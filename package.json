@@ -11,6 +11,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
+    "test:integration": "RUN_REAL_INTEGRATION=1 vitest run test/integration.smoke.test.ts",
     "test:watch": "vitest",
     "check": "tsc --noEmit -p tsconfig.json"
   },

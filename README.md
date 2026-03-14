@@ -52,3 +52,9 @@ Available routes:
 npm run check
 npm test
 ```
+
+Real Linear smoke test:
+
+```bash
+LINEAR_API_KEY=... LINEAR_PROJECT_SLUG=... npm run test:integration
+```
