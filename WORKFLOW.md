@@ -2,7 +2,7 @@
 tracker:
   kind: linear
   api_key: $LINEAR_API_KEY
-  project_slug: your-project-slug
+  project_slug: prosel-the-prose-system-5d795b228b00
   active_states:
     - Todo
     - In Progress
@@ -25,7 +25,7 @@ codex:
   approval_policy: never
   thread_sandbox: danger-full-access
   turn_timeout_ms: 3600000
-  read_timeout_ms: 5000
+  read_timeout_ms: 30000
   stall_timeout_ms: 300000
 server:
   port: 0
