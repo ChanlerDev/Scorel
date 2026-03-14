@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/*.ts", "test/**/*.ts"],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "src/domain.ts",
+    "src/logging.ts",
+    "src/tracker/**",
+    "src/utils/**",
+    "src/workflow/**",
+    "src/workspace/**"
+  ]
+}

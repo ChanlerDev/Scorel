@@ -1,0 +1,31 @@
+{
+  "name": "scorel-symphony",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A Symphony-compatible issue orchestration service implemented in TypeScript.",
+  "bin": {
+    "scorel-symphony": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "tsc --noEmit -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "chokidar": "^4.0.3",
+    "liquidjs": "^10.22.0",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
