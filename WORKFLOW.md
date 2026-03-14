@@ -13,8 +13,12 @@ tracker:
 polling:
   interval_ms: 30000
 workspace:
-  root: ./workspaces
+  root: ~/Prosel/.scorel/workspaces
 hooks:
+  after_create: |
+    "${SCOREL_ROOT:-$HOME/Scorel}/scripts/prosel-bootstrap-workspace.sh"
+  before_run: |
+    "${SCOREL_ROOT:-$HOME/Scorel}/scripts/prosel-bootstrap-workspace.sh"
   timeout_ms: 60000
 agent:
   max_concurrent_agents: 5
@@ -30,13 +34,17 @@ codex:
 server:
   port: 0
 ---
-You are working on a Linear issue.
+You are working on Prosel, a full-stack blog system built as a monorepo.
 
 Issue: {{ issue.identifier }} - {{ issue.title }}
 State: {{ issue.state }}
 Attempt: {{ attempt }}
 
 Requirements:
-- Work only inside the assigned workspace.
+- Work only inside the assigned issue workspace.
+- The canonical local source directory is `~/Prosel` unless `PROSEL_SOURCE_DIR` overrides it.
+- The workspace is refreshed from the canonical source before each run, but changes are not auto-synced back.
+- If the canonical source is still empty, you may bootstrap the initial monorepo structure in the current workspace.
+- Keep the result practical for a Next.js + Go monorepo, not a generic demo scaffold.
 - Validate the change before handing off.
 - If the ticket is blocked, explain why and stop.

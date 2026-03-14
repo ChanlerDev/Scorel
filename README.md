@@ -58,3 +58,23 @@ Real Linear smoke test:
 ```bash
 LINEAR_API_KEY=... LINEAR_PROJECT_SLUG=... npm run test:integration
 ```
+
+## Prosel Bootstrap
+
+Current default workflow is wired to the Linear project `Prosel: The Prose System`.
+
+Expected local setup:
+
+```bash
+export LINEAR_API_KEY=...
+export PROSEL_SOURCE_DIR=~/Prosel
+export SCOREL_ROOT=/Users/chanler/Scorel
+```
+
+Notes:
+
+- `~/Prosel` is treated as the canonical local source directory for the monorepo.
+- Issue workspaces are created under `~/Prosel/.scorel/workspaces`.
+- Before each run, Scorel syncs the canonical source into the issue workspace.
+- Sync is one-way for now. Scorel does not automatically write changes back into `~/Prosel`.
+- If `~/Prosel` is still empty, the first bootstrap issue may scaffold the initial monorepo inside its isolated workspace.
