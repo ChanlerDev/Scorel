@@ -67,14 +67,15 @@ Expected local setup:
 
 ```bash
 export LINEAR_API_KEY=...
-export PROSEL_SOURCE_DIR=~/Prosel
+export PROSEL_GIT_REMOTE=git@github.com:ChanlerDev/Prosel.git
+export PROSEL_GIT_BRANCH=main
 export SCOREL_ROOT=/Users/chanler/Scorel
 ```
 
 Notes:
 
-- `~/Prosel` is treated as the canonical local source directory for the monorepo.
 - Issue workspaces are created under `~/Prosel/.scorel/workspaces`.
-- Before each run, Scorel syncs the canonical source into the issue workspace.
-- Sync is one-way for now. Scorel does not automatically write changes back into `~/Prosel`.
-- If `~/Prosel` is still empty, the first bootstrap issue may scaffold the initial monorepo inside its isolated workspace.
+- Before each run, Scorel syncs from the Prosel git remote into the issue workspace.
+- Default dispatch gating is intentionally strict: only `In Progress` issues are eligible to run.
+- Default concurrency for Prosel is `1`, so creating a batch of issues will not trigger parallel execution until you explicitly move one issue into `In Progress`.
+- If a workspace has uncommitted changes or local commits ahead of `origin/main`, bootstrap preserves that state instead of resetting it.

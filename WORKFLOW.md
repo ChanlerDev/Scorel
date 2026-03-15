@@ -4,7 +4,6 @@ tracker:
   api_key: $LINEAR_API_KEY
   project_slug: prosel-the-prose-system-5d795b228b00
   active_states:
-    - Todo
     - In Progress
   terminal_states:
     - Done
@@ -21,7 +20,7 @@ hooks:
     "${SCOREL_ROOT:-$HOME/Scorel}/scripts/prosel-bootstrap-workspace.sh"
   timeout_ms: 60000
 agent:
-  max_concurrent_agents: 5
+  max_concurrent_agents: 1
   max_turns: 20
   max_retry_backoff_ms: 300000
 codex:
@@ -42,9 +41,9 @@ Attempt: {{ attempt }}
 
 Requirements:
 - Work only inside the assigned issue workspace.
-- The canonical local source directory is `~/Prosel` unless `PROSEL_SOURCE_DIR` overrides it.
-- The workspace is refreshed from the canonical source before each run, but changes are not auto-synced back.
-- If the canonical source is still empty, you may bootstrap the initial monorepo structure in the current workspace.
+- Workspace bootstrap is git-based and should sync from `origin/main` by default.
+- The default git remote is `git@github.com:ChanlerDev/Prosel.git` unless `PROSEL_GIT_REMOTE` overrides it.
+- If the workspace contains uncommitted or ahead-of-origin local work, bootstrap must preserve it instead of resetting it.
 - Keep the result practical for a Next.js + Go monorepo, not a generic demo scaffold.
 - Validate the change before handing off.
 - If the ticket is blocked, explain why and stop.
