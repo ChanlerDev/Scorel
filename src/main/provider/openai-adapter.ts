@@ -1,6 +1,6 @@
 import { resolveCompat } from "./compat.js";
 import { transformMessages } from "./transform-messages.js";
-import { EventStreamAccumulator } from "./event-stream.js";
+import { EventStreamAccumulator, parseSSEStream } from "./event-stream.js";
 import type { ProviderAdapter, ProviderRequestOptions } from "./types.js";
 import type { ProviderConfig, AssistantMessage } from "../../shared/types.js";
 import type { AssistantMessageEvent } from "../../shared/events.js";
@@ -87,7 +87,14 @@ export const openaiAdapter: ProviderAdapter = {
     let lastFinishReason = "stop";
 
     try {
-      await parseSSEStream(response, opts.signal, (chunk: OpenAIChunk) => {
+      await parseSSEStream(response, opts.signal, (_eventType: string | null, data: string) => {
+        let chunk: OpenAIChunk;
+        try {
+          chunk = JSON.parse(data) as OpenAIChunk;
+        } catch {
+          return; // Skip malformed JSON
+        }
+
         if (chunk.usage) {
           accumulator.setUsage(chunk.usage);
         }
@@ -125,50 +132,3 @@ export const openaiAdapter: ProviderAdapter = {
     return accumulator.finalize(lastFinishReason);
   },
 };
-
-async function parseSSEStream(
-  response: Response,
-  signal: AbortSignal | undefined,
-  onChunk: (chunk: OpenAIChunk) => void,
-): Promise<void> {
-  const body = response.body;
-  if (!body) throw new Error("Response body is null");
-
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    for (;;) {
-      if (signal?.aborted) {
-        throw new DOMException("The operation was aborted.", "AbortError");
-      }
-
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-
-      const lines = buffer.split("\n");
-      // Keep the last incomplete line in the buffer
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed === "") continue;
-        if (trimmed === "data: [DONE]") return;
-        if (!trimmed.startsWith("data: ")) continue;
-
-        const json = trimmed.slice(6);
-        try {
-          const chunk = JSON.parse(json) as OpenAIChunk;
-          onChunk(chunk);
-        } catch {
-          // Skip malformed JSON lines
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock();
-  }
-}
