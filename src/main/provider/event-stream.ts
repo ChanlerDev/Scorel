@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { Api, AssistantMessage, ContentPart, ToolCallPart } from "../../shared/types.js";
+import type { Api, AssistantMessage, ContentPart, ThinkingPart, ToolCallPart } from "../../shared/types.js";
 import type { AssistantMessageEvent } from "../../shared/events.js";
 import { NANOID_LENGTH } from "../../shared/constants.js";
 
@@ -28,6 +28,7 @@ export class EventStreamAccumulator {
   private _started = false;
   private _finalized = false;
   private _openTextIndex: number | null = null;
+  private _openThinkingIndex: number | null = null;
 
   constructor(
     providerId: string,
@@ -52,8 +53,37 @@ export class EventStreamAccumulator {
     return this._snapshot();
   }
 
+  pushThinkingDelta(delta: string, signature?: string): void {
+    this._ensureStarted();
+
+    if (this._openThinkingIndex !== null) {
+      const part = this._msg.content[this._openThinkingIndex] as ThinkingPart;
+      part.thinking += delta;
+    } else {
+      const newPart: ThinkingPart = { type: "thinking", thinking: delta };
+      this._msg.content.push(newPart);
+      this._openThinkingIndex = this._msg.content.length - 1;
+    }
+
+    if (signature !== undefined) {
+      const part = this._msg.content[this._openThinkingIndex] as ThinkingPart;
+      part.thinkingSignature = signature;
+    }
+
+    this._emit({
+      type: "thinking_delta",
+      contentIndex: this._openThinkingIndex,
+      delta,
+      partial: this._snapshot(),
+    });
+  }
+
   pushTextDelta(delta: string): void {
     this._ensureStarted();
+
+    if (this._openThinkingIndex !== null) {
+      this._closeThinking();
+    }
 
     if (this._openTextIndex !== null) {
       const part = this._msg.content[this._openTextIndex];
@@ -76,7 +106,10 @@ export class EventStreamAccumulator {
   pushToolCallDelta(index: number, id?: string, name?: string, argsDelta?: string): void {
     this._ensureStarted();
 
-    // Close open text part when tool calls start
+    // Close open thinking/text parts when tool calls start
+    if (this._openThinkingIndex !== null) {
+      this._closeThinking();
+    }
     if (this._openTextIndex !== null) {
       this._closeText();
     }
@@ -126,6 +159,10 @@ export class EventStreamAccumulator {
     if (this._finalized) return this._snapshot();
     this._finalized = true;
     this._ensureStarted();
+
+    if (this._openThinkingIndex !== null) {
+      this._closeThinking();
+    }
 
     if (finishReason === "tool_calls") {
       // Close open text first
@@ -179,9 +216,16 @@ export class EventStreamAccumulator {
     this._finalized = true;
     this._ensureStarted();
 
-    // Discard incomplete tool calls from content
-    this._msg.content = this._msg.content.filter((p) => p.type !== "toolCall");
+    // Discard incomplete tool calls and thinking from content
+    this._msg.content = this._msg.content.filter((p) => p.type !== "toolCall" && p.type !== "thinking");
     this._toolCalls.clear();
+    this._openThinkingIndex = null;
+
+    // Recalculate open text index after filtering shifted indices
+    if (this._openTextIndex !== null) {
+      this._openTextIndex = this._msg.content.findIndex((p) => p.type === "text");
+      if (this._openTextIndex === -1) this._openTextIndex = null;
+    }
 
     // Close open text if any
     if (this._openTextIndex !== null) {
@@ -214,11 +258,78 @@ export class EventStreamAccumulator {
     this._openTextIndex = null;
   }
 
+  private _closeThinking(): void {
+    if (this._openThinkingIndex === null) return;
+    const part = this._msg.content[this._openThinkingIndex] as ThinkingPart;
+    this._emit({
+      type: "thinking_end",
+      contentIndex: this._openThinkingIndex,
+      content: part.thinking,
+      partial: this._snapshot(),
+    });
+    this._openThinkingIndex = null;
+  }
+
   private _snapshot(): AssistantMessage {
     return structuredClone(this._msg);
   }
 
   private _emit(event: AssistantMessageEvent): void {
     this._onEvent(event);
+  }
+}
+
+/**
+ * Parse Server-Sent Events from a streaming Response.
+ * Calls onEvent for each complete event (data + optional event type).
+ * Handles OpenAI-style "data: [DONE]" termination.
+ */
+export async function parseSSEStream(
+  response: Response,
+  signal: AbortSignal | undefined,
+  onEvent: (eventType: string | null, data: string) => void,
+): Promise<void> {
+  const body = response.body;
+  if (!body) throw new Error("Response body is null");
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let currentEventType: string | null = null;
+
+  try {
+    for (;;) {
+      if (signal?.aborted) {
+        throw new DOMException("The operation was aborted.", "AbortError");
+      }
+
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed === "") {
+          // Empty line = event boundary, reset event type
+          currentEventType = null;
+          continue;
+        }
+        if (trimmed === "data: [DONE]") return;
+        if (trimmed.startsWith("event: ")) {
+          currentEventType = trimmed.slice(7).trim();
+          continue;
+        }
+        if (!trimmed.startsWith("data: ")) continue;
+
+        const json = trimmed.slice(6);
+        onEvent(currentEventType, json);
+      }
+    }
+  } finally {
+    reader.releaseLock();
   }
 }

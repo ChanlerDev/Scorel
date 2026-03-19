@@ -185,6 +185,56 @@ describe("EventStreamAccumulator", () => {
     });
   });
 
+  // Thinking delta accumulation
+  it("accumulates thinking deltas into a single ThinkingPart", () => {
+    const acc = createAccumulator();
+    acc.pushThinkingDelta("step 1...");
+    acc.pushThinkingDelta(" step 2...");
+    acc.pushTextDelta("answer");
+    const msg = acc.finalize("stop");
+    expect(msg.content).toHaveLength(2);
+    expect(msg.content[0]).toEqual({ type: "thinking", thinking: "step 1... step 2..." });
+    expect(msg.content[1]).toEqual({ type: "text", text: "answer" });
+  });
+
+  it("emits thinking_delta and thinking_end events", () => {
+    const events: AssistantMessageEvent["type"][] = [];
+    const acc = createAccumulator((e) => events.push(e.type));
+    acc.pushThinkingDelta("hmm");
+    acc.pushTextDelta("ok");
+    acc.finalize("stop");
+    expect(events).toEqual(["start", "thinking_delta", "thinking_end", "text_delta", "text_end", "done"]);
+  });
+
+  it("preserves thinking signature when provided", () => {
+    const acc = createAccumulator();
+    acc.pushThinkingDelta("deep thought", "sig-abc");
+    acc.pushTextDelta("answer");
+    const msg = acc.finalize("stop");
+    expect(msg.content[0]).toEqual({ type: "thinking", thinking: "deep thought", thinkingSignature: "sig-abc" });
+  });
+
+  it("discards thinking on abort", () => {
+    const acc = createAccumulator();
+    acc.pushThinkingDelta("partial thinking");
+    acc.pushTextDelta("some text");
+    const msg = acc.abort();
+    expect(msg.stopReason).toBe("aborted");
+    // Both thinking and toolCalls discarded, only text preserved
+    expect(msg.content).toHaveLength(1);
+    expect(msg.content[0]).toEqual({ type: "text", text: "some text" });
+  });
+
+  it("thinking then tool calls produces both parts", () => {
+    const acc = createAccumulator();
+    acc.pushThinkingDelta("reasoning...");
+    acc.pushToolCallDelta(0, "tc1", "bash", '{"cmd":"ls"}');
+    const msg = acc.finalize("tool_calls");
+    expect(msg.content).toHaveLength(2);
+    expect(msg.content[0]).toEqual({ type: "thinking", thinking: "reasoning..." });
+    expect(msg.content[1]).toEqual({ type: "toolCall", id: "tc1", name: "bash", arguments: { cmd: "ls" } });
+  });
+
   // Event partials are snapshots (not references to internal state)
   it("event partials are independent snapshots", () => {
     const partials: AssistantMessageEvent[] = [];
