@@ -8,6 +8,7 @@ import type { Orchestrator } from "./core/orchestrator.js";
 import type { EventBus } from "./core/event-bus.js";
 import type { ProviderEntry } from "./core/orchestrator.js";
 import { openaiAdapter } from "./provider/openai-adapter.js";
+import { anthropicAdapter } from "./provider/anthropic-adapter.js";
 
 export function registerIpcHandlers(opts: {
   db: Database.Database;
@@ -148,6 +149,11 @@ function rebuildProviderEntry(
       adapter: openaiAdapter,
       getApiKey: () => getSecret(config.id),
     });
+  } else if (config.api === "anthropic-messages") {
+    providerMap.set(config.id, {
+      config,
+      adapter: anthropicAdapter,
+      getApiKey: () => getSecret(config.id),
+    });
   }
-  // Anthropic adapter: M1.5
 }
