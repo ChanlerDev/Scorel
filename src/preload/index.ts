@@ -46,6 +46,12 @@ const scorelBridge = {
     clear: (providerId: string) =>
       ipcRenderer.invoke("secrets:clear", providerId),
   },
+  tools: {
+    approve: (sessionId: string, toolCallId: string) =>
+      ipcRenderer.invoke("tools:approve", sessionId, toolCallId),
+    deny: (sessionId: string, toolCallId: string) =>
+      ipcRenderer.invoke("tools:deny", sessionId, toolCallId),
+  },
 };
 
 contextBridge.exposeInMainWorld("scorel", scorelBridge);
