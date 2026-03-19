@@ -1,0 +1,45 @@
+import { useState, useEffect, useCallback } from "react";
+import type { SessionSummary, SessionDetail } from "@shared/types";
+
+export function useSessionList() {
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const list = await window.scorel.sessions.list({ archived: false });
+    setSessions(list);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  return { sessions, loading, refresh };
+}
+
+export function useSessionDetail(sessionId: string | null) {
+  const [detail, setDetail] = useState<SessionDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    window.scorel.sessions.get(sessionId).then((d) => {
+      if (!cancelled) {
+        setDetail(d);
+        setLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  return { detail, loading, setDetail };
+}
