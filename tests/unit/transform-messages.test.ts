@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { transformMessages } from "../../src/main/provider/transform-messages.js";
+import {
+  transformMessages,
+  transformMessagesAnthropic,
+  normalizeToolCallId,
+} from "../../src/main/provider/transform-messages.js";
 import { DEFAULT_COMPAT } from "../../src/main/provider/compat.js";
 import type {
   UserMessage,
@@ -7,7 +11,11 @@ import type {
   ToolResultMessage,
   ScorelMessage,
 } from "../../src/shared/types.js";
-import type { OpenAIMessage } from "../../src/main/provider/transform-messages.js";
+import type {
+  OpenAIMessage,
+  AnthropicMessage,
+  AnthropicPayload,
+} from "../../src/main/provider/transform-messages.js";
 
 // --- Helpers ---
 
@@ -272,5 +280,288 @@ describe("transformMessages", () => {
     const result = transformMessages("", msgs, bridgeCompat);
     // No bridge needed: tool → assistant is fine
     expect(result.filter((m) => m.role === "assistant")).toHaveLength(2);
+  });
+});
+
+// --- Anthropic helpers ---
+
+function anthropicAssistantMsg(
+  parts: AssistantMessage["content"],
+  opts: Partial<Pick<AssistantMessage, "stopReason" | "id" | "modelId">> = {},
+): AssistantMessage {
+  return {
+    role: "assistant",
+    id: opts.id ?? "a1",
+    api: "anthropic-messages",
+    providerId: "p1",
+    modelId: opts.modelId ?? "claude-sonnet",
+    content: parts,
+    stopReason: opts.stopReason ?? "stop",
+    ts: Date.now(),
+  };
+}
+
+describe("transformMessagesAnthropic", () => {
+  // 1. Basic user + assistant text turn
+  it("converts basic user + assistant text turn", () => {
+    const msgs: ScorelMessage[] = [
+      userMsg("hello"),
+      anthropicAssistantMsg([{ type: "text", text: "hi there" }]),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs);
+    expect(result.messages).toEqual([
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+      { role: "assistant", content: [{ type: "text", text: "hi there" }] },
+    ]);
+  });
+
+  // 2. System prompt extracted to top-level
+  it("extracts system prompt to top-level", () => {
+    const result = transformMessagesAnthropic("You are helpful.", [userMsg("hi")]);
+    expect(result.system).toBe("You are helpful.");
+    // No system role in messages
+    for (const msg of result.messages) {
+      expect(msg.role).not.toBe("system");
+    }
+  });
+
+  // 3. Tool round correctly
+  it("converts tool round correctly", () => {
+    const msgs: ScorelMessage[] = [
+      userMsg("do it"),
+      anthropicAssistantMsg(
+        [{ type: "toolCall", id: "tc1", name: "bash", arguments: { command: "ls" } }],
+        { id: "a1" },
+      ),
+      toolResultMsg("tc1", "file.txt"),
+      anthropicAssistantMsg([{ type: "text", text: "done" }], { id: "a2" }),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs);
+    // user → assistant (tool_use) → user (tool_result) → assistant (text)
+    expect(result.messages).toHaveLength(4);
+    expect(result.messages[0]).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "do it" }],
+    });
+    expect(result.messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "tool_use", id: "tc1", name: "bash", input: { command: "ls" } }],
+    });
+    expect(result.messages[2]).toEqual({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "tc1", content: "file.txt" }],
+    });
+    expect(result.messages[3]).toEqual({
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+    });
+  });
+
+  // 4. Orders tool_result before text in user message
+  it("orders tool_result before text in user message", () => {
+    // Simulate a scenario where tool_result and user text merge into same user message:
+    // user → assistant(toolCall) → toolResult → user("next") → last two merge as user
+    const msgs: ScorelMessage[] = [
+      userMsg("go"),
+      anthropicAssistantMsg(
+        [{ type: "toolCall", id: "tc1", name: "bash", arguments: {} }],
+        { id: "a1" },
+      ),
+      toolResultMsg("tc1", "output"),
+      userMsg("next", "u2"),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs);
+    // user → assistant → user(tool_result + text merged)
+    const lastUser = result.messages[2];
+    expect(lastUser.role).toBe("user");
+    expect(lastUser.content[0]).toEqual(
+      expect.objectContaining({ type: "tool_result" }),
+    );
+    expect(lastUser.content[1]).toEqual(
+      expect.objectContaining({ type: "text", text: "next" }),
+    );
+  });
+
+  // 5. Normalizes long tool call IDs
+  it("normalizes long tool call IDs", () => {
+    const longId = "x".repeat(200);
+    const msgs: ScorelMessage[] = [
+      userMsg("go"),
+      anthropicAssistantMsg(
+        [{ type: "toolCall", id: longId, name: "bash", arguments: {} }],
+        { id: "a1" },
+      ),
+      toolResultMsg(longId, "output"),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs);
+    const assistantBlock = result.messages[1].content[0];
+    const userBlock = result.messages[2].content[0];
+
+    expect(assistantBlock.type).toBe("tool_use");
+    expect(userBlock.type).toBe("tool_result");
+
+    const toolUseId = (assistantBlock as { type: "tool_use"; id: string }).id;
+    const toolResultId = (userBlock as { type: "tool_result"; tool_use_id: string }).tool_use_id;
+
+    expect(toolUseId).toBe(toolResultId);
+    expect(toolUseId.length).toBeLessThanOrEqual(64);
+    expect(toolUseId.startsWith("tc_")).toBe(true);
+  });
+
+  // 6. Passes through short IDs unchanged
+  it("passes through short IDs unchanged", () => {
+    const shortId = "abc123_short";
+    const msgs: ScorelMessage[] = [
+      userMsg("go"),
+      anthropicAssistantMsg(
+        [{ type: "toolCall", id: shortId, name: "bash", arguments: {} }],
+        { id: "a1" },
+      ),
+      toolResultMsg(shortId, "output"),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs);
+    const assistantBlock = result.messages[1].content[0] as { type: "tool_use"; id: string };
+    expect(assistantBlock.id).toBe(shortId);
+  });
+
+  // 7. Excludes aborted assistants
+  it("excludes aborted assistants", () => {
+    const msgs: ScorelMessage[] = [
+      userMsg("hi"),
+      anthropicAssistantMsg([{ type: "text", text: "partial" }], { stopReason: "aborted" }),
+      userMsg("retry", "u2"),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs);
+    // Two user messages merged into one (alternation)
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0].role).toBe("user");
+    expect(result.messages[0].content).toHaveLength(2);
+  });
+
+  // 8. Excludes orphan tool results
+  it("excludes orphan tool results", () => {
+    const msgs: ScorelMessage[] = [
+      userMsg("go"),
+      anthropicAssistantMsg(
+        [{ type: "toolCall", id: "tc1", name: "bash", arguments: {} }],
+        { stopReason: "aborted", id: "a1" },
+      ),
+      toolResultMsg("tc1", "orphan"),
+      userMsg("retry", "u2"),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs);
+    // aborted assistant and orphan tool result excluded; two users merge
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0].role).toBe("user");
+    for (const block of result.messages[0].content) {
+      expect(block.type).not.toBe("tool_result");
+    }
+  });
+
+  // 9. Merges consecutive user messages
+  it("merges consecutive user messages", () => {
+    const msgs: ScorelMessage[] = [userMsg("hello"), userMsg("world", "u2")];
+    const result = transformMessagesAnthropic("sys", msgs);
+    expect(result.messages).toHaveLength(1);
+    expect(result.messages[0].role).toBe("user");
+    expect(result.messages[0].content).toEqual([
+      { type: "text", text: "hello" },
+      { type: "text", text: "world" },
+    ]);
+  });
+
+  // 10. Merges consecutive assistant messages
+  it("merges consecutive assistant messages", () => {
+    const msgs: ScorelMessage[] = [
+      userMsg("go"),
+      anthropicAssistantMsg([{ type: "text", text: "a" }], { id: "a1" }),
+      anthropicAssistantMsg([{ type: "text", text: "b" }], { id: "a2" }),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs);
+    const assistants = result.messages.filter((m) => m.role === "assistant");
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0].content).toEqual([
+      { type: "text", text: "a" },
+      { type: "text", text: "b" },
+    ]);
+  });
+
+  // 11. Preserves thinking for same model
+  it("preserves thinking for same model", () => {
+    const msgs: ScorelMessage[] = [
+      userMsg("think"),
+      anthropicAssistantMsg(
+        [
+          { type: "thinking", thinking: "hmm...", thinkingSignature: "sig123" },
+          { type: "text", text: "answer" },
+        ],
+        { modelId: "claude-sonnet" },
+      ),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs, "claude-sonnet");
+    const assistantContent = result.messages[1].content;
+    expect(assistantContent[0]).toEqual({
+      type: "thinking",
+      thinking: "hmm...",
+      signature: "sig123",
+    });
+    expect(assistantContent[1]).toEqual({ type: "text", text: "answer" });
+  });
+
+  // 12. Converts thinking to text for different model
+  it("converts thinking to text for different model", () => {
+    const msgs: ScorelMessage[] = [
+      userMsg("think"),
+      anthropicAssistantMsg(
+        [
+          { type: "thinking", thinking: "hmm..." },
+          { type: "text", text: "answer" },
+        ],
+        { modelId: "claude-sonnet" },
+      ),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs, "claude-opus");
+    const assistantContent = result.messages[1].content;
+    // thinking converted to text
+    expect(assistantContent[0]).toEqual({ type: "text", text: "hmm..." });
+    expect(assistantContent[1]).toEqual({ type: "text", text: "answer" });
+  });
+
+  // 13. Omits redacted thinking
+  it("omits redacted thinking", () => {
+    const msgs: ScorelMessage[] = [
+      userMsg("think"),
+      anthropicAssistantMsg(
+        [
+          { type: "thinking", thinking: "secret", redacted: true },
+          { type: "text", text: "answer" },
+        ],
+        { modelId: "claude-sonnet" },
+      ),
+    ];
+    const result = transformMessagesAnthropic("sys", msgs, "claude-sonnet");
+    const assistantContent = result.messages[1].content;
+    expect(assistantContent).toEqual([{ type: "text", text: "answer" }]);
+  });
+
+  // 14. Handles empty system prompt
+  it("handles empty system prompt", () => {
+    const result = transformMessagesAnthropic("", [userMsg("hi")]);
+    expect(result.system).toBe("");
+    expect(result.messages).toHaveLength(1);
+  });
+});
+
+describe("normalizeToolCallId", () => {
+  it("is deterministic", () => {
+    const longId = "a".repeat(100);
+    expect(normalizeToolCallId(longId)).toBe(normalizeToolCallId(longId));
+    expect(normalizeToolCallId(longId)).not.toBe(normalizeToolCallId("b".repeat(100)));
+  });
+
+  it("returns exactly 64 chars for long IDs", () => {
+    const longId = "x".repeat(200);
+    const result = normalizeToolCallId(longId);
+    expect(result.length).toBe(64);
   });
 });
