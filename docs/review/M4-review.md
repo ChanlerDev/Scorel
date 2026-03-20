@@ -1,201 +1,154 @@
 # M4 Compact & Skills — Implementation Review
 
-> Reviewer: Claude | Date: 2025-03-21 | All 54 unit tests passing
+> Reviewer: Claude | All 60 unit tests passing
 
-## P0 — Bug (must fix)
+## R1 Issue Tracker
 
-### 1. `applyBoundaryResume` uses seq value as array index
-
-**File**: `src/main/core/compact.ts:201`
-
-```ts
-return [makeCompactSummaryMessage(compaction), ...messages.slice(boundarySeq)];
-```
-
-`boundarySeq` is a DB `seq` value (1-based monotonic), but `messages.slice(boundarySeq)` treats it as an array index. This happens to produce correct results in V0 (seq = index + 1, so `slice(seq)` is equivalent to `filter(m => m.seq > seq)`), but the equality depends on:
-
-- seq starting at 1 with no gaps
-- `getMessages()` returning the full list
-
-If messages are ever deleted or seqs have gaps, this will **silently return the wrong context slice**.
-
-**Fix**: Use `getMessages(sessionId, boundarySeq)` in `getContextMessages` instead of fetching all messages and then slicing. The `afterSeq` parameter already exists on `getMessages`. This eliminates the need for `applyBoundaryResume` to slice at all — just prepend the summary message.
-
-```ts
-// orchestrator.ts — getContextMessages
-private getContextMessages(sessionId: string, session: SessionDetail): ScorelMessage[] {
-  if (session.activeCompactId) {
-    const compaction = getCompaction(this.db, session.activeCompactId);
-    if (compaction) {
-      const boundarySeq = this.sessionManager.getMessageSeq(
-        sessionId, compaction.boundaryMessageId,
-      );
-      if (boundarySeq != null) {
-        const postBoundary = this.sessionManager.getMessages(sessionId, boundarySeq);
-        const messages = [makeCompactSummaryMessage(compaction), ...postBoundary];
-        return applyMicroCompact(messages, MICRO_COMPACT_KEEP_RECENT);
-      }
-    }
-  }
-
-  return applyMicroCompact(
-    this.sessionManager.getMessages(sessionId),
-    MICRO_COMPACT_KEEP_RECENT,
-  );
-}
-```
-
-After this change, `applyBoundaryResume` can be removed (or kept as a thin wrapper if tests depend on it).
+| # | Priority | Issue | Status |
+|---|----------|-------|--------|
+| 1 | P0 | `applyBoundaryResume` seq-as-index | **Fixed** — uses `getMessages(sessionId, boundarySeq)` + sparse seq test |
+| 2 | P1 | `load_skill` description "reserved for M4" | **Fixed** — updated text |
+| 3 | P1 | `manualCompact` double write `active_compact_id` | **Fixed** — `executeManualCompact` only inserts compaction |
+| 4 | P1 | `generateId()` duplicated in 3 files | **Fixed** — extracted to `src/main/core/id.ts` |
+| 5 | P2 | `trimSerializedMessages` truncation lacks comment | **Fixed** — comment added |
+| 6 | P2 | `COMPACT_SUMMARY_PROMPT` naive string replace | **Fixed** — `buildCompactSummaryPrompt` uses template literal |
+| 7 | P2 | Compactions table lacks FK constraints | Open — acceptable for V0 |
+| 8 | P2 | `includeLoadSkill` defaults to `true` | Open — harmless, orchestrator always passes explicitly |
+| 9 | P3 | `tools` bridge type missing from `global.d.ts` | Open — pre-existing, not M4 |
+| 10 | P3 | Test coverage gaps | **Mostly fixed** — 10-turn, unknown skill, compact failure, FTS tests added |
 
 ---
 
-## P1 — Design / correctness (should fix)
+## R2 — New Findings
 
-### 2. `load_skill` tool description still says "reserved for M4"
+### P1 — No-runner guard drops load_skill results in mixed tool call batches
 
-**File**: `src/main/core/tool-dispatch.ts:110`
-
-```ts
-case "load_skill":
-  return "Load a skill file (reserved for M4).";
-```
-
-This description is sent to the LLM as part of the tool schema. The model may interpret "reserved" as "not yet available" and refuse to call it.
-
-**Fix**: Update to match the design doc:
+**File**: `src/main/core/orchestrator.ts:207-210`
 
 ```ts
-case "load_skill":
-  return "Load a skill file to get detailed instructions for a specific task. Use 'list' as the name to see available skills.";
-```
-
-### 3. `manualCompact` writes `active_compact_id` twice
-
-**File**: `src/main/core/orchestrator.ts:389`
-
-```ts
-const result = await executeManualCompact({...});
-// executeManualCompact internally calls updateSessionCompact (compact.ts:298)
-this.sessionManager.setActiveCompact(sessionId, result.compactionId); // writes again
-```
-
-`executeManualCompact` already calls `updateSessionCompact` inside its transaction (`compact.ts:296-300`). The orchestrator then calls `setActiveCompact` again — same value, redundant DB write, and misleading (implies `executeManualCompact` didn't handle it).
-
-**Fix** (pick one):
-
-- **(a) Remove from orchestrator**: Delete line 389. `executeManualCompact` already handles it.
-- **(b) Remove from `executeManualCompact`**: Move `updateSessionCompact` out of the transaction in `compact.ts`, let orchestrator own it. This gives orchestrator full control over session state, which is more consistent with the rest of the codebase.
-
-Option (b) is cleaner architecturally — `executeManualCompact` would only `insertCompaction`, and orchestrator would `setActiveCompact` after success. The transaction in `compact.ts` would only contain `insertCompaction`.
-
-### 4. `generateId()` duplicated in three files
-
-**Files**:
-- `src/main/core/orchestrator.ts:36-38`
-- `src/main/core/session-manager.ts:28-30`
-- `src/main/core/compact.ts:37-39`
-
-All three are identical:
-
-```ts
-function generateId(): string {
-  return crypto.randomBytes(16).toString("base64url").slice(0, NANOID_LENGTH);
+if (!this.toolRunner && toolCalls.some((toolCall) => toolCall.name !== "load_skill")) {
+  this.sessionManager.setState(sessionId, "idle");
+  return;
 }
 ```
 
-**Fix**: Extract to a shared utility, e.g. `src/main/core/id.ts`:
+**Problem**: When there is no tool runner and the model requests BOTH `load_skill` and a runner tool (e.g. `[load_skill, bash]`), the guard bails out entirely. No tool results are produced — not even the `load_skill` result which could execute without a runner. The model gets stuck with a dangling `toolUse` assistant message and no feedback.
+
+Truth table:
+
+| Tool calls | Current `some(!= load_skill)` | Expected behavior |
+|---|---|---|
+| `[bash]` | bail — correct | bail (nothing can execute) |
+| `[load_skill]` | proceed — correct | proceed |
+| `[load_skill, bash]` | **bail — BUG** | proceed (execute load_skill, error on bash) |
+| `[bash, read_file]` | bail — correct | bail (nothing can execute) |
+
+**Fix**: Change the condition to only bail when there are NO load_skill calls at all:
 
 ```ts
-export function generateId(): string {
-  return crypto.randomBytes(16).toString("base64url").slice(0, NANOID_LENGTH);
+const hasSkillCalls = toolCalls.some((toolCall) => toolCall.name === "load_skill");
+if (!this.toolRunner && !hasSkillCalls) {
+  this.sessionManager.setState(sessionId, "idle");
+  return;
 }
 ```
 
-Import from the single source in all three files.
+This way, `[load_skill, bash]` proceeds to `executeToolCalls` where:
+- `load_skill` executes in Core — success
+- `bash` with no runner — returns error ToolResult (`"Tool runner unavailable for bash"`)
+- Both results are fed back to the model — correct
+
+The existing test "without toolRunner, tool call assistant is persisted but no execution" (`tool-execution.test.ts:285`) would NOT break because it uses `[bash]` only (no load_skill), so `hasSkillCalls = false` → bail unchanged.
 
 ---
 
-## P2 — Code quality (nice to fix)
+### P2 — `modelLoop` reads all messages from DB twice per iteration
 
-### 5. Single-message truncation in `trimSerializedMessages` lacks comment
-
-**File**: `src/main/core/compact.ts:166`
+**File**: `src/main/core/orchestrator.ts:127-129`
 
 ```ts
-kept[0] = segment.slice(segment.length - MANUAL_COMPACT_MAX_INPUT);
+const session = this.sessionManager.get(sessionId)!;       // reads session + ALL messages
+const messages = this.getContextMessages(sessionId, session); // reads ALL messages again
 ```
 
-When a single message exceeds 100k chars, it keeps the **tail**. This matches the design intent ("trim oldest, keep most recent") but is non-obvious for a single message. A comment explaining the rationale would help future readers.
+`SessionManager.get()` calls `dbGetSessionDetail` + `dbGetMessages` to build the full `SessionDetail` (including `messages` array). Then `getContextMessages()` calls `getMessages()` again for context assembly. The `session.messages` from `get()` is never used for context — only `session.activeCompactId` and other metadata are needed.
 
-### 6. `COMPACT_SUMMARY_PROMPT` uses naive string replace
+In a 10-round tool loop (20+ messages), this means reading the messages table 20+ extra times.
 
-**File**: `src/main/core/compact.ts:248`
+**Fix**: Split `get()` into two paths, or add a lightweight `getSessionMeta()` that returns only metadata (no messages). `getContextMessages` already fetches the messages it needs:
 
 ```ts
-const prompt = COMPACT_SUMMARY_PROMPT.replace("{serialized_messages}", serializedMessages);
+// Option: add getSessionMeta to SessionManager
+getSessionMeta(sessionId: string): Omit<SessionDetail, "messages"> | null
+
+// Then in modelLoop:
+const session = this.sessionManager.getSessionMeta(sessionId)!;
+const messages = this.getContextMessages(sessionId, session);
 ```
 
-If `serializedMessages` contains the literal string `"{serialized_messages}"`, the replacement could produce unexpected output. Probability is near zero in practice, but a template function would be safer:
-
-```ts
-const prompt = `Summarize the following conversation, preserving:
-...
-<conversation>
-${serializedMessages}
-</conversation>`;
-```
-
-### 7. Compactions table lacks foreign key constraints
-
-The `compactions` table has no `REFERENCES` on `session_id` or `boundary_message_id`. Deletion is handled manually in `deleteSession()` which is correct, but there's no DB-level guarantee against orphaned records.
-
-Not urgent for V0 (SQLite foreign keys aren't even enabled — no `PRAGMA foreign_keys = ON`), but worth noting as tech debt.
-
-### 8. `getToolDefinitions` defaults `includeLoadSkill` to `true`
-
-**File**: `src/main/core/tool-dispatch.ts:79`
-
-```ts
-const includeLoadSkill = opts?.includeLoadSkill ?? true;
-```
-
-Currently harmless since orchestrator always passes it explicitly. But if any caller omits the option (e.g. in tests), `load_skill` will be included unexpectedly. Consider defaulting to `false` for safety, since the orchestrator always passes `true` when it wants it.
+Not a bug, but a performance improvement for long sessions.
 
 ---
 
-## P3 — Minor (optional)
+### P2 — `saveCompactTranscript` uses array index instead of DB seq
 
-### 9. `tools` bridge type missing from `global.d.ts`
+**File**: `src/main/core/compact.ts:217-222`
 
-**File**: `src/renderer/global.d.ts`
+```ts
+...messages.map((message, index) => JSON.stringify({
+  v: COMPACT_TRANSCRIPT_VERSION,
+  type: "message",
+  seq: index + 1,   // ← array position, not DB seq
+  message,
+})),
+```
 
-`ScorelBridge` type doesn't include the `tools` namespace (`approve`/`deny`), but `preload/index.ts` exposes it. Not introduced by M4, but discovered during review.
+For the sparse seq test case (DB seq: 10, 20, 30), the transcript would record `seq: 1, 2, 3` instead of `10, 20, 30`. Since `ScorelMessage` doesn't carry `seq` (it's a DB-level concern), this is hard to fix without changing the function signature.
 
-### 10. Test coverage gaps vs design doc
+**Suggestion**: Accept `Array<{ seq: number; message: ScorelMessage }>` instead of `ScorelMessage[]`, or document that transcript seq values are positional, not DB-authoritative.
 
-The design doc specified these test files, which are not present:
+---
 
-- `tests/unit/boundary-resume.test.ts` — merged into `compact.test.ts` (only 1 case)
-- `tests/integration/compact-flow.test.ts` — not created
-- `tests/integration/skill-flow.test.ts` — not created
+### P3 — `parseFrontmatter` regex doesn't handle CRLF line endings
 
-Missing test scenarios:
+**File**: `src/main/skills/skill-loader.ts:5`
 
-| Scenario | Status |
-|----------|--------|
-| micro_compact with 10+ turns (verify first 7 replaced) | Missing — current test uses 5 turns, only 1 replaced |
-| Compact failure (LLM returns empty / throws) at orchestrator level | Missing — only `compact.ts` unit test covers empty check |
-| Multiple sequential compacts on same session | Missing |
-| `load_skill` with unknown name at orchestrator level | Missing |
-| FTS search still finds pre-compact messages | Missing |
+```ts
+const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
+```
+
+Uses `\n` only. SKILL.md files with Windows-style `\r\n` line endings would fail to match. Since the project is macOS-only and skills are bundled with the app, this is very low risk. But if skills are ever git-cloned from a Windows repo without `.gitattributes`, they'll silently fail to parse.
+
+**Fix** (if desired):
+
+```ts
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+```
+
+---
+
+### P3 — FTS test title misleading
+
+**File**: `tests/unit/compact.test.ts:250`
+
+```ts
+it("search keeps finding pre-compact content after a compaction record exists", () => {
+```
+
+The test does NOT create a compaction record. It inserts messages and searches them. The invariant being tested (messages table is never mutated) is correct, but the title implies a compaction was created. Consider either creating an actual compaction in the test setup, or renaming to "search finds content because compaction never deletes messages".
 
 ---
 
 ## Summary
 
-| Priority | Count | Action |
-|----------|-------|--------|
-| P0 (Bug) | 1 | Must fix — `applyBoundaryResume` seq-as-index |
-| P1 (Design) | 3 | Should fix — stale tool description, double write, duplicate `generateId` |
-| P2 (Quality) | 4 | Nice to fix — comment, template, FK, default value |
-| P3 (Minor) | 2 | Optional — type declaration, test coverage |
+### R1 resolution: 6/10 fixed, 4 open (all acceptable for V0)
+
+### R2 new findings:
+
+| # | Priority | Issue | Effort |
+|---|----------|-------|--------|
+| R2-1 | P1 | No-runner guard drops load_skill in mixed batches | Small — one condition change |
+| R2-2 | P2 | `modelLoop` double DB read per iteration | Medium — needs `getSessionMeta()` |
+| R2-3 | P2 | Transcript seq uses array index, not DB seq | Small — signature change or docs |
+| R2-4 | P3 | Frontmatter regex ignores CRLF | Trivial |
+| R2-5 | P3 | FTS test title misleading | Trivial |
