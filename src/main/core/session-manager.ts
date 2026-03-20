@@ -1,11 +1,9 @@
-import crypto from "node:crypto";
 import type Database from "better-sqlite3";
 import type { SessionDetail, SessionSummary, ScorelMessage } from "../../shared/types.js";
 import type { SessionState } from "../../shared/constants.js";
 import {
   EXPORT_VERSION,
   MANUAL_COMPACT_TOOL_RESULT_PREVIEW,
-  NANOID_LENGTH,
 } from "../../shared/constants.js";
 import {
   createSession as dbCreateSession,
@@ -19,14 +17,9 @@ import {
   getMessages as dbGetMessages,
   getNextSeq as dbGetNextSeq,
 } from "../storage/db.js";
+import { updateSessionCompact } from "../storage/compactions.js";
 import { redactString } from "./redact.js";
-
-// ---------------------------------------------------------------------------
-// ID generation (CJS-safe alternative to nanoid v5 ESM)
-// ---------------------------------------------------------------------------
-function generateId(): string {
-  return crypto.randomBytes(16).toString("base64url").slice(0, NANOID_LENGTH);
-}
+import { generateId } from "./id.js";
 
 // ---------------------------------------------------------------------------
 // In-memory per-session state
@@ -251,6 +244,20 @@ export class SessionManager {
 
   getMessages(sessionId: string, afterSeq?: number): ScorelMessage[] {
     return dbGetMessages(this.db, sessionId, afterSeq);
+  }
+
+  getMessageSeq(sessionId: string, messageId: string): number | null {
+    const row = this.db.prepare(
+      `SELECT seq
+       FROM messages
+       WHERE session_id = ? AND id = ?`,
+    ).get(sessionId, messageId) as { seq: number } | undefined;
+
+    return row?.seq ?? null;
+  }
+
+  setActiveCompact(sessionId: string, compactId: string | null): void {
+    updateSessionCompact(this.db, sessionId, compactId);
   }
 
   // --- State ---

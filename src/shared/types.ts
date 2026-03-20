@@ -117,6 +117,31 @@ export type ToolResult = {
   details?: unknown;
 };
 
+export type CompactionRecord = {
+  id: string;
+  sessionId: string;
+  boundaryMessageId: string;
+  summaryText: string;
+  providerId: string;
+  modelId: string;
+  transcriptPath: string | null;
+  createdAt: number;
+};
+
+export type ManualCompactResult = {
+  compactionId: string;
+  summaryText: string;
+  boundaryMessageId: string;
+  transcriptPath?: string;
+};
+
+export type SkillMeta = {
+  name: string;
+  description: string;
+  version: string;
+  filePath: string;
+};
+
 // --- Session ---
 
 export type SessionSummary = {

@@ -1,17 +1,20 @@
-import crypto from "node:crypto";
+import type Database from "better-sqlite3";
 import type {
+  ManualCompactResult,
   ProviderConfig,
   ScorelMessage,
   UserMessage,
   AssistantMessage,
+  SkillMeta,
+  ToolResult,
   ToolResultMessage,
   ToolCall,
   ToolCallPart,
   SessionDetail,
 } from "../../shared/types.js";
 import type { AssistantMessageEvent, ScorelEvent } from "../../shared/events.js";
-import { NANOID_LENGTH } from "../../shared/constants.js";
-import type { ProviderAdapter, ProviderRequestOptions } from "../provider/types.js";
+import { MICRO_COMPACT_KEEP_RECENT } from "../../shared/constants.js";
+import type { ProviderAdapter } from "../provider/types.js";
 import { SessionManager } from "./session-manager.js";
 import { EventBus } from "./event-bus.js";
 import type { ToolRunner } from "../runner/runner-protocol.js";
@@ -21,10 +24,14 @@ import {
   makeDeniedResult,
   getToolDefinitions,
 } from "./tool-dispatch.js";
-
-function generateId(): string {
-  return crypto.randomBytes(16).toString("base64url").slice(0, NANOID_LENGTH);
-}
+import {
+  applyBoundaryResume,
+  applyMicroCompact,
+  executeManualCompact,
+} from "./compact.js";
+import { generateId } from "./id.js";
+import { getCompaction } from "../storage/compactions.js";
+import { formatSkillList, loadSkill } from "../skills/skill-loader.js";
 
 export type ProviderEntry = {
   config: ProviderConfig;
@@ -38,22 +45,31 @@ type ApprovalRequest = {
 };
 
 export class Orchestrator {
+  private readonly db: Database.Database;
   private readonly sessionManager: SessionManager;
   private readonly eventBus: EventBus;
   private readonly providers: Map<string, ProviderEntry>;
   private readonly toolRunner: ToolRunner | null;
+  private readonly skills: SkillMeta[];
+  private readonly compactTranscriptDir?: string;
   private pendingApproval: ApprovalRequest | null = null;
 
   constructor(opts: {
+    db: Database.Database;
     sessionManager: SessionManager;
     eventBus: EventBus;
     providers: Map<string, ProviderEntry>;
     toolRunner?: ToolRunner;
+    skills?: SkillMeta[];
+    compactTranscriptDir?: string;
   }) {
+    this.db = opts.db;
     this.sessionManager = opts.sessionManager;
     this.eventBus = opts.eventBus;
     this.providers = opts.providers;
     this.toolRunner = opts.toolRunner ?? null;
+    this.skills = opts.skills ?? [];
+    this.compactTranscriptDir = opts.compactTranscriptDir;
   }
 
   async send(sessionId: string, text: string): Promise<void> {
@@ -106,12 +122,12 @@ export class Orchestrator {
     provider: ProviderEntry,
     apiKey: string,
   ): Promise<void> {
-    const session = this.sessionManager.get(sessionId)!;
-    const systemPrompt = this.assembleSystemPrompt(session);
-
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const messages = this.sessionManager.getMessages(sessionId);
+      const session = this.sessionManager.get(sessionId)!;
+      const systemPrompt = this.assembleSystemPrompt(session);
+      const messages = this.getContextMessages(sessionId, session);
+      const toolDefinitions = this.getAvailableToolDefinitions();
 
       // Stream phase
       this.sessionManager.setState(sessionId, "streaming");
@@ -137,7 +153,7 @@ export class Orchestrator {
             messages,
             providerId: provider.config.id,
             modelId: session.activeModelId!,
-            tools: this.toolRunner ? getToolDefinitions() : undefined,
+            tools: toolDefinitions,
             signal: abortController.signal,
           },
           (event: AssistantMessageEvent) => {
@@ -176,7 +192,7 @@ export class Orchestrator {
       });
 
       // If no tool calls, we're done
-      if (assistantMessage.stopReason !== "toolUse" || !this.toolRunner) {
+      if (assistantMessage.stopReason !== "toolUse") {
         this.sessionManager.setState(sessionId, "idle");
         return;
       }
@@ -184,6 +200,11 @@ export class Orchestrator {
       // Extract tool calls
       const toolCalls = this.extractToolCalls(assistantMessage);
       if (toolCalls.length === 0) {
+        this.sessionManager.setState(sessionId, "idle");
+        return;
+      }
+
+      if (!this.toolRunner && toolCalls.some((toolCall) => toolCall.name !== "load_skill")) {
         this.sessionManager.setState(sessionId, "idle");
         return;
       }
@@ -253,24 +274,35 @@ export class Orchestrator {
         toolCall,
       });
 
-      const timeoutMs = getToolTimeout(toolCall);
-      const result = await this.toolRunner!.execute(
-        toolCall.toolCallId,
-        toolCall.name,
-        toolCall.arguments,
-        {
-          timeoutMs,
-          onUpdate: (partial) => {
-            this.eventBus.emitAppEvent({
-              type: "tool.exec.update",
-              sessionId,
-              ts: Date.now(),
-              toolCallId: toolCall.toolCallId,
-              partial,
-            });
+      let result: ToolResult;
+      if (toolCall.name === "load_skill") {
+        result = this.executeLoadSkill(toolCall);
+      } else if (!this.toolRunner) {
+        result = {
+          toolCallId: toolCall.toolCallId,
+          isError: true,
+          content: `Tool runner unavailable for ${toolCall.name}`,
+        };
+      } else {
+        const timeoutMs = getToolTimeout(toolCall);
+        result = await this.toolRunner.execute(
+          toolCall.toolCallId,
+          toolCall.name,
+          toolCall.arguments,
+          {
+            timeoutMs,
+            onUpdate: (partial) => {
+              this.eventBus.emitAppEvent({
+                type: "tool.exec.update",
+                sessionId,
+                ts: Date.now(),
+                toolCallId: toolCall.toolCallId,
+                partial,
+              });
+            },
           },
-        },
-      );
+        );
+      }
 
       this.eventBus.emitAppEvent({
         type: "tool.exec.end",
@@ -305,6 +337,72 @@ export class Orchestrator {
     return new Promise((resolve) => {
       this.pendingApproval = { toolCall, resolve };
     });
+  }
+
+  async manualCompact(sessionId: string): Promise<ManualCompactResult> {
+    const state = this.sessionManager.getState(sessionId);
+    if (state !== "idle") {
+      throw new Error(`Session ${sessionId} is in state "${state}", expected "idle"`);
+    }
+
+    const session = this.sessionManager.get(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    const { activeProviderId: providerId, activeModelId: modelId } = session;
+    if (!providerId || !modelId) {
+      throw new Error("No provider/model configured for session");
+    }
+
+    const provider = this.providers.get(providerId);
+    if (!provider) {
+      throw new Error(`Provider "${providerId}" not found`);
+    }
+
+    const apiKey = await provider.getApiKey();
+    if (!apiKey) {
+      throw new Error(`No API key for provider "${providerId}"`);
+    }
+
+    const messages = this.sessionManager.getMessages(sessionId);
+
+    this.sessionManager.setState(sessionId, "compacting");
+
+    try {
+      const result = await executeManualCompact({
+        sessionId,
+        messages,
+        db: this.db,
+        adapter: provider.adapter,
+        providerConfig: provider.config,
+        apiKey,
+        providerId,
+        modelId,
+        transcriptDir: this.compactTranscriptDir,
+      });
+
+      this.sessionManager.setActiveCompact(sessionId, result.compactionId);
+      this.eventBus.emitAppEvent({
+        type: "compact.manual",
+        sessionId,
+        ts: Date.now(),
+        summaryMessageId: result.compactionId,
+        transcriptPath: result.transcriptPath,
+      });
+
+      return result;
+    } catch (error: unknown) {
+      this.eventBus.emitAppEvent({
+        type: "compact.failed",
+        sessionId,
+        ts: Date.now(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    } finally {
+      this.sessionManager.setState(sessionId, "idle");
+    }
   }
 
   approveToolCall(toolCallId: string): void {
@@ -348,9 +446,60 @@ export class Orchestrator {
     if (session.workspaceRoot) {
       parts.push(`Current workspace: ${session.workspaceRoot}`);
     }
+    if (this.skills.length > 0) {
+      parts.push(formatSkillList(this.skills));
+    }
     if (session.pinnedSystemPrompt) {
       parts.push(session.pinnedSystemPrompt);
     }
     return parts.join("\n\n");
+  }
+
+  private getContextMessages(sessionId: string, session: SessionDetail): ScorelMessage[] {
+    if (session.activeCompactId) {
+      const compaction = getCompaction(this.db, session.activeCompactId);
+      if (compaction) {
+        const boundarySeq = this.sessionManager.getMessageSeq(sessionId, compaction.boundaryMessageId);
+        if (boundarySeq != null) {
+          const postBoundaryMessages = this.sessionManager.getMessages(sessionId, boundarySeq);
+          return applyMicroCompact(
+            applyBoundaryResume(postBoundaryMessages, compaction),
+            MICRO_COMPACT_KEEP_RECENT,
+          );
+        }
+      }
+    }
+
+    return applyMicroCompact(this.sessionManager.getMessages(sessionId), MICRO_COMPACT_KEEP_RECENT);
+  }
+
+  private getAvailableToolDefinitions() {
+    const definitions = getToolDefinitions({
+      includeRunnerTools: this.toolRunner != null,
+      includeLoadSkill: true,
+    });
+
+    return definitions.length > 0 ? definitions : undefined;
+  }
+
+  private executeLoadSkill(toolCall: ToolCall): ToolResult {
+    const name = typeof toolCall.arguments.name === "string"
+      ? toolCall.arguments.name
+      : null;
+
+    if (!name) {
+      return {
+        toolCallId: toolCall.toolCallId,
+        isError: true,
+        content: 'Invalid load_skill arguments: expected a string "name"',
+      };
+    }
+
+    const result = loadSkill(this.skills, name);
+    return {
+      toolCallId: toolCall.toolCallId,
+      isError: result.isError,
+      content: result.content,
+    };
   }
 }

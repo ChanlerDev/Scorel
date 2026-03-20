@@ -52,16 +52,38 @@ const editFileSchema = {
   required: ["path", "old_string", "new_string"],
 };
 
+const loadSkillSchema = {
+  type: "object",
+  properties: {
+    name: {
+      type: "string",
+      description: 'The skill name to load, or "list" to see available skills',
+    },
+  },
+  required: ["name"],
+};
+
 export const TOOL_REGISTRY = new Map<string, ToolEntry>([
   ["bash", { name: "bash", schema: bashSchema, approval: "confirm", timeoutMs: DEFAULT_TOOL_TIMEOUT_MS }],
   ["read_file", { name: "read_file", schema: readFileSchema, approval: "allow", timeoutMs: 10_000 }],
   ["write_file", { name: "write_file", schema: writeFileSchema, approval: "confirm", timeoutMs: 10_000 }],
   ["edit_file", { name: "edit_file", schema: editFileSchema, approval: "confirm", timeoutMs: 10_000 }],
+  ["load_skill", { name: "load_skill", schema: loadSkillSchema, approval: "allow", timeoutMs: 5_000 }],
 ]);
 
-export function getToolDefinitions(): ToolDefinition[] {
+export function getToolDefinitions(opts?: {
+  includeRunnerTools?: boolean;
+  includeLoadSkill?: boolean;
+}): ToolDefinition[] {
+  const includeRunnerTools = opts?.includeRunnerTools ?? true;
+  const includeLoadSkill = opts?.includeLoadSkill ?? false;
   const defs: ToolDefinition[] = [];
   for (const entry of TOOL_REGISTRY.values()) {
+    const isRunnerTool = entry.name !== "load_skill";
+    if ((isRunnerTool && !includeRunnerTools) || (!isRunnerTool && !includeLoadSkill)) {
+      continue;
+    }
+
     defs.push({
       type: "function",
       function: {
@@ -85,7 +107,7 @@ function getToolDescription(name: ToolName): string {
     case "edit_file":
       return "Edit a file by replacing an exact string match. The old_string must appear exactly once.";
     case "load_skill":
-      return "Load a skill file (reserved for M4).";
+      return "Load a skill file to get detailed instructions for a specific task. Use 'list' as the name to see available skills.";
   }
 }
 

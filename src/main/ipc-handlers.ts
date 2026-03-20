@@ -97,6 +97,10 @@ export function registerIpcHandlers(opts: {
     orchestrator.abort(sessionId);
   });
 
+  ipcMain.handle("compact:manual", async (_event, sessionId: string) => {
+    return orchestrator.manualCompact(sessionId);
+  });
+
   // Forward stream events to renderer
   eventBus.onAppEvent((event) => {
     const win = getMainWindow();

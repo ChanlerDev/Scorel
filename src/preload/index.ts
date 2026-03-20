@@ -26,6 +26,10 @@ const scorelBridge = {
     query: (query: string, opts?: { sessionId?: string; limit?: number }) =>
       ipcRenderer.invoke("search:query", query, opts),
   },
+  compact: {
+    manual: (sessionId: string) =>
+      ipcRenderer.invoke("compact:manual", sessionId),
+  },
   chat: {
     send: (sessionId: string, text: string) =>
       ipcRenderer.invoke("chat:send", sessionId, text),

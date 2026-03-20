@@ -1,4 +1,5 @@
 import type {
+  ManualCompactResult,
   ProviderConfig,
   SessionSummary,
   SessionDetail,
@@ -28,6 +29,9 @@ type ScorelBridge = {
       opts?: { sessionId?: string; limit?: number },
     ): Promise<SearchResult[]>;
   };
+  compact: {
+    manual(sessionId: string): Promise<ManualCompactResult>;
+  };
   chat: {
     send(sessionId: string, text: string): Promise<void>;
     abort(sessionId: string): Promise<void>;
@@ -48,6 +52,10 @@ type ScorelBridge = {
     store(providerId: string, secret: string): Promise<void>;
     has(providerId: string): Promise<boolean>;
     clear(providerId: string): Promise<void>;
+  };
+  tools: {
+    approve(sessionId: string, toolCallId: string): Promise<void>;
+    deny(sessionId: string, toolCallId: string): Promise<void>;
   };
 };
 

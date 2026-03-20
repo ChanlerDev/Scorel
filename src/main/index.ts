@@ -9,6 +9,7 @@ import { openaiAdapter } from "./provider/openai-adapter.js";
 import { anthropicAdapter } from "./provider/anthropic-adapter.js";
 import { getSecret } from "./security/keychain.js";
 import { registerIpcHandlers } from "./ipc-handlers.js";
+import { scanSkills } from "./skills/skill-loader.js";
 import type { ProviderConfig } from "../shared/types.js";
 import { DB_FILENAME } from "../shared/constants.js";
 
@@ -25,14 +26,19 @@ app.whenReady().then(() => {
 
   const sessionManager = new SessionManager(db);
   const eventBus = new EventBus();
+  const skills = scanSkills(path.join(app.getAppPath(), "skills"));
+  const compactTranscriptDir = path.join(userDataPath, "compact-transcripts");
 
   // Mutable provider map — IPC handlers update it on upsert/delete
   const providerMap = buildProviderMap(listProviders(db));
 
   const orchestrator = new Orchestrator({
+    db,
     sessionManager,
     eventBus,
     providers: providerMap,
+    skills,
+    compactTranscriptDir,
   });
 
   registerIpcHandlers({
