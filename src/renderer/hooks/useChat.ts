@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { ScorelMessage, AssistantMessage } from "@shared/types";
-import type { AssistantMessageEvent } from "@shared/events";
+import type { AssistantMessageEvent, ScorelEvent } from "@shared/events";
 
 type ChatState = "idle" | "streaming" | "error";
 
@@ -26,7 +26,19 @@ export function useChat(sessionId: string | null) {
 
     const unsub = window.scorel.chat.onEvent(
       sessionId,
-      (event: AssistantMessageEvent) => {
+      (event: AssistantMessageEvent | ScorelEvent) => {
+        if (
+          event.type !== "start" &&
+          event.type !== "text_delta" &&
+          event.type !== "text_end" &&
+          event.type !== "toolcall_delta" &&
+          event.type !== "toolcall_end" &&
+          event.type !== "done" &&
+          event.type !== "error"
+        ) {
+          return;
+        }
+
         const e = event as AssistantMessageEvent;
         switch (e.type) {
           case "start":
@@ -57,6 +69,8 @@ export function useChat(sessionId: string | null) {
             ) {
               setMessages((prev) => [...prev, e.error]);
             }
+            break;
+          default:
             break;
         }
       },

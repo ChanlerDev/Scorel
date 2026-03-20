@@ -2,6 +2,7 @@ import type {
   ProviderConfig,
   SessionSummary,
   SessionDetail,
+  SearchResult,
 } from "@shared/types";
 import type { AssistantMessageEvent, ScorelEvent } from "@shared/events";
 
@@ -16,7 +17,16 @@ type ScorelBridge = {
     get(sessionId: string): Promise<SessionDetail | null>;
     rename(sessionId: string, title: string): Promise<void>;
     archive(sessionId: string): Promise<void>;
+    unarchive(sessionId: string): Promise<void>;
     delete(sessionId: string): Promise<void>;
+    exportJsonl(sessionId: string, opts?: { redact?: boolean }): Promise<string>;
+    exportMarkdown(sessionId: string, opts?: { redact?: boolean }): Promise<string>;
+  };
+  search: {
+    query(
+      query: string,
+      opts?: { sessionId?: string; limit?: number },
+    ): Promise<SearchResult[]>;
   };
   chat: {
     send(sessionId: string, text: string): Promise<void>;

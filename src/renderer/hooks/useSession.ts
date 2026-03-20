@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
 import type { SessionSummary, SessionDetail } from "@shared/types";
 
-export function useSessionList() {
+export function useSessionList(opts?: { archived?: boolean }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const archived = opts?.archived ?? false;
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const list = await window.scorel.sessions.list({ archived: false });
+    const list = await window.scorel.sessions.list({ archived });
     setSessions(list);
     setLoading(false);
-  }, []);
+  }, [archived]);
 
   useEffect(() => {
     refresh();
