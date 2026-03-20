@@ -1,0 +1,49 @@
+appId: com.scorel.app
+productName: Scorel
+copyright: Copyright © 2025–2026 Scorel
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - node_modules/**/*
+  - package.json
+  - "!src/**/*"
+  - "!tests/**/*"
+  - "!docs/**/*"
+  - "!archive/**/*"
+
+asar: true
+asarUnpack:
+  - dist/runner/**
+  - node_modules/better-sqlite3/**
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - universal
+    - target: zip
+      arch:
+        - universal
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+dmg:
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+  window:
+    width: 540
+    height: 380
+
+afterSign: scripts/notarize.js

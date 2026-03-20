@@ -6,10 +6,13 @@
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "electron .",
-    "build": "tsc -p tsconfig.main.json && tsc -p tsconfig.preload.json && tsc -p tsconfig.renderer.json",
+    "build": "pnpm build:main && pnpm build:preload && pnpm build:runner && tsc -p tsconfig.renderer.json && pnpm build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
     "build:preload": "tsc -p tsconfig.preload.json",
+    "build:runner": "tsc -p runner/tsconfig.json",
     "build:renderer": "vite build",
+    "pack": "node --experimental-strip-types scripts/build.ts",
+    "pack:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false node --experimental-strip-types scripts/build.ts",
     "test": "vitest --run",
     "test:watch": "vitest",
     "lint": "eslint src runner tests vite.config.ts vitest.config.ts --ext .ts,.tsx",
@@ -21,6 +24,7 @@
     "nanoid": "^5.0.9"
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "@eslint/js": "^9.39.4",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
