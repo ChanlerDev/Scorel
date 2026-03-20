@@ -155,11 +155,19 @@ export type SessionSummary = {
   activeModelId: string | null;
 };
 
-export type SessionDetail = SessionSummary & {
+export type SessionMeta = SessionSummary & {
   activeCompactId: string | null;
   pinnedSystemPrompt: string | null;
   settings: Record<string, unknown> | null;
+};
+
+export type SessionDetail = SessionMeta & {
   messages: ScorelMessage[];
+};
+
+export type StoredSessionMessage = {
+  seq: number;
+  message: ScorelMessage;
 };
 
 export type SearchResult = {

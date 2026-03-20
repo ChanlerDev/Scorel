@@ -1,5 +1,11 @@
 import type Database from "better-sqlite3";
-import type { SessionDetail, SessionSummary, ScorelMessage } from "../../shared/types.js";
+import type {
+  SessionDetail,
+  SessionMeta,
+  SessionSummary,
+  ScorelMessage,
+  StoredSessionMessage,
+} from "../../shared/types.js";
 import type { SessionState } from "../../shared/constants.js";
 import {
   EXPORT_VERSION,
@@ -134,7 +140,7 @@ export class SessionManager {
     return detail;
   }
 
-  private getStoredMessages(sessionId: string): Array<{ seq: number; message: ScorelMessage }> {
+  getStoredMessages(sessionId: string): StoredSessionMessage[] {
     const rows = this.db
       .prepare(
         `SELECT seq, message_json
@@ -164,16 +170,24 @@ export class SessionManager {
     return id;
   }
 
-  get(sessionId: string): SessionDetail | null {
+  getMeta(sessionId: string): SessionMeta | null {
     const detail = dbGetSessionDetail(this.db, sessionId);
     if (!detail) return null;
-    const messages = dbGetMessages(this.db, sessionId);
     return {
       ...detail.summary,
       activeCompactId: detail.activeCompactId,
       pinnedSystemPrompt: detail.pinnedSystemPrompt,
       settings: detail.settings,
-      messages,
+    };
+  }
+
+  get(sessionId: string): SessionDetail | null {
+    const meta = this.getMeta(sessionId);
+    if (!meta) return null;
+
+    return {
+      ...meta,
+      messages: dbGetMessages(this.db, sessionId),
     };
   }
 

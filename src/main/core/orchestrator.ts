@@ -10,7 +10,7 @@ import type {
   ToolResultMessage,
   ToolCall,
   ToolCallPart,
-  SessionDetail,
+  SessionMeta,
 } from "../../shared/types.js";
 import type { AssistantMessageEvent } from "../../shared/events.js";
 import { MICRO_COMPACT_KEEP_RECENT } from "../../shared/constants.js";
@@ -78,7 +78,7 @@ export class Orchestrator {
       throw new Error(`Session ${sessionId} is in state "${state}", expected "idle"`);
     }
 
-    const session = this.sessionManager.get(sessionId);
+    const session = this.sessionManager.getMeta(sessionId);
     if (!session) throw new Error(`Session ${sessionId} not found`);
 
     const { activeProviderId: providerId, activeModelId: modelId } = session;
@@ -123,7 +123,7 @@ export class Orchestrator {
     apiKey: string,
   ): Promise<void> {
     while (true) {
-      const session = this.sessionManager.get(sessionId)!;
+      const session = this.sessionManager.getMeta(sessionId)!;
       const systemPrompt = this.assembleSystemPrompt(session);
       const messages = this.getContextMessages(sessionId, session);
       const toolDefinitions = this.getAvailableToolDefinitions();
@@ -203,7 +203,8 @@ export class Orchestrator {
         return;
       }
 
-      if (!this.toolRunner && toolCalls.some((toolCall) => toolCall.name !== "load_skill")) {
+      const hasSkillCalls = toolCalls.some((toolCall) => toolCall.name === "load_skill");
+      if (!this.toolRunner && !hasSkillCalls) {
         this.sessionManager.setState(sessionId, "idle");
         return;
       }
@@ -237,6 +238,33 @@ export class Orchestrator {
     const results: ToolResultMessage[] = [];
 
     for (const toolCall of toolCalls) {
+      const toolRunner = this.toolRunner;
+
+      if (toolCall.name !== "load_skill" && !toolRunner) {
+        const unavailable: ToolResult = {
+          toolCallId: toolCall.toolCallId,
+          isError: true,
+          content: `Tool runner unavailable for ${toolCall.name}`,
+        };
+
+        this.sessionManager.setState(sessionId, "tooling");
+        this.eventBus.emitAppEvent({
+          type: "tool.exec.start",
+          sessionId,
+          ts: Date.now(),
+          toolCall,
+        });
+        this.eventBus.emitAppEvent({
+          type: "tool.exec.end",
+          sessionId,
+          ts: Date.now(),
+          result: unavailable,
+        });
+
+        results.push(this.toToolResultMessage(toolCall, unavailable));
+        continue;
+      }
+
       // Check if approval is needed
       if (requiresApproval(toolCall)) {
         this.sessionManager.setState(sessionId, "awaiting_approval");
@@ -276,15 +304,13 @@ export class Orchestrator {
       let result: ToolResult;
       if (toolCall.name === "load_skill") {
         result = this.executeLoadSkill(toolCall);
-      } else if (!this.toolRunner) {
-        result = {
-          toolCallId: toolCall.toolCallId,
-          isError: true,
-          content: `Tool runner unavailable for ${toolCall.name}`,
-        };
       } else {
+        if (!toolRunner) {
+          throw new Error(`Tool runner unavailable for ${toolCall.name}`);
+        }
+
         const timeoutMs = getToolTimeout(toolCall);
-        result = await this.toolRunner.execute(
+        result = await toolRunner.execute(
           toolCall.toolCallId,
           toolCall.name,
           toolCall.arguments,
@@ -344,7 +370,7 @@ export class Orchestrator {
       throw new Error(`Session ${sessionId} is in state "${state}", expected "idle"`);
     }
 
-    const session = this.sessionManager.get(sessionId);
+    const session = this.sessionManager.getMeta(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
     }
@@ -364,7 +390,8 @@ export class Orchestrator {
       throw new Error(`No API key for provider "${providerId}"`);
     }
 
-    const messages = this.sessionManager.getMessages(sessionId);
+    const storedMessages = this.sessionManager.getStoredMessages(sessionId);
+    const messages = storedMessages.map(({ message }) => message);
 
     this.sessionManager.setState(sessionId, "compacting");
 
@@ -379,6 +406,7 @@ export class Orchestrator {
         providerId,
         modelId,
         transcriptDir: this.compactTranscriptDir,
+        transcriptMessages: storedMessages,
       });
 
       this.sessionManager.setActiveCompact(sessionId, result.compactionId);
@@ -440,7 +468,7 @@ export class Orchestrator {
     }
   }
 
-  private assembleSystemPrompt(session: SessionDetail): string {
+  private assembleSystemPrompt(session: SessionMeta): string {
     const parts: string[] = ["You are a helpful assistant."];
     if (session.workspaceRoot) {
       parts.push(`Current workspace: ${session.workspaceRoot}`);
@@ -454,7 +482,7 @@ export class Orchestrator {
     return parts.join("\n\n");
   }
 
-  private getContextMessages(sessionId: string, session: SessionDetail): ScorelMessage[] {
+  private getContextMessages(sessionId: string, session: SessionMeta): ScorelMessage[] {
     if (session.activeCompactId) {
       const compaction = getCompaction(this.db, session.activeCompactId);
       if (compaction) {

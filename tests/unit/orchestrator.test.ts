@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { initDatabase } from "../../src/main/storage/db.js";
 import { SessionManager } from "../../src/main/core/session-manager.js";
 import { EventBus } from "../../src/main/core/event-bus.js";
@@ -224,6 +224,20 @@ describe("Orchestrator", () => {
 
     // Adapter was called once
     expect(adapter.callCount).toBe(1);
+  });
+
+  it("send() uses lightweight session metadata during the model loop", async () => {
+    const response = makeAssistantMessage();
+    const adapter = createMockAdapter([response]);
+    const orch = createOrchestrator(adapter);
+    const sessionId = createSession();
+    const getSpy = vi.spyOn(sessionManager, "get");
+    const getMetaSpy = vi.spyOn(sessionManager, "getMeta");
+
+    await orch.send(sessionId, "Hello");
+
+    expect(getMetaSpy).toHaveBeenCalled();
+    expect(getSpy).not.toHaveBeenCalled();
   });
 
   // 2. send() with tool calls

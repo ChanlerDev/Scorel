@@ -85,6 +85,33 @@ function assistantUnknownSkillMessage(): AssistantMessage {
   };
 }
 
+function assistantMixedToolBatchMessage(): AssistantMessage {
+  return {
+    role: "assistant",
+    id: "assistant-mixed-tools",
+    api: "openai-chat-completions",
+    providerId: TEST_PROVIDER_ID,
+    modelId: TEST_MODEL_ID,
+    content: [
+      { type: "text", text: "I should load the skill and run a command." },
+      {
+        type: "toolCall",
+        id: "skill-call-1",
+        name: "load_skill",
+        arguments: { name: "code-review" },
+      },
+      {
+        type: "toolCall",
+        id: "bash-call-1",
+        name: "bash",
+        arguments: { command: "pwd" },
+      },
+    ],
+    stopReason: "toolUse",
+    ts: Date.now(),
+  };
+}
+
 function createSequentialAdapter(responses: AssistantMessage[]) {
   const requests: ProviderRequestOptions[] = [];
   let index = 0;
@@ -331,6 +358,65 @@ describe("Orchestrator M4", () => {
       role: "assistant",
       stopReason: "stop",
     });
+  });
+
+  it("keeps mixed load_skill batches running when no runner is available", async () => {
+    const skillContent = [
+      "---",
+      "name: code-review",
+      "description: Review code changes",
+      'version: "1.0"',
+      "---",
+      "",
+      "# Code Review",
+      "Use read_file before making changes.",
+    ].join("\n");
+    const skillPath = path.join(skillsDir, "code-review.md");
+    writeFileSync(skillPath, skillContent);
+
+    const skills: SkillMeta[] = [{
+      name: "code-review",
+      description: "Review code changes",
+      version: "1.0",
+      filePath: skillPath,
+    }];
+
+    const { adapter, requests } = createSequentialAdapter([
+      assistantMixedToolBatchMessage(),
+      assistantTextMessage("final-response", "Loaded the skill and reported the runner failure."),
+    ]);
+    const providers = new Map<string, ProviderEntry>();
+    providers.set(TEST_PROVIDER_ID, createProviderEntry(adapter));
+
+    const orchestrator = new Orchestrator({
+      db,
+      sessionManager,
+      eventBus,
+      providers,
+      skills,
+    });
+
+    const sessionId = createSession();
+    await orchestrator.send(sessionId, "Load the review skill and run pwd");
+
+    const messages = sessionManager.getMessages(sessionId);
+    expect(messages).toHaveLength(5);
+    expect(messages[2]).toMatchObject({
+      role: "toolResult",
+      toolName: "load_skill",
+      isError: false,
+    });
+    expect(messages[3]).toMatchObject({
+      role: "toolResult",
+      toolName: "bash",
+      isError: true,
+      content: [{ type: "text", text: "Tool runner unavailable for bash" }],
+    });
+    expect(messages[4]).toMatchObject({
+      role: "assistant",
+      stopReason: "stop",
+    });
+    expect(requests).toHaveLength(2);
   });
 
   it("returns an error tool result when load_skill requests an unknown skill", async () => {

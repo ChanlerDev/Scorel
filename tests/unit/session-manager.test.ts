@@ -60,6 +60,20 @@ describe("SessionManager", () => {
     expect(detail!.messages[0].role).toBe("user");
   });
 
+  it("returns lightweight session metadata without messages", () => {
+    const id = mgr.create("/tmp/ws");
+    mgr.appendMessage(id, userMsg("hi"));
+
+    const meta = mgr.getMeta(id);
+    expect(meta).not.toBeNull();
+    expect(meta!.id).toBe(id);
+    expect(meta!.workspaceRoot).toBe("/tmp/ws");
+    expect(meta!.activeCompactId).toBeNull();
+    expect(meta!.pinnedSystemPrompt).toBeNull();
+    expect(meta!.settings).toBeNull();
+    expect("messages" in meta!).toBe(false);
+  });
+
   it("returns null for non-existent session", () => {
     expect(mgr.get("nonexistent")).toBeNull();
   });
