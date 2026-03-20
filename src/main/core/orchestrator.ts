@@ -12,7 +12,7 @@ import type {
   ToolCallPart,
   SessionDetail,
 } from "../../shared/types.js";
-import type { AssistantMessageEvent, ScorelEvent } from "../../shared/events.js";
+import type { AssistantMessageEvent } from "../../shared/events.js";
 import { MICRO_COMPACT_KEEP_RECENT } from "../../shared/constants.js";
 import type { ProviderAdapter } from "../provider/types.js";
 import { SessionManager } from "./session-manager.js";
@@ -122,7 +122,6 @@ export class Orchestrator {
     provider: ProviderEntry,
     apiKey: string,
   ): Promise<void> {
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const session = this.sessionManager.get(sessionId)!;
       const systemPrompt = this.assembleSystemPrompt(session);

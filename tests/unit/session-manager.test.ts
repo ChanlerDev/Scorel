@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import Database from "better-sqlite3";
 import { initDatabase } from "../../src/main/storage/db.js";
 import { SessionManager } from "../../src/main/core/session-manager.js";
-import type { UserMessage, AssistantMessage, ToolResultMessage } from "../../src/shared/types.js";
+import type { UserMessage, AssistantMessage } from "../../src/shared/types.js";
 import { NANOID_LENGTH } from "../../src/shared/constants.js";
 
 // --- Helpers ---
@@ -20,18 +20,6 @@ function assistantMsg(id = "a1"): AssistantMessage {
     modelId: "m1",
     content: [{ type: "text", text: "hello" }],
     stopReason: "stop",
-    ts: Date.now(),
-  };
-}
-
-function toolResultMsg(toolCallId: string, id = "tr1"): ToolResultMessage {
-  return {
-    role: "toolResult",
-    id,
-    toolCallId,
-    toolName: "bash",
-    isError: false,
-    content: [{ type: "text", text: "output" }],
     ts: Date.now(),
   };
 }

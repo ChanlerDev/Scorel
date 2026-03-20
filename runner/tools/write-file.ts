@@ -1,6 +1,6 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
-import type { ToolResult, ToolHandler } from "../types.js";
+import type { ToolHandler } from "../types.js";
 
 function validatePath(filePath: string, workspaceRoot: string): string | null {
   const resolved = path.resolve(workspaceRoot, filePath);

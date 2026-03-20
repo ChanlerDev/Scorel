@@ -12,7 +12,7 @@
     "build:renderer": "vite build",
     "test": "vitest --run",
     "test:watch": "vitest",
-    "lint": "eslint src/ --ext .ts,.tsx",
+    "lint": "eslint src runner tests vite.config.ts vitest.config.ts --ext .ts,.tsx",
     "format": "prettier --write 'src/**/*.{ts,tsx}'",
     "start": "electron dist/main/index.js"
   },
@@ -21,6 +21,7 @@
     "nanoid": "^5.0.9"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
@@ -29,10 +30,13 @@
     "electron": "^33.2.0",
     "electron-builder": "^25.1.8",
     "eslint": "^9.16.0",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "globals": "^17.4.0",
     "prettier": "^3.4.2",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.7.2",
+    "typescript-eslint": "^8.57.1",
     "vite": "^6.0.0",
     "vitest": "^2.1.8"
   },

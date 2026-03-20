@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { anthropicAdapter } from "../../src/main/provider/anthropic-adapter.js";
 import type { ProviderConfig } from "../../src/shared/types.js";
 import type { AssistantMessageEvent } from "../../src/shared/events.js";

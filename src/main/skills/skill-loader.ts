@@ -23,7 +23,7 @@ export function parseFrontmatter(content: string): ParsedFrontmatter | null {
 
     const key = trimmed.slice(0, separatorIndex).trim();
     const rawValue = trimmed.slice(separatorIndex + 1).trim();
-    const value = rawValue.replace(/^['\"]|['\"]$/g, "");
+    const value = rawValue.replace(/^["']|["']$/g, "");
 
     if (key === "name" || key === "description" || key === "version") {
       parsed[key] = value;

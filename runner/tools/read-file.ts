@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { ToolResult, ToolHandler } from "../types.js";
+import type { ToolHandler } from "../types.js";
 
 const READ_FILE_MAX_OUTPUT = 64_000;
 

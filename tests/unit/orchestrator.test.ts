@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { initDatabase } from "../../src/main/storage/db.js";
 import { SessionManager } from "../../src/main/core/session-manager.js";
 import { EventBus } from "../../src/main/core/event-bus.js";

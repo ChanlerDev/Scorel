@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ToolResult, ToolHandler } from "../types.js";
+import type { ToolHandler } from "../types.js";
 
 const EDIT_FILE_MAX_OUTPUT = 2_000;
 

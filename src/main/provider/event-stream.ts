@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { Api, AssistantMessage, ContentPart, ThinkingPart, ToolCallPart } from "../../shared/types.js";
+import type { Api, AssistantMessage, ThinkingPart, ToolCallPart } from "../../shared/types.js";
 import type { AssistantMessageEvent } from "../../shared/events.js";
 import { NANOID_LENGTH } from "../../shared/constants.js";
 

@@ -11,11 +11,6 @@ import type {
   ToolResultMessage,
   ScorelMessage,
 } from "../../src/shared/types.js";
-import type {
-  OpenAIMessage,
-  AnthropicMessage,
-  AnthropicPayload,
-} from "../../src/main/provider/transform-messages.js";
 
 // --- Helpers ---
 

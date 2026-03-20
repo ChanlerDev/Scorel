@@ -3,7 +3,6 @@ import type {
   ScorelMessage,
   AssistantMessage,
   ProviderCompat,
-  ContentPart,
 } from "../../shared/types.js";
 
 export type OpenAIToolCall = {
@@ -66,16 +65,12 @@ export function transformMessages(
     }
   }
 
-  let lastRole: string | undefined;
-
   for (const msg of messages) {
     if (msg.role === "user") {
       result.push({ role: "user", content: msg.content });
-      lastRole = "user";
     } else if (msg.role === "assistant") {
       if (msg.stopReason === "aborted") continue;
       result.push(transformAssistant(msg, compat));
-      lastRole = "assistant";
     } else if (msg.role === "toolResult") {
       // Exclude orphan toolResults
       if (!validToolCallIds.has(msg.toolCallId)) continue;
@@ -91,7 +86,6 @@ export function transformMessages(
           msg.toolName;
       }
       result.push(toolMsg);
-      lastRole = "tool";
     }
   }
 
