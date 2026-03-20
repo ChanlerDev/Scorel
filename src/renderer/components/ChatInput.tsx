@@ -22,7 +22,7 @@ export function ChatInput({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey || !e.shiftKey)) {
         e.preventDefault();
         handleSend();
       }
@@ -36,8 +36,8 @@ export function ChatInput({
         display: "flex",
         gap: 8,
         padding: "8px 16px",
-        borderTop: "1px solid #e0e0e0",
-        background: "#fff",
+        borderTop: "1px solid var(--border)",
+        background: "var(--bg-primary)",
       }}
     >
       <textarea
@@ -50,12 +50,14 @@ export function ChatInput({
         style={{
           flex: 1,
           resize: "none",
-          border: "1px solid #ccc",
+          border: "1px solid var(--border)",
           borderRadius: 8,
           padding: "8px 12px",
           fontSize: 14,
           fontFamily: "inherit",
           outline: "none",
+          background: "var(--bg-primary)",
+          color: "var(--text-primary)",
         }}
       />
       {isStreaming ? (
@@ -65,7 +67,7 @@ export function ChatInput({
             padding: "8px 16px",
             borderRadius: 8,
             border: "none",
-            background: "#ff3b30",
+            background: "var(--danger)",
             color: "#fff",
             cursor: "pointer",
             fontSize: 14,
@@ -81,7 +83,7 @@ export function ChatInput({
             padding: "8px 16px",
             borderRadius: 8,
             border: "none",
-            background: disabled || !text.trim() ? "#ccc" : "#007aff",
+            background: disabled || !text.trim() ? "var(--border-strong)" : "var(--accent)",
             color: "#fff",
             cursor: disabled || !text.trim() ? "default" : "pointer",
             fontSize: 14,

@@ -8,6 +8,11 @@ import type {
 import type { AssistantMessageEvent, ScorelEvent } from "@shared/events";
 
 type ScorelBridge = {
+  app: {
+    selectDirectory(): Promise<string | null>;
+    getVersion(): Promise<string>;
+    onThemeChanged(callback: (theme: string) => void): () => void;
+  };
   sessions: {
     create(opts: {
       providerId: string;
@@ -56,6 +61,9 @@ type ScorelBridge = {
   tools: {
     approve(sessionId: string, toolCallId: string): Promise<void>;
     deny(sessionId: string, toolCallId: string): Promise<void>;
+  };
+  menu: {
+    onNewSession(callback: () => void): () => void;
   };
 };
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
 import { useChat } from "../hooks/useChat";
@@ -28,16 +28,43 @@ export function ChatView({
   onSessionMutated: (action: "archive" | "unarchive" | "delete") => void | Promise<void>;
   searchNavigationTarget: SearchNavigationTarget | null;
 }) {
-  const { messages, streamingMessage, chatState, error, send, abort } =
+  const { messages, streamingMessage, chatState, error, send, abort, toolStatuses } =
     useChat(sessionId);
-  const { detail } = useSessionDetail(sessionId);
+  const { detail, loading, refresh } = useSessionDetail(sessionId);
   const [redactExports, setRedactExports] = useState(true);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [isCompacting, setIsCompacting] = useState(false);
+  const [compactStatus, setCompactStatus] = useState<string | null>(null);
 
   const exportBaseName = useMemo(() => {
     const rawName = detail?.title ?? sessionId;
     return sanitizeFileName(rawName);
   }, [detail?.title, sessionId]);
+
+  const isBusy = chatState === "streaming" || chatState === "awaiting_approval" || chatState === "tooling";
+  const activityLabel = isCompacting
+    ? "Compacting conversation…"
+    : chatState === "streaming"
+      ? "Thinking…"
+      : chatState === "awaiting_approval"
+        ? "Awaiting tool approval…"
+        : chatState === "tooling"
+          ? "Running tools…"
+          : null;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && isBusy) {
+        event.preventDefault();
+        abort();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [abort, isBusy]);
 
   const handleExport = async (format: "jsonl" | "md") => {
     try {
@@ -85,6 +112,35 @@ export function ChatView({
     }
   };
 
+  const handleCompact = async () => {
+    try {
+      setActionError(null);
+      setCompactStatus(null);
+      setIsCompacting(true);
+      await window.scorel.compact.manual(sessionId);
+      setCompactStatus("Conversation compacted successfully");
+      await refresh();
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsCompacting(false);
+    }
+  };
+
+  if (loading && !detail) {
+    return (
+      <div style={{ flex: 1, padding: 24, background: "var(--bg-primary)" }}>
+        <div style={{ width: 220, height: 20, borderRadius: 10, background: "var(--bg-tertiary)", marginBottom: 12 }} />
+        <div style={{ width: 320, height: 14, borderRadius: 10, background: "var(--bg-secondary)", marginBottom: 20 }} />
+        <div style={{ display: "grid", gap: 12 }}>
+          {[0, 1, 2].map((index) => (
+            <div key={index} style={{ height: 72, borderRadius: 16, background: "var(--bg-secondary)" }} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -100,8 +156,8 @@ export function ChatView({
           justifyContent: "space-between",
           gap: 12,
           padding: "12px 16px",
-          borderBottom: "1px solid #e0e0e0",
-          background: "#fafafa",
+          borderBottom: "1px solid var(--border)",
+          background: "var(--bg-elevated)",
         }}
       >
         <div style={{ minWidth: 0 }}>
@@ -111,7 +167,7 @@ export function ChatView({
           <div
             style={{
               fontSize: 12,
-              color: "#666",
+              color: "var(--text-secondary)",
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
@@ -130,23 +186,63 @@ export function ChatView({
             />
             Redact exports
           </label>
+          <button onClick={() => void handleCompact()} disabled={isBusy || isCompacting}>
+            {isCompacting ? "Compacting…" : "Compact"}
+          </button>
           <button onClick={() => handleExport("jsonl")}>Export JSONL</button>
           <button onClick={() => handleExport("md")}>Export Markdown</button>
           <button onClick={handleArchiveToggle}>
             {detail?.archived ? "Unarchive" : "Archive"}
           </button>
-          <button onClick={handleDelete} style={{ color: "#b42318" }}>
+          <button onClick={handleDelete} style={{ color: "var(--danger)" }}>
             Delete
           </button>
         </div>
       </div>
+      {activityLabel && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 16px",
+            borderBottom: "1px solid var(--border)",
+            background: isCompacting ? "var(--warning-bg)" : "var(--bg-secondary)",
+            color: isCompacting ? "var(--warning)" : "var(--text-secondary)",
+            fontSize: 13,
+          }}
+        >
+          <span
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: "50%",
+              background: isCompacting ? "var(--warning)" : "var(--accent)",
+              animation: "scorel-pulse 1s ease infinite",
+            }}
+          />
+          {activityLabel}
+        </div>
+      )}
+      {compactStatus && !actionError && (
+        <div
+          style={{
+            padding: "6px 16px",
+            fontSize: 13,
+            color: "var(--success)",
+            background: "var(--success-bg)",
+          }}
+        >
+          {compactStatus}
+        </div>
+      )}
       {actionError && (
         <div
           style={{
             padding: "6px 16px",
             fontSize: 13,
-            color: "#ff3b30",
-            background: "#fff5f5",
+            color: "var(--danger)",
+            background: "var(--danger-bg)",
           }}
         >
           {actionError}
@@ -156,14 +252,15 @@ export function ChatView({
         messages={messages}
         streamingMessage={streamingMessage}
         searchNavigationTarget={searchNavigationTarget}
+        toolStatuses={toolStatuses}
       />
       {error && (
         <div
           style={{
             padding: "6px 16px",
             fontSize: 13,
-            color: "#ff3b30",
-            background: "#fff5f5",
+            color: "var(--danger)",
+            background: "var(--danger-bg)",
           }}
         >
           {error}
@@ -172,8 +269,8 @@ export function ChatView({
       <ChatInput
         onSend={send}
         onAbort={abort}
-        isStreaming={chatState === "streaming"}
-        disabled={chatState === "streaming"}
+        isStreaming={isBusy}
+        disabled={isBusy || isCompacting}
       />
     </div>
   );

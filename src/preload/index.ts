@@ -2,6 +2,17 @@ import { contextBridge, ipcRenderer } from "electron";
 
 // Type-safe bridge — matches ScorelBridge from V0_SPEC (M1 subset)
 const scorelBridge = {
+  app: {
+    selectDirectory: () => ipcRenderer.invoke("app:selectDirectory"),
+    getVersion: () => ipcRenderer.invoke("app:getVersion"),
+    onThemeChanged: (callback: (theme: string) => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, theme: string) => callback(theme);
+      ipcRenderer.on("theme:changed", listener);
+      return () => {
+        ipcRenderer.removeListener("theme:changed", listener);
+      };
+    },
+  },
   sessions: {
     create: (opts: { providerId: string; modelId: string; workspaceRoot: string }) =>
       ipcRenderer.invoke("sessions:create", opts),
@@ -65,6 +76,15 @@ const scorelBridge = {
       ipcRenderer.invoke("tools:approve", sessionId, toolCallId),
     deny: (sessionId: string, toolCallId: string) =>
       ipcRenderer.invoke("tools:deny", sessionId, toolCallId),
+  },
+  menu: {
+    onNewSession: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on("menu:new-session", listener);
+      return () => {
+        ipcRenderer.removeListener("menu:new-session", listener);
+      };
+    },
   },
 };
 

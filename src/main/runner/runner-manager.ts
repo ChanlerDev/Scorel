@@ -54,9 +54,12 @@ export class RunnerManager extends EventEmitter implements ToolRunner {
   async start(): Promise<void> {
     if (this._isRunning) return;
 
-    this.child = spawn("node", [this.runnerPath, this.workspaceRoot], {
+    this.child = spawn(process.execPath, [this.runnerPath, this.workspaceRoot], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+      },
     });
 
     this._isRunning = true;

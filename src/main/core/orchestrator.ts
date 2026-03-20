@@ -50,8 +50,10 @@ export class Orchestrator {
   private readonly eventBus: EventBus;
   private readonly providers: Map<string, ProviderEntry>;
   private readonly toolRunner: ToolRunner | null;
+  private readonly createToolRunner: ((workspaceRoot: string) => Promise<ToolRunner>) | null;
   private readonly skills: SkillMeta[];
   private readonly compactTranscriptDir?: string;
+  private readonly workspaceToolRunners = new Map<string, ToolRunner>();
   private pendingApproval: ApprovalRequest | null = null;
 
   constructor(opts: {
@@ -60,6 +62,7 @@ export class Orchestrator {
     eventBus: EventBus;
     providers: Map<string, ProviderEntry>;
     toolRunner?: ToolRunner;
+    createToolRunner?: (workspaceRoot: string) => Promise<ToolRunner>;
     skills?: SkillMeta[];
     compactTranscriptDir?: string;
   }) {
@@ -68,6 +71,7 @@ export class Orchestrator {
     this.eventBus = opts.eventBus;
     this.providers = opts.providers;
     this.toolRunner = opts.toolRunner ?? null;
+    this.createToolRunner = opts.createToolRunner ?? null;
     this.skills = opts.skills ?? [];
     this.compactTranscriptDir = opts.compactTranscriptDir;
   }
@@ -204,13 +208,15 @@ export class Orchestrator {
       }
 
       const hasSkillCalls = toolCalls.some((toolCall) => toolCall.name === "load_skill");
-      if (!this.toolRunner && !hasSkillCalls) {
+      const toolRunner = await this.getToolRunnerForSession(session);
+
+      if (!toolRunner && !hasSkillCalls) {
         this.sessionManager.setState(sessionId, "idle");
         return;
       }
 
       // Execute tool calls sequentially
-      const toolResults = await this.executeToolCalls(sessionId, toolCalls);
+      const toolResults = await this.executeToolCalls(sessionId, toolCalls, toolRunner);
 
       // Persist tool results and continue loop
       for (const result of toolResults) {
@@ -234,12 +240,11 @@ export class Orchestrator {
   private async executeToolCalls(
     sessionId: string,
     toolCalls: ToolCall[],
+    toolRunner: ToolRunner | null,
   ): Promise<ToolResultMessage[]> {
     const results: ToolResultMessage[] = [];
 
     for (const toolCall of toolCalls) {
-      const toolRunner = this.toolRunner;
-
       if (toolCall.name !== "load_skill" && !toolRunner) {
         const unavailable: ToolResult = {
           toolCallId: toolCall.toolCallId,
@@ -466,6 +471,39 @@ export class Orchestrator {
       this.pendingApproval = null;
       resolve("denied");
     }
+
+    this.sessionManager.clearAbortController(sessionId);
+    this.sessionManager.setState(sessionId, "idle");
+  }
+
+  abortAll(): void {
+    for (const session of this.sessionManager.list({ archived: false })) {
+      const state = this.sessionManager.getState(session.id);
+      if (state !== "idle") {
+        this.abort(session.id);
+      }
+    }
+  }
+
+  async shutdownRunner(timeoutMs: number): Promise<void> {
+    const runners = this.toolRunner != null
+      ? [this.toolRunner]
+      : Array.from(this.workspaceToolRunners.values());
+
+    if (runners.length === 0) {
+      return;
+    }
+
+    await Promise.all(runners.map(async (runner) => {
+      await Promise.race([
+        runner.stop(),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`Runner shutdown timed out after ${timeoutMs}ms`)), timeoutMs);
+        }),
+      ]);
+    }));
+
+    this.workspaceToolRunners.clear();
   }
 
   private assembleSystemPrompt(session: SessionMeta): string {
@@ -502,11 +540,36 @@ export class Orchestrator {
 
   private getAvailableToolDefinitions() {
     const definitions = getToolDefinitions({
-      includeRunnerTools: this.toolRunner != null,
+      includeRunnerTools: this.toolRunner != null || this.createToolRunner != null,
       includeLoadSkill: true,
     });
 
     return definitions.length > 0 ? definitions : undefined;
+  }
+
+  private async getToolRunnerForSession(session: SessionMeta): Promise<ToolRunner | null> {
+    if (this.toolRunner) {
+      return this.toolRunner;
+    }
+
+    if (!this.createToolRunner) {
+      return null;
+    }
+
+    const workspaceRoot = session.workspaceRoot?.trim();
+    if (!workspaceRoot) {
+      return null;
+    }
+
+    const existing = this.workspaceToolRunners.get(workspaceRoot);
+    if (existing) {
+      return existing;
+    }
+
+    const runner = await this.createToolRunner(workspaceRoot);
+    await runner.start();
+    this.workspaceToolRunners.set(workspaceRoot, runner);
+    return runner;
   }
 
   private executeLoadSkill(toolCall: ToolCall): ToolResult {

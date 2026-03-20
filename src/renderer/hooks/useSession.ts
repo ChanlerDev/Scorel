@@ -24,6 +24,18 @@ export function useSessionDetail(sessionId: string | null) {
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const refresh = useCallback(async () => {
+    if (!sessionId) {
+      setDetail(null);
+      return;
+    }
+
+    setLoading(true);
+    const nextDetail = await window.scorel.sessions.get(sessionId);
+    setDetail(nextDetail);
+    setLoading(false);
+  }, [sessionId]);
+
   useEffect(() => {
     if (!sessionId) {
       setDetail(null);
@@ -42,5 +54,5 @@ export function useSessionDetail(sessionId: string | null) {
     };
   }, [sessionId]);
 
-  return { detail, loading, setDetail };
+  return { detail, loading, setDetail, refresh };
 }

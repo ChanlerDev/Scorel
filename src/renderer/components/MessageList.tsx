@@ -2,8 +2,32 @@ import { useRef, useEffect, useState } from "react";
 import type { ScorelMessage, AssistantMessage, ContentPart } from "@shared/types";
 import type { SearchNavigationTarget } from "../message-navigation";
 import { hasPendingSearchNavigationTarget } from "../message-navigation";
+import type { ToolStatus } from "../hooks/useChat";
 
-function renderContentPart(part: ContentPart, idx: number) {
+function toolStatusLabel(status: ToolStatus | undefined): string | null {
+  if (!status) {
+    return null;
+  }
+
+  switch (status.state) {
+    case "awaiting_approval":
+      return "Awaiting approval";
+    case "running":
+      return "Running";
+    case "success":
+      return "Completed";
+    case "denied":
+      return "Denied";
+    case "error":
+      return "Failed";
+  }
+}
+
+function renderContentPart(
+  part: ContentPart,
+  idx: number,
+  toolStatuses: Record<string, ToolStatus>,
+) {
   switch (part.type) {
     case "text":
       return (
@@ -11,29 +35,50 @@ function renderContentPart(part: ContentPart, idx: number) {
           {part.text}
         </span>
       );
-    case "toolCall":
+    case "toolCall": {
+      const status = toolStatuses[part.id];
+      const label = toolStatusLabel(status);
+
       return (
         <div
           key={idx}
           style={{
             fontFamily: "monospace",
             fontSize: 12,
-            background: "#f0f0f0",
-            padding: "4px 8px",
-            borderRadius: 4,
-            margin: "4px 0",
+            background: "var(--tool-bg)",
+            padding: "8px 10px",
+            borderRadius: 10,
+            margin: "6px 0",
+            border: `1px solid ${status?.state === "error" ? "var(--danger)" : status?.state === "awaiting_approval" ? "var(--warning)" : "var(--border)"}`,
           }}
         >
-          🔧 {part.name}({JSON.stringify(part.arguments)})
+          <div>{part.name}({JSON.stringify(part.arguments)})</div>
+          {label ? (
+            <div style={{ marginTop: 4, color: "var(--text-secondary)", display: "flex", alignItems: "center", gap: 6 }}>
+              {(status?.state === "awaiting_approval" || status?.state === "running") ? (
+                <span
+                  style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: "50%",
+                    background: status.state === "awaiting_approval" ? "var(--warning)" : "var(--accent)",
+                    animation: status.state === "running" ? "scorel-pulse 1s ease infinite" : "none",
+                  }}
+                />
+              ) : null}
+              {label}
+            </div>
+          ) : null}
         </div>
       );
+    }
     case "thinking":
       return (
         <div
           key={idx}
-          style={{ color: "#888", fontStyle: "italic", fontSize: 13 }}
+          style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: 13 }}
         >
-          💭 {part.thinking}
+          {part.thinking}
         </div>
       );
   }
@@ -44,11 +89,13 @@ function MessageBubble({
   isStreaming,
   highlighted,
   bubbleRef,
+  toolStatuses,
 }: {
   message: ScorelMessage | AssistantMessage;
   isStreaming?: boolean;
   highlighted?: boolean;
   bubbleRef?: (element: HTMLDivElement | null) => void;
+  toolStatuses: Record<string, ToolStatus>;
 }) {
   const isUser = message.role === "user";
   const isAborted =
@@ -68,8 +115,8 @@ function MessageBubble({
           maxWidth: "80%",
           padding: "8px 12px",
           borderRadius: 12,
-          background: isUser ? "#007aff" : "#e9e9eb",
-          color: isUser ? "#fff" : "#000",
+          background: isUser ? "var(--accent)" : "var(--bg-secondary)",
+          color: isUser ? "#fff" : "var(--text-primary)",
           opacity: isAborted ? 0.5 : 1,
           boxShadow: highlighted ? "0 0 0 2px rgba(255, 204, 0, 0.9)" : "none",
           fontSize: 14,
@@ -79,7 +126,7 @@ function MessageBubble({
       >
         {message.role === "user" && message.content}
         {message.role === "assistant" &&
-          message.content.map((p, i) => renderContentPart(p, i))}
+          message.content.map((p, i) => renderContentPart(p, i, toolStatuses))}
         {message.role === "toolResult" && (
           <div style={{ fontFamily: "monospace", fontSize: 12 }}>
             [{message.toolName}]{" "}
@@ -92,9 +139,9 @@ function MessageBubble({
               display: "inline-block",
               width: 6,
               height: 14,
-              background: "#007aff",
+              background: "var(--accent)",
               marginLeft: 2,
-              animation: "blink 1s infinite",
+              animation: "scorel-blink 1s infinite",
             }}
           />
         )}
@@ -107,10 +154,12 @@ export function MessageList({
   messages,
   streamingMessage,
   searchNavigationTarget,
+  toolStatuses,
 }: {
   messages: ScorelMessage[];
   streamingMessage: AssistantMessage | null;
   searchNavigationTarget: SearchNavigationTarget | null;
+  toolStatuses: Record<string, ToolStatus>;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef(new Map<string, HTMLDivElement>());
@@ -161,6 +210,7 @@ export function MessageList({
           key={msg.id}
           message={msg}
           highlighted={msg.id === highlightedMessageId}
+          toolStatuses={toolStatuses}
           bubbleRef={(element) => {
             if (element) {
               messageRefs.current.set(msg.id, element);
@@ -172,7 +222,7 @@ export function MessageList({
         />
       ))}
       {streamingMessage && (
-        <MessageBubble message={streamingMessage} isStreaming />
+        <MessageBubble message={streamingMessage} isStreaming toolStatuses={toolStatuses} />
       )}
       <div ref={bottomRef} />
     </div>

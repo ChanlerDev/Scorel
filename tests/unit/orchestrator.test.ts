@@ -11,6 +11,7 @@ import type {
 } from "../../src/shared/types.js";
 import type { AssistantMessageEvent, ScorelEvent } from "../../src/shared/events.js";
 import type { ProviderAdapter, ProviderRequestOptions } from "../../src/main/provider/types.js";
+import type { ToolRunner } from "../../src/main/runner/runner-protocol.js";
 import type Database from "better-sqlite3";
 
 // ---------------------------------------------------------------------------
@@ -178,10 +179,14 @@ describe("Orchestrator", () => {
     eventBus = new EventBus();
   });
 
-  function createOrchestrator(adapter: ProviderAdapter, apiKey: string | null = "sk-test"): Orchestrator {
+  function createOrchestrator(
+    adapter: ProviderAdapter,
+    apiKey: string | null = "sk-test",
+    toolRunner?: ToolRunner,
+  ): Orchestrator {
     const providers = new Map<string, ProviderEntry>();
     providers.set(TEST_PROVIDER_ID, createProviderEntry(adapter, apiKey));
-    return new Orchestrator({ db, sessionManager, eventBus, providers });
+    return new Orchestrator({ db, sessionManager, eventBus, providers, toolRunner });
   }
 
   function createSession(): string {
@@ -394,6 +399,42 @@ describe("Orchestrator", () => {
 
     // No session.abort event since there was no controller
     expect(events.some((e) => e.type === "session.abort")).toBe(false);
+  });
+
+  it("abortAll() aborts every active session controller", () => {
+    const adapter = createMockAdapter([]);
+    const orch = createOrchestrator(adapter);
+    const firstSessionId = createSession();
+    const secondSessionId = createSession();
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    sessionManager.setState(firstSessionId, "streaming");
+    sessionManager.setState(secondSessionId, "tooling");
+    sessionManager.setAbortController(firstSessionId, firstController);
+    sessionManager.setAbortController(secondSessionId, secondController);
+
+    orch.abortAll();
+
+    expect(firstController.signal.aborted).toBe(true);
+    expect(secondController.signal.aborted).toBe(true);
+    expect(sessionManager.getState(firstSessionId)).toBe("idle");
+    expect(sessionManager.getState(secondSessionId)).toBe("idle");
+  });
+
+  it("shutdownRunner() stops the active tool runner", async () => {
+    const adapter = createMockAdapter([]);
+    const toolRunner: ToolRunner = {
+      execute: vi.fn(),
+      abort: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn().mockResolvedValue(undefined),
+    };
+    const orch = createOrchestrator(adapter, "sk-test", toolRunner);
+
+    await orch.shutdownRunner(3000);
+
+    expect(toolRunner.stop).toHaveBeenCalledTimes(1);
   });
 
   // 11. stream events forwarded to EventBus

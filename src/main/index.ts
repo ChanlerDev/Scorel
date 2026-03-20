@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, Menu, nativeTheme } from "electron";
 import * as path from "node:path";
 import { initDatabase, listProviders } from "./storage/db.js";
 import { SessionManager } from "./core/session-manager.js";
@@ -10,13 +10,32 @@ import { anthropicAdapter } from "./provider/anthropic-adapter.js";
 import { getSecret } from "./security/keychain.js";
 import { registerIpcHandlers } from "./ipc-handlers.js";
 import { scanSkills } from "./skills/skill-loader.js";
+import { RunnerManager } from "./runner/runner-manager.js";
+import { buildAppMenu } from "./menu.js";
+import { loadWindowState, saveWindowState } from "./window-state.js";
 import type { ProviderConfig } from "../shared/types.js";
 import { DB_FILENAME } from "../shared/constants.js";
 
 let mainWindow: BrowserWindow | null = null;
+let shuttingDown = false;
 
 function getMainWindow(): BrowserWindow | null {
   return mainWindow;
+}
+
+function resolveRunnerPath(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "app.asar.unpacked", "dist", "runner", "index.js");
+  }
+
+  return path.join(app.getAppPath(), "dist", "runner", "index.js");
+}
+
+function sendThemeToRenderer(): void {
+  mainWindow?.webContents.send(
+    "theme:changed",
+    nativeTheme.shouldUseDarkColors ? "dark" : "light",
+  );
 }
 
 app.whenReady().then(() => {
@@ -37,6 +56,10 @@ app.whenReady().then(() => {
     sessionManager,
     eventBus,
     providers: providerMap,
+    createToolRunner: async (workspaceRoot: string) => new RunnerManager({
+      workspaceRoot,
+      runnerPath: resolveRunnerPath(),
+    }),
     skills,
     compactTranscriptDir,
   });
@@ -50,9 +73,14 @@ app.whenReady().then(() => {
     getMainWindow,
   });
 
+  const windowState = loadWindowState(userDataPath);
+
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    x: windowState.x,
+    y: windowState.y,
+    width: windowState.width,
+    height: windowState.height,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -61,6 +89,45 @@ app.whenReady().then(() => {
     },
   });
 
+  if (windowState.isMaximized) {
+    mainWindow.maximize();
+  }
+
+  Menu.setApplicationMenu(buildAppMenu(mainWindow));
+
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  const persistWindowState = () => {
+    if (!mainWindow) {
+      return;
+    }
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+    }
+
+    saveTimer = setTimeout(() => {
+      if (!mainWindow) {
+        return;
+      }
+      const bounds = mainWindow.getBounds();
+      saveWindowState(userDataPath, {
+        ...bounds,
+        isMaximized: mainWindow.isMaximized(),
+      });
+    }, 300);
+  };
+
+  mainWindow.on("resize", persistWindowState);
+  mainWindow.on("move", persistWindowState);
+  mainWindow.on("maximize", persistWindowState);
+  mainWindow.on("unmaximize", persistWindowState);
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+  });
+  mainWindow.webContents.on("did-finish-load", () => {
+    sendThemeToRenderer();
+  });
+  nativeTheme.on("updated", sendThemeToRenderer);
+
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
@@ -68,7 +135,40 @@ app.whenReady().then(() => {
   }
 
   mainWindow.on("closed", () => {
+    nativeTheme.removeListener("updated", sendThemeToRenderer);
     mainWindow = null;
+  });
+
+  app.on("before-quit", (event) => {
+    if (shuttingDown) {
+      return;
+    }
+
+    shuttingDown = true;
+    event.preventDefault();
+
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+    }
+    if (mainWindow) {
+      const bounds = mainWindow.getBounds();
+      saveWindowState(userDataPath, {
+        ...bounds,
+        isMaximized: mainWindow.isMaximized(),
+      });
+    }
+
+    void (async () => {
+      try {
+        orchestrator.abortAll();
+        await orchestrator.shutdownRunner(3000);
+        db.close();
+      } catch (error: unknown) {
+        console.error("Graceful shutdown failed", error);
+      } finally {
+        app.exit(0);
+      }
+    })();
   });
 });
 

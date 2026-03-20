@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from "electron";
+import { app, dialog, ipcMain, BrowserWindow } from "electron";
 import type Database from "better-sqlite3";
 import type { ProviderConfig } from "../shared/types.js";
 import { upsertProvider, listProviders, deleteProvider, searchMessages } from "./storage/db.js";
@@ -19,6 +19,21 @@ export function registerIpcHandlers(opts: {
   getMainWindow: () => BrowserWindow | null;
 }): void {
   const { db, sessionManager, orchestrator, eventBus, providerMap, getMainWindow } = opts;
+
+  ipcMain.handle("app:selectDirectory", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "Select Workspace Folder",
+      properties: ["openDirectory", "createDirectory"],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return result.filePaths[0] ?? null;
+  });
+
+  ipcMain.handle("app:getVersion", async () => app.getVersion());
 
   // --- Sessions ---
 
@@ -138,8 +153,27 @@ export function registerIpcHandlers(opts: {
     "providers:testConnection",
     async (_event, providerId: string) => {
       try {
+        const provider = providerMap.get(providerId);
+        if (!provider) {
+          return { ok: false, error: `Provider "${providerId}" not found` };
+        }
+
         const apiKey = await getSecret(providerId);
         if (!apiKey) return { ok: false, error: "No API key configured" };
+
+        const response = await fetch(buildHealthcheckUrl(provider.config), {
+          method: "GET",
+          headers: buildAuthHeaders(provider.config, apiKey),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          return {
+            ok: false,
+            error: `${response.status} ${response.statusText}${errorText ? `: ${errorText}` : ""}`,
+          };
+        }
+
         return { ok: true };
       } catch (err: unknown) {
         return {
@@ -166,6 +200,43 @@ export function registerIpcHandlers(opts: {
   ipcMain.handle("secrets:clear", async (_event, providerId: string) => {
     await clearSecret(providerId);
   });
+
+  ipcMain.handle("tools:approve", async (_event, _sessionId: string, toolCallId: string) => {
+    orchestrator.approveToolCall(toolCallId);
+  });
+
+  ipcMain.handle("tools:deny", async (_event, _sessionId: string, toolCallId: string) => {
+    orchestrator.denyToolCall(toolCallId);
+  });
+}
+
+function buildAuthHeaders(config: ProviderConfig, apiKey: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...config.defaultHeaders,
+  };
+
+  if (config.api === "anthropic-messages") {
+    headers["anthropic-version"] = headers["anthropic-version"] ?? "2023-06-01";
+  }
+
+  if (config.auth.type === "bearer") {
+    headers.Authorization = `Bearer ${apiKey}`;
+  } else {
+    headers[config.auth.headerName ?? "x-api-key"] = apiKey;
+  }
+
+  return headers;
+}
+
+function buildHealthcheckUrl(config: ProviderConfig): string {
+  const baseUrl = config.baseUrl.replace(/\/$/, "");
+
+  if (config.api === "anthropic-messages") {
+    return baseUrl.endsWith("/v1") ? `${baseUrl}/models` : `${baseUrl}/v1/models`;
+  }
+
+  return `${baseUrl}/models`;
 }
 
 function rebuildProviderEntry(
