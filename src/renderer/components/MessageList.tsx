@@ -1,5 +1,7 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import type { ScorelMessage, AssistantMessage, ContentPart } from "@shared/types";
+import type { SearchNavigationTarget } from "../message-navigation";
+import { hasPendingSearchNavigationTarget } from "../message-navigation";
 
 function renderContentPart(part: ContentPart, idx: number) {
   switch (part.type) {
@@ -40,9 +42,13 @@ function renderContentPart(part: ContentPart, idx: number) {
 function MessageBubble({
   message,
   isStreaming,
+  highlighted,
+  bubbleRef,
 }: {
   message: ScorelMessage | AssistantMessage;
   isStreaming?: boolean;
+  highlighted?: boolean;
+  bubbleRef?: (element: HTMLDivElement | null) => void;
 }) {
   const isUser = message.role === "user";
   const isAborted =
@@ -50,6 +56,7 @@ function MessageBubble({
 
   return (
     <div
+      ref={bubbleRef}
       style={{
         display: "flex",
         justifyContent: isUser ? "flex-end" : "flex-start",
@@ -64,8 +71,10 @@ function MessageBubble({
           background: isUser ? "#007aff" : "#e9e9eb",
           color: isUser ? "#fff" : "#000",
           opacity: isAborted ? 0.5 : 1,
+          boxShadow: highlighted ? "0 0 0 2px rgba(255, 204, 0, 0.9)" : "none",
           fontSize: 14,
           lineHeight: 1.5,
+          transition: "box-shadow 0.2s ease",
         }}
       >
         {message.role === "user" && message.content}
@@ -97,20 +106,70 @@ function MessageBubble({
 export function MessageList({
   messages,
   streamingMessage,
+  searchNavigationTarget,
 }: {
   messages: ScorelMessage[];
   streamingMessage: AssistantMessage | null;
+  searchNavigationTarget: SearchNavigationTarget | null;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const messageRefs = useRef(new Map<string, HTMLDivElement>());
+  const lastHandledTargetNonceRef = useRef<number | null>(null);
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!hasPendingSearchNavigationTarget(searchNavigationTarget, lastHandledTargetNonceRef.current)) {
+      return;
+    }
+
+    if (!searchNavigationTarget) {
+      return;
+    }
+
+    const targetElement = messageRefs.current.get(searchNavigationTarget.messageId);
+    if (!targetElement) {
+      return;
+    }
+
+    targetElement.scrollIntoView({ behavior: "smooth", block: "center" });
+    lastHandledTargetNonceRef.current = searchNavigationTarget.nonce;
+    setHighlightedMessageId(searchNavigationTarget.messageId);
+
+    const timer = window.setTimeout(() => {
+      setHighlightedMessageId((current) => (
+        current === searchNavigationTarget.messageId ? null : current
+      ));
+    }, 2200);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [messages, searchNavigationTarget]);
+
+  useEffect(() => {
+    if (hasPendingSearchNavigationTarget(searchNavigationTarget, lastHandledTargetNonceRef.current)) {
+      return;
+    }
+
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingMessage]);
+  }, [messages, streamingMessage, searchNavigationTarget]);
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "8px 0" }}>
       {messages.map((msg) => (
-        <MessageBubble key={msg.id} message={msg} />
+        <MessageBubble
+          key={msg.id}
+          message={msg}
+          highlighted={msg.id === highlightedMessageId}
+          bubbleRef={(element) => {
+            if (element) {
+              messageRefs.current.set(msg.id, element);
+              return;
+            }
+
+            messageRefs.current.delete(msg.id);
+          }}
+        />
       ))}
       {streamingMessage && (
         <MessageBubble message={streamingMessage} isStreaming />

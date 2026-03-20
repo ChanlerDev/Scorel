@@ -3,6 +3,7 @@ import type { SearchResult, SessionSummary } from "@shared/types";
 import { ChatView } from "./components/ChatView";
 import { ProviderSetup } from "./components/ProviderSetup";
 import { useSessionList } from "./hooks/useSession";
+import type { SearchNavigationTarget } from "./message-navigation";
 
 function renderSnippet(snippet: string) {
   return snippet
@@ -31,6 +32,7 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchNavigationTarget, setSearchNavigationTarget] = useState<SearchNavigationTarget | null>(null);
 
   const handleProviderDone = useCallback(
     (pid: string, mid: string) => {
@@ -183,7 +185,14 @@ export function App() {
               {searchResults.map((result) => (
                 <div
                   key={`${result.messageId}-${result.seq}`}
-                  onClick={() => setActiveSessionId(result.sessionId)}
+                  onClick={() => {
+                    setActiveSessionId(result.sessionId);
+                    setSearchNavigationTarget({
+                      sessionId: result.sessionId,
+                      messageId: result.messageId,
+                      nonce: Date.now(),
+                    });
+                  }}
                   style={{
                     padding: "10px 16px",
                     cursor: "pointer",
@@ -232,7 +241,15 @@ export function App() {
       {/* Main area */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         {activeSessionId ? (
-          <ChatView sessionId={activeSessionId} onSessionMutated={handleSessionMutated} />
+          <ChatView
+            sessionId={activeSessionId}
+            onSessionMutated={handleSessionMutated}
+            searchNavigationTarget={
+              searchNavigationTarget?.sessionId === activeSessionId
+                ? searchNavigationTarget
+                : null
+            }
+          />
         ) : (
           <div
             style={{

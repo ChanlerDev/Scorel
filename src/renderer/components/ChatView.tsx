@@ -3,6 +3,7 @@ import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
 import { useChat } from "../hooks/useChat";
 import { useSessionDetail } from "../hooks/useSession";
+import type { SearchNavigationTarget } from "../message-navigation";
 
 function sanitizeFileName(value: string): string {
   return value.replace(/[^a-z0-9-_]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "session";
@@ -21,9 +22,11 @@ function downloadTextFile(fileName: string, content: string, type: string): void
 export function ChatView({
   sessionId,
   onSessionMutated,
+  searchNavigationTarget,
 }: {
   sessionId: string;
   onSessionMutated: (action: "archive" | "unarchive" | "delete") => void | Promise<void>;
+  searchNavigationTarget: SearchNavigationTarget | null;
 }) {
   const { messages, streamingMessage, chatState, error, send, abort } =
     useChat(sessionId);
@@ -149,7 +152,11 @@ export function ChatView({
           {actionError}
         </div>
       )}
-      <MessageList messages={messages} streamingMessage={streamingMessage} />
+      <MessageList
+        messages={messages}
+        streamingMessage={streamingMessage}
+        searchNavigationTarget={searchNavigationTarget}
+      />
       {error && (
         <div
           style={{
