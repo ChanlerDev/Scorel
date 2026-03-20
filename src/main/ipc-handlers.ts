@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow } from "electron";
 import type Database from "better-sqlite3";
 import type { ProviderConfig } from "../shared/types.js";
-import { upsertProvider, listProviders, deleteProvider } from "./storage/db.js";
+import { upsertProvider, listProviders, deleteProvider, searchMessages } from "./storage/db.js";
 import { storeSecret, hasSecret, clearSecret, getSecret } from "./security/keychain.js";
 import type { SessionManager } from "./core/session-manager.js";
 import type { Orchestrator } from "./core/orchestrator.js";
@@ -55,9 +55,34 @@ export function registerIpcHandlers(opts: {
     sessionManager.archive(sessionId);
   });
 
+  ipcMain.handle("sessions:unarchive", async (_event, sessionId: string) => {
+    sessionManager.unarchive(sessionId);
+  });
+
   ipcMain.handle("sessions:delete", async (_event, sessionId: string) => {
     sessionManager.delete(sessionId);
   });
+
+  ipcMain.handle(
+    "sessions:exportJsonl",
+    async (_event, sessionId: string, exportOpts?: { redact?: boolean }) => {
+      return sessionManager.exportJsonl(sessionId, exportOpts);
+    },
+  );
+
+  ipcMain.handle(
+    "sessions:exportMarkdown",
+    async (_event, sessionId: string, exportOpts?: { redact?: boolean }) => {
+      return sessionManager.exportMarkdown(sessionId, exportOpts);
+    },
+  );
+
+  ipcMain.handle(
+    "search:query",
+    async (_event, query: string, searchOpts?: { sessionId?: string; limit?: number }) => {
+      return searchMessages(db, query, searchOpts);
+    },
+  );
 
   // --- Chat ---
 

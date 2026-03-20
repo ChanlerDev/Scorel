@@ -136,3 +136,13 @@ export type SessionDetail = SessionSummary & {
   settings: Record<string, unknown> | null;
   messages: ScorelMessage[];
 };
+
+export type SearchResult = {
+  messageId: string;
+  sessionId: string;
+  sessionTitle: string | null;
+  role: ScorelMessage["role"];
+  snippet: string;
+  ts: number;
+  seq: number;
+};

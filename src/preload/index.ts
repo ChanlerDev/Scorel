@@ -13,8 +13,18 @@ const scorelBridge = {
       ipcRenderer.invoke("sessions:rename", sessionId, title),
     archive: (sessionId: string) =>
       ipcRenderer.invoke("sessions:archive", sessionId),
+    unarchive: (sessionId: string) =>
+      ipcRenderer.invoke("sessions:unarchive", sessionId),
     delete: (sessionId: string) =>
       ipcRenderer.invoke("sessions:delete", sessionId),
+    exportJsonl: (sessionId: string, opts?: { redact?: boolean }) =>
+      ipcRenderer.invoke("sessions:exportJsonl", sessionId, opts),
+    exportMarkdown: (sessionId: string, opts?: { redact?: boolean }) =>
+      ipcRenderer.invoke("sessions:exportMarkdown", sessionId, opts),
+  },
+  search: {
+    query: (query: string, opts?: { sessionId?: string; limit?: number }) =>
+      ipcRenderer.invoke("search:query", query, opts),
   },
   chat: {
     send: (sessionId: string, text: string) =>

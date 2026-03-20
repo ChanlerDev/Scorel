@@ -114,6 +114,16 @@ describe("SessionManager", () => {
     expect(mgr.getState(id)).toBe("idle");
   });
 
+  it("unarchives a session", () => {
+    const id = mgr.create("/tmp/ws");
+    mgr.archive(id);
+
+    mgr.unarchive(id);
+
+    const detail = mgr.get(id);
+    expect(detail!.archived).toBe(false);
+  });
+
   // 6. delete
   it("deletes a session", () => {
     const id = mgr.create("/tmp/ws");

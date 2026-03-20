@@ -4,6 +4,7 @@ import type {
   SessionSummary,
   ScorelMessage,
   ContentPart,
+  SearchResult,
 } from "../../shared/types.js";
 import { FTS_CONTENT_MAX_CHARS } from "../../shared/constants.js";
 
@@ -373,6 +374,15 @@ export function archiveSession(
   ).run(now(), sessionId);
 }
 
+export function unarchiveSession(
+  db: Database.Database,
+  sessionId: string,
+): void {
+  db.prepare(
+    "UPDATE sessions SET archived = 0, updated_at = ? WHERE id = ?",
+  ).run(now(), sessionId);
+}
+
 export function deleteSession(
   db: Database.Database,
   sessionId: string,
@@ -502,4 +512,64 @@ export function getNextSeq(
     )
     .get(sessionId) as { max_seq: number | null } | undefined;
   return (row?.max_seq ?? 0) + 1;
+}
+
+type SearchMessageRow = {
+  message_id: string;
+  session_id: string;
+  session_title: string | null;
+  role: ScorelMessage["role"];
+  snippet: string;
+  ts: number;
+  seq: number;
+};
+
+export function searchMessages(
+  db: Database.Database,
+  query: string,
+  opts?: { sessionId?: string; limit?: number },
+): SearchResult[] {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery.length === 0) {
+    return [];
+  }
+
+  const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
+  const rows = db
+    .prepare(
+      `SELECT
+         m.id AS message_id,
+         m.session_id,
+         s.title AS session_title,
+         m.role,
+         snippet(messages_fts, 2, '<mark>', '</mark>', '...', 32) AS snippet,
+         m.ts,
+         m.seq
+       FROM messages_fts
+       JOIN messages AS m ON m.id = messages_fts.message_id
+       JOIN sessions AS s ON s.id = m.session_id
+       WHERE messages_fts MATCH @query
+         AND (@sessionId IS NULL OR m.session_id = @sessionId)
+       ORDER BY bm25(messages_fts), m.ts DESC
+       LIMIT @limit`,
+    )
+    .all({
+      query: normalizedQuery,
+      sessionId: opts?.sessionId ?? null,
+      limit,
+    }) as SearchMessageRow[];
+
+  return rows.map((row) => ({
+    messageId: row.message_id,
+    sessionId: row.session_id,
+    sessionTitle: row.session_title,
+    role: row.role,
+    snippet: row.snippet,
+    ts: row.ts,
+    seq: row.seq,
+  }));
+}
+
+export function rebuildFts(db: Database.Database): void {
+  db.exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')");
 }
