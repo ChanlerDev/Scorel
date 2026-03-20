@@ -10,17 +10,18 @@ import {
 import type { ToolCall } from "../../src/shared/types.js";
 
 describe("tool-dispatch", () => {
-  it("TOOL_REGISTRY has 4 built-in tools", () => {
-    expect(TOOL_REGISTRY.size).toBe(4);
+  it("TOOL_REGISTRY has 5 built-in tools", () => {
+    expect(TOOL_REGISTRY.size).toBe(5);
     expect(TOOL_REGISTRY.has("bash")).toBe(true);
     expect(TOOL_REGISTRY.has("read_file")).toBe(true);
     expect(TOOL_REGISTRY.has("write_file")).toBe(true);
     expect(TOOL_REGISTRY.has("edit_file")).toBe(true);
+    expect(TOOL_REGISTRY.has("load_skill")).toBe(true);
   });
 
   it("getToolDefinitions returns provider-compatible definitions", () => {
-    const defs = getToolDefinitions();
-    expect(defs).toHaveLength(4);
+    const defs = getToolDefinitions({ includeLoadSkill: true });
+    expect(defs).toHaveLength(5);
     for (const def of defs) {
       expect(def.type).toBe("function");
       expect(def.function.name).toBeTruthy();
@@ -37,8 +38,10 @@ describe("tool-dispatch", () => {
   it("requiresApproval: read_file=false, bash=true", () => {
     const readCall: ToolCall = { toolCallId: "tc-1", name: "read_file", arguments: {} };
     const bashCall: ToolCall = { toolCallId: "tc-2", name: "bash", arguments: {} };
+    const skillCall: ToolCall = { toolCallId: "tc-3", name: "load_skill", arguments: { name: "code-review" } };
     expect(requiresApproval(readCall)).toBe(false);
     expect(requiresApproval(bashCall)).toBe(true);
+    expect(requiresApproval(skillCall)).toBe(false);
   });
 
   it("getToolTimeout respects bash custom timeout_ms", () => {
@@ -63,5 +66,16 @@ describe("tool-dispatch", () => {
     expect(result.toolCallId).toBe("tc-d");
     expect(result.isError).toBe(true);
     expect(result.content).toBe("Tool call denied by user");
+  });
+
+  it("getToolDefinitions can expose only load_skill when runner tools are unavailable", () => {
+    const defs = getToolDefinitions({ includeRunnerTools: false, includeLoadSkill: true });
+    expect(defs).toHaveLength(1);
+    expect(defs[0].function.name).toBe("load_skill");
+  });
+
+  it("does not expose load_skill unless explicitly requested", () => {
+    const defs = getToolDefinitions();
+    expect(defs.map((def) => def.function.name)).not.toContain("load_skill");
   });
 });

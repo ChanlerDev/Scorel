@@ -114,7 +114,7 @@ describe("Orchestrator — Tool Execution (M2)", () => {
       adapter,
       getApiKey: async () => "sk-test",
     });
-    return new Orchestrator({ sessionManager, eventBus, providers, toolRunner: mockRunner });
+    return new Orchestrator({ db, sessionManager, eventBus, providers, toolRunner: mockRunner });
   }
 
   function createSession(): string {
@@ -294,7 +294,7 @@ describe("Orchestrator — Tool Execution (M2)", () => {
       adapter,
       getApiKey: async () => "sk-test",
     });
-    const orch = new Orchestrator({ sessionManager, eventBus, providers });
+    const orch = new Orchestrator({ db, sessionManager, eventBus, providers });
     const sessionId = createSession();
 
     await orch.send(sessionId, "Run ls");

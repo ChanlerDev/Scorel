@@ -160,6 +160,26 @@ describe("SessionManager", () => {
     expect(after1[0].id).toBe("a1");
   });
 
+  it("returns the persisted seq for a message ID", () => {
+    const id = mgr.create("/tmp/ws");
+    mgr.appendMessage(id, userMsg("first", "u1"));
+    mgr.appendMessage(id, assistantMsg("a1"));
+
+    expect(mgr.getMessageSeq(id, "u1")).toBe(1);
+    expect(mgr.getMessageSeq(id, "a1")).toBe(2);
+    expect(mgr.getMessageSeq(id, "missing")).toBeNull();
+  });
+
+  it("updates the session active compact ID", () => {
+    const id = mgr.create("/tmp/ws");
+
+    mgr.setActiveCompact(id, "cmp-1");
+    expect(mgr.get(id)?.activeCompactId).toBe("cmp-1");
+
+    mgr.setActiveCompact(id, null);
+    expect(mgr.get(id)?.activeCompactId).toBeNull();
+  });
+
   // 8. state management
   it("manages session state transitions", () => {
     const id = mgr.create("/tmp/ws");

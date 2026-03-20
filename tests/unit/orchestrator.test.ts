@@ -181,7 +181,7 @@ describe("Orchestrator", () => {
   function createOrchestrator(adapter: ProviderAdapter, apiKey: string | null = "sk-test"): Orchestrator {
     const providers = new Map<string, ProviderEntry>();
     providers.set(TEST_PROVIDER_ID, createProviderEntry(adapter, apiKey));
-    return new Orchestrator({ sessionManager, eventBus, providers });
+    return new Orchestrator({ db, sessionManager, eventBus, providers });
   }
 
   function createSession(): string {
@@ -335,6 +335,7 @@ describe("Orchestrator", () => {
   // 7. send() with missing provider
   it("send() throws when provider is not found", async () => {
     const orch = new Orchestrator({
+      db,
       sessionManager,
       eventBus,
       providers: new Map(), // empty
