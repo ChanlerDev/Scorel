@@ -12,6 +12,7 @@ import type {
   ManualCompactResult,
   ProviderConfig,
   ScorelMessage,
+  StoredSessionMessage,
   ToolResultMessage,
   UserMessage,
 } from "../../shared/types.js";
@@ -202,7 +203,7 @@ export async function saveCompactTranscript(
   dir: string,
   sessionId: string,
   compactionId: string,
-  messages: ScorelMessage[],
+  messages: StoredSessionMessage[],
 ): Promise<string> {
   await mkdir(dir, { recursive: true });
   const filePath = path.join(dir, `${sessionId}-${compactionId}.jsonl`);
@@ -214,10 +215,10 @@ export async function saveCompactTranscript(
       sessionId,
       ts: Date.now(),
     }),
-    ...messages.map((message, index) => JSON.stringify({
+    ...messages.map(({ seq, message }) => JSON.stringify({
       v: COMPACT_TRANSCRIPT_VERSION,
       type: "message",
-      seq: index + 1,
+      seq,
       message,
     })),
   ];
@@ -236,6 +237,7 @@ export async function executeManualCompact(opts: {
   providerId: string;
   modelId: string;
   transcriptDir?: string;
+  transcriptMessages?: StoredSessionMessage[];
 }): Promise<ManualCompactResult> {
   if (opts.messages.length === 0) {
     throw new Error("Cannot compact an empty session");
@@ -271,11 +273,15 @@ export async function executeManualCompact(opts: {
 
   let transcriptPath: string | undefined;
   if (opts.transcriptDir) {
+    if (!opts.transcriptMessages) {
+      throw new Error("Transcript messages require persisted seq values");
+    }
+
     transcriptPath = await saveCompactTranscript(
       opts.transcriptDir,
       opts.sessionId,
       compactionId,
-      opts.messages,
+      opts.transcriptMessages,
     );
   }
 

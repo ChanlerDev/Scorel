@@ -75,6 +75,30 @@ describe("skill-loader", () => {
     });
   });
 
+  it("parses skills with CRLF frontmatter line endings", () => {
+    writeFileSync(
+      path.join(skillsDir, "windows-skill.md"),
+      [
+        "---",
+        "name: windows-skill",
+        "description: Parses CRLF frontmatter",
+        'version: "1.0"',
+        "---",
+        "",
+        "# Windows Skill",
+      ].join("\r\n"),
+    );
+
+    const skills = scanSkills(skillsDir);
+
+    expect(skills).toHaveLength(1);
+    expect(skills[0]).toMatchObject({
+      name: "windows-skill",
+      description: "Parses CRLF frontmatter",
+      version: "1.0",
+    });
+  });
+
   it("formats the skill list for system prompt injection", () => {
     const formatted = formatSkillList([
       {

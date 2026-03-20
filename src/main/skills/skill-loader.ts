@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import type { SkillMeta } from "../../shared/types.js";
 
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 type ParsedFrontmatter = {
   name?: string;
@@ -15,7 +15,7 @@ export function parseFrontmatter(content: string): ParsedFrontmatter | null {
   if (!match) return null;
 
   const parsed: ParsedFrontmatter = {};
-  for (const line of match[1].split("\n")) {
+  for (const line of match[1].split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) continue;
     const separatorIndex = trimmed.indexOf(":");

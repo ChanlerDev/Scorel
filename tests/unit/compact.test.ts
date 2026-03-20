@@ -9,6 +9,7 @@ import {
   applyMicroCompact,
   applyBoundaryResume,
   executeManualCompact,
+  saveCompactTranscript,
   serializeForCompact,
 } from "../../src/main/core/compact.js";
 import type {
@@ -222,6 +223,10 @@ describe("compact", () => {
     const result = await executeManualCompact({
       sessionId: "session-1",
       messages,
+      transcriptMessages: messages.map((message, index) => ({
+        seq: index + 1,
+        message,
+      })),
       db,
       adapter,
       providerConfig: TEST_PROVIDER_CONFIG,
@@ -247,7 +252,29 @@ describe("compact", () => {
     expect(transcript).toContain('"message":{"role":"assistant"');
   });
 
-  it("search keeps finding pre-compact content after a compaction record exists", () => {
+  it("saveCompactTranscript preserves sparse DB seq values", async () => {
+    const transcriptPath = await saveCompactTranscript(
+      transcriptDir,
+      "session-gap",
+      "cmp-gap",
+      [
+        { seq: 10, message: userMessage("u1", "old request", 100) },
+        { seq: 20, message: assistantMessage("a1", "boundary answer", 101) },
+        { seq: 30, message: userMessage("u2", "new request", 102) },
+      ],
+    );
+
+    const lines = readFileSync(transcriptPath, "utf8")
+      .trim()
+      .split("\n")
+      .slice(1)
+      .map((line) => JSON.parse(line) as { seq: number; message: { role: string } });
+
+    expect(lines.map((line) => line.seq)).toEqual([10, 20, 30]);
+    expect(lines.map((line) => line.message.role)).toEqual(["user", "assistant", "user"]);
+  });
+
+  it("search finds content because compaction never deletes messages", () => {
     createSession(db, {
       id: "session-search",
       workspaceRoot: "/tmp/workspace",
