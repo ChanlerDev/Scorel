@@ -126,7 +126,7 @@ Or better — auto-save before testing when the draft is dirty, eliminating the 
 
 **Problem**: Design doc specifies `react-markdown ^9.0.0`, implementation uses `^10.1.0`. The code works (tests pass, API is compatible), but the design doc is now out of sync.
 
-**Fix**: Update `docs/plan/M6-design.md` §10 to reflect `^10.1.0`. No code change needed.
+**Fix**: Update `docs/execution/plans/m6-design.md` §10 to reflect `^10.1.0`. No code change needed.
 
 ---
 

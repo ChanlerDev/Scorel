@@ -20,7 +20,7 @@ Complete the tool execution loop: model requests tool calls → user approves �
 
 ## Out of Scope (M2)
 
-- Parallel tool execution (→ Beta)
+- Parallel tool execution (→ V1+)
 - load_skill tool (→ M4)
 - Workspace path canonicalization / symlink resolution (document as known limitation)
 

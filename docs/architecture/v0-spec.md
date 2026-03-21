@@ -33,10 +33,10 @@ V0 does NOT aim to be a universal platform. It aims to be a stable, usable deskt
   - Layer 2: model calls `load_skill(name)` → SKILL.md body injected as tool_result (expensive, on-demand)
 - **Provider adapter layer**: `transformMessages()` for cross-provider message conversion; normalized `AssistantMessageEvent` stream
 
-### Out-of-Scope (V0 explicit TODO/Beta)
+### Out-of-Scope (V0 explicit TODO / Post-V0)
 
 - MCP (reserve extension points in design; MCP standard transports are stdio + Streamable HTTP, encoding JSON-RPC)
-- Semantic search / vector index (embedding pipeline deferred to Beta)
+- Semantic search / vector index (embedding pipeline deferred to V1)
 - auto_compact and handoff (state machine placeholder + grayed UI entry only)
 - Complex permission DSL (command-level allow/deny + path scope is sufficient)
 - Plugin ecosystem, team collaboration, multi-window concurrent write conflict resolution
@@ -474,7 +474,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
   content
 );
 
--- TODO Beta: embeddings table reserved
+-- TODO V1: embeddings table reserved
 CREATE TABLE IF NOT EXISTS embeddings (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -556,7 +556,7 @@ OpenAI may return multiple `tool_calls` in a single response. V0 executes them *
 - Simpler Runner protocol and state management
 - Avoids concurrent filesystem access conflicts (two `write_file` calls to the same file)
 - Permission approval UX is clearer (one confirmation at a time)
-- Parallel execution is a Beta optimization (reserve `executionMode: "sequential" | "parallel"` in ToolCall type)
+- Parallel execution is a V1+ optimization (reserve `executionMode: "sequential" | "parallel"` in ToolCall type)
 
 All tool_results are collected and sent back in a single follow-up request (matching the order of tool_calls).
 
@@ -714,7 +714,7 @@ type RunnerEvent =
 **LLM call for summary generation**:
 - Uses the **same provider and model** as the current session (no separate summarization model in V0)
 - If provider is unavailable: compact fails gracefully, session continues with uncompacted context, UI shows error
-- Summary prompt template (hardcoded in V0, configurable in Beta):
+- Summary prompt template (hardcoded in V0, configurable in V1+):
   ```
   Summarize the following conversation, preserving:
   1. Key decisions and their rationale
@@ -915,11 +915,11 @@ When the app restarts and user opens an existing session:
 
 | Phase | Key Features | Dependencies |
 |-------|-------------|-------------|
-| Beta 1 | auto_compact (threshold-triggered), subagent tool (context isolation), TodoWrite planning tool | V0 stable, compact proven |
-| Beta 2 | MCP integration (stdio + Streamable HTTP), tool discovery | Runner protocol extensible |
-| Beta 3 | Embedding pipeline, vector search (hybrid FTS + ANN) | Storage layer stable |
-| V1 | Handoff (new thread from old context), multi-provider routing | Compact + session model mature |
-| V1.x | Plugin/skill marketplace, team collaboration, cloud sync | Security model hardened |
+| V1 M1 | auto_compact (threshold-triggered), subagent tool (context isolation), TodoWrite planning tool | V0 stable, compact proven |
+| V1 M2 | MCP integration (stdio + Streamable HTTP), tool discovery | Runner protocol extensible |
+| V1 M3 | Embedding pipeline, vector search (hybrid FTS + ANN) | Storage layer stable |
+| V2 | Handoff (new thread from old context), multi-provider routing | Compact + session model mature |
+| V3 | Plugin/skill marketplace, team collaboration, cloud sync | Security model hardened |
 
 ## 18. Design Decisions Record
 

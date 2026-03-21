@@ -4,7 +4,7 @@
 
 ## Origin
 
-First manual dogfood session ([dogfood/V0-mannual.md](dogfood/V0-mannual.md)). Four issues discovered that block V0 from being genuinely usable.
+First manual dogfood session ([../../execution/dogfood/v0-manual.md](../../execution/dogfood/v0-manual.md)). Four issues discovered that block V0 from being genuinely usable.
 
 ## Goal
 
@@ -38,7 +38,7 @@ Fix the UI gaps uncovered by dogfood so that a real user can complete a full cod
 **Key decisions**:
 - Library: `react-markdown` (mature, React-native, supports GFM) or `marked` + `DOMPurify` (lighter, manual)
 - Scope: render only `TextPart` content in assistant messages; user messages stay plain text
-- Code blocks: syntax highlighting deferred to Beta (plain `<pre><code>` in M6)
+- Code blocks: syntax highlighting deferred to V1 (plain `<pre><code>` in M6)
 - Security: sanitize HTML output (XSS prevention) — especially important since content comes from LLM
 - Thinking blocks: remain as italic plain text (no markdown parsing)
 
@@ -54,7 +54,7 @@ Fix the UI gaps uncovered by dogfood so that a real user can complete a full cod
 - Test connection with updated config
 - Add new provider (reuse SetupWizard configure/test steps)
 - Delete provider
-- No full_access / per-tool permission in M6 (→ Beta 1)
+- No full_access / per-tool permission in M6 (→ V1 M1)
 
 **Key decisions**:
 - Settings as a full-page view (replaces chat area when active), not a modal
@@ -90,11 +90,11 @@ Fix the UI gaps uncovered by dogfood so that a real user can complete a full cod
 
 ## Out of Scope (M6)
 
-- Syntax highlighting in code blocks (→ Beta UX)
-- Full access toggle / per-tool permission config (→ Beta 1)
-- Reject with reason (→ Beta 1)
-- Workspace rename / remove from history (→ Beta UX)
-- Image rendering in messages (→ Beta)
+- Syntax highlighting in code blocks (→ V1)
+- Full access toggle / per-tool permission config (→ V1 M1)
+- Reject with reason (→ V1 M1)
+- Workspace rename / remove from history (→ V1)
+- Image rendering in messages (→ V1+)
 
 ## Acceptance Criteria
 

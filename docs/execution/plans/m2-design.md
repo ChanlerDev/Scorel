@@ -263,7 +263,7 @@ llm.done             → final assistant message (stopReason: stop)
 ## 7. 已知限制
 
 - **路径 symlink**：`path.resolve` 不解析 symlink，理论上可通过 symlink 逃逸 workspace。V0 记录为已知限制。
-- **并行执行**：V0 所有 tool calls 顺序执行，并行执行留待 Beta。
+- **并行执行**：V0 所有 tool calls 顺序执行，并行执行留待 V1+。
 - **load_skill**：注册表预留了 ToolName 类型，实现推迟到 M4。
 - **Runner 单实例**：当前每个 session 假设共享一个 Runner 进程，多 session 并发场景需要 M3+ 处理。
 - **Abort during tooling**：当前 abort 在 streaming 阶段生效；tooling 阶段的 abort 需要通过 RunnerManager.abort() 传递，orchestrator 层尚未完整串联（需在 executeToolCalls 循环中检查 abort 信号）。
@@ -273,5 +273,5 @@ llm.done             → final assistant message (stopReason: stop)
 | Spec 要求 | 实际实现 | 原因 |
 |-----------|---------|------|
 | `ToolEntry.handler` 字段 | 不含 handler，handler 在 Runner 侧 | Core 侧 ToolEntry 只做 metadata（schema/approval/timeout），执行委托给 ToolRunner |
-| `tool_execution_update` 事件 | Runner 预留了发送能力，但 4 个工具未实际发送 | V0 工具执行较快，streaming partial output 留待 Beta |
+| `tool_execution_update` 事件 | Runner 预留了发送能力，但 4 个工具未实际发送 | V0 工具执行较快，streaming partial output 留待 V1+ |
 | Case D (abort mid-tool) | Orchestrator.abort() deny pending approval，但 tooling 阶段的 abort 路径未完整测试 | 需补充集成测试 |

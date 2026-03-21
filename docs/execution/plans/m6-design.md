@@ -257,7 +257,7 @@ case "text":
 
 **XSS 安全性**：`react-markdown` 默认将 HTML 标签渲染为文本（`allowedElements` 白名单机制）。`<script>alert(1)</script>` 会显示为可见文本而非执行。无需额外 sanitize。
 
-**代码高亮（M6 不做）**：完整的代码高亮需要 `rehype-highlight` 或 `react-syntax-highlighter`（200KB+），对包体积影响大。M6 使用 `<pre><code>` 原始样式，代码高亮推迟到 Beta UX。
+**代码高亮（M6 不做）**：完整的代码高亮需要 `rehype-highlight` 或 `react-syntax-highlighter`（200KB+），对包体积影响大。M6 使用 `<pre><code>` 原始样式，代码高亮推迟到 V1。
 
 ### 3.3 D3: Settings 面板 — `SettingsView.tsx`
 
@@ -932,16 +932,16 @@ db.exec(`
 | Settings "reuse SetupWizard form components" | 复用 `setup-wizard-model.ts` 逻辑（draft/validate/buildConfig），但不复用 SetupWizard 组件 | SetupWizard 是多步向导，结构与 Settings 的表单模式差异大；逻辑层复用、UI 层独立 |
 | Default workspace "e.g. ~/Scorel" | 固定为 `~/Scorel` | 简单明确；用户可通过 app-config.json 手动修改 |
 | "Max history: 20 entries (LRU eviction)" | SQL `LIMIT 20` + 不主动删除旧记录 | 表中可存更多，查询时限制返回；简单无状态 |
-| Markdown "syntax highlighting deferred to Beta" | 仅 `<pre><code>` 样式，无语法高亮 | 避免 200KB+ 依赖膨胀 |
+| Markdown "syntax highlighting deferred to V1" | 仅 `<pre><code>` 样式，无语法高亮 | 避免 200KB+ 依赖膨胀 |
 
 ## 13. 已知限制
 
 1. **Markdown streaming 渲染**：streaming 中 TextPart 不断增长，`react-markdown` 每次重新解析完整文本。对极长消息（>10000 chars streaming）可能有轻微延迟。M6 不优化。
-2. **代码高亮**：M6 的代码块是无高亮的 monospace 文本。语法高亮推迟到 Beta。
-3. **Settings 不支持多模型管理**：当前 `ProviderConfig.models` 是数组但 UI 只编辑第一个模型。多模型选择推迟到 Beta。
+2. **代码高亮**：M6 的代码块是无高亮的 monospace 文本。语法高亮推迟到 V1。
+3. **Settings 不支持多模型管理**：当前 `ProviderConfig.models` 是数组但 UI 只编辑第一个模型。多模型选择推迟到 V1。
 4. **Workspace 不支持重命名/删除**：`workspaces` 表有 `label` 字段但 M6 不暴露编辑 UI。
 5. **默认 workspace 路径不可在 UI 中修改**：需要手动编辑 `app-config.json`。
-6. **"Reject with reason" 不在 M6**：Deny 按钮只发送拒绝，不附带理由文本。推迟到 Beta 1。
+6. **"Reject with reason" 不在 M6**：Deny 按钮只发送拒绝，不附带理由文本。推迟到 V1 M1。
 7. **测试已有连接需新增 IPC**：`providers:testExisting` 是新端点，增加了 API surface。但比暴露 `getSecret` 到 renderer 更安全。
 
 ## 14. 实施顺序建议

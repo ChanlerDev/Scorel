@@ -64,8 +64,19 @@ runner/                  # Standalone runner process (stdio JSONL)
     edit-file.ts
 skills/                  # SKILL.md files
 docs/
-  V0_SPEC.md
-  COMPAT.md
+  roadmap/
+    milestones.md
+    v0/
+    v1/
+    v2/
+    v3/
+  architecture/
+    v0-spec.md
+    compat.md
+  execution/
+    dogfood/
+    plans/
+    reviews/
 tests/
   unit/
   integration/
@@ -126,7 +137,7 @@ These are hard boundaries. Do NOT implement in V0:
 - IDs: `nanoid(21)` for all entities (session, message, event)
 - Message ordering: `messages.seq` (monotonic per session) is authoritative; `ts` is informational
 - Workspace: single directory per session, all file tools scoped to it
-- Parallel tool calls: V0 executes sequentially; parallel reserved for Beta
+- Parallel tool calls: V0 executes sequentially; parallel reserved for V1+
 - Tool output truncation at Runner level (bash: 32k chars, read_file: 64k chars)
 - Core-owned tool timeout: Core is authoritative; Runner only responds to abort
 - Aborted assistant: persisted if visible output existed, excluded from future LLM context
@@ -134,7 +145,7 @@ These are hard boundaries. Do NOT implement in V0:
 
 ## Reference
 
-- [Milestones](docs/milestones.md) — Master roadmap (V0 → V1.x)
-- [V0 Spec](docs/V0_SPEC.md) — V0 architecture, data model, storage, protocols
-- [Compat Strategy](docs/COMPAT.md) — Canonical model invariants, provider adapter mappings, pitfall registry
-- Milestone specs: [M1](docs/V0-M1.md) | [M1.5](docs/V0-M1.5.md) | [M2](docs/V0-M2.md) | [M3](docs/V0-M3.md) | [M4](docs/V0-M4.md) | [M5](docs/V0-M5.md) | [M6](docs/V0-M6.md)
+- [Milestones](docs/roadmap/milestones.md) — Master roadmap (V0 → V3)
+- [V0 Spec](docs/architecture/v0-spec.md) — V0 architecture, data model, storage, protocols
+- [Compat Strategy](docs/architecture/compat.md) — Canonical model invariants, provider adapter mappings, pitfall registry
+- Milestone specs: [M1](docs/roadmap/v0/m1-core-loop.md) | [M1.5](docs/roadmap/v0/m1.5-anthropic-adapter.md) | [M2](docs/roadmap/v0/m2-tool-execution.md) | [M3](docs/roadmap/v0/m3-history-search.md) | [M4](docs/roadmap/v0/m4-compact-skills.md) | [M5](docs/roadmap/v0/m5-release.md) | [M6](docs/roadmap/v0/m6-dogfood-fixes.md)
