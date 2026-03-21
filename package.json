@@ -15,7 +15,7 @@
     "pack:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false node --experimental-strip-types scripts/build.ts",
     "test": "vitest --run",
     "test:watch": "vitest",
-    "lint": "eslint src runner tests vite.config.ts vitest.config.ts --ext .ts,.tsx",
+    "lint": "eslint src runner tests vite.config.ts vitest.config.ts",
     "format": "prettier --write 'src/**/*.{ts,tsx}'",
     "start": "electron dist/main/index.js"
   },

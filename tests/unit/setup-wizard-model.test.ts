@@ -37,12 +37,52 @@ describe("setup-wizard-model", () => {
     });
   });
 
+  it("builds configs for the built-in hosted provider presets", () => {
+    const openaiConfig = buildProviderConfig({
+      providerType: "openai",
+      displayName: "OpenAI",
+      baseUrl: "https://api.openai.com/v1/",
+      modelId: "gpt-4o",
+    });
+    const anthropicConfig = buildProviderConfig({
+      providerType: "anthropic",
+      displayName: "Anthropic",
+      baseUrl: "https://api.anthropic.com/v1/",
+      modelId: "claude-sonnet-4-20250514",
+    });
+
+    expect(openaiConfig).toMatchObject({
+      api: "openai-chat-completions",
+      baseUrl: "https://api.openai.com/v1",
+      auth: { type: "bearer", keyRef: "openai" },
+    });
+    expect(anthropicConfig).toMatchObject({
+      api: "anthropic-messages",
+      baseUrl: "https://api.anthropic.com/v1",
+      auth: { type: "x-api-key", keyRef: "anthropic" },
+    });
+  });
+
   it("validates required wizard fields before testing the connection", () => {
     expect(validateProviderDraft({
       displayName: "",
       baseUrl: "",
       modelId: "",
       apiKey: "",
+    })).toEqual([
+      "Display name is required",
+      "Base URL is required",
+      "Model is required",
+      "API key is required",
+    ]);
+  });
+
+  it("treats whitespace-only input as missing", () => {
+    expect(validateProviderDraft({
+      displayName: "  ",
+      baseUrl: "  ",
+      modelId: "  ",
+      apiKey: "  ",
     })).toEqual([
       "Display name is required",
       "Base URL is required",

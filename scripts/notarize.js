@@ -16,11 +16,16 @@ exports.default = async function notarizeApp(context) {
   const appPath = `${appOutDir}/${appName}.app`;
 
   console.log(`Notarizing ${appPath}`);
-  await notarize({
-    appPath,
-    appleId: process.env.APPLE_ID,
-    appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
-    teamId: process.env.APPLE_TEAM_ID,
-  });
-  console.log("Notarization complete");
+  try {
+    await notarize({
+      appPath,
+      appleId: process.env.APPLE_ID,
+      appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
+      teamId: process.env.APPLE_TEAM_ID,
+    });
+    console.log("Notarization complete");
+  } catch (error) {
+    console.error("Notarization failed:", error);
+    throw error;
+  }
 };

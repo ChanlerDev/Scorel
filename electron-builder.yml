@@ -21,6 +21,7 @@ asarUnpack:
   - node_modules/better-sqlite3/**
 
 mac:
+  icon: build/icon.icns
   target:
     - target: dmg
       arch:
