@@ -12,7 +12,7 @@ import { registerIpcHandlers } from "./ipc-handlers.js";
 import { scanSkills } from "./skills/skill-loader.js";
 import { RunnerManager } from "./runner/runner-manager.js";
 import { buildAppMenu } from "./menu.js";
-import { loadWindowState, saveWindowState } from "./window-state.js";
+import { loadWindowState, saveWindowState, type WindowState } from "./window-state.js";
 import type { ProviderConfig } from "../shared/types.js";
 import { DB_FILENAME } from "../shared/constants.js";
 
@@ -36,6 +36,21 @@ function sendThemeToRenderer(): void {
     "theme:changed",
     nativeTheme.shouldUseDarkColors ? "dark" : "light",
   );
+}
+
+function getNextWindowState(window: BrowserWindow, previousState: WindowState): WindowState {
+  if (window.isMaximized()) {
+    return {
+      ...previousState,
+      isMaximized: true,
+    };
+  }
+
+  const bounds = window.getBounds();
+  return {
+    ...bounds,
+    isMaximized: false,
+  };
 }
 
 app.whenReady().then(() => {
@@ -73,7 +88,7 @@ app.whenReady().then(() => {
     getMainWindow,
   });
 
-  const windowState = loadWindowState(userDataPath);
+  let windowState = loadWindowState(userDataPath);
 
   mainWindow = new BrowserWindow({
     x: windowState.x,
@@ -93,7 +108,7 @@ app.whenReady().then(() => {
     mainWindow.maximize();
   }
 
-  Menu.setApplicationMenu(buildAppMenu(mainWindow));
+  Menu.setApplicationMenu(buildAppMenu(getMainWindow));
 
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   const persistWindowState = () => {
@@ -108,11 +123,8 @@ app.whenReady().then(() => {
       if (!mainWindow) {
         return;
       }
-      const bounds = mainWindow.getBounds();
-      saveWindowState(userDataPath, {
-        ...bounds,
-        isMaximized: mainWindow.isMaximized(),
-      });
+      windowState = getNextWindowState(mainWindow, windowState);
+      saveWindowState(userDataPath, windowState);
     }, 300);
   };
 
@@ -151,11 +163,8 @@ app.whenReady().then(() => {
       clearTimeout(saveTimer);
     }
     if (mainWindow) {
-      const bounds = mainWindow.getBounds();
-      saveWindowState(userDataPath, {
-        ...bounds,
-        isMaximized: mainWindow.isMaximized(),
-      });
+      windowState = getNextWindowState(mainWindow, windowState);
+      saveWindowState(userDataPath, windowState);
     }
 
     void (async () => {
@@ -166,7 +175,7 @@ app.whenReady().then(() => {
       } catch (error: unknown) {
         console.error("Graceful shutdown failed", error);
       } finally {
-        app.exit(0);
+        app.quit();
       }
     })();
   });

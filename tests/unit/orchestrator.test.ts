@@ -406,20 +406,27 @@ describe("Orchestrator", () => {
     const orch = createOrchestrator(adapter);
     const firstSessionId = createSession();
     const secondSessionId = createSession();
+    const idleSessionId = createSession();
     const firstController = new AbortController();
     const secondController = new AbortController();
+    const idleController = new AbortController();
+    const events = collectAppEvents(eventBus);
 
     sessionManager.setState(firstSessionId, "streaming");
     sessionManager.setState(secondSessionId, "tooling");
     sessionManager.setAbortController(firstSessionId, firstController);
     sessionManager.setAbortController(secondSessionId, secondController);
+    sessionManager.setAbortController(idleSessionId, idleController);
 
     orch.abortAll();
 
     expect(firstController.signal.aborted).toBe(true);
     expect(secondController.signal.aborted).toBe(true);
+    expect(idleController.signal.aborted).toBe(false);
     expect(sessionManager.getState(firstSessionId)).toBe("idle");
     expect(sessionManager.getState(secondSessionId)).toBe("idle");
+    expect(sessionManager.getState(idleSessionId)).toBe("idle");
+    expect(events.filter((event) => event.type === "session.abort")).toHaveLength(2);
   });
 
   it("shutdownRunner() stops the active tool runner", async () => {
@@ -435,6 +442,29 @@ describe("Orchestrator", () => {
     await orch.shutdownRunner(3000);
 
     expect(toolRunner.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("shutdownRunner() resolves when runner shutdown times out", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const adapter = createMockAdapter([]);
+    const toolRunner: ToolRunner = {
+      execute: vi.fn(),
+      abort: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(() => new Promise<void>(() => {})),
+    };
+    const orch = createOrchestrator(adapter, "sk-test", toolRunner);
+
+    const shutdownPromise = orch.shutdownRunner(3000);
+    await vi.advanceTimersByTimeAsync(3000);
+    await shutdownPromise;
+
+    expect(toolRunner.stop).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith("Runner shutdown timed out after 3000ms");
+
+    warnSpy.mockRestore();
+    vi.useRealTimers();
   });
 
   // 11. stream events forwarded to EventBus

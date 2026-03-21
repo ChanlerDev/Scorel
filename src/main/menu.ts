@@ -1,6 +1,6 @@
 import { app, Menu, type BrowserWindow, type MenuItemConstructorOptions } from "electron";
 
-export function buildAppMenu(mainWindow: BrowserWindow): Menu {
+export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
   const template: MenuItemConstructorOptions[] = [
     {
       label: app.name,
@@ -21,7 +21,7 @@ export function buildAppMenu(mainWindow: BrowserWindow): Menu {
           label: "New Chat",
           accelerator: "CmdOrCtrl+N",
           click: () => {
-            mainWindow.webContents.send("menu:new-session");
+            getMainWindow()?.webContents.send("menu:new-session");
           },
         },
         { type: "separator" },

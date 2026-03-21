@@ -495,12 +495,22 @@ export class Orchestrator {
     }
 
     await Promise.all(runners.map(async (runner) => {
-      await Promise.race([
-        runner.stop(),
-        new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error(`Runner shutdown timed out after ${timeoutMs}ms`)), timeoutMs);
-        }),
-      ]);
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      try {
+        await Promise.race([
+          runner.stop(),
+          new Promise<void>((resolve) => {
+            timeoutHandle = setTimeout(() => {
+              console.warn(`Runner shutdown timed out after ${timeoutMs}ms`);
+              resolve();
+            }, timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+      }
     }));
 
     this.workspaceToolRunners.clear();

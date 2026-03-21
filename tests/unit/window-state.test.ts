@@ -70,4 +70,28 @@ describe("window-state", () => {
 
     expect(loadWindowState(tempDir)).toEqual(DEFAULT_WINDOW_STATE);
   });
+
+  it("falls back to the default state when only a tiny corner remains visible", () => {
+    saveWindowState(tempDir, {
+      x: 1435,
+      y: 895,
+      width: 1280,
+      height: 820,
+      isMaximized: false,
+    });
+
+    expect(loadWindowState(tempDir)).toEqual(DEFAULT_WINDOW_STATE);
+  });
+
+  it("falls back to the default state when a maximized window restore bounds are off-screen", () => {
+    saveWindowState(tempDir, {
+      x: 4000,
+      y: 4000,
+      width: 1280,
+      height: 820,
+      isMaximized: true,
+    });
+
+    expect(loadWindowState(tempDir)).toEqual(DEFAULT_WINDOW_STATE);
+  });
 });
