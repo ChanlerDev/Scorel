@@ -1,10 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { ProviderConfig } from "../shared/types.js";
 
 // Type-safe bridge — matches ScorelBridge from V0_SPEC (M1 subset)
 const scorelBridge = {
   app: {
     selectDirectory: () => ipcRenderer.invoke("app:selectDirectory"),
     getVersion: () => ipcRenderer.invoke("app:getVersion"),
+    getTheme: () => ipcRenderer.invoke("app:getTheme"),
     onThemeChanged: (callback: (theme: string) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, theme: string) => callback(theme);
       ipcRenderer.on("theme:changed", listener);
@@ -58,11 +60,11 @@ const scorelBridge = {
   },
   providers: {
     list: () => ipcRenderer.invoke("providers:list"),
-    upsert: (config: unknown) => ipcRenderer.invoke("providers:upsert", config),
+    upsert: (config: ProviderConfig) => ipcRenderer.invoke("providers:upsert", config),
     delete: (providerId: string) =>
       ipcRenderer.invoke("providers:delete", providerId),
-    testConnection: (providerId: string) =>
-      ipcRenderer.invoke("providers:testConnection", providerId),
+    testConnection: (config: ProviderConfig, apiKey: string) =>
+      ipcRenderer.invoke("providers:testConnection", config, apiKey),
   },
   secrets: {
     store: (providerId: string, secret: string) =>

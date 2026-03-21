@@ -9,9 +9,23 @@ function applyTheme(theme: ThemeName): void {
 export function useTheme(): void {
   useEffect(() => {
     applyTheme(window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    let disposed = false;
 
-    return window.scorel.app.onThemeChanged((theme) => {
+    window.scorel.app.getTheme().then((theme) => {
+      if (!disposed) {
+        applyTheme(theme === "dark" ? "dark" : "light");
+      }
+    }).catch(() => {
+      // Ignore and keep the CSS media-query fallback.
+    });
+
+    const unsubscribe = window.scorel.app.onThemeChanged((theme) => {
       applyTheme(theme === "dark" ? "dark" : "light");
     });
+
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
   }, []);
 }

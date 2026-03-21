@@ -11,6 +11,7 @@ type ScorelBridge = {
   app: {
     selectDirectory(): Promise<string | null>;
     getVersion(): Promise<string>;
+    getTheme(): Promise<string>;
     onThemeChanged(callback: (theme: string) => void): () => void;
   };
   sessions: {
@@ -50,7 +51,8 @@ type ScorelBridge = {
     upsert(config: ProviderConfig): Promise<void>;
     delete(providerId: string): Promise<void>;
     testConnection(
-      providerId: string,
+      config: ProviderConfig,
+      apiKey: string,
     ): Promise<{ ok: boolean; error?: string }>;
   };
   secrets: {

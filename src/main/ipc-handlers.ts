@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, BrowserWindow } from "electron";
+import { app, dialog, ipcMain, BrowserWindow, nativeTheme } from "electron";
 import type Database from "better-sqlite3";
 import type { ProviderConfig } from "../shared/types.js";
 import { upsertProvider, listProviders, deleteProvider, searchMessages } from "./storage/db.js";
@@ -34,6 +34,7 @@ export function registerIpcHandlers(opts: {
   });
 
   ipcMain.handle("app:getVersion", async () => app.getVersion());
+  ipcMain.handle("app:getTheme", async () => (nativeTheme.shouldUseDarkColors ? "dark" : "light"));
 
   // --- Sessions ---
 
@@ -151,19 +152,16 @@ export function registerIpcHandlers(opts: {
 
   ipcMain.handle(
     "providers:testConnection",
-    async (_event, providerId: string) => {
+    async (_event, config: ProviderConfig, apiKey: string) => {
       try {
-        const provider = providerMap.get(providerId);
-        if (!provider) {
-          return { ok: false, error: `Provider "${providerId}" not found` };
+        const normalizedApiKey = apiKey.trim();
+        if (!normalizedApiKey) {
+          return { ok: false, error: "No API key configured" };
         }
 
-        const apiKey = await getSecret(providerId);
-        if (!apiKey) return { ok: false, error: "No API key configured" };
-
-        const response = await fetch(buildHealthcheckUrl(provider.config), {
+        const response = await fetch(buildHealthcheckUrl(config), {
           method: "GET",
-          headers: buildAuthHeaders(provider.config, apiKey),
+          headers: buildAuthHeaders(config, normalizedApiKey),
         });
 
         if (!response.ok) {

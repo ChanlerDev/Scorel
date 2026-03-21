@@ -27,6 +27,18 @@ export function useChat(sessionId: string | null) {
   const [error, setError] = useState<string | null>(null);
   const [toolStatuses, setToolStatuses] = useState<Record<string, ToolStatus>>({});
   const unsubRef = useRef<(() => void) | null>(null);
+  const sessionIdRef = useRef<string | null>(sessionId);
+
+  const loadMessages = useCallback(async (targetSessionId: string) => {
+    const detail = await window.scorel.sessions.get(targetSessionId);
+    if (sessionIdRef.current === targetSessionId) {
+      setMessages(detail?.messages ?? []);
+    }
+  }, []);
+
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -37,9 +49,7 @@ export function useChat(sessionId: string | null) {
       return;
     }
 
-    window.scorel.sessions.get(sessionId).then((detail) => {
-      if (detail) setMessages(detail.messages);
-    });
+    void loadMessages(sessionId);
     setToolStatuses({});
     setError(null);
     setStreamingMessage(null);
@@ -168,7 +178,7 @@ export function useChat(sessionId: string | null) {
       unsub();
       unsubRef.current = null;
     };
-  }, [sessionId]);
+  }, [sessionId, loadMessages]);
 
   const send = useCallback(
     async (text: string) => {
@@ -186,9 +196,11 @@ export function useChat(sessionId: string | null) {
       } catch (err: unknown) {
         setChatState("error");
         setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        await loadMessages(sessionId);
       }
     },
-    [sessionId, chatState],
+    [sessionId, chatState, loadMessages],
   );
 
   const abort = useCallback(() => {

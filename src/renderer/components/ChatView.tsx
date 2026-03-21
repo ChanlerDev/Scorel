@@ -178,7 +178,7 @@ export function ChatView({
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#555" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "var(--text-secondary)" }}>
             <input
               type="checkbox"
               checked={redactExports}

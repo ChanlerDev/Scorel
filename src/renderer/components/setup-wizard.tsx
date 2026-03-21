@@ -99,20 +99,39 @@ export function SetupWizard({
     setStatus(null);
 
     try {
+      const apiKey = draft.apiKey.trim();
       const config = buildProviderConfig({
         providerType,
         displayName: draft.displayName,
         baseUrl: draft.baseUrl,
         modelId: draft.modelId,
       });
+      const previousProviderId = savedProvider?.providerId ?? null;
 
-      await window.scorel.providers.upsert(config);
-      await window.scorel.secrets.store(config.id, draft.apiKey.trim());
-
-      const result = await window.scorel.providers.testConnection(config.id);
+      const result = await window.scorel.providers.testConnection(config, apiKey);
       if (!result.ok) {
         setStatus(result.error ?? "Connection test failed");
         return;
+      }
+
+      try {
+        await window.scorel.providers.upsert(config);
+        await window.scorel.secrets.store(config.id, apiKey);
+      } catch (error: unknown) {
+        if (previousProviderId !== config.id) {
+          await Promise.allSettled([
+            window.scorel.providers.delete(config.id),
+            window.scorel.secrets.clear(config.id),
+          ]);
+        }
+        throw error;
+      }
+
+      if (previousProviderId && previousProviderId !== config.id) {
+        await Promise.allSettled([
+          window.scorel.providers.delete(previousProviderId),
+          window.scorel.secrets.clear(previousProviderId),
+        ]);
       }
 
       setSavedProvider({
@@ -268,7 +287,7 @@ export function SetupWizard({
           <>
             <div style={sectionTitleStyle}>Test your connection</div>
             <div style={bodyTextStyle}>
-              Scorel will save the provider config securely, store the API key in Keychain, and verify the endpoint before continuing.
+              Scorel will verify the endpoint first, then save the provider config and API key after the connection succeeds.
             </div>
             <div style={{ marginTop: 20, display: "flex", gap: 12, alignItems: "center" }}>
               <button style={primaryButtonStyle} onClick={handleTestConnection} disabled={isBusy}>

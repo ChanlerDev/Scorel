@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { SearchResult, SessionSummary } from "@shared/types";
 import { ChatView } from "./components/ChatView";
 import { SetupWizard } from "./components/setup-wizard";
@@ -37,9 +37,11 @@ export function App() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchNavigationTarget, setSearchNavigationTarget] = useState<SearchNavigationTarget | null>(null);
+  const shouldAutoSelectFirstSessionRef = useRef(true);
 
   const handleProviderDone = useCallback(
     async (result: { providerId: string; modelId: string; sessionId: string }) => {
+      shouldAutoSelectFirstSessionRef.current = false;
       setProviderId(result.providerId);
       setModelId(result.modelId);
       setActiveSessionId(result.sessionId);
@@ -61,6 +63,7 @@ export function App() {
       modelId,
       workspaceRoot,
     });
+    shouldAutoSelectFirstSessionRef.current = false;
     await refresh();
     setActiveSessionId(sessionId);
   }, [providerId, modelId, refresh]);
@@ -98,10 +101,16 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (appState !== "ready" || activeSessionId || sessions.length === 0) {
+    if (
+      appState !== "ready"
+      || activeSessionId
+      || sessions.length === 0
+      || !shouldAutoSelectFirstSessionRef.current
+    ) {
       return;
     }
 
+    shouldAutoSelectFirstSessionRef.current = false;
     setActiveSessionId(sessions[0]?.id ?? null);
   }, [appState, activeSessionId, sessions]);
 
@@ -143,6 +152,7 @@ export function App() {
   const handleSessionMutated = useCallback(async (action: "archive" | "unarchive" | "delete") => {
     await refresh();
     if (action === "delete" || action === "archive") {
+      shouldAutoSelectFirstSessionRef.current = false;
       setActiveSessionId(null);
       return;
     }
@@ -264,6 +274,7 @@ export function App() {
                   <div
                     key={`${result.messageId}-${result.seq}`}
                     onClick={() => {
+                      shouldAutoSelectFirstSessionRef.current = false;
                       setActiveSessionId(result.sessionId);
                       setSearchNavigationTarget({
                         sessionId: result.sessionId,
@@ -296,7 +307,10 @@ export function App() {
                 {sessions.map((s: SessionSummary) => (
                   <div
                     key={s.id}
-                    onClick={() => setActiveSessionId(s.id)}
+                    onClick={() => {
+                      shouldAutoSelectFirstSessionRef.current = false;
+                      setActiveSessionId(s.id);
+                    }}
                     style={{
                       padding: "10px 16px",
                       cursor: "pointer",

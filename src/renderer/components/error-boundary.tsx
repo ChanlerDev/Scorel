@@ -27,8 +27,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     console.error(`Renderer error in ${this.props.region}`, error, errorInfo);
   }
 
-  private handleReload = () => {
-    window.location.reload();
+  private handleReset = () => {
+    this.setState({ hasError: false, error: null });
   };
 
   render() {
@@ -63,7 +63,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             {this.props.region} crashed
           </div>
           <div style={{ color: "var(--text-secondary)", marginBottom: 16, lineHeight: 1.5 }}>
-            Scorel recovered the rest of the window. Reload to continue.
+            Scorel recovered the rest of the window. Reset this area to continue.
           </div>
           {process.env.NODE_ENV !== "production" && this.state.error ? (
             <pre
@@ -81,7 +81,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
             </pre>
           ) : null}
           <button
-            onClick={this.handleReload}
+            onClick={this.handleReset}
             style={{
               padding: "10px 14px",
               borderRadius: 10,
@@ -91,7 +91,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               cursor: "pointer",
             }}
           >
-            Reload
+            Try Again
           </button>
         </div>
       </div>
