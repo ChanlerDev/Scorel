@@ -1,11 +1,15 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import type { SearchResult, SessionSummary } from "@shared/types";
+import type { SearchResult, SessionSummary, WorkspaceEntry } from "@shared/types";
 import { ChatView } from "./components/ChatView";
 import { SetupWizard } from "./components/setup-wizard";
 import { ErrorBoundary } from "./components/error-boundary";
+import { SettingsView } from "./components/SettingsView";
+import { WorkspacePicker } from "./components/WorkspacePicker";
 import { useSessionList } from "./hooks/useSession";
 import { useTheme } from "./hooks/use-theme";
 import type { SearchNavigationTarget } from "./message-navigation";
+
+type AppView = "chat" | "settings";
 
 function renderSnippet(snippet: string) {
   return snippet
@@ -31,13 +35,50 @@ export function App() {
   const { sessions, loading: sessionsLoading, refresh } = useSessionList({ archived: showArchived });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [appState, setAppState] = useState<"loading" | "setup" | "ready">("loading");
+  const [appView, setAppView] = useState<AppView>("chat");
   const [providerId, setProviderId] = useState<string | null>(null);
   const [modelId, setModelId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchNavigationTarget, setSearchNavigationTarget] = useState<SearchNavigationTarget | null>(null);
+  const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
+  const [workspacePickerLoading, setWorkspacePickerLoading] = useState(false);
+  const [workspacePickerError, setWorkspacePickerError] = useState<string | null>(null);
+  const [defaultWorkspace, setDefaultWorkspace] = useState("");
+  const [workspaceHistory, setWorkspaceHistory] = useState<WorkspaceEntry[]>([]);
+  const [creatingSession, setCreatingSession] = useState(false);
   const shouldAutoSelectFirstSessionRef = useRef(true);
+
+  const refreshActiveProvider = useCallback(async (preferred?: { providerId?: string | null; modelId?: string | null } | null) => {
+    const providers = await window.scorel.providers.list();
+
+    const nextProvider = (preferred?.providerId
+      ? providers.find((provider) => provider.id === preferred.providerId)
+      : null) ?? providers[0] ?? null;
+
+    const nextModelId = nextProvider
+      ? (preferred?.modelId && nextProvider.models.some((model) => model.id === preferred.modelId)
+        ? preferred.modelId
+        : nextProvider.models[0]?.id ?? null)
+      : null;
+
+    if (!nextProvider || !nextModelId) {
+      setProviderId(null);
+      setModelId(null);
+      setAppState("setup");
+      return null;
+    }
+
+    setProviderId(nextProvider.id);
+    setModelId(nextModelId);
+    setAppState("ready");
+
+    return {
+      providerId: nextProvider.id,
+      modelId: nextModelId,
+    };
+  }, []);
 
   const handleProviderDone = useCallback(
     async (result: { providerId: string; modelId: string; sessionId: string }) => {
@@ -46,59 +87,102 @@ export function App() {
       setModelId(result.modelId);
       setActiveSessionId(result.sessionId);
       setAppState("ready");
+      setAppView("chat");
       await refresh();
     },
     [refresh],
   );
 
-  const handleNewSession = useCallback(async () => {
-    if (!providerId || !modelId) return;
+  const openWorkspacePicker = useCallback(async () => {
+    if (!providerId || !modelId) {
+      return;
+    }
+
+    setWorkspacePickerOpen(true);
+    setWorkspacePickerError(null);
+    setWorkspacePickerLoading(true);
+
+    try {
+      const [nextDefaultWorkspace, nextWorkspaceHistory] = await Promise.all([
+        window.scorel.app.getDefaultWorkspace(),
+        window.scorel.workspaces.list(20),
+      ]);
+
+      setDefaultWorkspace(nextDefaultWorkspace);
+      setWorkspaceHistory(nextWorkspaceHistory);
+    } catch (error: unknown) {
+      setWorkspacePickerError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setWorkspacePickerLoading(false);
+    }
+  }, [providerId, modelId]);
+
+  const createSessionAtWorkspace = useCallback(async (workspaceRoot: string) => {
+    if (!providerId || !modelId) {
+      return;
+    }
+
+    setCreatingSession(true);
+    setWorkspacePickerError(null);
+
+    try {
+      const { sessionId } = await window.scorel.sessions.create({
+        providerId,
+        modelId,
+        workspaceRoot,
+      });
+      shouldAutoSelectFirstSessionRef.current = false;
+      await refresh();
+      setActiveSessionId(sessionId);
+      setAppView("chat");
+      setWorkspacePickerOpen(false);
+    } catch (error: unknown) {
+      setWorkspacePickerError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCreatingSession(false);
+    }
+  }, [modelId, providerId, refresh]);
+
+  const handleBrowseWorkspace = useCallback(async () => {
     const workspaceRoot = await window.scorel.app.selectDirectory();
     if (!workspaceRoot) {
       return;
     }
 
-    const { sessionId } = await window.scorel.sessions.create({
-      providerId,
-      modelId,
-      workspaceRoot,
-    });
-    shouldAutoSelectFirstSessionRef.current = false;
-    await refresh();
-    setActiveSessionId(sessionId);
-  }, [providerId, modelId, refresh]);
+    await createSessionAtWorkspace(workspaceRoot);
+  }, [createSessionAtWorkspace]);
+
+  const handleNewSession = useCallback(async () => {
+    await openWorkspacePicker();
+  }, [openWorkspacePicker]);
+
+  const handleProvidersChanged = useCallback(async (selection?: { providerId: string; modelId: string } | null) => {
+    const activeProvider = await refreshActiveProvider(selection ?? null);
+    if (!activeProvider) {
+      shouldAutoSelectFirstSessionRef.current = false;
+      setActiveSessionId(null);
+    }
+  }, [refreshActiveProvider]);
 
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
-      const providers = await window.scorel.providers.list();
+      const activeProvider = await refreshActiveProvider();
       if (cancelled) {
         return;
       }
 
-      if (providers.length === 0) {
+      if (!activeProvider) {
         setAppState("setup");
         return;
       }
-
-      const activeProvider = providers[0] ?? null;
-      const activeModel = activeProvider?.models[0] ?? null;
-
-      if (!activeProvider || !activeModel) {
-        setAppState("setup");
-        return;
-      }
-
-      setProviderId(activeProvider.id);
-      setModelId(activeModel.id);
-      setAppState("ready");
     })();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshActiveProvider]);
 
   useEffect(() => {
     if (
@@ -119,6 +203,12 @@ export function App() {
       void handleNewSession();
     });
   }, [handleNewSession]);
+
+  useEffect(() => {
+    return window.scorel.menu.onSettings(() => {
+      setAppView("settings");
+    });
+  }, []);
 
   useEffect(() => {
     const normalizedQuery = searchQuery.trim();
@@ -276,6 +366,7 @@ export function App() {
                     onClick={() => {
                       shouldAutoSelectFirstSessionRef.current = false;
                       setActiveSessionId(result.sessionId);
+                      setAppView("chat");
                       setSearchNavigationTarget({
                         sessionId: result.sessionId,
                         messageId: result.messageId,
@@ -310,6 +401,7 @@ export function App() {
                     onClick={() => {
                       shouldAutoSelectFirstSessionRef.current = false;
                       setActiveSessionId(s.id);
+                      setAppView("chat");
                     }}
                     style={{
                       padding: "10px 16px",
@@ -333,13 +425,35 @@ export function App() {
               </>
             )}
           </div>
+
+          <div style={{ padding: 16, borderTop: "1px solid var(--border)" }}>
+            <button
+              onClick={() => setAppView("settings")}
+              style={{
+                width: "100%",
+                padding: "8px 0",
+                borderRadius: 10,
+                border: "1px solid var(--border)",
+                background: appView === "settings" ? "var(--bg-tertiary)" : "var(--bg-primary)",
+                color: "var(--text-primary)",
+                cursor: "pointer",
+              }}
+            >
+              Settings
+            </button>
+          </div>
         </div>
       </ErrorBoundary>
 
       {/* Main area */}
       <ErrorBoundary region="Main area">
         <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
-          {activeSessionId ? (
+          {appView === "settings" ? (
+            <SettingsView
+              onClose={() => setAppView("chat")}
+              onProvidersChanged={handleProvidersChanged}
+            />
+          ) : activeSessionId ? (
             <ChatView
               sessionId={activeSessionId}
               onSessionMutated={handleSessionMutated}
@@ -366,6 +480,27 @@ export function App() {
           )}
         </div>
       </ErrorBoundary>
+
+      {workspacePickerOpen ? (
+        <WorkspacePicker
+          defaultWorkspace={defaultWorkspace}
+          workspaces={workspaceHistory}
+          loading={workspacePickerLoading}
+          creating={creatingSession}
+          error={workspacePickerError}
+          onUseWorkspace={(workspacePath) => {
+            void createSessionAtWorkspace(workspacePath);
+          }}
+          onBrowse={() => {
+            void handleBrowseWorkspace();
+          }}
+          onClose={() => {
+            if (!creatingSession) {
+              setWorkspacePickerOpen(false);
+            }
+          }}
+        />
+      ) : null}
     </div>
   );
 }

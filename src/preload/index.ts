@@ -7,6 +7,7 @@ const scorelBridge = {
     selectDirectory: () => ipcRenderer.invoke("app:selectDirectory"),
     getVersion: () => ipcRenderer.invoke("app:getVersion"),
     getTheme: () => ipcRenderer.invoke("app:getTheme"),
+    getDefaultWorkspace: () => ipcRenderer.invoke("app:getDefaultWorkspace"),
     onThemeChanged: (callback: (theme: string) => void) => {
       const listener = (_event: Electron.IpcRendererEvent, theme: string) => callback(theme);
       ipcRenderer.on("theme:changed", listener);
@@ -65,6 +66,8 @@ const scorelBridge = {
       ipcRenderer.invoke("providers:delete", providerId),
     testConnection: (config: ProviderConfig, apiKey: string) =>
       ipcRenderer.invoke("providers:testConnection", config, apiKey),
+    testExisting: (providerId: string) =>
+      ipcRenderer.invoke("providers:testExisting", providerId),
   },
   secrets: {
     store: (providerId: string, secret: string) =>
@@ -72,6 +75,9 @@ const scorelBridge = {
     has: (providerId: string) => ipcRenderer.invoke("secrets:has", providerId),
     clear: (providerId: string) =>
       ipcRenderer.invoke("secrets:clear", providerId),
+  },
+  workspaces: {
+    list: (limit?: number) => ipcRenderer.invoke("workspaces:list", limit),
   },
   tools: {
     approve: (sessionId: string, toolCallId: string) =>
@@ -85,6 +91,13 @@ const scorelBridge = {
       ipcRenderer.on("menu:new-session", listener);
       return () => {
         ipcRenderer.removeListener("menu:new-session", listener);
+      };
+    },
+    onSettings: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on("menu:settings", listener);
+      return () => {
+        ipcRenderer.removeListener("menu:settings", listener);
       };
     },
   },

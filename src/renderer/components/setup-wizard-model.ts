@@ -62,8 +62,12 @@ export function createProviderId(displayName: string): string {
   return normalized || "provider";
 }
 
-export function validateProviderDraft(draft: ProviderDraft): string[] {
+export function validateProviderDraft(
+  draft: ProviderDraft,
+  opts?: { requireApiKey?: boolean },
+): string[] {
   const errors: string[] = [];
+  const requireApiKey = opts?.requireApiKey ?? true;
 
   if (!draft.displayName.trim()) {
     errors.push("Display name is required");
@@ -74,7 +78,7 @@ export function validateProviderDraft(draft: ProviderDraft): string[] {
   if (!draft.modelId.trim()) {
     errors.push("Model is required");
   }
-  if (!draft.apiKey.trim()) {
+  if (requireApiKey && !draft.apiKey.trim()) {
     errors.push("API key is required");
   }
 

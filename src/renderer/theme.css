@@ -68,6 +68,87 @@ select {
   box-sizing: border-box;
 }
 
+a {
+  color: var(--accent);
+}
+
+.scorel-markdown {
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.scorel-markdown > :first-child {
+  margin-top: 0;
+}
+
+.scorel-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.scorel-markdown pre {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+.scorel-markdown code {
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 0.9em;
+}
+
+.scorel-markdown :not(pre) > code {
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.scorel-markdown p {
+  margin: 0 0 8px;
+}
+
+.scorel-markdown ul,
+.scorel-markdown ol {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+
+.scorel-markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+
+.scorel-markdown th,
+.scorel-markdown td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.scorel-markdown th {
+  background: var(--bg-tertiary);
+}
+
+.scorel-markdown blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: var(--text-secondary);
+}
+
+.scorel-markdown h1,
+.scorel-markdown h2,
+.scorel-markdown h3,
+.scorel-markdown h4,
+.scorel-markdown h5,
+.scorel-markdown h6 {
+  margin: 12px 0 6px;
+  line-height: 1.3;
+}
+
 @keyframes scorel-spin {
   from {
     transform: rotate(0deg);

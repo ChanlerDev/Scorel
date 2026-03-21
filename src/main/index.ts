@@ -13,6 +13,7 @@ import { scanSkills } from "./skills/skill-loader.js";
 import { RunnerManager } from "./runner/runner-manager.js";
 import { buildAppMenu } from "./menu.js";
 import { loadWindowState, saveWindowState, type WindowState } from "./window-state.js";
+import { loadAppConfig } from "./app-config.js";
 import type { ProviderConfig } from "../shared/types.js";
 import { DB_FILENAME } from "../shared/constants.js";
 
@@ -55,6 +56,7 @@ function getNextWindowState(window: BrowserWindow, previousState: WindowState): 
 
 app.whenReady().then(() => {
   const userDataPath = app.getPath("userData");
+  const appConfig = loadAppConfig(userDataPath);
   const dbPath = path.join(userDataPath, DB_FILENAME);
   const db = initDatabase(dbPath);
 
@@ -86,6 +88,7 @@ app.whenReady().then(() => {
     eventBus,
     providerMap,
     getMainWindow,
+    appConfig,
   });
 
   let windowState = loadWindowState(userDataPath);

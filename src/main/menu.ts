@@ -24,6 +24,13 @@ export function buildAppMenu(getMainWindow: () => BrowserWindow | null): Menu {
             getMainWindow()?.webContents.send("menu:new-session");
           },
         },
+        {
+          label: "Settings",
+          accelerator: "CmdOrCtrl+,",
+          click: () => {
+            getMainWindow()?.webContents.send("menu:settings");
+          },
+        },
         { type: "separator" },
         { role: "close" },
       ],

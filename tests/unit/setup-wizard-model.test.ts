@@ -90,4 +90,13 @@ describe("setup-wizard-model", () => {
       "API key is required",
     ]);
   });
+
+  it("allows editing provider settings without requiring a replacement API key", () => {
+    expect(validateProviderDraft({
+      displayName: "OpenAI",
+      baseUrl: "https://api.openai.com/v1",
+      modelId: "gpt-4o",
+      apiKey: "",
+    }, { requireApiKey: false })).toEqual([]);
+  });
 });

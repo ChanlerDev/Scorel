@@ -4,6 +4,7 @@ import type {
   SessionSummary,
   SessionDetail,
   SearchResult,
+  WorkspaceEntry,
 } from "@shared/types";
 import type { AssistantMessageEvent, ScorelEvent } from "@shared/events";
 
@@ -12,6 +13,7 @@ type ScorelBridge = {
     selectDirectory(): Promise<string | null>;
     getVersion(): Promise<string>;
     getTheme(): Promise<string>;
+    getDefaultWorkspace(): Promise<string>;
     onThemeChanged(callback: (theme: string) => void): () => void;
   };
   sessions: {
@@ -54,11 +56,15 @@ type ScorelBridge = {
       config: ProviderConfig,
       apiKey: string,
     ): Promise<{ ok: boolean; error?: string }>;
+    testExisting(providerId: string): Promise<{ ok: boolean; error?: string }>;
   };
   secrets: {
     store(providerId: string, secret: string): Promise<void>;
     has(providerId: string): Promise<boolean>;
     clear(providerId: string): Promise<void>;
+  };
+  workspaces: {
+    list(limit?: number): Promise<WorkspaceEntry[]>;
   };
   tools: {
     approve(sessionId: string, toolCallId: string): Promise<void>;
@@ -66,6 +72,7 @@ type ScorelBridge = {
   };
   menu: {
     onNewSession(callback: () => void): () => void;
+    onSettings(callback: () => void): () => void;
   };
 };
 

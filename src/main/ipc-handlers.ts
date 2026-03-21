@@ -1,7 +1,15 @@
 import { app, dialog, ipcMain, BrowserWindow, nativeTheme } from "electron";
+import * as fs from "node:fs";
 import type Database from "better-sqlite3";
-import type { ProviderConfig } from "../shared/types.js";
-import { upsertProvider, listProviders, deleteProvider, searchMessages } from "./storage/db.js";
+import type { ProviderConfig, WorkspaceEntry } from "../shared/types.js";
+import {
+  upsertProvider,
+  listProviders,
+  deleteProvider,
+  searchMessages,
+  listWorkspaces,
+  upsertWorkspace,
+} from "./storage/db.js";
 import { storeSecret, hasSecret, clearSecret, getSecret } from "./security/keychain.js";
 import type { SessionManager } from "./core/session-manager.js";
 import type { Orchestrator } from "./core/orchestrator.js";
@@ -9,6 +17,7 @@ import type { EventBus } from "./core/event-bus.js";
 import type { ProviderEntry } from "./core/orchestrator.js";
 import { openaiAdapter } from "./provider/openai-adapter.js";
 import { anthropicAdapter } from "./provider/anthropic-adapter.js";
+import type { AppConfig } from "./app-config.js";
 
 export function registerIpcHandlers(opts: {
   db: Database.Database;
@@ -17,8 +26,17 @@ export function registerIpcHandlers(opts: {
   eventBus: EventBus;
   providerMap: Map<string, ProviderEntry>;
   getMainWindow: () => BrowserWindow | null;
+  appConfig: AppConfig;
 }): void {
-  const { db, sessionManager, orchestrator, eventBus, providerMap, getMainWindow } = opts;
+  const {
+    db,
+    sessionManager,
+    orchestrator,
+    eventBus,
+    providerMap,
+    getMainWindow,
+    appConfig,
+  } = opts;
 
   ipcMain.handle("app:selectDirectory", async () => {
     const result = await dialog.showOpenDialog({
@@ -35,6 +53,7 @@ export function registerIpcHandlers(opts: {
 
   ipcMain.handle("app:getVersion", async () => app.getVersion());
   ipcMain.handle("app:getTheme", async () => (nativeTheme.shouldUseDarkColors ? "dark" : "light"));
+  ipcMain.handle("app:getDefaultWorkspace", async () => appConfig.defaultWorkspace);
 
   // --- Sessions ---
 
@@ -45,6 +64,7 @@ export function registerIpcHandlers(opts: {
         providerId: createOpts.providerId,
         modelId: createOpts.modelId,
       });
+      upsertWorkspace(db, createOpts.workspaceRoot);
       return { sessionId };
     },
   );
@@ -182,6 +202,40 @@ export function registerIpcHandlers(opts: {
     },
   );
 
+  ipcMain.handle("providers:testExisting", async (_event, providerId: string) => {
+    const config = listProviders(db).find((provider) => provider.id === providerId);
+    if (!config) {
+      return { ok: false, error: "Provider not found" };
+    }
+
+    const apiKey = await getSecret(providerId);
+    if (!apiKey) {
+      return { ok: false, error: "No API key stored" };
+    }
+
+    try {
+      const response = await fetch(buildHealthcheckUrl(config), {
+        method: "GET",
+        headers: buildAuthHeaders(config, apiKey),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => "");
+        return {
+          ok: false,
+          error: `${response.status} ${response.statusText}${errorText ? `: ${errorText}` : ""}`,
+        };
+      }
+
+      return { ok: true };
+    } catch (err: unknown) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
   // --- Secrets (write-only from renderer) ---
 
   ipcMain.handle(
@@ -197,6 +251,14 @@ export function registerIpcHandlers(opts: {
 
   ipcMain.handle("secrets:clear", async (_event, providerId: string) => {
     await clearSecret(providerId);
+  });
+
+  ipcMain.handle("workspaces:list", async (_event, limit?: number) => {
+    const workspaces = listWorkspaces(db, limit);
+    return workspaces.map((workspace): WorkspaceEntry => ({
+      ...workspace,
+      exists: fs.existsSync(workspace.path),
+    }));
   });
 
   ipcMain.handle("tools:approve", async (_event, _sessionId: string, toolCallId: string) => {

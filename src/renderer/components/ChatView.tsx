@@ -253,6 +253,7 @@ export function ChatView({
         streamingMessage={streamingMessage}
         searchNavigationTarget={searchNavigationTarget}
         toolStatuses={toolStatuses}
+        sessionId={sessionId}
       />
       {error && (
         <div

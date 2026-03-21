@@ -179,3 +179,14 @@ export type SearchResult = {
   ts: number;
   seq: number;
 };
+
+export type WorkspaceRecord = {
+  path: string;
+  label: string | null;
+  lastUsedAt: number;
+  createdAt: number;
+};
+
+export type WorkspaceEntry = WorkspaceRecord & {
+  exists: boolean;
+};

@@ -5,13 +5,14 @@ import type {
   ScorelMessage,
   ContentPart,
   SearchResult,
+  WorkspaceRecord,
 } from "../../shared/types.js";
 import { FTS_CONTENT_MAX_CHARS } from "../../shared/constants.js";
 
 // ---------------------------------------------------------------------------
 // Schema version — bump when adding migrations
 // ---------------------------------------------------------------------------
-const CURRENT_USER_VERSION = 1;
+const CURRENT_USER_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // DDL
@@ -113,9 +114,25 @@ function runMigrations(db: Database.Database): void {
 
   if (version < 1) {
     db.exec(SCHEMA_V1);
+    db.pragma("user_version = 1");
+  }
+
+  if (version < 2) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS workspaces (
+        path TEXT PRIMARY KEY,
+        label TEXT,
+        last_used_at INTEGER NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+
+      INSERT OR IGNORE INTO workspaces (path, label, last_used_at, created_at)
+      SELECT DISTINCT workspace_root, NULL, updated_at, created_at
+      FROM sessions
+      WHERE workspace_root IS NOT NULL AND workspace_root != '';
+    `);
     db.pragma(`user_version = ${CURRENT_USER_VERSION}`);
   }
-  // Future migrations: if (version < 2) { ... db.pragma("user_version = 2"); }
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +246,79 @@ export function deleteProvider(
   providerId: string,
 ): void {
   db.prepare("DELETE FROM providers WHERE id = ?").run(providerId);
+}
+
+// ---------------------------------------------------------------------------
+// Workspace history
+// ---------------------------------------------------------------------------
+
+type WorkspaceRow = {
+  path: string;
+  label: string | null;
+  last_used_at: number;
+  created_at: number;
+};
+
+function rowToWorkspaceRecord(row: WorkspaceRow): WorkspaceRecord {
+  return {
+    path: row.path,
+    label: row.label,
+    lastUsedAt: row.last_used_at,
+    createdAt: row.created_at,
+  };
+}
+
+export function upsertWorkspace(
+  db: Database.Database,
+  workspacePath: string,
+  label?: string,
+): void {
+  const trimmedPath = workspacePath.trim();
+  if (!trimmedPath) {
+    return;
+  }
+
+  const ts = now();
+  const upsert = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO workspaces (path, label, last_used_at, created_at)
+       VALUES (@path, @label, @lastUsedAt, @createdAt)
+       ON CONFLICT(path) DO UPDATE SET
+         label = COALESCE(@label, label),
+         last_used_at = @lastUsedAt`,
+    ).run({
+      path: trimmedPath,
+      label: label?.trim() || null,
+      lastUsedAt: ts,
+      createdAt: ts,
+    });
+
+    db.prepare(
+      `DELETE FROM workspaces
+       WHERE path NOT IN (
+         SELECT path FROM workspaces
+         ORDER BY last_used_at DESC, created_at DESC
+         LIMIT 20
+       )`,
+    ).run();
+  });
+
+  upsert();
+}
+
+export function listWorkspaces(
+  db: Database.Database,
+  limit = 20,
+): WorkspaceRecord[] {
+  const normalizedLimit = Math.min(Math.max(limit, 1), 100);
+  const rows = db.prepare(
+    `SELECT path, label, last_used_at, created_at
+     FROM workspaces
+     ORDER BY last_used_at DESC, created_at DESC
+     LIMIT ?`,
+  ).all(normalizedLimit) as WorkspaceRow[];
+
+  return rows.map(rowToWorkspaceRecord);
 }
 
 // ---------------------------------------------------------------------------

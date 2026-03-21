@@ -80,6 +80,7 @@ export function SetupWizard({
 
   useEffect(() => {
     window.scorel.app.getVersion().then(setVersion).catch(() => setVersion(""));
+    window.scorel.app.getDefaultWorkspace().then(setWorkspaceRoot).catch(() => setWorkspaceRoot(null));
   }, []);
 
   const handleProviderSelect = (nextProviderType: WizardProviderType) => {
