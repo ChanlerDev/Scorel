@@ -137,4 +137,4 @@ These are hard boundaries. Do NOT implement in V0:
 - [Milestones](docs/milestones.md) — Master roadmap (V0 → V1.x)
 - [V0 Spec](docs/V0_SPEC.md) — V0 architecture, data model, storage, protocols
 - [Compat Strategy](docs/COMPAT.md) — Canonical model invariants, provider adapter mappings, pitfall registry
-- Milestone specs: [M1](docs/V0-M1.md) | [M1.5](docs/V0-M1.5.md) | [M2](docs/V0-M2.md) | [M3](docs/V0-M3.md) | [M4](docs/V0-M4.md) | [M5](docs/V0-M5.md)
+- Milestone specs: [M1](docs/V0-M1.md) | [M1.5](docs/V0-M1.5.md) | [M2](docs/V0-M2.md) | [M3](docs/V0-M3.md) | [M4](docs/V0-M4.md) | [M5](docs/V0-M5.md) | [M6](docs/V0-M6.md)

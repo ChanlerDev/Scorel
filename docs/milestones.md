@@ -17,8 +17,14 @@ V0 ─────────────────────────�
                                      ├── manual       ├── notarize
                                      └── Skills       └── Polish
 
+                                     M6 Dogfood Fixes
+                                     ├── Approval UI
+                                     ├── Markdown render
+                                     ├── Settings panel
+                                     └── Workspace UX
+
 Beta ────────────────────────────────────────────────────────────────────
-  B1 auto_compact + subagent + TodoWrite
+  B1 auto_compact + subagent + TodoWrite + permission system
   B2 MCP integration
   B3 Embedding + vector search
 
@@ -75,7 +81,15 @@ V1.x ─────────────────────────
 - **Go/No-Go**: Install/upgrade loop works on clean macOS
 - **Dependencies**: M1–M4 complete
 
-### V0 Total Estimate: 65–98 person-days
+### M6: Dogfood Fixes
+- **Spec**: [V0-M6.md](V0-M6.md)
+- **Content**: Approval UI buttons + Markdown rendering + Settings panel + default workspace + workspace history
+- **Estimate**: 8–12 person-days
+- **Go/No-Go**: Full tool round works in UI (approve/deny visible), assistant output renders markdown, provider config editable post-setup, New Chat uses default workspace or picks from history
+- **Dependencies**: M5
+- **Origin**: First dogfood session findings ([dogfood/V0-mannual.md](dogfood/V0-mannual.md))
+
+### V0 Total Estimate: 73–110 person-days
 
 ---
 
@@ -93,6 +107,7 @@ graph LR
     M2 --> M5[M5 Release]
     M3 --> M5
     M4 --> M5
+    M5 --> M6[M6 Dogfood Fixes]
 ```
 
 ---
@@ -100,9 +115,9 @@ graph LR
 ## Post-V0 Milestones
 
 ### Beta 1: Autonomy
-- **Content**: auto_compact (token-threshold triggered), subagent tool (isolated child context), TodoWrite planning tool
-- **Dependencies**: V0 stable, compact strategy proven
-- **Key design**: subagent uses fresh `messages[]`, returns summary only to parent; aligns with learn-claude-code s04 pattern
+- **Content**: auto_compact (token-threshold triggered), subagent tool (isolated child context), TodoWrite planning tool, permission system (full access toggle + per-tool allow/confirm/deny + reject with reason)
+- **Dependencies**: V0 stable (including M6), compact strategy proven
+- **Key design**: subagent uses fresh `messages[]`, returns summary only to parent; aligns with learn-claude-code s04 pattern; permission config stored in session/global settings, full_access overrides per-tool defaults
 
 ### Beta 2: MCP Integration
 - **Content**: MCP support (stdio + Streamable HTTP transports), tool discovery, dynamic tool registration
@@ -138,6 +153,10 @@ graph LR
 | H | Tool call ID normalization (>64 chars) | M1.5 |
 | I | Manual compact boundary → resume → correct context | M4 |
 | J | Deny tool call → error result → model adapts | M2 |
+| K | Approve tool call via UI button → tool executes → result shown | M6 |
+| L | Markdown code block + inline code + list renders correctly | M6 |
+| M | Change provider API key in Settings → next request uses new key | M6 |
+| N | New Chat uses default workspace without folder picker | M6 |
 
 ---
 
@@ -154,3 +173,5 @@ graph LR
 | [V0-M3.md](V0-M3.md) | M3: History & Search milestone spec |
 | [V0-M4.md](V0-M4.md) | M4: Compact & Skills milestone spec |
 | [V0-M5.md](V0-M5.md) | M5: Release milestone spec |
+| [V0-M6.md](V0-M6.md) | M6: Dogfood Fixes milestone spec |
+| [dogfood/V0-mannual.md](dogfood/V0-mannual.md) | V0 first dogfood session findings |
