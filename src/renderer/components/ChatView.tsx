@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
+import { TodoPanel } from "./TodoPanel";
 import { useChat } from "../hooks/useChat";
 import { useSessionDetail } from "../hooks/useSession";
 import type { SearchNavigationTarget } from "../message-navigation";
+import type { ScorelEvent } from "@shared/events";
 
 function sanitizeFileName(value: string): string {
   return value.replace(/[^a-z0-9-_]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "session";
@@ -17,6 +19,26 @@ function downloadTextFile(fileName: string, content: string, type: string): void
   anchor.download = fileName;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+export function getCompactEventNotice(
+  event: ScorelEvent,
+): { tone: "success" | "warning"; message: string } | null {
+  if (event.type === "compact.failed") {
+    return {
+      tone: "warning",
+      message: `Auto-compact failed: ${event.error}`,
+    };
+  }
+
+  if (event.type === "compact.auto") {
+    return {
+      tone: "success",
+      message: "Conversation auto-compacted successfully",
+    };
+  }
+
+  return null;
 }
 
 export function ChatView({
@@ -35,6 +57,7 @@ export function ChatView({
   const [actionError, setActionError] = useState<string | null>(null);
   const [isCompacting, setIsCompacting] = useState(false);
   const [compactStatus, setCompactStatus] = useState<string | null>(null);
+  const [compactStatusTone, setCompactStatusTone] = useState<"success" | "warning">("success");
 
   const exportBaseName = useMemo(() => {
     const rawName = detail?.title ?? sessionId;
@@ -65,6 +88,24 @@ export function ChatView({
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [abort, isBusy]);
+
+  useEffect(() => {
+    const unsubscribe = window.scorel.chat.onEvent(sessionId, (event) => {
+      if (event.type !== "compact.failed" && event.type !== "compact.auto") {
+        return;
+      }
+
+      const notice = getCompactEventNotice(event);
+      if (!notice) {
+        return;
+      }
+
+      setCompactStatus(notice.message);
+      setCompactStatusTone(notice.tone);
+    });
+
+    return unsubscribe;
+  }, [sessionId]);
 
   const handleExport = async (format: "jsonl" | "md") => {
     try {
@@ -119,6 +160,7 @@ export function ChatView({
       setIsCompacting(true);
       await window.scorel.compact.manual(sessionId);
       setCompactStatus("Conversation compacted successfully");
+      setCompactStatusTone("success");
       await refresh();
     } catch (err: unknown) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -229,8 +271,8 @@ export function ChatView({
           style={{
             padding: "6px 16px",
             fontSize: 13,
-            color: "var(--success)",
-            background: "var(--success-bg)",
+            color: compactStatusTone === "success" ? "var(--success)" : "var(--warning)",
+            background: compactStatusTone === "success" ? "var(--success-bg)" : "var(--warning-bg)",
           }}
         >
           {compactStatus}
@@ -248,6 +290,7 @@ export function ChatView({
           {actionError}
         </div>
       )}
+      <TodoPanel sessionId={sessionId} />
       <MessageList
         messages={messages}
         streamingMessage={streamingMessage}

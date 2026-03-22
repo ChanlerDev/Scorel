@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
-import type { ProviderConfig } from "@shared/types";
+import type { PermissionConfig, PermissionLevel, ProviderConfig } from "@shared/types";
 import {
   buildProviderConfig,
   getProviderPreset,
@@ -14,6 +14,16 @@ type SettingsViewProps = {
 };
 
 type EditorMode = "edit" | "add";
+
+const PERMISSION_TOOLS = ["bash", "read_file", "write_file", "edit_file", "subagent", "todo_write", "load_skill"] as const;
+
+function createEmptyPermissionConfig(): PermissionConfig {
+  return {
+    fullAccess: false,
+    toolDefaults: {},
+    denyReasons: {},
+  };
+}
 
 function createAddDraft(providerType: WizardProviderType): ProviderDraft {
   const preset = getProviderPreset(providerType);
@@ -60,6 +70,14 @@ export function getUnsavedProviderTestMessage(): string {
   return "Save your changes before testing, or enter a new API key to test with.";
 }
 
+export function getPermissionsLoadFailureMessage(): string {
+  return "Failed to load permissions. Changes are disabled to avoid overwriting existing settings.";
+}
+
+export function canSavePermissions(savingPermissions: boolean, permissionsLoadError: string | null): boolean {
+  return !savingPermissions && permissionsLoadError == null;
+}
+
 export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps) {
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [hasKeyById, setHasKeyById] = useState<Record<string, boolean>>({});
@@ -72,6 +90,9 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
   const [statusTone, setStatusTone] = useState<"success" | "danger">("success");
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<"save" | "test" | "delete" | null>(null);
+  const [permissionConfig, setPermissionConfig] = useState<PermissionConfig>(createEmptyPermissionConfig());
+  const [savingPermissions, setSavingPermissions] = useState(false);
+  const [permissionsLoadError, setPermissionsLoadError] = useState<string | null>(null);
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId) ?? null,
@@ -117,6 +138,28 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
   useEffect(() => {
     void loadProviders();
   }, [loadProviders]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.scorel.permissions.getGlobal().then((config) => {
+      if (!cancelled) {
+        setPermissionConfig(config);
+        setPermissionsLoadError(null);
+      }
+    }).catch((error: unknown) => {
+      if (!cancelled) {
+        setPermissionConfig(createEmptyPermissionConfig());
+        const message = getPermissionsLoadFailureMessage();
+        console.error("Failed to load permission config:", error);
+        setPermissionsLoadError(message);
+        setFeedback(message, "danger");
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const setFeedback = (message: string, tone: "success" | "danger") => {
     setStatus(message);
@@ -385,6 +428,21 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
     );
   };
 
+  const handleSavePermissions = async () => {
+    setSavingPermissions(true);
+    setStatus(null);
+
+    try {
+      const saved = await window.scorel.permissions.setGlobal(permissionConfig);
+      setPermissionConfig(saved);
+      setFeedback("Permissions saved", "success");
+    } catch (error: unknown) {
+      setFeedback(error instanceof Error ? error.message : String(error), "danger");
+    } finally {
+      setSavingPermissions(false);
+    }
+  };
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "var(--bg-primary)" }}>
       <div style={headerStyle}>
@@ -437,6 +495,93 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
           {loading ? (
             <div style={{ color: "var(--text-secondary)" }}>Loading settings…</div>
           ) : renderProviderEditor()}
+
+          <div style={{ marginTop: 28, display: "grid", gap: 16 }}>
+            <div>
+              <div style={sectionTitleStyle}>Permissions</div>
+              <div style={bodyTextStyle}>Configure the default tool approval policy.</div>
+            </div>
+
+            <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={permissionConfig.fullAccess}
+                onChange={(event) => setPermissionConfig((current) => ({
+                  ...current,
+                  fullAccess: event.target.checked,
+                }))}
+              />
+              Full access (keeps subagent on confirm)
+            </label>
+
+            <div style={{ display: "grid", gap: 12 }}>
+              {PERMISSION_TOOLS.map((toolName) => {
+                const level = permissionConfig.toolDefaults[toolName] ?? "confirm";
+                return (
+                  <div
+                    key={toolName}
+                    style={{
+                      display: "grid",
+                      gap: 8,
+                      padding: 14,
+                      borderRadius: 14,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-secondary)",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600 }}>{toolName}</div>
+                    <select
+                      value={level}
+                      onChange={(event) => {
+                        const nextLevel = event.target.value as PermissionLevel;
+                        setPermissionConfig((current) => ({
+                          ...current,
+                          toolDefaults: {
+                            ...current.toolDefaults,
+                            [toolName]: nextLevel,
+                          },
+                          denyReasons: nextLevel === "deny"
+                            ? current.denyReasons
+                            : Object.fromEntries(
+                              Object.entries(current.denyReasons).filter(([name]) => name !== toolName),
+                            ),
+                        }));
+                      }}
+                      style={inputStyle}
+                    >
+                      <option value="allow">Allow</option>
+                      <option value="confirm">Confirm</option>
+                      <option value="deny">Deny</option>
+                    </select>
+                    {level === "deny" ? (
+                      <input
+                        value={permissionConfig.denyReasons[toolName] ?? ""}
+                        onChange={(event) => setPermissionConfig((current) => ({
+                          ...current,
+                          denyReasons: {
+                            ...current.denyReasons,
+                            [toolName]: event.target.value,
+                          },
+                        }))}
+                        placeholder="Optional deny reason"
+                        style={inputStyle}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div style={actionsRowStyle}>
+              <button
+                style={primaryButtonStyle}
+                onClick={() => void handleSavePermissions()}
+                disabled={!canSavePermissions(savingPermissions, permissionsLoadError)}
+              >
+                {savingPermissions ? "Saving…" : "Save Permissions"}
+              </button>
+            </div>
+          </div>
 
           {status ? (
             <div

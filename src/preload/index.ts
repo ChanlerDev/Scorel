@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ProviderConfig } from "../shared/types.js";
+import type { PermissionConfig, ProviderConfig } from "../shared/types.js";
 
 // Type-safe bridge — matches ScorelBridge from V0_SPEC (M1 subset)
 const scorelBridge = {
@@ -78,6 +78,16 @@ const scorelBridge = {
   },
   workspaces: {
     list: (limit?: number) => ipcRenderer.invoke("workspaces:list", limit),
+  },
+  todos: {
+    list: (sessionId: string) => ipcRenderer.invoke("todos:list", sessionId),
+  },
+  permissions: {
+    getGlobal: () => ipcRenderer.invoke("permissions:getGlobal"),
+    setGlobal: (config: PermissionConfig) => ipcRenderer.invoke("permissions:setGlobal", config),
+    getSession: (sessionId: string) => ipcRenderer.invoke("permissions:getSession", sessionId),
+    setSession: (sessionId: string, config: PermissionConfig | null) =>
+      ipcRenderer.invoke("permissions:setSession", sessionId, config),
   },
   tools: {
     approve: (sessionId: string, toolCallId: string) =>

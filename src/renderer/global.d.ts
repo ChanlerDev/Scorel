@@ -1,9 +1,11 @@
 import type {
   ManualCompactResult,
+  PermissionConfig,
   ProviderConfig,
   SessionSummary,
   SessionDetail,
   SearchResult,
+  TodoItem,
   WorkspaceEntry,
 } from "@shared/types";
 import type { AssistantMessageEvent, ScorelEvent } from "@shared/events";
@@ -65,6 +67,15 @@ type ScorelBridge = {
   };
   workspaces: {
     list(limit?: number): Promise<WorkspaceEntry[]>;
+  };
+  todos: {
+    list(sessionId: string): Promise<TodoItem[]>;
+  };
+  permissions: {
+    getGlobal(): Promise<PermissionConfig>;
+    setGlobal(config: PermissionConfig): Promise<PermissionConfig>;
+    getSession(sessionId: string): Promise<PermissionConfig | null>;
+    setSession(sessionId: string, config: PermissionConfig | null): Promise<PermissionConfig | null>;
   };
   tools: {
     approve(sessionId: string, toolCallId: string): Promise<void>;
