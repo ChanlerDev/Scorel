@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import type {
   ProviderConfig,
+  PermissionConfig,
   SessionSummary,
   ScorelMessage,
   ContentPart,
@@ -8,6 +9,7 @@ import type {
   WorkspaceRecord,
 } from "../../shared/types.js";
 import { FTS_CONTENT_MAX_CHARS } from "../../shared/constants.js";
+import { normalizePermissionConfig } from "../app-config.js";
 import { deleteSessionTodos } from "./todos.js";
 
 // ---------------------------------------------------------------------------
@@ -473,13 +475,14 @@ export function getSessionDetail(
     )
     .get(sessionId) as SessionDetailRow | undefined;
   if (!row) return null;
+  const permissionConfig = parseJsonOrNull<PermissionConfig>(row.permission_config);
   return {
     summary: rowToSessionSummary(row),
     activeCompactId: row.active_compact_id,
     pinnedSystemPrompt: row.pinned_system_prompt,
     settings: parseJsonOrNull<Record<string, unknown>>(row.settings_json),
     parentSessionId: row.parent_session_id,
-    permissionConfig: parseJsonOrNull<import("../../shared/types.js").PermissionConfig>(row.permission_config),
+    permissionConfig: permissionConfig == null ? null : normalizePermissionConfig(permissionConfig),
   };
 }
 

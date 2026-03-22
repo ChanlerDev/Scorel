@@ -21,7 +21,7 @@ function rowToTodoItem(row: TodoRow): TodoItem {
     sessionId: row.session_id,
     title: row.title,
     status: isTodoStatus(row.status) ? row.status : "pending",
-    notes: row.notes,
+    notes: typeof row.notes === "string" ? row.notes : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
