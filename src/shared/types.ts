@@ -91,7 +91,7 @@ export type ProviderConfig = {
 
 // --- Tools ---
 
-export type ToolName =
+export type BuiltInToolName =
   | "bash"
   | "read_file"
   | "write_file"
@@ -99,6 +99,8 @@ export type ToolName =
   | "load_skill"
   | "subagent"
   | "todo_write";
+
+export type ToolName = BuiltInToolName | string;
 
 export type ToolCall = {
   toolCallId: string;
@@ -111,6 +113,80 @@ export type ToolResult = {
   isError: boolean;
   content: string;
   details?: unknown;
+};
+
+export type McpStdioTransportConfig = {
+  type: "stdio";
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+};
+
+export type McpHttpTransportConfig = {
+  type: "streamable-http";
+  url: string;
+  headers?: Record<string, string>;
+};
+
+export type McpTransportConfig = McpStdioTransportConfig | McpHttpTransportConfig;
+
+export type McpCapabilities = Record<string, unknown>;
+
+export type McpToolDefinition = {
+  name: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+};
+
+export type McpCallToolContent =
+  | { type: "text"; text: string; _meta?: Record<string, unknown> }
+  | { type: "image"; data: string; mimeType: string; _meta?: Record<string, unknown> }
+  | { type: "audio"; data: string; mimeType: string; _meta?: Record<string, unknown> }
+  | {
+      type: "resource";
+      resource: {
+        uri: string;
+        text?: string;
+        blob?: string;
+        mimeType?: string;
+        _meta?: Record<string, unknown>;
+      };
+      _meta?: Record<string, unknown>;
+    }
+  | {
+      type: "resource_link";
+      uri: string;
+      name: string;
+      description?: string;
+      mimeType?: string;
+      _meta?: Record<string, unknown>;
+    };
+
+export type McpCallToolResult = {
+  content: McpCallToolContent[];
+  isError?: boolean;
+  structuredContent?: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
+};
+
+export type McpServerConfig = {
+  id: string;
+  name: string;
+  transport: McpTransportConfig;
+  autoStart: boolean;
+  enabled: boolean;
+  capabilities?: McpCapabilities | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type McpServerStatus = "disconnected" | "connecting" | "initializing" | "ready" | "error";
+
+export type McpServerSummary = McpServerConfig & {
+  status: McpServerStatus;
+  toolCount: number;
+  lastError: string | null;
 };
 
 export type SubagentStatus = "completed" | "max_turns" | "aborted" | "error";
@@ -219,8 +295,8 @@ export type PermissionLevel = "allow" | "confirm" | "deny";
 
 export type PermissionConfig = {
   fullAccess: boolean;
-  toolDefaults: Partial<Record<ToolName, PermissionLevel>>;
-  denyReasons: Partial<Record<ToolName, string>>;
+  toolDefaults: Record<string, PermissionLevel>;
+  denyReasons: Record<string, string>;
 };
 
 // --- Auto Compact ---

@@ -1,11 +1,15 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { PermissionConfig, ToolName } from "../shared/types.js";
+import type { PermissionConfig } from "../shared/types.js";
 
 export type AppConfig = {
   defaultWorkspace: string;
   permissions: PermissionConfig;
+  mcp: {
+    healthCheckIntervalMs: number;
+    maxHealthFailures: number;
+  };
 };
 
 const APP_CONFIG_FILE = "app-config.json";
@@ -17,15 +21,10 @@ const DEFAULT_PERMISSION_CONFIG: PermissionConfig = {
   denyReasons: {},
 };
 
-const VALID_PERMISSION_TOOLS = new Set<ToolName>([
-  "bash",
-  "read_file",
-  "write_file",
-  "edit_file",
-  "load_skill",
-  "subagent",
-  "todo_write",
-]);
+const DEFAULT_MCP_CONFIG: AppConfig["mcp"] = {
+  healthCheckIntervalMs: 30_000,
+  maxHealthFailures: 3,
+};
 
 export function getDefaultWorkspacePath(homeDir = os.homedir()): string {
   return path.join(homeDir, DEFAULT_WORKSPACE_NAME);
@@ -39,6 +38,7 @@ export function loadAppConfig(
   const fallbackConfig: AppConfig = {
     defaultWorkspace: getDefaultWorkspacePath(opts?.homeDir),
     permissions: DEFAULT_PERMISSION_CONFIG,
+    mcp: DEFAULT_MCP_CONFIG,
   };
 
   try {
@@ -49,6 +49,7 @@ export function loadAppConfig(
         ? parsed.defaultWorkspace
         : fallbackConfig.defaultWorkspace,
       permissions: normalizePermissionConfig(parsed.permissions),
+      mcp: normalizeMcpConfig(parsed.mcp),
     };
     ensureDir(config.defaultWorkspace);
     return config;
@@ -57,6 +58,22 @@ export function loadAppConfig(
     fs.writeFileSync(configPath, JSON.stringify(fallbackConfig, null, 2), "utf8");
     return fallbackConfig;
   }
+}
+
+function normalizeMcpConfig(value: unknown): AppConfig["mcp"] {
+  if (!value || typeof value !== "object") {
+    return { ...DEFAULT_MCP_CONFIG };
+  }
+
+  const candidate = value as Partial<AppConfig["mcp"]>;
+  return {
+    healthCheckIntervalMs: typeof candidate.healthCheckIntervalMs === "number" && candidate.healthCheckIntervalMs >= 5_000
+      ? candidate.healthCheckIntervalMs
+      : DEFAULT_MCP_CONFIG.healthCheckIntervalMs,
+    maxHealthFailures: typeof candidate.maxHealthFailures === "number" && candidate.maxHealthFailures >= 1
+      ? candidate.maxHealthFailures
+      : DEFAULT_MCP_CONFIG.maxHealthFailures,
+  };
 }
 
 export function saveAppConfig(userDataPath: string, config: AppConfig): void {
@@ -76,17 +93,20 @@ export function normalizePermissionConfig(value: unknown): PermissionConfig {
     toolDefaults: candidate.toolDefaults && typeof candidate.toolDefaults === "object"
       ? Object.fromEntries(
         Object.entries(candidate.toolDefaults).filter(([toolName, level]) =>
-          VALID_PERMISSION_TOOLS.has(toolName as ToolName)
+          typeof toolName === "string"
+          && toolName.trim().length > 0
           && (level === "allow" || level === "confirm" || level === "deny")
         ),
-      ) as PermissionConfig["toolDefaults"]
+      )
       : {},
     denyReasons: candidate.denyReasons && typeof candidate.denyReasons === "object"
       ? Object.fromEntries(
         Object.entries(candidate.denyReasons).filter(([toolName, reason]) =>
-          VALID_PERMISSION_TOOLS.has(toolName as ToolName) && typeof reason === "string"
+          typeof toolName === "string"
+          && toolName.trim().length > 0
+          && typeof reason === "string"
         ),
-      ) as PermissionConfig["denyReasons"]
+      )
       : {},
   };
 }

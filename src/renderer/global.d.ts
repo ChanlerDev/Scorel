@@ -1,5 +1,7 @@
 import type {
   ManualCompactResult,
+  McpServerConfig,
+  McpServerSummary,
   PermissionConfig,
   ProviderConfig,
   SessionSummary,
@@ -60,6 +62,17 @@ type ScorelBridge = {
       apiKey: string,
     ): Promise<{ ok: boolean; error?: string }>;
     testExisting(providerId: string): Promise<{ ok: boolean; error?: string }>;
+  };
+  mcp: {
+    list(): Promise<McpServerSummary[]>;
+    testConnection(
+      config: McpServerConfig,
+    ): Promise<{ ok: boolean; capabilities?: unknown; tools?: unknown[]; error?: string }>;
+    save(config: McpServerConfig): Promise<McpServerSummary | null>;
+    delete(serverId: string): Promise<void>;
+    start(serverId: string): Promise<McpServerSummary | null>;
+    stop(serverId: string): Promise<McpServerSummary | null>;
+    restart(serverId: string): Promise<McpServerSummary | null>;
   };
   secrets: {
     store(providerId: string, secret: string): Promise<void>;

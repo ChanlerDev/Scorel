@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Menu, nativeTheme } from "electron";
 import * as path from "node:path";
 import { initDatabase, listProviders } from "./storage/db.js";
+import { listMcpServers } from "./storage/mcp-servers.js";
 import { SessionManager } from "./core/session-manager.js";
 import { Orchestrator } from "./core/orchestrator.js";
 import type { ProviderEntry } from "./core/orchestrator.js";
@@ -11,6 +12,7 @@ import { getSecret } from "./security/keychain.js";
 import { registerIpcHandlers } from "./ipc-handlers.js";
 import { scanSkills } from "./skills/skill-loader.js";
 import { RunnerManager } from "./runner/runner-manager.js";
+import { McpManager } from "./mcp/manager.js";
 import { buildAppMenu } from "./menu.js";
 import { loadWindowState, saveWindowState, type WindowState } from "./window-state.js";
 import { loadAppConfig } from "./app-config.js";
@@ -64,6 +66,15 @@ app.whenReady().then(() => {
   const eventBus = new EventBus();
   const skills = scanSkills(path.join(app.getAppPath(), "skills"));
   const compactTranscriptDir = path.join(userDataPath, "compact-transcripts");
+  const mcpManager = new McpManager({
+    appName: "Scorel",
+    appVersion: app.getVersion(),
+    healthCheckIntervalMs: appConfig.mcp.healthCheckIntervalMs,
+    maxHealthFailures: appConfig.mcp.maxHealthFailures,
+  });
+  for (const config of listMcpServers(db)) {
+    mcpManager.upsertConfig(config);
+  }
 
   // Mutable provider map — IPC handlers update it on upsert/delete
   const providerMap = buildProviderMap(listProviders(db));
@@ -80,6 +91,7 @@ app.whenReady().then(() => {
     skills,
     compactTranscriptDir,
     getGlobalPermissionConfig: () => appConfig.permissions,
+    mcpManager,
   });
 
   registerIpcHandlers({
@@ -90,6 +102,10 @@ app.whenReady().then(() => {
     providerMap,
     getMainWindow,
     appConfig,
+    mcpManager,
+  });
+  void mcpManager.startAutoStartServers().catch((error: unknown) => {
+    console.error("Failed to start auto-start MCP servers", error);
   });
 
   let windowState = loadWindowState(userDataPath);
@@ -175,6 +191,7 @@ app.whenReady().then(() => {
       try {
         orchestrator.abortAll();
         await orchestrator.shutdownRunner(3000);
+        await mcpManager.shutdownAll();
         db.close();
       } catch (error: unknown) {
         console.error("Graceful shutdown failed", error);

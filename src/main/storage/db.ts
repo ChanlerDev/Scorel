@@ -15,7 +15,7 @@ import { deleteSessionTodos } from "./todos.js";
 // ---------------------------------------------------------------------------
 // Schema version — bump when adding migrations
 // ---------------------------------------------------------------------------
-const CURRENT_USER_VERSION = 3;
+const CURRENT_USER_VERSION = 4;
 
 // ---------------------------------------------------------------------------
 // DDL
@@ -152,6 +152,23 @@ function runMigrations(db: Database.Database): void {
 
       ALTER TABLE sessions ADD COLUMN parent_session_id TEXT REFERENCES sessions(id);
       ALTER TABLE sessions ADD COLUMN permission_config TEXT;
+    `);
+    db.pragma("user_version = 3");
+  }
+
+  if (version < 4) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS mcp_servers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        config TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        auto_start INTEGER NOT NULL DEFAULT 0,
+        capabilities TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers(name);
     `);
     db.pragma(`user_version = ${CURRENT_USER_VERSION}`);
   }

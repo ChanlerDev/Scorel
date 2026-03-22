@@ -53,6 +53,7 @@ describe("db resilience", () => {
       fullAccess: true,
       toolDefaults: {
         read_file: "allow",
+        unknown_tool: "deny",
       },
       denyReasons: {
         bash: "blocked",

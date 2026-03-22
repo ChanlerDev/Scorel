@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type {
   ManualCompactResult,
+  McpCallToolResult,
   PermissionConfig,
   ProviderConfig,
   ScorelMessage,
@@ -22,6 +23,7 @@ import { EventBus } from "./event-bus.js";
 import type { ToolRunner } from "../runner/runner-protocol.js";
 import {
   getToolTimeout,
+  getToolEntry,
   makeDeniedResult,
   makePolicyDeniedResult,
   getToolDefinitions,
@@ -43,6 +45,7 @@ import {
   makeSubagentErrorResult,
   summarizeChildMessages,
 } from "./subagent.js";
+import type { McpManager } from "../mcp/manager.js";
 
 export type ProviderEntry = {
   config: ProviderConfig;
@@ -66,6 +69,7 @@ export class Orchestrator {
   private readonly skills: SkillMeta[];
   private readonly compactTranscriptDir?: string;
   private readonly getGlobalPermissionConfig: () => PermissionConfig | null;
+  private readonly mcpManager: Pick<McpManager, "callTool"> | null;
   private readonly workspaceToolRunners = new Map<string, ToolRunner>();
   private readonly activeChildSessions = new Map<string, string>();
   private readonly pendingApprovals = new Map<string, ApprovalRequest>();
@@ -80,6 +84,7 @@ export class Orchestrator {
     skills?: SkillMeta[];
     compactTranscriptDir?: string;
     getGlobalPermissionConfig?: () => PermissionConfig | null;
+    mcpManager?: Pick<McpManager, "callTool">;
   }) {
     this.db = opts.db;
     this.sessionManager = opts.sessionManager;
@@ -90,6 +95,7 @@ export class Orchestrator {
     this.skills = opts.skills ?? [];
     this.compactTranscriptDir = opts.compactTranscriptDir;
     this.getGlobalPermissionConfig = opts.getGlobalPermissionConfig ?? (() => null);
+    this.mcpManager = opts.mcpManager ?? null;
   }
 
   async send(sessionId: string, text: string): Promise<void> {
@@ -236,12 +242,17 @@ export class Orchestrator {
         return { status: "completed", turnsUsed };
       }
 
-      const hasLocalCalls = toolCalls.some((toolCall) =>
-        toolCall.name === "load_skill" || toolCall.name === "subagent" || toolCall.name === "todo_write"
-      );
+      const hasLocalCalls = toolCalls.some((toolCall) => {
+        const entry = getToolEntry(toolCall.name);
+        return entry?.backend === "local";
+      });
+      const hasMcpCalls = toolCalls.some((toolCall) => {
+        const entry = getToolEntry(toolCall.name);
+        return entry?.backend === "mcp";
+      });
       const toolRunner = await this.getToolRunnerForSession(session);
 
-      if (!toolRunner && !hasLocalCalls) {
+      if (!toolRunner && !hasLocalCalls && !hasMcpCalls) {
         this.sessionManager.setState(sessionId, "idle");
         return { status: "completed", turnsUsed };
       }
@@ -287,11 +298,11 @@ export class Orchestrator {
     const globalPermissions = this.getGlobalPermissionConfig();
 
     for (const toolCall of toolCalls) {
-      const isLocalTool = toolCall.name === "load_skill"
-        || toolCall.name === "subagent"
-        || toolCall.name === "todo_write";
+      const entry = getToolEntry(toolCall.name);
+      const isLocalTool = entry?.backend === "local";
+      const isMcpTool = entry?.backend === "mcp";
 
-      if (!isLocalTool && !toolRunner) {
+      if (!isLocalTool && !isMcpTool && !toolRunner) {
         const unavailable: ToolResult = {
           toolCallId: toolCall.toolCallId,
           isError: true,
@@ -366,6 +377,49 @@ export class Orchestrator {
         result = this.executeTodoWrite(sessionId, toolCall);
       } else if (toolCall.name === "subagent") {
         result = await this.executeSubagent(session, toolCall);
+      } else if (isMcpTool) {
+        if (!this.mcpManager) {
+          result = {
+            toolCallId: toolCall.toolCallId,
+            isError: true,
+            content: `MCP manager unavailable for ${toolCall.name}`,
+          };
+        } else {
+          const timeoutMs = getToolTimeout(toolCall);
+          try {
+            let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+            const mcpResult = await Promise.race([
+              this.mcpManager.callTool(toolCall.name, toolCall.arguments, {
+                toolCallId: toolCall.toolCallId,
+                onUpdate: (partial) => {
+                  this.eventBus.emitAppEvent({
+                    type: "tool.exec.update",
+                    sessionId,
+                    ts: Date.now(),
+                    toolCallId: toolCall.toolCallId,
+                    partial,
+                  });
+                },
+              }),
+              new Promise<McpCallToolResult>((_resolve, reject) => {
+                timeoutHandle = setTimeout(() => {
+                  reject(new Error(`MCP tool "${toolCall.name}" timed out after ${timeoutMs}ms`));
+                }, timeoutMs);
+              }),
+            ]).finally(() => {
+              if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+              }
+            });
+            result = this.mapMcpToolResult(toolCall.toolCallId, mcpResult);
+          } catch (error: unknown) {
+            result = {
+              toolCallId: toolCall.toolCallId,
+              isError: true,
+              content: error instanceof Error ? error.message : String(error),
+            };
+          }
+        }
       } else {
         if (!toolRunner) {
           throw new Error(`Tool runner unavailable for ${toolCall.name}`);
@@ -417,6 +471,37 @@ export class Orchestrator {
       content: [{ type: "text", text: result.content }],
       details: result.details,
       ts: Date.now(),
+    };
+  }
+
+  private mapMcpToolResult(toolCallId: string, mcpResult: McpCallToolResult): ToolResult {
+    const textParts = mcpResult.content.map((part) => {
+      if (part.type === "text") {
+        return part.text;
+      }
+      if (part.type === "image") {
+        return `[image: ${part.mimeType}]`;
+      }
+      if (part.type === "audio") {
+        return `[audio: ${part.mimeType}]`;
+      }
+      if (part.type === "resource") {
+        const mimeType = part.resource.mimeType ? ` ${part.resource.mimeType}` : "";
+        return `[resource:${mimeType}]`;
+      }
+      return `[resource-link: ${part.name}]`;
+    });
+
+    return {
+      toolCallId,
+      isError: mcpResult.isError ?? false,
+      content: textParts.join("\n"),
+      details: {
+        source: "mcp",
+        rawContent: mcpResult.content,
+        structuredContent: mcpResult.structuredContent,
+        meta: mcpResult._meta,
+      },
     };
   }
 

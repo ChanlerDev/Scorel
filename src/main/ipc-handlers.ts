@@ -1,7 +1,12 @@
 import { app, dialog, ipcMain, BrowserWindow, nativeTheme } from "electron";
 import * as fs from "node:fs";
 import type Database from "better-sqlite3";
-import type { PermissionConfig, ProviderConfig, WorkspaceEntry } from "../shared/types.js";
+import type {
+  McpServerConfig,
+  PermissionConfig,
+  ProviderConfig,
+  WorkspaceEntry,
+} from "../shared/types.js";
 import {
   upsertProvider,
   listProviders,
@@ -11,11 +16,13 @@ import {
   upsertWorkspace,
 } from "./storage/db.js";
 import { listTodos } from "./storage/todos.js";
+import { deleteMcpServer, upsertMcpServer } from "./storage/mcp-servers.js";
 import { storeSecret, hasSecret, clearSecret, getSecret } from "./security/keychain.js";
 import type { SessionManager } from "./core/session-manager.js";
 import type { Orchestrator } from "./core/orchestrator.js";
 import type { EventBus } from "./core/event-bus.js";
 import type { ProviderEntry } from "./core/orchestrator.js";
+import type { McpManager } from "./mcp/manager.js";
 import { openaiAdapter } from "./provider/openai-adapter.js";
 import { anthropicAdapter } from "./provider/anthropic-adapter.js";
 import { normalizePermissionConfig, saveAppConfig, type AppConfig } from "./app-config.js";
@@ -28,6 +35,7 @@ export function registerIpcHandlers(opts: {
   providerMap: Map<string, ProviderEntry>;
   getMainWindow: () => BrowserWindow | null;
   appConfig: AppConfig;
+  mcpManager: McpManager;
 }): void {
   const {
     db,
@@ -37,6 +45,7 @@ export function registerIpcHandlers(opts: {
     providerMap,
     getMainWindow,
     appConfig,
+    mcpManager,
   } = opts;
 
   ipcMain.handle("app:selectDirectory", async () => {
@@ -296,6 +305,48 @@ export function registerIpcHandlers(opts: {
 
   ipcMain.handle("tools:deny", async (_event, _sessionId: string, toolCallId: string) => {
     orchestrator.denyToolCall(toolCallId);
+  });
+
+  // --- MCP ---
+
+  ipcMain.handle("mcp:list", async () => {
+    return mcpManager.listServers();
+  });
+
+  ipcMain.handle("mcp:testConnection", async (_event, config: McpServerConfig) => {
+    return mcpManager.testConnection(config);
+  });
+
+  ipcMain.handle("mcp:save", async (_event, config: McpServerConfig) => {
+    upsertMcpServer(db, config);
+    mcpManager.upsertConfig(config);
+    if (config.enabled) {
+      await mcpManager.startServer(config.id).catch(() => undefined);
+    } else {
+      await mcpManager.stopServer(config.id);
+    }
+    return mcpManager.listServers().find((server) => server.id === config.id) ?? null;
+  });
+
+  ipcMain.handle("mcp:delete", async (_event, serverId: string) => {
+    await mcpManager.stopServer(serverId);
+    mcpManager.removeConfig(serverId);
+    deleteMcpServer(db, serverId);
+  });
+
+  ipcMain.handle("mcp:start", async (_event, serverId: string) => {
+    await mcpManager.startServer(serverId);
+    return mcpManager.listServers().find((server) => server.id === serverId) ?? null;
+  });
+
+  ipcMain.handle("mcp:stop", async (_event, serverId: string) => {
+    await mcpManager.stopServer(serverId);
+    return mcpManager.listServers().find((server) => server.id === serverId) ?? null;
+  });
+
+  ipcMain.handle("mcp:restart", async (_event, serverId: string) => {
+    await mcpManager.restartServer(serverId);
+    return mcpManager.listServers().find((server) => server.id === serverId) ?? null;
   });
 }
 

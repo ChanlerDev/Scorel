@@ -3,10 +3,12 @@ import {
   TOOL_REGISTRY,
   getToolDefinitions,
   getToolEntry,
+  registerMcpTools,
   requiresApproval,
   getToolTimeout,
   makeDeniedResult,
   resolveToolApproval,
+  unregisterMcpTools,
 } from "../../src/main/core/tool-dispatch.js";
 import type { ToolCall } from "../../src/shared/types.js";
 
@@ -103,5 +105,38 @@ describe("tool-dispatch", () => {
 
     expect(resolveToolApproval(readCall, null, null)).toEqual({ action: "allow" });
     expect(resolveToolApproval(bashCall, null, null)).toEqual({ action: "confirm" });
+  });
+
+  it("registers and unregisters MCP tools dynamically", () => {
+    registerMcpTools("server-1", "filesystem", [
+      {
+        name: "read_text",
+        description: "Read a text file",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+          },
+          required: ["path"],
+        },
+      },
+    ]);
+
+    expect(getToolEntry("filesystem.read_text")).toMatchObject({
+      name: "filesystem.read_text",
+      source: "mcp",
+      serverId: "server-1",
+      mcpToolName: "read_text",
+    });
+    expect(getToolDefinitions().map((definition) => definition.function.name)).toContain("filesystem.read_text");
+    expect(resolveToolApproval({
+      toolCallId: "tc-mcp",
+      name: "filesystem.read_text",
+      arguments: { path: "README.md" },
+    }, null, null)).toEqual({ action: "confirm" });
+
+    unregisterMcpTools("server-1");
+
+    expect(getToolEntry("filesystem.read_text")).toBeUndefined();
   });
 });

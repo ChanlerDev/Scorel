@@ -59,10 +59,11 @@ describe("app-config", () => {
       toolDefaults: {
         read_file: "allow",
         bash: "alllow",
-        not_a_tool: "deny",
+        "filesystem.read": "deny",
       },
       denyReasons: {
         bash: "blocked",
+        "filesystem.read": "sandboxed",
         read_file: 123,
       },
     });
@@ -71,9 +72,11 @@ describe("app-config", () => {
       fullAccess: true,
       toolDefaults: {
         read_file: "allow",
+        "filesystem.read": "deny",
       },
       denyReasons: {
         bash: "blocked",
+        "filesystem.read": "sandboxed",
       },
     });
   });

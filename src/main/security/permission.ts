@@ -1,4 +1,4 @@
-import type { PermissionConfig, PermissionLevel, ToolName, ToolResult } from "../../shared/types.js";
+import type { PermissionConfig, PermissionLevel, ToolResult } from "../../shared/types.js";
 
 export const DEFAULT_PERMISSION_CONFIG: PermissionConfig = {
   fullAccess: false,
@@ -7,7 +7,7 @@ export const DEFAULT_PERMISSION_CONFIG: PermissionConfig = {
 };
 
 export function resolvePermission(
-  toolName: ToolName,
+  toolName: string,
   sessionConfig: PermissionConfig | null,
   globalConfig: PermissionConfig | null,
 ): { level?: PermissionLevel; reason?: string } {

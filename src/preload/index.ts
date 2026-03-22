@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { PermissionConfig, ProviderConfig } from "../shared/types.js";
+import type { McpServerConfig, PermissionConfig, ProviderConfig } from "../shared/types.js";
 
 // Type-safe bridge — matches ScorelBridge from V0_SPEC (M1 subset)
 const scorelBridge = {
@@ -70,6 +70,15 @@ const scorelBridge = {
       ipcRenderer.invoke("providers:testConnection", config, apiKey),
     testExisting: (providerId: string) =>
       ipcRenderer.invoke("providers:testExisting", providerId),
+  },
+  mcp: {
+    list: () => ipcRenderer.invoke("mcp:list"),
+    testConnection: (config: McpServerConfig) => ipcRenderer.invoke("mcp:testConnection", config),
+    save: (config: McpServerConfig) => ipcRenderer.invoke("mcp:save", config),
+    delete: (serverId: string) => ipcRenderer.invoke("mcp:delete", serverId),
+    start: (serverId: string) => ipcRenderer.invoke("mcp:start", serverId),
+    stop: (serverId: string) => ipcRenderer.invoke("mcp:stop", serverId),
+    restart: (serverId: string) => ipcRenderer.invoke("mcp:restart", serverId),
   },
   secrets: {
     store: (providerId: string, secret: string) =>

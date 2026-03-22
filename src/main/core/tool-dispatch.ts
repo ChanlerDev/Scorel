@@ -1,15 +1,28 @@
-import type { ToolName, ToolCall, ToolResult, PermissionConfig } from "../../shared/types.js";
+import type {
+  BuiltInToolName,
+  McpToolDefinition,
+  ToolCall,
+  ToolResult,
+  PermissionConfig,
+} from "../../shared/types.js";
 import type { ToolDefinition } from "../provider/types.js";
 import { DEFAULT_TOOL_TIMEOUT_MS } from "../../shared/constants.js";
 import { resolvePermission, makeDeniedWithReasonResult } from "../security/permission.js";
 
 export type ApprovalPolicy = "allow" | "confirm";
+export type ToolSource = "builtin" | "mcp";
+export type ToolBackend = "runner" | "local" | "mcp";
 
 export type ToolEntry = {
-  name: ToolName;
+  name: string;
   schema: Record<string, unknown>;
   approval: ApprovalPolicy;
   timeoutMs: number;
+  description?: string;
+  source: ToolSource;
+  backend: ToolBackend;
+  serverId?: string;
+  mcpToolName?: string;
 };
 
 const bashSchema = {
@@ -86,42 +99,80 @@ const todoWriteSchema = {
 };
 
 export const TOOL_REGISTRY = new Map<string, ToolEntry>([
-  ["bash", { name: "bash", schema: bashSchema, approval: "confirm", timeoutMs: DEFAULT_TOOL_TIMEOUT_MS }],
-  ["read_file", { name: "read_file", schema: readFileSchema, approval: "allow", timeoutMs: 10_000 }],
-  ["write_file", { name: "write_file", schema: writeFileSchema, approval: "confirm", timeoutMs: 10_000 }],
-  ["edit_file", { name: "edit_file", schema: editFileSchema, approval: "confirm", timeoutMs: 10_000 }],
-  ["load_skill", { name: "load_skill", schema: loadSkillSchema, approval: "allow", timeoutMs: 5_000 }],
-  ["subagent", { name: "subagent", schema: subagentSchema, approval: "confirm", timeoutMs: 600_000 }],
-  ["todo_write", { name: "todo_write", schema: todoWriteSchema, approval: "allow", timeoutMs: 5_000 }],
+  ["bash", { name: "bash", schema: bashSchema, approval: "confirm", timeoutMs: DEFAULT_TOOL_TIMEOUT_MS, source: "builtin", backend: "runner" }],
+  ["read_file", { name: "read_file", schema: readFileSchema, approval: "allow", timeoutMs: 10_000, source: "builtin", backend: "runner" }],
+  ["write_file", { name: "write_file", schema: writeFileSchema, approval: "confirm", timeoutMs: 10_000, source: "builtin", backend: "runner" }],
+  ["edit_file", { name: "edit_file", schema: editFileSchema, approval: "confirm", timeoutMs: 10_000, source: "builtin", backend: "runner" }],
+  ["load_skill", { name: "load_skill", schema: loadSkillSchema, approval: "allow", timeoutMs: 5_000, source: "builtin", backend: "local" }],
+  ["subagent", { name: "subagent", schema: subagentSchema, approval: "confirm", timeoutMs: 600_000, source: "builtin", backend: "local" }],
+  ["todo_write", { name: "todo_write", schema: todoWriteSchema, approval: "allow", timeoutMs: 5_000, source: "builtin", backend: "local" }],
 ]);
+
+export function qualifyMcpToolName(serverName: string, toolName: string): string {
+  return `${serverName}.${toolName}`;
+}
+
+export function registerMcpTools(
+  serverId: string,
+  serverName: string,
+  tools: McpToolDefinition[],
+): void {
+  unregisterMcpTools(serverId);
+  for (const tool of tools) {
+    const qualifiedName = qualifyMcpToolName(serverName, tool.name);
+    TOOL_REGISTRY.set(qualifiedName, {
+      name: qualifiedName,
+      schema: tool.inputSchema,
+      approval: "confirm",
+      timeoutMs: DEFAULT_TOOL_TIMEOUT_MS,
+      description: tool.description,
+      source: "mcp",
+      backend: "mcp",
+      serverId,
+      mcpToolName: tool.name,
+    });
+  }
+}
+
+export function unregisterMcpTools(serverId: string): void {
+  for (const [name, entry] of TOOL_REGISTRY.entries()) {
+    if (entry.source === "mcp" && entry.serverId === serverId) {
+      TOOL_REGISTRY.delete(name);
+    }
+  }
+}
 
 export function getToolDefinitions(opts?: {
   includeRunnerTools?: boolean;
   includeLoadSkill?: boolean;
   includeSubagent?: boolean;
   includeTodoWrite?: boolean;
+  includeMcpTools?: boolean;
 }): ToolDefinition[] {
   const includeRunnerTools = opts?.includeRunnerTools ?? true;
   const includeLoadSkill = opts?.includeLoadSkill ?? false;
   const includeSubagent = opts?.includeSubagent ?? false;
   const includeTodoWrite = opts?.includeTodoWrite ?? false;
+  const includeMcpTools = opts?.includeMcpTools ?? true;
   const defs: ToolDefinition[] = [];
   for (const entry of TOOL_REGISTRY.values()) {
-    const isRunnerTool = !["load_skill", "subagent", "todo_write"].includes(entry.name);
+    const isRunnerTool = entry.backend === "runner";
     const isLoadSkill = entry.name === "load_skill";
     const isSubagent = entry.name === "subagent";
     const isTodoWrite = entry.name === "todo_write";
+    const isMcpTool = entry.backend === "mcp";
 
     if (isRunnerTool && !includeRunnerTools) continue;
     if (isLoadSkill && !includeLoadSkill) continue;
     if (isSubagent && !includeSubagent) continue;
     if (isTodoWrite && !includeTodoWrite) continue;
+    if (isMcpTool && !includeMcpTools) continue;
 
     defs.push({
       type: "function",
       function: {
         name: entry.name,
-        description: getToolDescription(entry.name),
+        description: getToolDescription(entry),
         parameters: entry.schema,
       },
     });
@@ -129,8 +180,12 @@ export function getToolDefinitions(opts?: {
   return defs;
 }
 
-function getToolDescription(name: ToolName): string {
-  switch (name) {
+function getToolDescription(entry: ToolEntry): string {
+  if (entry.description) {
+    return entry.description;
+  }
+
+  switch (entry.name as BuiltInToolName) {
     case "bash":
       return "Execute a shell command using the current workspace as the default working directory. Returns stdout+stderr combined output.";
     case "read_file":
@@ -145,6 +200,8 @@ function getToolDescription(name: ToolName): string {
       return "Spawn an isolated child conversation to perform a subtask. The child has access to all tools but runs in a separate context. Returns a summary of the child's work.";
     case "todo_write":
       return "Create, update, delete, or list structured todo items for tracking multi-step task progress.";
+    default:
+      return "Call an MCP tool exposed by a connected server.";
   }
 }
 

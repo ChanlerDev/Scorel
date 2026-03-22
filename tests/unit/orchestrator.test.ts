@@ -6,6 +6,7 @@ import { Orchestrator } from "../../src/main/core/orchestrator.js";
 import type { ProviderEntry } from "../../src/main/core/orchestrator.js";
 import type {
   AssistantMessage,
+  McpCallToolResult,
   ProviderConfig,
   ContentPart,
 } from "../../src/shared/types.js";
@@ -13,6 +14,8 @@ import type { AssistantMessageEvent, ScorelEvent } from "../../src/shared/events
 import type { ProviderAdapter, ProviderRequestOptions } from "../../src/main/provider/types.js";
 import type { ToolRunner } from "../../src/main/runner/runner-protocol.js";
 import type Database from "better-sqlite3";
+import type { McpManager } from "../../src/main/mcp/manager.js";
+import { registerMcpTools, unregisterMcpTools } from "../../src/main/core/tool-dispatch.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -183,10 +186,11 @@ describe("Orchestrator", () => {
     adapter: ProviderAdapter,
     apiKey: string | null = "sk-test",
     toolRunner?: ToolRunner,
+    mcpManager?: Pick<McpManager, "callTool">,
   ): Orchestrator {
     const providers = new Map<string, ProviderEntry>();
     providers.set(TEST_PROVIDER_ID, createProviderEntry(adapter, apiKey));
-    return new Orchestrator({ db, sessionManager, eventBus, providers, toolRunner });
+    return new Orchestrator({ db, sessionManager, eventBus, providers, toolRunner, mcpManager });
   }
 
   function createSession(): string {
@@ -243,6 +247,116 @@ describe("Orchestrator", () => {
 
     expect(getMetaSpy).toHaveBeenCalled();
     expect(getSpy).not.toHaveBeenCalled();
+  });
+
+  it("routes MCP tool calls through the MCP manager", async () => {
+    registerMcpTools("server-1", "filesystem", [
+      {
+        name: "read_text",
+        description: "Read text",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+          },
+          required: ["path"],
+        },
+      },
+    ]);
+
+    const mcpResponse: McpCallToolResult = {
+      content: [
+        { type: "text", text: "contents from MCP" },
+      ],
+      isError: false,
+    };
+    const callTool = vi.fn(async () => mcpResponse);
+    const adapter = createMockAdapter([{
+      role: "assistant",
+      id: "ast-mcp",
+      api: "openai-chat-completions",
+      providerId: TEST_PROVIDER_ID,
+      modelId: TEST_MODEL_ID,
+      content: [
+        { type: "toolCall", id: "tc-mcp", name: "filesystem.read_text", arguments: { path: "README.md" } },
+      ],
+      stopReason: "toolUse",
+      ts: Date.now(),
+    }, makeAssistantMessage()]);
+    const orch = createOrchestrator(adapter, "sk-test", undefined, { callTool } as Pick<McpManager, "callTool">);
+    const sessionId = createSession();
+    sessionManager.setPermissionConfig(sessionId, {
+      fullAccess: false,
+      toolDefaults: {
+        "filesystem.read_text": "allow",
+      },
+      denyReasons: {},
+    });
+
+    await orch.send(sessionId, "Read the file");
+
+    expect(callTool).toHaveBeenCalledWith("filesystem.read_text", { path: "README.md" }, expect.any(Object));
+    const toolResult = sessionManager.getMessages(sessionId).find((message) => message.role === "toolResult");
+    expect(toolResult).toMatchObject({
+      role: "toolResult",
+      toolName: "filesystem.read_text",
+      isError: false,
+      content: [{ type: "text", text: "contents from MCP" }],
+    });
+
+    unregisterMcpTools("server-1");
+  });
+
+  it("maps non-text MCP content into a model-visible placeholder", async () => {
+    registerMcpTools("server-1", "artifacts", [
+      {
+        name: "snapshot",
+        description: "Capture image output",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+    ]);
+
+    const callTool = vi.fn(async () => ({
+      content: [
+        { type: "image", data: "abc123", mimeType: "image/png" },
+      ],
+      isError: false,
+    }));
+    const adapter = createMockAdapter([{
+      role: "assistant",
+      id: "ast-mcp-image",
+      api: "openai-chat-completions",
+      providerId: TEST_PROVIDER_ID,
+      modelId: TEST_MODEL_ID,
+      content: [
+        { type: "toolCall", id: "tc-mcp-image", name: "artifacts.snapshot", arguments: {} },
+      ],
+      stopReason: "toolUse",
+      ts: Date.now(),
+    }, makeAssistantMessage()]);
+    const orch = createOrchestrator(adapter, "sk-test", undefined, { callTool } as Pick<McpManager, "callTool">);
+    const sessionId = createSession();
+    sessionManager.setPermissionConfig(sessionId, {
+      fullAccess: false,
+      toolDefaults: {
+        "artifacts.snapshot": "allow",
+      },
+      denyReasons: {},
+    });
+
+    await orch.send(sessionId, "Capture it");
+
+    const toolResult = sessionManager.getMessages(sessionId).find((message) => message.role === "toolResult");
+    expect(toolResult).toMatchObject({
+      role: "toolResult",
+      toolName: "artifacts.snapshot",
+      content: [{ type: "text", text: "[image: image/png]" }],
+    });
+
+    unregisterMcpTools("server-1");
   });
 
   // 2. send() with tool calls
