@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
   getDefaultWorkspacePath,
   loadAppConfig,
+  normalizePermissionConfig,
 } from "../../src/main/app-config.js";
 
 describe("app-config", () => {
@@ -50,5 +51,30 @@ describe("app-config", () => {
 
     expect(config.defaultWorkspace).toBe(getDefaultWorkspacePath(fakeHomeDir));
     expect(fs.existsSync(config.defaultWorkspace)).toBe(true);
+  });
+
+  it("normalizes invalid permission config entries", () => {
+    const config = normalizePermissionConfig({
+      fullAccess: true,
+      toolDefaults: {
+        read_file: "allow",
+        bash: "alllow",
+        not_a_tool: "deny",
+      },
+      denyReasons: {
+        bash: "blocked",
+        read_file: 123,
+      },
+    });
+
+    expect(config).toEqual({
+      fullAccess: true,
+      toolDefaults: {
+        read_file: "allow",
+      },
+      denyReasons: {
+        bash: "blocked",
+      },
+    });
   });
 });

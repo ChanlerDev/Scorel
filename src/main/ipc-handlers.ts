@@ -1,7 +1,7 @@
 import { app, dialog, ipcMain, BrowserWindow, nativeTheme } from "electron";
 import * as fs from "node:fs";
 import type Database from "better-sqlite3";
-import type { ProviderConfig, WorkspaceEntry } from "../shared/types.js";
+import type { PermissionConfig, ProviderConfig, WorkspaceEntry } from "../shared/types.js";
 import {
   upsertProvider,
   listProviders,
@@ -10,6 +10,7 @@ import {
   listWorkspaces,
   upsertWorkspace,
 } from "./storage/db.js";
+import { listTodos } from "./storage/todos.js";
 import { storeSecret, hasSecret, clearSecret, getSecret } from "./security/keychain.js";
 import type { SessionManager } from "./core/session-manager.js";
 import type { Orchestrator } from "./core/orchestrator.js";
@@ -17,7 +18,7 @@ import type { EventBus } from "./core/event-bus.js";
 import type { ProviderEntry } from "./core/orchestrator.js";
 import { openaiAdapter } from "./provider/openai-adapter.js";
 import { anthropicAdapter } from "./provider/anthropic-adapter.js";
-import type { AppConfig } from "./app-config.js";
+import { normalizePermissionConfig, saveAppConfig, type AppConfig } from "./app-config.js";
 
 export function registerIpcHandlers(opts: {
   db: Database.Database;
@@ -259,6 +260,29 @@ export function registerIpcHandlers(opts: {
       ...workspace,
       exists: fs.existsSync(workspace.path),
     }));
+  });
+
+  ipcMain.handle("todos:list", async (_event, sessionId: string) => {
+    return listTodos(db, sessionId);
+  });
+
+  ipcMain.handle("permissions:getGlobal", async () => {
+    return appConfig.permissions;
+  });
+
+  ipcMain.handle("permissions:setGlobal", async (_event, config: PermissionConfig) => {
+    appConfig.permissions = normalizePermissionConfig(config);
+    saveAppConfig(app.getPath("userData"), appConfig);
+    return appConfig.permissions;
+  });
+
+  ipcMain.handle("permissions:getSession", async (_event, sessionId: string) => {
+    return sessionManager.getMeta(sessionId)?.permissionConfig ?? null;
+  });
+
+  ipcMain.handle("permissions:setSession", async (_event, sessionId: string, config: PermissionConfig | null) => {
+    sessionManager.setPermissionConfig(sessionId, config ? normalizePermissionConfig(config) : null);
+    return sessionManager.getMeta(sessionId)?.permissionConfig ?? null;
   });
 
   ipcMain.handle("tools:approve", async (_event, _sessionId: string, toolCallId: string) => {

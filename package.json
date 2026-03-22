@@ -5,7 +5,11 @@
   "private": true,
   "main": "dist/main/index.js",
   "scripts": {
+    "rebuild:native:node": "pnpm rebuild better-sqlite3",
+    "rebuild:native:electron": "electron-rebuild -f -w better-sqlite3",
+    "predev": "pnpm rebuild:native:electron",
     "dev": "electron .",
+    "prestart": "pnpm rebuild:native:electron",
     "build": "pnpm build:main && pnpm build:preload && pnpm build:runner && tsc -p tsconfig.renderer.json && pnpm build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
     "build:preload": "tsc -p tsconfig.preload.json",
@@ -13,6 +17,7 @@
     "build:renderer": "vite build",
     "pack": "node --experimental-strip-types scripts/build.ts",
     "pack:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false node --experimental-strip-types scripts/build.ts",
+    "pretest": "pnpm rebuild:native:node",
     "test": "vitest --run",
     "test:watch": "vitest",
     "lint": "eslint src runner tests vite.config.ts vitest.config.ts",
@@ -27,6 +32,7 @@
   },
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
+    "@electron/rebuild": "3.6.1",
     "@eslint/js": "^9.39.4",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.10.0",

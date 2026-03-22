@@ -112,6 +112,27 @@ function assistantMixedToolBatchMessage(): AssistantMessage {
   };
 }
 
+function assistantSubagentMessage(): AssistantMessage {
+  return {
+    role: "assistant",
+    id: "assistant-subagent",
+    api: "openai-chat-completions",
+    providerId: TEST_PROVIDER_ID,
+    modelId: TEST_MODEL_ID,
+    content: [
+      { type: "text", text: "I should delegate this." },
+      {
+        type: "toolCall",
+        id: "subagent-call-1",
+        name: "subagent",
+        arguments: { task: "Inspect the issue" },
+      },
+    ],
+    stopReason: "toolUse",
+    ts: Date.now(),
+  };
+}
+
 function createSequentialAdapter(responses: AssistantMessage[]) {
   const requests: ProviderRequestOptions[] = [];
   let index = 0;
@@ -445,6 +466,53 @@ describe("Orchestrator M4", () => {
       isError: true,
     });
     expect(messages[2].content[0].text).toBe("Unknown skill: missing-skill");
+  });
+
+  it("does not create an orphan child session when subagent loses API key access", async () => {
+    const { adapter } = createSequentialAdapter([
+      assistantSubagentMessage(),
+      assistantTextMessage("final-response", "Subagent could not start."),
+    ]);
+    let apiKeyCalls = 0;
+    const providers = new Map<string, ProviderEntry>();
+    providers.set(TEST_PROVIDER_ID, {
+      config: TEST_PROVIDER_CONFIG,
+      adapter,
+      getApiKey: async () => {
+        apiKeyCalls += 1;
+        return apiKeyCalls === 1 ? "sk-test" : null;
+      },
+    });
+
+    const events: Array<string> = [];
+    eventBus.onAppEvent((event) => {
+      events.push(event.type);
+    });
+
+    const orchestrator = new Orchestrator({
+      db,
+      sessionManager,
+      eventBus,
+      providers,
+      skills: [],
+    });
+
+    const sessionId = createSession();
+    const sendPromise = orchestrator.send(sessionId, "Delegate this task");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    orchestrator.approveToolCall("subagent-call-1");
+    await sendPromise;
+
+    expect(sessionManager.list()).toHaveLength(1);
+    expect(events).not.toContain("subagent.start");
+
+    const messages = sessionManager.getMessages(sessionId);
+    expect(messages[2]).toMatchObject({
+      role: "toolResult",
+      toolName: "subagent",
+      isError: true,
+    });
+    expect(messages[2].content[0].text).toContain("No API key");
   });
 
   it("emits compact.failed and restores idle state when manual compact fails", async () => {

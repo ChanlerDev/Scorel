@@ -79,6 +79,7 @@ app.whenReady().then(() => {
     }),
     skills,
     compactTranscriptDir,
+    getGlobalPermissionConfig: () => appConfig.permissions,
   });
 
   registerIpcHandlers({

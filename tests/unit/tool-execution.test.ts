@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { initDatabase } from "../../src/main/storage/db.js";
 import { SessionManager } from "../../src/main/core/session-manager.js";
 import { EventBus } from "../../src/main/core/event-bus.js";
@@ -262,6 +262,85 @@ describe("Orchestrator — Tool Execution (M2)", () => {
     const tr3 = msgs[4] as ToolResultMessage;
     expect(tr3.toolCallId).toBe("tc-3");
     expect(tr3.isError).toBe(false);
+  });
+
+  it("tracks approvals independently across concurrent sessions", async () => {
+    const adapter = createSequentialAdapter([
+      {
+        ...makeToolCallAssistant([{ id: "tc-s1", name: "bash", args: { command: "pwd" } }]),
+        id: "ast-tc-s1",
+      },
+      {
+        ...makeToolCallAssistant([{ id: "tc-s2", name: "bash", args: { command: "ls" } }]),
+        id: "ast-tc-s2",
+      },
+      {
+        ...makeFinalAssistant("Session 1 done"),
+        id: "ast-final-s1",
+      },
+      {
+        ...makeFinalAssistant("Session 2 done"),
+        id: "ast-final-s2",
+      },
+    ]);
+    const orch = createOrchestrator(adapter);
+    const sessionId1 = createSession();
+    const sessionId2 = createSession();
+
+    const send1 = orch.send(sessionId1, "Run pwd");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const send2 = orch.send(sessionId2, "Run ls");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(sessionManager.getState(sessionId1)).toBe("awaiting_approval");
+    expect(sessionManager.getState(sessionId2)).toBe("awaiting_approval");
+
+    orch.approveToolCall("tc-s1");
+    await expect(Promise.race([
+      send1.then(() => "resolved"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("timed_out"), 100)),
+    ])).resolves.toBe("resolved");
+
+    expect(sessionManager.getState(sessionId2)).toBe("awaiting_approval");
+
+    orch.approveToolCall("tc-s2");
+    await send2;
+
+    expect(sessionManager.getMessages(sessionId1).at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Session 1 done" }],
+    });
+    expect(sessionManager.getMessages(sessionId2).at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Session 2 done" }],
+    });
+  });
+
+  it("returns an error tool result when todo_write storage throws", async () => {
+    const adapter = createSequentialAdapter([
+      makeToolCallAssistant([{ id: "tc-todo", name: "todo_write", args: { operation: "create", title: "Broken" } }]),
+      makeFinalAssistant("Handled the todo failure."),
+    ]);
+    const orch = createOrchestrator(adapter);
+    const sessionId = createSession();
+    const originalPrepare = db.prepare.bind(db);
+
+    vi.spyOn(db, "prepare").mockImplementation(((sql: string) => {
+      if (sql.includes("INSERT INTO todos")) {
+        throw new Error("disk full");
+      }
+      return originalPrepare(sql);
+    }) as typeof db.prepare);
+
+    await orch.send(sessionId, "Create a todo");
+
+    const toolResult = sessionManager.getMessages(sessionId)[2] as ToolResultMessage;
+    expect(toolResult).toMatchObject({
+      role: "toolResult",
+      toolName: "todo_write",
+      isError: true,
+    });
+    expect(toolResult.content[0]?.text).toContain("disk full");
   });
 
   // MockRunner tracks call history

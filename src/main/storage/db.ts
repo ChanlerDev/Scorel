@@ -8,11 +8,12 @@ import type {
   WorkspaceRecord,
 } from "../../shared/types.js";
 import { FTS_CONTENT_MAX_CHARS } from "../../shared/constants.js";
+import { deleteSessionTodos } from "./todos.js";
 
 // ---------------------------------------------------------------------------
 // Schema version — bump when adding migrations
 // ---------------------------------------------------------------------------
-const CURRENT_USER_VERSION = 2;
+const CURRENT_USER_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // DDL
@@ -131,6 +132,25 @@ function runMigrations(db: Database.Database): void {
       FROM sessions
       WHERE workspace_root IS NOT NULL AND workspace_root != '';
     `);
+    db.pragma("user_version = 2");
+  }
+
+  if (version < 3) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS todos (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES sessions(id),
+        title TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        notes TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_todos_session ON todos(session_id);
+
+      ALTER TABLE sessions ADD COLUMN parent_session_id TEXT REFERENCES sessions(id);
+      ALTER TABLE sessions ADD COLUMN permission_config TEXT;
+    `);
     db.pragma(`user_version = ${CURRENT_USER_VERSION}`);
   }
 }
@@ -159,7 +179,12 @@ function jsonOrNull(value: unknown): string | null {
 
 function parseJsonOrNull<T>(raw: string | null): T | null {
   if (raw == null) return null;
-  return JSON.parse(raw) as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch (error: unknown) {
+    console.error("Failed to parse JSON from DB:", error);
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +354,8 @@ type CreateSessionOpts = {
   workspaceRoot: string;
   providerId?: string;
   modelId?: string;
+  parentSessionId?: string;
+  permissionConfig?: string;
 };
 
 export function createSession(
@@ -339,14 +366,18 @@ export function createSession(
   db.prepare(
     `INSERT INTO sessions
        (id, title, created_at, updated_at, archived,
-        workspace_root, active_provider_id, active_model_id)
-     VALUES (@id, NULL, @ts, @ts, 0, @workspaceRoot, @providerId, @modelId)`,
+        workspace_root, active_provider_id, active_model_id,
+        parent_session_id, permission_config)
+     VALUES (@id, NULL, @ts, @ts, 0, @workspaceRoot, @providerId, @modelId,
+             @parentSessionId, @permissionConfig)`,
   ).run({
     id: opts.id,
     ts,
     workspaceRoot: opts.workspaceRoot,
     providerId: opts.providerId ?? null,
     modelId: opts.modelId ?? null,
+    parentSessionId: opts.parentSessionId ?? null,
+    permissionConfig: opts.permissionConfig ?? null,
   });
 }
 
@@ -417,6 +448,8 @@ type SessionDetailRow = SessionRow & {
   active_compact_id: string | null;
   pinned_system_prompt: string | null;
   settings_json: string | null;
+  parent_session_id: string | null;
+  permission_config: string | null;
 };
 
 export function getSessionDetail(
@@ -427,12 +460,15 @@ export function getSessionDetail(
   activeCompactId: string | null;
   pinnedSystemPrompt: string | null;
   settings: Record<string, unknown> | null;
+  parentSessionId: string | null;
+  permissionConfig: import("../../shared/types.js").PermissionConfig | null;
 } | null {
   const row = db
     .prepare(
       `SELECT id, title, created_at, updated_at, archived,
               workspace_root, active_provider_id, active_model_id,
-              active_compact_id, pinned_system_prompt, settings_json
+              active_compact_id, pinned_system_prompt, settings_json,
+              parent_session_id, permission_config
        FROM sessions WHERE id = ?`,
     )
     .get(sessionId) as SessionDetailRow | undefined;
@@ -442,7 +478,19 @@ export function getSessionDetail(
     activeCompactId: row.active_compact_id,
     pinnedSystemPrompt: row.pinned_system_prompt,
     settings: parseJsonOrNull<Record<string, unknown>>(row.settings_json),
+    parentSessionId: row.parent_session_id,
+    permissionConfig: parseJsonOrNull<import("../../shared/types.js").PermissionConfig>(row.permission_config),
   };
+}
+
+export function updateSessionPermissionConfig(
+  db: Database.Database,
+  sessionId: string,
+  config: import("../../shared/types.js").PermissionConfig | null,
+): void {
+  db.prepare(
+    "UPDATE sessions SET permission_config = ?, updated_at = ? WHERE id = ?",
+  ).run(config ? JSON.stringify(config) : null, now(), sessionId);
 }
 
 export function renameSession(
@@ -484,6 +532,7 @@ export function deleteSession(
     db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
     db.prepare("DELETE FROM events WHERE session_id = ?").run(sessionId);
     db.prepare("DELETE FROM compactions WHERE session_id = ?").run(sessionId);
+    deleteSessionTodos(db, sessionId);
     db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
   });
   del();

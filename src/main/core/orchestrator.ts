@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import type {
   ManualCompactResult,
+  PermissionConfig,
   ProviderConfig,
   ScorelMessage,
   UserMessage,
@@ -11,6 +12,7 @@ import type {
   ToolCall,
   ToolCallPart,
   SessionMeta,
+  SubagentStatus,
 } from "../../shared/types.js";
 import type { AssistantMessageEvent } from "../../shared/events.js";
 import { MICRO_COMPACT_KEEP_RECENT } from "../../shared/constants.js";
@@ -19,10 +21,11 @@ import { SessionManager } from "./session-manager.js";
 import { EventBus } from "./event-bus.js";
 import type { ToolRunner } from "../runner/runner-protocol.js";
 import {
-  requiresApproval,
   getToolTimeout,
   makeDeniedResult,
+  makePolicyDeniedResult,
   getToolDefinitions,
+  resolveToolApproval,
 } from "./tool-dispatch.js";
 import {
   applyBoundaryResume,
@@ -32,6 +35,14 @@ import {
 import { generateId } from "./id.js";
 import { getCompaction } from "../storage/compactions.js";
 import { formatSkillList, loadSkill } from "../skills/skill-loader.js";
+import { deleteTodo, listTodos, updateTodo, createTodo } from "../storage/todos.js";
+import { getAutoCompactConfig, runAutoCompact, shouldAutoCompact } from "./auto-compact.js";
+import {
+  canSpawnSubagent,
+  getSubagentMaxTurns,
+  makeSubagentErrorResult,
+  summarizeChildMessages,
+} from "./subagent.js";
 
 export type ProviderEntry = {
   config: ProviderConfig;
@@ -40,6 +51,7 @@ export type ProviderEntry = {
 };
 
 type ApprovalRequest = {
+  sessionId: string;
   toolCall: ToolCall;
   resolve: (decision: "approved" | "denied") => void;
 };
@@ -53,8 +65,10 @@ export class Orchestrator {
   private readonly createToolRunner: ((workspaceRoot: string) => Promise<ToolRunner>) | null;
   private readonly skills: SkillMeta[];
   private readonly compactTranscriptDir?: string;
+  private readonly getGlobalPermissionConfig: () => PermissionConfig | null;
   private readonly workspaceToolRunners = new Map<string, ToolRunner>();
-  private pendingApproval: ApprovalRequest | null = null;
+  private readonly activeChildSessions = new Map<string, string>();
+  private readonly pendingApprovals = new Map<string, ApprovalRequest>();
 
   constructor(opts: {
     db: Database.Database;
@@ -65,6 +79,7 @@ export class Orchestrator {
     createToolRunner?: (workspaceRoot: string) => Promise<ToolRunner>;
     skills?: SkillMeta[];
     compactTranscriptDir?: string;
+    getGlobalPermissionConfig?: () => PermissionConfig | null;
   }) {
     this.db = opts.db;
     this.sessionManager = opts.sessionManager;
@@ -74,9 +89,18 @@ export class Orchestrator {
     this.createToolRunner = opts.createToolRunner ?? null;
     this.skills = opts.skills ?? [];
     this.compactTranscriptDir = opts.compactTranscriptDir;
+    this.getGlobalPermissionConfig = opts.getGlobalPermissionConfig ?? (() => null);
   }
 
   async send(sessionId: string, text: string): Promise<void> {
+    await this.runSessionPrompt(sessionId, text);
+  }
+
+  private async runSessionPrompt(
+    sessionId: string,
+    text: string,
+    opts?: { maxTurns?: number },
+  ): Promise<{ status: Exclude<SubagentStatus, "error">; turnsUsed: number }> {
     const state = this.sessionManager.getState(sessionId);
     if (state !== "idle") {
       throw new Error(`Session ${sessionId} is in state "${state}", expected "idle"`);
@@ -113,7 +137,7 @@ export class Orchestrator {
 
     // Enter the model loop (stream → tool calls → stream → ... → final text)
     try {
-      await this.modelLoop(sessionId, provider, apiKey);
+      return await this.modelLoop(sessionId, provider, apiKey, opts);
     } catch (err) {
       this.sessionManager.clearAbortController(sessionId);
       this.sessionManager.setState(sessionId, "idle");
@@ -125,8 +149,12 @@ export class Orchestrator {
     sessionId: string,
     provider: ProviderEntry,
     apiKey: string,
-  ): Promise<void> {
+    opts?: { maxTurns?: number },
+  ): Promise<{ status: Exclude<SubagentStatus, "error">; turnsUsed: number }> {
+    let turnsUsed = 0;
+
     while (true) {
+      turnsUsed += 1;
       const session = this.sessionManager.getMeta(sessionId)!;
       const systemPrompt = this.assembleSystemPrompt(session);
       const messages = this.getContextMessages(sessionId, session);
@@ -182,7 +210,7 @@ export class Orchestrator {
           this.sessionManager.appendMessage(sessionId, assistantMessage);
         }
         this.sessionManager.setState(sessionId, "idle");
-        return;
+        return { status: "aborted", turnsUsed };
       }
 
       // Persist assistant message
@@ -196,23 +224,26 @@ export class Orchestrator {
 
       // If no tool calls, we're done
       if (assistantMessage.stopReason !== "toolUse") {
+        await this.maybeAutoCompact(sessionId, session, provider, apiKey, assistantMessage);
         this.sessionManager.setState(sessionId, "idle");
-        return;
+        return { status: "completed", turnsUsed };
       }
 
       // Extract tool calls
       const toolCalls = this.extractToolCalls(assistantMessage);
       if (toolCalls.length === 0) {
         this.sessionManager.setState(sessionId, "idle");
-        return;
+        return { status: "completed", turnsUsed };
       }
 
-      const hasSkillCalls = toolCalls.some((toolCall) => toolCall.name === "load_skill");
+      const hasLocalCalls = toolCalls.some((toolCall) =>
+        toolCall.name === "load_skill" || toolCall.name === "subagent" || toolCall.name === "todo_write"
+      );
       const toolRunner = await this.getToolRunnerForSession(session);
 
-      if (!toolRunner && !hasSkillCalls) {
+      if (!toolRunner && !hasLocalCalls) {
         this.sessionManager.setState(sessionId, "idle");
-        return;
+        return { status: "completed", turnsUsed };
       }
 
       // Execute tool calls sequentially
@@ -221,6 +252,11 @@ export class Orchestrator {
       // Persist tool results and continue loop
       for (const result of toolResults) {
         this.sessionManager.appendMessage(sessionId, result);
+      }
+
+      if (opts?.maxTurns != null && turnsUsed >= opts.maxTurns) {
+        this.sessionManager.setState(sessionId, "idle");
+        return { status: "max_turns", turnsUsed };
       }
 
       // Loop back to stream with updated context
@@ -243,9 +279,19 @@ export class Orchestrator {
     toolRunner: ToolRunner | null,
   ): Promise<ToolResultMessage[]> {
     const results: ToolResultMessage[] = [];
+    const session = this.sessionManager.getMeta(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    const globalPermissions = this.getGlobalPermissionConfig();
 
     for (const toolCall of toolCalls) {
-      if (toolCall.name !== "load_skill" && !toolRunner) {
+      const isLocalTool = toolCall.name === "load_skill"
+        || toolCall.name === "subagent"
+        || toolCall.name === "todo_write";
+
+      if (!isLocalTool && !toolRunner) {
         const unavailable: ToolResult = {
           toolCallId: toolCall.toolCallId,
           isError: true,
@@ -270,8 +316,15 @@ export class Orchestrator {
         continue;
       }
 
-      // Check if approval is needed
-      if (requiresApproval(toolCall)) {
+      const approval = resolveToolApproval(toolCall, session.permissionConfig, globalPermissions);
+
+      if (approval.action === "deny") {
+        const denied = makePolicyDeniedResult(toolCall, approval.reason);
+        results.push(this.toToolResultMessage(toolCall, denied));
+        continue;
+      }
+
+      if (approval.action === "confirm") {
         this.sessionManager.setState(sessionId, "awaiting_approval");
         this.eventBus.emitAppEvent({
           type: "approval.requested",
@@ -280,7 +333,7 @@ export class Orchestrator {
           toolCall,
         });
 
-        const decision = await this.waitForApproval(toolCall);
+        const decision = await this.waitForApproval(sessionId, toolCall);
 
         this.eventBus.emitAppEvent({
           type: "approval.resolved",
@@ -309,6 +362,10 @@ export class Orchestrator {
       let result: ToolResult;
       if (toolCall.name === "load_skill") {
         result = this.executeLoadSkill(toolCall);
+      } else if (toolCall.name === "todo_write") {
+        result = this.executeTodoWrite(sessionId, toolCall);
+      } else if (toolCall.name === "subagent") {
+        result = await this.executeSubagent(session, toolCall);
       } else {
         if (!toolRunner) {
           throw new Error(`Tool runner unavailable for ${toolCall.name}`);
@@ -358,14 +415,14 @@ export class Orchestrator {
       toolName: toolCall.name,
       isError: result.isError,
       content: [{ type: "text", text: result.content }],
-      details: result.details as ToolResultMessage["details"],
+      details: result.details,
       ts: Date.now(),
     };
   }
 
-  private waitForApproval(toolCall: ToolCall): Promise<"approved" | "denied"> {
+  private waitForApproval(sessionId: string, toolCall: ToolCall): Promise<"approved" | "denied"> {
     return new Promise((resolve) => {
-      this.pendingApproval = { toolCall, resolve };
+      this.pendingApprovals.set(toolCall.toolCallId, { sessionId, toolCall, resolve });
     });
   }
 
@@ -438,22 +495,29 @@ export class Orchestrator {
   }
 
   approveToolCall(toolCallId: string): void {
-    if (this.pendingApproval && this.pendingApproval.toolCall.toolCallId === toolCallId) {
-      const { resolve } = this.pendingApproval;
-      this.pendingApproval = null;
+    const pendingApproval = this.pendingApprovals.get(toolCallId);
+    if (pendingApproval) {
+      const { resolve } = pendingApproval;
+      this.pendingApprovals.delete(toolCallId);
       resolve("approved");
     }
   }
 
   denyToolCall(toolCallId: string): void {
-    if (this.pendingApproval && this.pendingApproval.toolCall.toolCallId === toolCallId) {
-      const { resolve } = this.pendingApproval;
-      this.pendingApproval = null;
+    const pendingApproval = this.pendingApprovals.get(toolCallId);
+    if (pendingApproval) {
+      const { resolve } = pendingApproval;
+      this.pendingApprovals.delete(toolCallId);
       resolve("denied");
     }
   }
 
   abort(sessionId: string): void {
+    const childSessionId = this.activeChildSessions.get(sessionId);
+    if (childSessionId) {
+      this.abort(childSessionId);
+    }
+
     // Abort streaming
     const controller = this.sessionManager.getAbortController(sessionId);
     if (controller) {
@@ -465,11 +529,13 @@ export class Orchestrator {
       });
     }
 
-    // Deny pending approval
-    if (this.pendingApproval) {
-      const { resolve } = this.pendingApproval;
-      this.pendingApproval = null;
-      resolve("denied");
+    for (const [toolCallId, approval] of this.pendingApprovals.entries()) {
+      if (approval.sessionId !== sessionId) {
+        continue;
+      }
+
+      this.pendingApprovals.delete(toolCallId);
+      approval.resolve("denied");
     }
 
     this.sessionManager.clearAbortController(sessionId);
@@ -521,6 +587,13 @@ export class Orchestrator {
     if (session.workspaceRoot) {
       parts.push(`Current workspace: ${session.workspaceRoot}`);
     }
+    const todos = listTodos(this.db, session.id);
+    if (todos.length > 0) {
+      parts.push([
+        "Current todo list:",
+        ...todos.map((todo) => `- ${todo.id}: [${todo.status}] ${todo.title}${todo.notes ? ` (${todo.notes})` : ""}`),
+      ].join("\n"));
+    }
     if (this.skills.length > 0) {
       parts.push(formatSkillList(this.skills));
     }
@@ -552,6 +625,8 @@ export class Orchestrator {
     const definitions = getToolDefinitions({
       includeRunnerTools: this.toolRunner != null || this.createToolRunner != null,
       includeLoadSkill: true,
+      includeSubagent: true,
+      includeTodoWrite: true,
     });
 
     return definitions.length > 0 ? definitions : undefined;
@@ -580,6 +655,286 @@ export class Orchestrator {
     await runner.start();
     this.workspaceToolRunners.set(workspaceRoot, runner);
     return runner;
+  }
+
+  private async maybeAutoCompact(
+    sessionId: string,
+    session: SessionMeta,
+    provider: ProviderEntry,
+    apiKey: string,
+    assistantMessage: AssistantMessage,
+  ): Promise<void> {
+    const config = getAutoCompactConfig(session);
+    if (!shouldAutoCompact(assistantMessage, session.activeModelId ?? provider.config.models[0]?.id ?? "", config)) {
+      return;
+    }
+
+    const storedMessages = this.sessionManager.getStoredMessages(sessionId);
+    const messages = storedMessages.map(({ message }) => message);
+    this.sessionManager.setState(sessionId, "compacting");
+
+    try {
+      const result = await runAutoCompact(
+        {
+          db: this.db,
+          adapter: provider.adapter,
+          providerConfig: provider.config,
+          apiKey,
+          providerId: provider.config.id,
+          modelId: session.activeModelId ?? provider.config.models[0]?.id ?? "",
+          transcriptDir: this.compactTranscriptDir,
+        },
+        {
+          sessionId,
+          messages,
+          storedMessages,
+        },
+      );
+
+      this.sessionManager.setActiveCompact(sessionId, result.compactionId);
+      this.eventBus.emitAppEvent({
+        type: "compact.auto",
+        sessionId,
+        ts: Date.now(),
+        summaryMessageId: result.compactionId,
+        transcriptPath: result.transcriptPath,
+      });
+    } catch (error: unknown) {
+      console.error("[auto-compact] Failed for session", sessionId, error);
+      this.eventBus.emitAppEvent({
+        type: "compact.failed",
+        sessionId,
+        ts: Date.now(),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      this.sessionManager.setState(sessionId, "idle");
+    }
+  }
+
+  private executeTodoWrite(sessionId: string, toolCall: ToolCall): ToolResult {
+    try {
+      const operation = typeof toolCall.arguments.operation === "string"
+        ? toolCall.arguments.operation
+        : null;
+
+      if (!operation) {
+        return {
+          toolCallId: toolCall.toolCallId,
+          isError: true,
+          content: 'Invalid todo_write arguments: expected string "operation"',
+        };
+      }
+
+      if (operation === "create") {
+        const title = typeof toolCall.arguments.title === "string" ? toolCall.arguments.title.trim() : "";
+        if (!title) {
+          return {
+            toolCallId: toolCall.toolCallId,
+            isError: true,
+            content: 'Invalid todo_write create arguments: expected non-empty string "title"',
+          };
+        }
+
+        const todo = createTodo(this.db, {
+          id: generateId(),
+          sessionId,
+          title,
+          notes: typeof toolCall.arguments.notes === "string" ? toolCall.arguments.notes : undefined,
+        });
+        this.emitTodoUpdated(sessionId);
+        return {
+          toolCallId: toolCall.toolCallId,
+          isError: false,
+          content: `Created todo: ${todo.title}`,
+          details: todo,
+        };
+      }
+
+      if (operation === "update") {
+        const id = typeof toolCall.arguments.id === "string" ? toolCall.arguments.id : "";
+        if (!id) {
+          return {
+            toolCallId: toolCall.toolCallId,
+            isError: true,
+            content: 'Invalid todo_write update arguments: expected string "id"',
+          };
+        }
+
+        const todo = updateTodo(this.db, {
+          id,
+          title: typeof toolCall.arguments.title === "string" ? toolCall.arguments.title : undefined,
+          status: toolCall.arguments.status === "pending"
+            || toolCall.arguments.status === "in_progress"
+            || toolCall.arguments.status === "done"
+            ? toolCall.arguments.status
+            : undefined,
+          notes: typeof toolCall.arguments.notes === "string"
+            ? toolCall.arguments.notes
+            : toolCall.arguments.notes === null
+              ? null
+              : undefined,
+        });
+
+        if (!todo) {
+          return {
+            toolCallId: toolCall.toolCallId,
+            isError: true,
+            content: `Todo not found: ${id}`,
+          };
+        }
+
+        this.emitTodoUpdated(sessionId);
+        return {
+          toolCallId: toolCall.toolCallId,
+          isError: false,
+          content: `Updated todo: ${todo.title}`,
+          details: todo,
+        };
+      }
+
+      if (operation === "delete") {
+        const id = typeof toolCall.arguments.id === "string" ? toolCall.arguments.id : "";
+        if (!id) {
+          return {
+            toolCallId: toolCall.toolCallId,
+            isError: true,
+            content: 'Invalid todo_write delete arguments: expected string "id"',
+          };
+        }
+
+        const deleted = deleteTodo(this.db, id);
+        if (!deleted) {
+          return {
+            toolCallId: toolCall.toolCallId,
+            isError: true,
+            content: `Todo not found: ${id}`,
+          };
+        }
+
+        this.emitTodoUpdated(sessionId);
+        return {
+          toolCallId: toolCall.toolCallId,
+          isError: false,
+          content: `Deleted todo: ${id}`,
+        };
+      }
+
+      if (operation === "list") {
+        const todos = listTodos(this.db, sessionId);
+        return {
+          toolCallId: toolCall.toolCallId,
+          isError: false,
+          content: todos.length === 0
+            ? "No todos"
+            : todos.map((todo) => `- [${todo.status}] ${todo.title}${todo.notes ? ` (${todo.notes})` : ""}`).join("\n"),
+          details: todos,
+        };
+      }
+
+      return {
+        toolCallId: toolCall.toolCallId,
+        isError: true,
+        content: `Unsupported todo_write operation: ${operation}`,
+      };
+    } catch (error: unknown) {
+      return {
+        toolCallId: toolCall.toolCallId,
+        isError: true,
+        content: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  private async executeSubagent(session: SessionMeta, toolCall: ToolCall): Promise<ToolResult> {
+    if (!canSpawnSubagent(session)) {
+      return makeSubagentErrorResult(toolCall.toolCallId, "Nested subagents are not supported in V1.");
+    }
+
+    const task = typeof toolCall.arguments.task === "string" ? toolCall.arguments.task.trim() : "";
+    if (!task) {
+      return makeSubagentErrorResult(toolCall.toolCallId, 'Invalid subagent arguments: expected non-empty string "task"');
+    }
+
+    const providerId = session.activeProviderId;
+    const modelId = session.activeModelId;
+    if (!providerId || !modelId) {
+      return makeSubagentErrorResult(toolCall.toolCallId, "Subagent requires an active provider and model.");
+    }
+
+    const provider = this.providers.get(providerId);
+    if (!provider) {
+      return makeSubagentErrorResult(toolCall.toolCallId, `Provider not found: ${providerId}`);
+    }
+
+    if (!await provider.getApiKey()) {
+      return makeSubagentErrorResult(toolCall.toolCallId, `No API key for provider "${providerId}"`);
+    }
+
+    const childSessionId = this.sessionManager.create(session.workspaceRoot, {
+      providerId,
+      modelId,
+      parentSessionId: session.id,
+      permissionConfig: session.permissionConfig,
+    });
+    const maxTurns = getSubagentMaxTurns(toolCall.arguments.max_turns);
+
+    this.eventBus.emitAppEvent({
+      type: "subagent.start",
+      sessionId: session.id,
+      ts: Date.now(),
+      childSessionId,
+      task,
+    });
+
+    this.activeChildSessions.set(session.id, childSessionId);
+
+    try {
+      const outcome = await this.runSessionPrompt(childSessionId, task, { maxTurns });
+      const summary = summarizeChildMessages(this.sessionManager.getMessages(childSessionId));
+
+      this.eventBus.emitAppEvent({
+        type: "subagent.done",
+        sessionId: session.id,
+        ts: Date.now(),
+        childSessionId,
+        status: outcome.status,
+        turnsUsed: outcome.turnsUsed,
+      });
+
+      return {
+        toolCallId: toolCall.toolCallId,
+        isError: false,
+        content: summary,
+        details: {
+          childSessionId,
+          turnsUsed: outcome.turnsUsed,
+          status: outcome.status,
+        },
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.eventBus.emitAppEvent({
+        type: "subagent.done",
+        sessionId: session.id,
+        ts: Date.now(),
+        childSessionId,
+        status: "error",
+        turnsUsed: 0,
+      });
+      return makeSubagentErrorResult(toolCall.toolCallId, `Subagent failed: ${message}`);
+    } finally {
+      this.activeChildSessions.delete(session.id);
+    }
+  }
+
+  private emitTodoUpdated(sessionId: string): void {
+    this.eventBus.emitAppEvent({
+      type: "todo.updated",
+      sessionId,
+      ts: Date.now(),
+      todos: listTodos(this.db, sessionId),
+    });
   }
 
   private executeLoadSkill(toolCall: ToolCall): ToolResult {

@@ -6,22 +6,29 @@ import {
   requiresApproval,
   getToolTimeout,
   makeDeniedResult,
+  resolveToolApproval,
 } from "../../src/main/core/tool-dispatch.js";
 import type { ToolCall } from "../../src/shared/types.js";
 
 describe("tool-dispatch", () => {
-  it("TOOL_REGISTRY has 5 built-in tools", () => {
-    expect(TOOL_REGISTRY.size).toBe(5);
+  it("TOOL_REGISTRY has 7 built-in tools", () => {
+    expect(TOOL_REGISTRY.size).toBe(7);
     expect(TOOL_REGISTRY.has("bash")).toBe(true);
     expect(TOOL_REGISTRY.has("read_file")).toBe(true);
     expect(TOOL_REGISTRY.has("write_file")).toBe(true);
     expect(TOOL_REGISTRY.has("edit_file")).toBe(true);
     expect(TOOL_REGISTRY.has("load_skill")).toBe(true);
+    expect(TOOL_REGISTRY.has("subagent")).toBe(true);
+    expect(TOOL_REGISTRY.has("todo_write")).toBe(true);
   });
 
   it("getToolDefinitions returns provider-compatible definitions", () => {
-    const defs = getToolDefinitions({ includeLoadSkill: true });
-    expect(defs).toHaveLength(5);
+    const defs = getToolDefinitions({
+      includeLoadSkill: true,
+      includeSubagent: true,
+      includeTodoWrite: true,
+    });
+    expect(defs).toHaveLength(7);
     for (const def of defs) {
       expect(def.type).toBe("function");
       expect(def.function.name).toBeTruthy();
@@ -39,9 +46,11 @@ describe("tool-dispatch", () => {
     const readCall: ToolCall = { toolCallId: "tc-1", name: "read_file", arguments: {} };
     const bashCall: ToolCall = { toolCallId: "tc-2", name: "bash", arguments: {} };
     const skillCall: ToolCall = { toolCallId: "tc-3", name: "load_skill", arguments: { name: "code-review" } };
+    const todoCall: ToolCall = { toolCallId: "tc-4", name: "todo_write", arguments: { operation: "list" } };
     expect(requiresApproval(readCall)).toBe(false);
     expect(requiresApproval(bashCall)).toBe(true);
     expect(requiresApproval(skillCall)).toBe(false);
+    expect(requiresApproval(todoCall)).toBe(false);
   });
 
   it("getToolTimeout respects bash custom timeout_ms", () => {
@@ -74,8 +83,25 @@ describe("tool-dispatch", () => {
     expect(defs[0].function.name).toBe("load_skill");
   });
 
+  it("can expose subagent and todo_write without runner tools", () => {
+    const defs = getToolDefinitions({
+      includeRunnerTools: false,
+      includeSubagent: true,
+      includeTodoWrite: true,
+    });
+    expect(defs.map((def) => def.function.name).sort()).toEqual(["subagent", "todo_write"]);
+  });
+
   it("does not expose load_skill unless explicitly requested", () => {
     const defs = getToolDefinitions();
     expect(defs.map((def) => def.function.name)).not.toContain("load_skill");
+  });
+
+  it("falls back to tool registry defaults when permissions are unset", () => {
+    const readCall: ToolCall = { toolCallId: "tc-read", name: "read_file", arguments: { path: "a.txt" } };
+    const bashCall: ToolCall = { toolCallId: "tc-bash", name: "bash", arguments: { command: "pwd" } };
+
+    expect(resolveToolApproval(readCall, null, null)).toEqual({ action: "allow" });
+    expect(resolveToolApproval(bashCall, null, null)).toEqual({ action: "confirm" });
   });
 });

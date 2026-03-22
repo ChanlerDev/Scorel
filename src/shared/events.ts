@@ -2,11 +2,13 @@
 
 import type {
   AssistantMessage,
+  SubagentStatus,
   ToolCall,
   ToolCallPart,
   ToolResult,
   StopReason,
   UserMessage,
+  TodoItem,
 } from "./types.js";
 
 // --- Normalized Provider Event Stream ---
@@ -99,4 +101,21 @@ export type ScorelEvent =
       decision: "approved" | "denied";
     }
   | { type: "provider.retry"; sessionId: string; ts: number; attempt: number; error: string }
-  | { type: "session.abort"; sessionId: string; ts: number };
+  | { type: "session.abort"; sessionId: string; ts: number }
+  | {
+      type: "compact.auto";
+      sessionId: string;
+      ts: number;
+      summaryMessageId: string;
+      transcriptPath?: string;
+    }
+  | { type: "subagent.start"; sessionId: string; ts: number; childSessionId: string; task: string }
+  | {
+      type: "subagent.done";
+      sessionId: string;
+      ts: number;
+      childSessionId: string;
+      status: SubagentStatus;
+      turnsUsed: number;
+    }
+  | { type: "todo.updated"; sessionId: string; ts: number; todos: TodoItem[] };

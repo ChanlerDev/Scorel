@@ -25,14 +25,12 @@ export const MAX_TOOL_TIMEOUT_MS = 300_000;
 // FTS
 export const FTS_CONTENT_MAX_CHARS = 2_000;
 
-// Session state
-export type SessionState =
-  | "idle"
-  | "streaming"
-  | "awaiting_approval"
-  | "tooling"
-  | "compacting"
-  | "error";
+// Auto compact
+export const AUTO_COMPACT_DEFAULT_THRESHOLD = 0.8;
+
+// Subagent
+export const SUBAGENT_MAX_DEPTH = 1;
+export const SUBAGENT_DEFAULT_MAX_TURNS = 20;
 
 // DB
 export const DB_FILENAME = "scorel.db";

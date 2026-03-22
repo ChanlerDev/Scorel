@@ -1,12 +1,13 @@
 import type Database from "better-sqlite3";
 import type {
+  PermissionConfig,
   SessionDetail,
   SessionMeta,
+  SessionState,
   SessionSummary,
   ScorelMessage,
   StoredSessionMessage,
 } from "../../shared/types.js";
-import type { SessionState } from "../../shared/constants.js";
 import {
   EXPORT_VERSION,
   MANUAL_COMPACT_TOOL_RESULT_PREVIEW,
@@ -15,6 +16,7 @@ import {
   createSession as dbCreateSession,
   listSessions as dbListSessions,
   getSessionDetail as dbGetSessionDetail,
+  updateSessionPermissionConfig as dbUpdateSessionPermissionConfig,
   renameSession as dbRenameSession,
   archiveSession as dbArchiveSession,
   unarchiveSession as dbUnarchiveSession,
@@ -158,13 +160,23 @@ export class SessionManager {
 
   // --- CRUD ---
 
-  create(workspaceRoot: string, opts?: { providerId?: string; modelId?: string }): string {
+  create(
+    workspaceRoot: string,
+    opts?: {
+      providerId?: string;
+      modelId?: string;
+      parentSessionId?: string;
+      permissionConfig?: PermissionConfig | null;
+    },
+  ): string {
     const id = generateId();
     dbCreateSession(this.db, {
       id,
       workspaceRoot,
       providerId: opts?.providerId,
       modelId: opts?.modelId,
+      parentSessionId: opts?.parentSessionId,
+      permissionConfig: opts?.permissionConfig != null ? JSON.stringify(opts.permissionConfig) : undefined,
     });
     this.runtimes.set(id, { state: "idle", abortController: null });
     return id;
@@ -178,6 +190,8 @@ export class SessionManager {
       activeCompactId: detail.activeCompactId,
       pinnedSystemPrompt: detail.pinnedSystemPrompt,
       settings: detail.settings,
+      parentSessionId: detail.parentSessionId,
+      permissionConfig: detail.permissionConfig,
     };
   }
 
@@ -272,6 +286,10 @@ export class SessionManager {
 
   setActiveCompact(sessionId: string, compactId: string | null): void {
     updateSessionCompact(this.db, sessionId, compactId);
+  }
+
+  setPermissionConfig(sessionId: string, config: PermissionConfig | null): void {
+    dbUpdateSessionPermissionConfig(this.db, sessionId, config);
   }
 
   // --- State ---

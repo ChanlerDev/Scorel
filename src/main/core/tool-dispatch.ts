@@ -1,6 +1,7 @@
-import type { ToolName, ToolCall, ToolResult } from "../../shared/types.js";
+import type { ToolName, ToolCall, ToolResult, PermissionConfig } from "../../shared/types.js";
 import type { ToolDefinition } from "../provider/types.js";
 import { DEFAULT_TOOL_TIMEOUT_MS } from "../../shared/constants.js";
+import { resolvePermission, makeDeniedWithReasonResult } from "../security/permission.js";
 
 export type ApprovalPolicy = "allow" | "confirm";
 
@@ -63,26 +64,58 @@ const loadSkillSchema = {
   required: ["name"],
 };
 
+const subagentSchema = {
+  type: "object",
+  properties: {
+    task: { type: "string", description: "Task description for the child agent" },
+    max_turns: { type: "number", description: "Max conversation turns (default 20)" },
+  },
+  required: ["task"],
+};
+
+const todoWriteSchema = {
+  type: "object",
+  properties: {
+    operation: { type: "string", enum: ["create", "update", "delete", "list"], description: "Operation to perform" },
+    id: { type: "string", description: "Task ID (required for update/delete)" },
+    title: { type: "string", description: "Task title (required for create)" },
+    status: { type: "string", enum: ["pending", "in_progress", "done"], description: "Task status" },
+    notes: { type: "string", description: "Optional notes or details" },
+  },
+  required: ["operation"],
+};
+
 export const TOOL_REGISTRY = new Map<string, ToolEntry>([
   ["bash", { name: "bash", schema: bashSchema, approval: "confirm", timeoutMs: DEFAULT_TOOL_TIMEOUT_MS }],
   ["read_file", { name: "read_file", schema: readFileSchema, approval: "allow", timeoutMs: 10_000 }],
   ["write_file", { name: "write_file", schema: writeFileSchema, approval: "confirm", timeoutMs: 10_000 }],
   ["edit_file", { name: "edit_file", schema: editFileSchema, approval: "confirm", timeoutMs: 10_000 }],
   ["load_skill", { name: "load_skill", schema: loadSkillSchema, approval: "allow", timeoutMs: 5_000 }],
+  ["subagent", { name: "subagent", schema: subagentSchema, approval: "confirm", timeoutMs: 600_000 }],
+  ["todo_write", { name: "todo_write", schema: todoWriteSchema, approval: "allow", timeoutMs: 5_000 }],
 ]);
 
 export function getToolDefinitions(opts?: {
   includeRunnerTools?: boolean;
   includeLoadSkill?: boolean;
+  includeSubagent?: boolean;
+  includeTodoWrite?: boolean;
 }): ToolDefinition[] {
   const includeRunnerTools = opts?.includeRunnerTools ?? true;
   const includeLoadSkill = opts?.includeLoadSkill ?? false;
+  const includeSubagent = opts?.includeSubagent ?? false;
+  const includeTodoWrite = opts?.includeTodoWrite ?? false;
   const defs: ToolDefinition[] = [];
   for (const entry of TOOL_REGISTRY.values()) {
-    const isRunnerTool = entry.name !== "load_skill";
-    if ((isRunnerTool && !includeRunnerTools) || (!isRunnerTool && !includeLoadSkill)) {
-      continue;
-    }
+    const isRunnerTool = !["load_skill", "subagent", "todo_write"].includes(entry.name);
+    const isLoadSkill = entry.name === "load_skill";
+    const isSubagent = entry.name === "subagent";
+    const isTodoWrite = entry.name === "todo_write";
+
+    if (isRunnerTool && !includeRunnerTools) continue;
+    if (isLoadSkill && !includeLoadSkill) continue;
+    if (isSubagent && !includeSubagent) continue;
+    if (isTodoWrite && !includeTodoWrite) continue;
 
     defs.push({
       type: "function",
@@ -108,6 +141,10 @@ function getToolDescription(name: ToolName): string {
       return "Edit a file by replacing an exact string match. The old_string must appear exactly once.";
     case "load_skill":
       return "Load a skill file to get detailed instructions for a specific task. Use 'list' as the name to see available skills.";
+    case "subagent":
+      return "Spawn an isolated child conversation to perform a subtask. The child has access to all tools but runs in a separate context. Returns a summary of the child's work.";
+    case "todo_write":
+      return "Create, update, delete, or list structured todo items for tracking multi-step task progress.";
   }
 }
 
@@ -117,8 +154,35 @@ export function getToolEntry(name: string): ToolEntry | undefined {
 
 export function requiresApproval(toolCall: ToolCall): boolean {
   const entry = TOOL_REGISTRY.get(toolCall.name);
-  if (!entry) return true; // Unknown tools require approval
+  if (!entry) return true;
   return entry.approval === "confirm";
+}
+
+export function resolveToolApproval(
+  toolCall: ToolCall,
+  sessionPermissions: PermissionConfig | null,
+  globalPermissions: PermissionConfig | null,
+): { action: "allow" | "confirm" | "deny"; reason?: string } {
+  const { level, reason } = resolvePermission(
+    toolCall.name,
+    sessionPermissions,
+    globalPermissions,
+  );
+
+  if (level === "allow") return { action: "allow" };
+  if (level === "deny") return { action: "deny", reason };
+
+  const entry = TOOL_REGISTRY.get(toolCall.name);
+  if (!entry) return { action: "confirm" };
+
+  return { action: entry.approval === "allow" ? "allow" : "confirm" };
+}
+
+export function makePolicyDeniedResult(
+  toolCall: ToolCall,
+  reason?: string,
+): ToolResult {
+  return makeDeniedWithReasonResult(toolCall.toolCallId, reason);
 }
 
 export function getToolTimeout(toolCall: ToolCall): number {

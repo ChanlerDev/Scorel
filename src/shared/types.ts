@@ -60,13 +60,7 @@ export type ToolResultMessage = {
   toolName: string;
   isError: boolean;
   content: TextPart[];
-  details?: {
-    rawOutput?: string;
-    exitCode?: number;
-    truncated?: boolean;
-    paths?: string[];
-    diff?: string;
-  };
+  details?: unknown;
   ts: number;
   meta?: Record<string, unknown>;
 };
@@ -102,7 +96,9 @@ export type ToolName =
   | "read_file"
   | "write_file"
   | "edit_file"
-  | "load_skill";
+  | "load_skill"
+  | "subagent"
+  | "todo_write";
 
 export type ToolCall = {
   toolCallId: string;
@@ -116,6 +112,8 @@ export type ToolResult = {
   content: string;
   details?: unknown;
 };
+
+export type SubagentStatus = "completed" | "max_turns" | "aborted" | "error";
 
 export type CompactionRecord = {
   id: string;
@@ -142,6 +140,14 @@ export type SkillMeta = {
   filePath: string;
 };
 
+export type SessionState =
+  | "idle"
+  | "streaming"
+  | "awaiting_approval"
+  | "tooling"
+  | "compacting"
+  | "error";
+
 // --- Session ---
 
 export type SessionSummary = {
@@ -159,6 +165,8 @@ export type SessionMeta = SessionSummary & {
   activeCompactId: string | null;
   pinnedSystemPrompt: string | null;
   settings: Record<string, unknown> | null;
+  parentSessionId: string | null;
+  permissionConfig: PermissionConfig | null;
 };
 
 export type SessionDetail = SessionMeta & {
@@ -189,4 +197,35 @@ export type WorkspaceRecord = {
 
 export type WorkspaceEntry = WorkspaceRecord & {
   exists: boolean;
+};
+
+// --- Todos ---
+
+export type TodoStatus = "pending" | "in_progress" | "done";
+
+export type TodoItem = {
+  id: string;
+  sessionId: string;
+  title: string;
+  status: TodoStatus;
+  notes: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+// --- Permissions ---
+
+export type PermissionLevel = "allow" | "confirm" | "deny";
+
+export type PermissionConfig = {
+  fullAccess: boolean;
+  toolDefaults: Partial<Record<ToolName, PermissionLevel>>;
+  denyReasons: Partial<Record<ToolName, string>>;
+};
+
+// --- Auto Compact ---
+
+export type AutoCompactConfig = {
+  enabled: boolean;
+  threshold: number;
 };
