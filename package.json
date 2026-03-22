@@ -25,10 +25,13 @@
     "start": "electron dist/main/index.js"
   },
   "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/sdk": "1.27.1",
     "better-sqlite3": "^11.7.0",
     "nanoid": "^5.0.9",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@electron/notarize": "^3.1.1",
