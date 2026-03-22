@@ -7,8 +7,8 @@
   "scripts": {
     "rebuild:native:node": "pnpm rebuild better-sqlite3",
     "rebuild:native:electron": "electron-rebuild -f -w better-sqlite3",
-    "predev": "pnpm rebuild:native:electron",
-    "dev": "electron .",
+    "predev": "pnpm rebuild:native:electron && pnpm build:main && pnpm build:preload && pnpm build:runner",
+    "dev": "node --experimental-strip-types scripts/dev.ts",
     "prestart": "pnpm rebuild:native:electron",
     "build": "pnpm build:main && pnpm build:preload && pnpm build:runner && tsc -p tsconfig.renderer.json && pnpm build:renderer",
     "build:main": "tsc -p tsconfig.main.json",
