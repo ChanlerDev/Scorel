@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
-import type { PermissionConfig, PermissionLevel, ProviderConfig } from "@shared/types";
+import type {
+  McpServerConfig,
+  McpServerSummary,
+  PermissionConfig,
+  PermissionLevel,
+  ProviderConfig,
+} from "@shared/types";
 import {
   buildProviderConfig,
   getProviderPreset,
@@ -14,6 +20,21 @@ type SettingsViewProps = {
 };
 
 type EditorMode = "edit" | "add";
+type McpEditorMode = "edit" | "add";
+
+type McpDraft = {
+  id: string | null;
+  name: string;
+  transportType: "stdio" | "streamable-http";
+  command: string;
+  argsText: string;
+  envText: string;
+  cwd: string;
+  url: string;
+  headersText: string;
+  autoStart: boolean;
+  enabled: boolean;
+};
 
 const PERMISSION_TOOLS = ["bash", "read_file", "write_file", "edit_file", "subagent", "todo_write", "load_skill"] as const;
 const DEFAULT_PERMISSION_LEVEL_BY_TOOL: Record<(typeof PERMISSION_TOOLS)[number], PermissionLevel> = {
@@ -31,6 +52,139 @@ function createEmptyPermissionConfig(): PermissionConfig {
     fullAccess: false,
     toolDefaults: {},
     denyReasons: {},
+  };
+}
+
+function createEmptyMcpDraft(): McpDraft {
+  return {
+    id: null,
+    name: "",
+    transportType: "stdio",
+    command: "",
+    argsText: "",
+    envText: "",
+    cwd: "",
+    url: "",
+    headersText: "",
+    autoStart: true,
+    enabled: true,
+  };
+}
+
+function stringifyStringRecord(value?: Record<string, string>): string {
+  return value && Object.keys(value).length > 0 ? JSON.stringify(value, null, 2) : "";
+}
+
+function mcpServerToDraft(config: McpServerConfig): McpDraft {
+  if (config.transport.type === "stdio") {
+    return {
+      id: config.id,
+      name: config.name,
+      transportType: "stdio",
+      command: config.transport.command,
+      argsText: (config.transport.args ?? []).join("\n"),
+      envText: stringifyStringRecord(config.transport.env),
+      cwd: config.transport.cwd ?? "",
+      url: "",
+      headersText: "",
+      autoStart: config.autoStart,
+      enabled: config.enabled,
+    };
+  }
+
+  return {
+    id: config.id,
+    name: config.name,
+    transportType: "streamable-http",
+    command: "",
+    argsText: "",
+    envText: "",
+    cwd: "",
+    url: config.transport.url,
+    headersText: stringifyStringRecord(config.transport.headers),
+    autoStart: config.autoStart,
+    enabled: config.enabled,
+  };
+}
+
+function validateMcpDraft(draft: McpDraft): string[] {
+  if (!draft.name.trim()) {
+    return ["Server name is required"];
+  }
+  if (draft.transportType === "stdio" && !draft.command.trim()) {
+    return ["Command is required for stdio MCP servers"];
+  }
+  if (draft.transportType === "streamable-http" && !draft.url.trim()) {
+    return ["URL is required for Streamable HTTP MCP servers"];
+  }
+  return [];
+}
+
+function parseStringRecord(label: string, raw: string): Record<string, string> | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    throw new Error(`${label} must be valid JSON`);
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON object`);
+  }
+
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value !== "string") {
+      throw new Error(`${label} values must all be strings`);
+    }
+    if (!key.trim()) {
+      throw new Error(`${label} keys must be non-empty`);
+    }
+  }
+
+  return parsed as Record<string, string>;
+}
+
+function buildMcpConfig(draft: McpDraft): McpServerConfig {
+  const now = Date.now();
+  const id = draft.id ?? globalThis.crypto.randomUUID();
+  const base = {
+    id,
+    name: draft.name.trim(),
+    autoStart: draft.autoStart,
+    enabled: draft.enabled,
+    capabilities: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  if (draft.transportType === "stdio") {
+    return {
+      ...base,
+      transport: {
+        type: "stdio",
+        command: draft.command.trim(),
+        args: draft.argsText
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean),
+        env: parseStringRecord("Environment", draft.envText),
+        cwd: draft.cwd.trim() || undefined,
+      },
+    };
+  }
+
+  return {
+    ...base,
+    transport: {
+      type: "streamable-http",
+      url: draft.url.trim(),
+      headers: parseStringRecord("Headers", draft.headersText),
+    },
   };
 }
 
@@ -106,6 +260,11 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
   const [statusTone, setStatusTone] = useState<"success" | "danger">("success");
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<"save" | "test" | "delete" | null>(null);
+  const [mcpServers, setMcpServers] = useState<McpServerSummary[]>([]);
+  const [selectedMcpServerId, setSelectedMcpServerId] = useState<string | null>(null);
+  const [mcpEditorMode, setMcpEditorMode] = useState<McpEditorMode>("add");
+  const [mcpDraft, setMcpDraft] = useState<McpDraft>(createEmptyMcpDraft());
+  const [busyMcpAction, setBusyMcpAction] = useState<"save" | "test" | "delete" | "start" | "stop" | "restart" | null>(null);
   const [permissionConfig, setPermissionConfig] = useState<PermissionConfig>(createEmptyPermissionConfig());
   const [savingPermissions, setSavingPermissions] = useState(false);
   const [permissionsLoadError, setPermissionsLoadError] = useState<string | null>(null);
@@ -113,6 +272,10 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId) ?? null,
     [providers, selectedProviderId],
+  );
+  const selectedMcpServer = useMemo(
+    () => mcpServers.find((server) => server.id === selectedMcpServerId) ?? null,
+    [mcpServers, selectedMcpServerId],
   );
 
   const loadProviders = useCallback(async (preferredProviderId?: string | null) => {
@@ -154,6 +317,34 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
   useEffect(() => {
     void loadProviders();
   }, [loadProviders]);
+
+  const loadMcpServers = useCallback(async (preferredServerId?: string | null) => {
+    const nextServers = await window.scorel.mcp.list();
+    setMcpServers(nextServers);
+
+    if (nextServers.length === 0) {
+      setSelectedMcpServerId(null);
+      setMcpEditorMode("add");
+      setMcpDraft(createEmptyMcpDraft());
+      return;
+    }
+
+    const nextSelectedServer = (
+      (preferredServerId
+        ? nextServers.find((server) => server.id === preferredServerId)
+        : null)
+      ?? nextServers[0]
+      ?? null
+    );
+
+    setSelectedMcpServerId(nextSelectedServer?.id ?? null);
+    setMcpEditorMode("edit");
+    setMcpDraft(nextSelectedServer ? mcpServerToDraft(nextSelectedServer) : createEmptyMcpDraft());
+  }, []);
+
+  useEffect(() => {
+    void loadMcpServers();
+  }, [loadMcpServers]);
 
   useEffect(() => {
     let cancelled = false;
@@ -459,6 +650,171 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
     }
   };
 
+  const handleSelectMcpServer = (server: McpServerSummary) => {
+    setSelectedMcpServerId(server.id);
+    setMcpEditorMode("edit");
+    setMcpDraft(mcpServerToDraft(server));
+    setStatus(null);
+  };
+
+  const handleTestMcpServer = async () => {
+    const validationErrors = validateMcpDraft(mcpDraft);
+    if (validationErrors.length > 0) {
+      setFeedback(validationErrors[0] ?? "MCP server configuration is incomplete", "danger");
+      return;
+    }
+
+    setBusyMcpAction("test");
+    setStatus(null);
+
+    try {
+      const config = buildMcpConfig(mcpDraft);
+      const result = await window.scorel.mcp.testConnection(config);
+      if (!result.ok) {
+        setFeedback(result.error ?? "MCP connection failed", "danger");
+        return;
+      }
+
+      setFeedback(`Connection succeeded${result.tools ? ` (${result.tools.length} tools)` : ""}`, "success");
+    } catch (error: unknown) {
+      setFeedback(error instanceof Error ? error.message : String(error), "danger");
+    } finally {
+      setBusyMcpAction(null);
+    }
+  };
+
+  const handleSaveMcpServer = async () => {
+    const validationErrors = validateMcpDraft(mcpDraft);
+    if (validationErrors.length > 0) {
+      setFeedback(validationErrors[0] ?? "MCP server configuration is incomplete", "danger");
+      return;
+    }
+
+    setBusyMcpAction("save");
+    setStatus(null);
+
+    try {
+      const config = buildMcpConfig(mcpDraft);
+      const saved = await window.scorel.mcp.save({
+        ...config,
+        createdAt: mcpDraft.id ? selectedMcpServer?.createdAt ?? config.createdAt : config.createdAt,
+      });
+      await loadMcpServers(config.id);
+      if (saved?.status === "error" && saved.lastError) {
+        setFeedback(`MCP server saved, but connection failed: ${saved.lastError}`, "danger");
+        return;
+      }
+
+      setFeedback("MCP server saved", "success");
+    } catch (error: unknown) {
+      setFeedback(error instanceof Error ? error.message : String(error), "danger");
+    } finally {
+      setBusyMcpAction(null);
+    }
+  };
+
+  const handleDeleteMcpServer = async () => {
+    if (!selectedMcpServer || !window.confirm(`Delete MCP server "${selectedMcpServer.name}"?`)) {
+      return;
+    }
+
+    setBusyMcpAction("delete");
+    setStatus(null);
+
+    try {
+      await window.scorel.mcp.delete(selectedMcpServer.id);
+      await loadMcpServers();
+      setFeedback("MCP server deleted", "success");
+    } catch (error: unknown) {
+      setFeedback(error instanceof Error ? error.message : String(error), "danger");
+    } finally {
+      setBusyMcpAction(null);
+    }
+  };
+
+  const handleMcpServerCommand = async (
+    operation: "start" | "stop" | "restart",
+  ) => {
+    if (!selectedMcpServer) {
+      return;
+    }
+
+    setBusyMcpAction(operation);
+    setStatus(null);
+
+    try {
+      await window.scorel.mcp[operation](selectedMcpServer.id);
+      await loadMcpServers(selectedMcpServer.id);
+      setFeedback(
+        operation === "start"
+          ? "MCP server started"
+          : operation === "stop"
+            ? "MCP server stopped"
+            : "MCP server restarted",
+        "success",
+      );
+    } catch (error: unknown) {
+      setFeedback(error instanceof Error ? error.message : String(error), "danger");
+    } finally {
+      setBusyMcpAction(null);
+    }
+  };
+
+  const renderMcpEditor = () => {
+    return (
+      <div style={{ display: "grid", gap: 16 }}>
+        <div>
+          <div style={sectionTitleStyle}>MCP server</div>
+          <div style={bodyTextStyle}>Connect external tools through stdio or Streamable HTTP.</div>
+        </div>
+
+        <McpServerForm draft={mcpDraft} onChange={setMcpDraft} />
+
+        {selectedMcpServer ? (
+          <div
+            style={{
+              padding: "12px 14px",
+              borderRadius: 12,
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border)",
+              display: "grid",
+              gap: 6,
+            }}
+          >
+            <div><strong>Status:</strong> {selectedMcpServer.status}</div>
+            <div><strong>Tools:</strong> {selectedMcpServer.toolCount}</div>
+            {selectedMcpServer.lastError ? <div><strong>Error:</strong> {selectedMcpServer.lastError}</div> : null}
+          </div>
+        ) : null}
+
+        <div style={actionsRowStyle}>
+          <button style={secondaryButtonStyle} onClick={() => void handleTestMcpServer()} disabled={busyMcpAction !== null}>
+            {busyMcpAction === "test" ? "Testing…" : "Test Connection"}
+          </button>
+          {selectedMcpServer ? (
+            <>
+              <button style={secondaryButtonStyle} onClick={() => void handleMcpServerCommand("start")} disabled={busyMcpAction !== null}>
+                {busyMcpAction === "start" ? "Starting…" : "Start"}
+              </button>
+              <button style={secondaryButtonStyle} onClick={() => void handleMcpServerCommand("stop")} disabled={busyMcpAction !== null}>
+                {busyMcpAction === "stop" ? "Stopping…" : "Stop"}
+              </button>
+              <button style={secondaryButtonStyle} onClick={() => void handleMcpServerCommand("restart")} disabled={busyMcpAction !== null}>
+                {busyMcpAction === "restart" ? "Restarting…" : "Restart"}
+              </button>
+              <button style={secondaryButtonStyle} onClick={() => void handleDeleteMcpServer()} disabled={busyMcpAction !== null}>
+                {busyMcpAction === "delete" ? "Deleting…" : "Delete"}
+              </button>
+            </>
+          ) : null}
+          <button style={primaryButtonStyle} onClick={() => void handleSaveMcpServer()} disabled={busyMcpAction !== null}>
+            {busyMcpAction === "save" ? "Saving…" : selectedMcpServer ? "Save Changes" : "Add Server"}
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "var(--bg-primary)" }}>
       <div style={headerStyle}>
@@ -513,6 +869,56 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
           ) : renderProviderEditor()}
 
           <div style={{ marginTop: 28, display: "grid", gap: 16 }}>
+            <div>
+              <div style={sectionTitleStyle}>MCP Servers</div>
+              <div style={bodyTextStyle}>Manage external MCP tool servers.</div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16 }}>
+              <div style={sidebarStyle}>
+                <button
+                  style={{ ...primaryButtonStyle, width: "100%" }}
+                  onClick={() => {
+                    setSelectedMcpServerId(null);
+                    setMcpEditorMode("add");
+                    setMcpDraft(createEmptyMcpDraft());
+                    setStatus(null);
+                  }}
+                >
+                  Add MCP Server
+                </button>
+
+                <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+                  {mcpServers.map((server) => {
+                    const isActive = mcpEditorMode === "edit" && server.id === selectedMcpServerId;
+                    return (
+                      <button
+                        key={server.id}
+                        onClick={() => handleSelectMcpServer(server)}
+                        style={{
+                          ...listButtonStyle,
+                          borderColor: isActive ? "var(--accent)" : "var(--border)",
+                          background: isActive ? "var(--bg-tertiary)" : "var(--bg-primary)",
+                        }}
+                      >
+                        <div style={{ fontWeight: 600 }}>{server.name}</div>
+                        <div style={{ color: "var(--text-secondary)", fontSize: 12, marginTop: 4 }}>
+                          {server.transport.type === "stdio" ? server.transport.command : server.transport.url}
+                        </div>
+                        <div style={{ color: "var(--text-secondary)", fontSize: 12, marginTop: 6 }}>
+                          {server.status} · {server.toolCount} tools
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gap: 16 }}>
+                {renderMcpEditor()}
+              </div>
+            </div>
+
             <div>
               <div style={sectionTitleStyle}>Permissions</div>
               <div style={bodyTextStyle}>Configure the default tool approval policy.</div>
@@ -667,6 +1073,119 @@ function ProviderForm({
   );
 }
 
+function McpServerForm({
+  draft,
+  onChange,
+}: {
+  draft: McpDraft;
+  onChange: (draft: McpDraft) => void;
+}) {
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <label style={labelStyle}>
+        Server name
+        <input
+          value={draft.name}
+          onChange={(event) => onChange({ ...draft, name: event.target.value })}
+          style={inputStyle}
+        />
+      </label>
+
+      <label style={labelStyle}>
+        Transport
+        <select
+          value={draft.transportType}
+          onChange={(event) => onChange({
+            ...draft,
+            transportType: event.target.value as McpDraft["transportType"],
+          })}
+          style={inputStyle}
+        >
+          <option value="stdio">stdio</option>
+          <option value="streamable-http">Streamable HTTP</option>
+        </select>
+      </label>
+
+      <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 10 }}>
+        <input
+          type="checkbox"
+          checked={draft.enabled}
+          onChange={(event) => onChange({ ...draft, enabled: event.target.checked })}
+        />
+        Enabled
+      </label>
+
+      <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 10 }}>
+        <input
+          type="checkbox"
+          checked={draft.autoStart}
+          onChange={(event) => onChange({ ...draft, autoStart: event.target.checked })}
+        />
+        Auto-start
+      </label>
+
+      {draft.transportType === "stdio" ? (
+        <>
+          <label style={labelStyle}>
+            Command
+            <input
+              value={draft.command}
+              onChange={(event) => onChange({ ...draft, command: event.target.value })}
+              style={inputStyle}
+            />
+          </label>
+          <label style={labelStyle}>
+            Args
+            <textarea
+              value={draft.argsText}
+              onChange={(event) => onChange({ ...draft, argsText: event.target.value })}
+              placeholder="One argument per line"
+              style={textareaStyle}
+            />
+          </label>
+          <label style={labelStyle}>
+            Working directory
+            <input
+              value={draft.cwd}
+              onChange={(event) => onChange({ ...draft, cwd: event.target.value })}
+              style={inputStyle}
+            />
+          </label>
+          <label style={labelStyle}>
+            Environment JSON
+            <textarea
+              value={draft.envText}
+              onChange={(event) => onChange({ ...draft, envText: event.target.value })}
+              placeholder='{"API_KEY":"..."}'
+              style={textareaStyle}
+            />
+          </label>
+        </>
+      ) : (
+        <>
+          <label style={labelStyle}>
+            URL
+            <input
+              value={draft.url}
+              onChange={(event) => onChange({ ...draft, url: event.target.value })}
+              style={inputStyle}
+            />
+          </label>
+          <label style={labelStyle}>
+            Headers JSON
+            <textarea
+              value={draft.headersText}
+              onChange={(event) => onChange({ ...draft, headersText: event.target.value })}
+              placeholder='{"Authorization":"Bearer ..."}'
+              style={textareaStyle}
+            />
+          </label>
+        </>
+      )}
+    </div>
+  );
+}
+
 const headerStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -714,6 +1233,13 @@ const inputStyle: CSSProperties = {
   border: "1px solid var(--border)",
   background: "var(--bg-primary)",
   color: "var(--text-primary)",
+};
+
+const textareaStyle: CSSProperties = {
+  ...inputStyle,
+  minHeight: 96,
+  resize: "vertical",
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
 };
 
 const actionsRowStyle: CSSProperties = {
