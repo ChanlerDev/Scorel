@@ -1,17 +1,8 @@
 import { readFile, stat } from "node:fs/promises";
-import path from "node:path";
 import type { ToolHandler } from "../types.js";
+import { formatFileAccessError, resolveToolPath } from "./path-utils.js";
 
 const READ_FILE_MAX_OUTPUT = 64_000;
-
-function validatePath(filePath: string, workspaceRoot: string): string | null {
-  const resolved = path.resolve(workspaceRoot, filePath);
-  const normalizedRoot = path.resolve(workspaceRoot);
-  if (!resolved.startsWith(normalizedRoot + path.sep) && resolved !== normalizedRoot) {
-    return null;
-  }
-  return resolved;
-}
 
 async function isBinaryFile(filePath: string): Promise<boolean> {
   const { createReadStream } = await import("node:fs");
@@ -33,15 +24,12 @@ export const readFileTool: ToolHandler = async (args, workspaceRoot) => {
     return { toolCallId: "", isError: true, content: "Missing required argument: path" };
   }
 
-  const resolved = validatePath(filePath, workspaceRoot);
-  if (!resolved) {
-    return { toolCallId: "", isError: true, content: `Path escapes workspace root: ${filePath}` };
-  }
+  const resolved = resolveToolPath(filePath, workspaceRoot);
 
   try {
     await stat(resolved);
-  } catch {
-    return { toolCallId: "", isError: true, content: `File not found: ${filePath}` };
+  } catch (error: unknown) {
+    return { toolCallId: "", isError: true, content: formatFileAccessError("read", filePath, error) };
   }
 
   try {
@@ -52,11 +40,16 @@ export const readFileTool: ToolHandler = async (args, workspaceRoot) => {
         content: `Binary file detected, cannot read as text: ${filePath}`,
       };
     }
-  } catch {
-    return { toolCallId: "", isError: true, content: `File not found: ${filePath}` };
+  } catch (error: unknown) {
+    return { toolCallId: "", isError: true, content: formatFileAccessError("read", filePath, error) };
   }
 
-  const raw = await readFile(resolved, "utf-8");
+  let raw: string;
+  try {
+    raw = await readFile(resolved, "utf-8");
+  } catch (error: unknown) {
+    return { toolCallId: "", isError: true, content: formatFileAccessError("read", filePath, error) };
+  }
   const lines = raw.split("\n");
 
   const offset = typeof args.offset === "number" ? args.offset : 0;

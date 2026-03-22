@@ -44,10 +44,12 @@ export function getCompactEventNotice(
 export function ChatView({
   sessionId,
   onSessionMutated,
+  onChangeWorkspace,
   searchNavigationTarget,
 }: {
   sessionId: string;
   onSessionMutated: (action: "archive" | "unarchive" | "delete") => void | Promise<void>;
+  onChangeWorkspace: (sessionId: string) => void | Promise<void>;
   searchNavigationTarget: SearchNavigationTarget | null;
 }) {
   const { messages, streamingMessage, chatState, error, send, abort, toolStatuses } =
@@ -230,6 +232,9 @@ export function ChatView({
           </label>
           <button onClick={() => void handleCompact()} disabled={isBusy || isCompacting}>
             {isCompacting ? "Compacting…" : "Compact"}
+          </button>
+          <button onClick={() => void onChangeWorkspace(sessionId)} disabled={isBusy || isCompacting}>
+            Workspace
           </button>
           <button onClick={() => handleExport("jsonl")}>Export JSONL</button>
           <button onClick={() => handleExport("md")}>Export Markdown</button>

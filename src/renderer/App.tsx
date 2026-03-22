@@ -11,6 +11,28 @@ import type { SearchNavigationTarget } from "./message-navigation";
 
 type AppView = "chat" | "settings";
 
+export async function createSessionInDefaultWorkspace(
+  scorel: Pick<Window["scorel"], "app" | "sessions">,
+  providerId: string,
+  modelId: string,
+): Promise<{ sessionId: string; workspaceRoot: string }> {
+  const workspaceRoot = await scorel.app.getDefaultWorkspace();
+  const { sessionId } = await scorel.sessions.create({
+    providerId,
+    modelId,
+    workspaceRoot,
+  });
+  return { sessionId, workspaceRoot };
+}
+
+export async function switchSessionWorkspace(
+  scorel: Pick<Window["scorel"], "sessions">,
+  sessionId: string,
+  workspaceRoot: string,
+): Promise<void> {
+  await scorel.sessions.updateWorkspace(sessionId, workspaceRoot);
+}
+
 function renderSnippet(snippet: string) {
   return snippet
     .split(/(<mark>.*?<\/mark>)/g)
@@ -48,6 +70,8 @@ export function App() {
   const [defaultWorkspace, setDefaultWorkspace] = useState("");
   const [workspaceHistory, setWorkspaceHistory] = useState<WorkspaceEntry[]>([]);
   const [creatingSession, setCreatingSession] = useState(false);
+  const [workspacePickerSessionId, setWorkspacePickerSessionId] = useState<string | null>(null);
+  const [chatViewVersion, setChatViewVersion] = useState(0);
   const shouldAutoSelectFirstSessionRef = useRef(true);
 
   const refreshActiveProvider = useCallback(async (preferred?: { providerId?: string | null; modelId?: string | null } | null) => {
@@ -93,14 +117,11 @@ export function App() {
     [refresh],
   );
 
-  const openWorkspacePicker = useCallback(async () => {
-    if (!providerId || !modelId) {
-      return;
-    }
-
+  const openWorkspacePicker = useCallback(async (sessionId: string) => {
     setWorkspacePickerOpen(true);
     setWorkspacePickerError(null);
     setWorkspacePickerLoading(true);
+    setWorkspacePickerSessionId(sessionId);
 
     try {
       const [nextDefaultWorkspace, nextWorkspaceHistory] = await Promise.all([
@@ -115,7 +136,7 @@ export function App() {
     } finally {
       setWorkspacePickerLoading(false);
     }
-  }, [providerId, modelId]);
+  }, []);
 
   const createSessionAtWorkspace = useCallback(async (workspaceRoot: string) => {
     if (!providerId || !modelId) {
@@ -149,12 +170,43 @@ export function App() {
       return;
     }
 
+    if (workspacePickerSessionId) {
+      try {
+        setWorkspacePickerError(null);
+        await switchSessionWorkspace(window.scorel, workspacePickerSessionId, workspaceRoot);
+        await refresh();
+        setChatViewVersion((version) => version + 1);
+        setWorkspacePickerOpen(false);
+        setWorkspacePickerSessionId(null);
+      } catch (error: unknown) {
+        setWorkspacePickerError(error instanceof Error ? error.message : String(error));
+      }
+      return;
+    }
+
     await createSessionAtWorkspace(workspaceRoot);
-  }, [createSessionAtWorkspace]);
+  }, [createSessionAtWorkspace, refresh, workspacePickerSessionId]);
 
   const handleNewSession = useCallback(async () => {
-    await openWorkspacePicker();
-  }, [openWorkspacePicker]);
+    if (!providerId || !modelId) {
+      return;
+    }
+
+    setCreatingSession(true);
+    try {
+      setWorkspacePickerError(null);
+      const { sessionId, workspaceRoot } = await createSessionInDefaultWorkspace(window.scorel, providerId, modelId);
+      setDefaultWorkspace(workspaceRoot);
+      shouldAutoSelectFirstSessionRef.current = false;
+      await refresh();
+      setActiveSessionId(sessionId);
+      setAppView("chat");
+    } catch (error: unknown) {
+      setWorkspacePickerError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCreatingSession(false);
+    }
+  }, [modelId, providerId, refresh]);
 
   const handleProvidersChanged = useCallback(async (selection?: { providerId: string; modelId: string } | null) => {
     const activeProvider = await refreshActiveProvider(selection ?? null);
@@ -455,8 +507,12 @@ export function App() {
             />
           ) : activeSessionId ? (
             <ChatView
+              key={`${activeSessionId}:${chatViewVersion}`}
               sessionId={activeSessionId}
               onSessionMutated={handleSessionMutated}
+              onChangeWorkspace={(sessionId) => {
+                void openWorkspacePicker(sessionId);
+              }}
               searchNavigationTarget={
                 searchNavigationTarget?.sessionId === activeSessionId
                   ? searchNavigationTarget
@@ -489,7 +545,23 @@ export function App() {
           creating={creatingSession}
           error={workspacePickerError}
           onUseWorkspace={(workspacePath) => {
-            void createSessionAtWorkspace(workspacePath);
+            if (!workspacePickerSessionId) {
+              void createSessionAtWorkspace(workspacePath);
+              return;
+            }
+
+            void (async () => {
+              try {
+                setWorkspacePickerError(null);
+                await switchSessionWorkspace(window.scorel, workspacePickerSessionId, workspacePath);
+                await refresh();
+                setChatViewVersion((version) => version + 1);
+                setWorkspacePickerOpen(false);
+                setWorkspacePickerSessionId(null);
+              } catch (error: unknown) {
+                setWorkspacePickerError(error instanceof Error ? error.message : String(error));
+              }
+            })();
           }}
           onBrowse={() => {
             void handleBrowseWorkspace();
@@ -497,6 +569,7 @@ export function App() {
           onClose={() => {
             if (!creatingSession) {
               setWorkspacePickerOpen(false);
+              setWorkspacePickerSessionId(null);
             }
           }}
         />

@@ -17,6 +17,7 @@ import {
   listSessions as dbListSessions,
   getSessionDetail as dbGetSessionDetail,
   updateSessionPermissionConfig as dbUpdateSessionPermissionConfig,
+  updateSessionWorkspaceRoot as dbUpdateSessionWorkspaceRoot,
   renameSession as dbRenameSession,
   archiveSession as dbArchiveSession,
   unarchiveSession as dbUnarchiveSession,
@@ -290,6 +291,10 @@ export class SessionManager {
 
   setPermissionConfig(sessionId: string, config: PermissionConfig | null): void {
     dbUpdateSessionPermissionConfig(this.db, sessionId, config);
+  }
+
+  setWorkspaceRoot(sessionId: string, workspaceRoot: string): void {
+    dbUpdateSessionWorkspaceRoot(this.db, sessionId, workspaceRoot);
   }
 
   // --- State ---

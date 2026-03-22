@@ -19,6 +19,8 @@ const scorelBridge = {
   sessions: {
     create: (opts: { providerId: string; modelId: string; workspaceRoot: string }) =>
       ipcRenderer.invoke("sessions:create", opts),
+    updateWorkspace: (sessionId: string, workspaceRoot: string) =>
+      ipcRenderer.invoke("sessions:updateWorkspace", sessionId, workspaceRoot),
     list: (opts?: { archived?: boolean }) =>
       ipcRenderer.invoke("sessions:list", opts),
     get: (sessionId: string) =>

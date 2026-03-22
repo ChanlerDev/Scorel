@@ -493,6 +493,16 @@ export function updateSessionPermissionConfig(
   ).run(config ? JSON.stringify(config) : null, now(), sessionId);
 }
 
+export function updateSessionWorkspaceRoot(
+  db: Database.Database,
+  sessionId: string,
+  workspaceRoot: string,
+): void {
+  db.prepare(
+    "UPDATE sessions SET workspace_root = ?, updated_at = ? WHERE id = ?",
+  ).run(workspaceRoot, now(), sessionId);
+}
+
 export function renameSession(
   db: Database.Database,
   sessionId: string,

@@ -1,17 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import type { ToolHandler } from "../types.js";
+import { formatFileAccessError, resolveToolPath } from "./path-utils.js";
 
 const EDIT_FILE_MAX_OUTPUT = 2_000;
-
-function validatePath(filePath: string, workspaceRoot: string): string | null {
-  const resolved = path.resolve(workspaceRoot, filePath);
-  const normalizedRoot = path.resolve(workspaceRoot);
-  if (!resolved.startsWith(normalizedRoot + path.sep) && resolved !== normalizedRoot) {
-    return null;
-  }
-  return resolved;
-}
 
 function createDiffSnippet(
   filePath: string,
@@ -61,16 +52,13 @@ export const editFileTool: ToolHandler = async (args, workspaceRoot) => {
     return { toolCallId: "", isError: true, content: "Missing required argument: new_string" };
   }
 
-  const resolved = validatePath(filePath, workspaceRoot);
-  if (!resolved) {
-    return { toolCallId: "", isError: true, content: `Path escapes workspace root: ${filePath}` };
-  }
+  const resolved = resolveToolPath(filePath, workspaceRoot);
 
   let content: string;
   try {
     content = await readFile(resolved, "utf-8");
-  } catch {
-    return { toolCallId: "", isError: true, content: `File not found: ${filePath}` };
+  } catch (error: unknown) {
+    return { toolCallId: "", isError: true, content: formatFileAccessError("edit", filePath, error) };
   }
 
   // Count occurrences
@@ -97,7 +85,11 @@ export const editFileTool: ToolHandler = async (args, workspaceRoot) => {
   }
 
   const newContent = content.slice(0, firstIndex) + newString + content.slice(firstIndex + oldString.length);
-  await writeFile(resolved, newContent, "utf-8");
+  try {
+    await writeFile(resolved, newContent, "utf-8");
+  } catch (error: unknown) {
+    return { toolCallId: "", isError: true, content: formatFileAccessError("edit", filePath, error) };
+  }
 
   const diff = createDiffSnippet(filePath, oldString, newString, firstIndex, content);
 

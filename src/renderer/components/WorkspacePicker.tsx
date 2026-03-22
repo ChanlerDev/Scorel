@@ -51,7 +51,7 @@ export function WorkspacePicker({
           <div>
             <div style={{ fontSize: 22, fontWeight: 700 }}>Select Workspace</div>
             <div style={{ color: "var(--text-secondary)", marginTop: 4 }}>
-              Start a chat in the default workspace, a recent project, or browse for another folder.
+              Switch the current workspace to the default folder, a recent project, or another location.
             </div>
           </div>
           <button style={secondaryButtonStyle} onClick={onClose} disabled={creating}>Cancel</button>

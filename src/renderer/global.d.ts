@@ -24,6 +24,7 @@ type ScorelBridge = {
       modelId: string;
       workspaceRoot: string;
     }): Promise<{ sessionId: string }>;
+    updateWorkspace(sessionId: string, workspaceRoot: string): Promise<void>;
     list(opts?: { archived?: boolean }): Promise<SessionSummary[]>;
     get(sessionId: string): Promise<SessionDetail | null>;
     rename(sessionId: string, title: string): Promise<void>;

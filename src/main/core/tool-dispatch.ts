@@ -27,7 +27,7 @@ const bashSchema = {
 const readFileSchema = {
   type: "object",
   properties: {
-    path: { type: "string", description: "File path relative to workspace root" },
+    path: { type: "string", description: "File path; relative paths resolve from the current workspace, absolute paths are allowed" },
     offset: { type: "number", description: "Line offset (0-based)" },
     limit: { type: "number", description: "Number of lines to read" },
   },
@@ -37,7 +37,7 @@ const readFileSchema = {
 const writeFileSchema = {
   type: "object",
   properties: {
-    path: { type: "string", description: "File path relative to workspace root" },
+    path: { type: "string", description: "File path; relative paths resolve from the current workspace, absolute paths are allowed" },
     content: { type: "string", description: "File content to write" },
   },
   required: ["path", "content"],
@@ -46,7 +46,7 @@ const writeFileSchema = {
 const editFileSchema = {
   type: "object",
   properties: {
-    path: { type: "string", description: "File path relative to workspace root" },
+    path: { type: "string", description: "File path; relative paths resolve from the current workspace, absolute paths are allowed" },
     old_string: { type: "string", description: "Exact string to find (must be unique)" },
     new_string: { type: "string", description: "Replacement string" },
   },
@@ -132,13 +132,13 @@ export function getToolDefinitions(opts?: {
 function getToolDescription(name: ToolName): string {
   switch (name) {
     case "bash":
-      return "Execute a shell command in the workspace directory. Returns stdout+stderr combined output.";
+      return "Execute a shell command using the current workspace as the default working directory. Returns stdout+stderr combined output.";
     case "read_file":
-      return "Read a file from the workspace. Supports line offset and limit for partial reads.";
+      return "Read a file. Relative paths resolve from the current workspace; absolute paths are allowed. Supports line offset and limit for partial reads.";
     case "write_file":
-      return "Write content to a file in the workspace. Creates parent directories if needed.";
+      return "Write content to a file. Relative paths resolve from the current workspace; absolute paths are allowed. Creates parent directories if needed.";
     case "edit_file":
-      return "Edit a file by replacing an exact string match. The old_string must appear exactly once.";
+      return "Edit a file by replacing an exact string match. Relative paths resolve from the current workspace; absolute paths are allowed. The old_string must appear exactly once.";
     case "load_skill":
       return "Load a skill file to get detailed instructions for a specific task. Use 'list' as the name to see available skills.";
     case "subagent":

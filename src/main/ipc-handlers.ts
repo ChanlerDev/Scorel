@@ -70,6 +70,11 @@ export function registerIpcHandlers(opts: {
     },
   );
 
+  ipcMain.handle("sessions:updateWorkspace", async (_event, sessionId: string, workspaceRoot: string) => {
+    sessionManager.setWorkspaceRoot(sessionId, workspaceRoot);
+    upsertWorkspace(db, workspaceRoot);
+  });
+
   ipcMain.handle(
     "sessions:list",
     async (_event, listOpts?: { archived?: boolean }) => {

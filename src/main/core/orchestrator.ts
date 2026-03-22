@@ -585,7 +585,7 @@ export class Orchestrator {
   private assembleSystemPrompt(session: SessionMeta): string {
     const parts: string[] = ["You are a helpful assistant."];
     if (session.workspaceRoot) {
-      parts.push(`Current workspace: ${session.workspaceRoot}`);
+      parts.push(`Current workspace: ${session.workspaceRoot} (default working directory for tools; relative paths resolve here, but absolute paths may target elsewhere).`);
     }
     const todos = listTodos(this.db, session.id);
     if (todos.length > 0) {

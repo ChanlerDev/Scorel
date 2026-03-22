@@ -104,6 +104,15 @@ describe("SessionManager", () => {
     expect(detail!.title).toBe("New Title");
   });
 
+  it("updates a session workspace root", () => {
+    const id = mgr.create("/tmp/ws");
+
+    mgr.setWorkspaceRoot(id, "/tmp/next-workspace");
+
+    expect(mgr.get(id)?.workspaceRoot).toBe("/tmp/next-workspace");
+    expect(mgr.getMeta(id)?.workspaceRoot).toBe("/tmp/next-workspace");
+  });
+
   // 5. archive
   it("archives a session and clears runtime", () => {
     const id = mgr.create("/tmp/ws");

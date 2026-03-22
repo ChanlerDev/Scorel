@@ -38,10 +38,16 @@ describe("read_file tool", () => {
     expect(result.content).toBe("b\nc");
   });
 
-  it("rejects path escape", async () => {
-    const result = await readFileTool({ path: "../../etc/passwd" }, workspaceRoot, signal());
-    expect(result.isError).toBe(true);
-    expect(result.content).toContain("Path escapes workspace root");
+  it("reads an absolute path outside the workspace", async () => {
+    const externalPath = path.join(os.tmpdir(), `scorel-external-read-${Date.now()}.txt`);
+    writeFileSync(externalPath, "outside workspace\n");
+
+    const result = await readFileTool({ path: externalPath }, workspaceRoot, signal());
+
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("outside workspace");
+
+    rmSync(externalPath, { force: true });
   });
 
   it("returns error for missing file", async () => {
@@ -81,14 +87,19 @@ describe("write_file tool", () => {
     expect(existsSync(path.join(workspaceRoot, "sub/dir/file.txt"))).toBe(true);
   });
 
-  it("rejects path escape", async () => {
+  it("writes to an absolute path outside the workspace", async () => {
+    const externalPath = path.join(os.tmpdir(), `scorel-external-write-${Date.now()}.txt`);
+
     const result = await writeFileTool(
-      { path: "../escape.txt", content: "bad" },
+      { path: externalPath, content: "outside" },
       workspaceRoot,
       signal(),
     );
-    expect(result.isError).toBe(true);
-    expect(result.content).toContain("Path escapes workspace root");
+
+    expect(result.isError).toBe(false);
+    expect(readFileSync(externalPath, "utf-8")).toBe("outside");
+
+    rmSync(externalPath, { force: true });
   });
 });
 
@@ -126,14 +137,20 @@ describe("edit_file tool", () => {
     expect(result.content).toContain("Multiple matches found (2)");
   });
 
-  it("rejects path escape", async () => {
+  it("edits an absolute path outside the workspace", async () => {
+    const externalPath = path.join(os.tmpdir(), `scorel-external-edit-${Date.now()}.txt`);
+    writeFileSync(externalPath, "outside text");
+
     const result = await editFileTool(
-      { path: "../../etc/hosts", old_string: "a", new_string: "b" },
+      { path: externalPath, old_string: "outside", new_string: "updated" },
       workspaceRoot,
       signal(),
     );
-    expect(result.isError).toBe(true);
-    expect(result.content).toContain("Path escapes workspace root");
+
+    expect(result.isError).toBe(false);
+    expect(readFileSync(externalPath, "utf-8")).toBe("updated text");
+
+    rmSync(externalPath, { force: true });
   });
 });
 
