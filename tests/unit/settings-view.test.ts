@@ -39,4 +39,19 @@ describe("SettingsView", () => {
     expect(canSave?.(true, null)).toBe(false);
     expect(canSave?.(false, "load failed")).toBe(false);
   });
+
+  it("uses runtime-equivalent defaults when a tool has no stored permission override", () => {
+    const maybeResolver = (
+      SettingsViewModule as Record<string, unknown>
+    ).getDisplayedPermissionLevel;
+
+    const getDisplayedPermissionLevel = typeof maybeResolver === "function"
+      ? maybeResolver as (toolName: string, storedLevel?: string) => string
+      : null;
+
+    expect(getDisplayedPermissionLevel?.("read_file")).toBe("allow");
+    expect(getDisplayedPermissionLevel?.("todo_write")).toBe("allow");
+    expect(getDisplayedPermissionLevel?.("bash")).toBe("confirm");
+    expect(getDisplayedPermissionLevel?.("read_file", "deny")).toBe("deny");
+  });
 });

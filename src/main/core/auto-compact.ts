@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { SessionMeta, AutoCompactConfig, AssistantMessage } from "../../shared/types.js";
+import type { SessionMeta, AutoCompactConfig, AssistantMessage, ScorelMessage } from "../../shared/types.js";
 import { AUTO_COMPACT_DEFAULT_THRESHOLD } from "../../shared/constants.js";
 import type { ProviderAdapter } from "../provider/types.js";
 import type { ProviderConfig, StoredSessionMessage } from "../../shared/types.js";
@@ -72,7 +72,7 @@ export type AutoCompactDeps = {
 
 export type AutoCompactInput = {
   sessionId: string;
-  messages: import("../../shared/types.js").ScorelMessage[];
+  messages: ScorelMessage[];
   storedMessages: StoredSessionMessage[];
 };
 

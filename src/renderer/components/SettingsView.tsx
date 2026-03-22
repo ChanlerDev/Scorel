@@ -16,6 +16,15 @@ type SettingsViewProps = {
 type EditorMode = "edit" | "add";
 
 const PERMISSION_TOOLS = ["bash", "read_file", "write_file", "edit_file", "subagent", "todo_write", "load_skill"] as const;
+const DEFAULT_PERMISSION_LEVEL_BY_TOOL: Record<(typeof PERMISSION_TOOLS)[number], PermissionLevel> = {
+  bash: "confirm",
+  read_file: "allow",
+  write_file: "confirm",
+  edit_file: "confirm",
+  subagent: "confirm",
+  todo_write: "allow",
+  load_skill: "allow",
+};
 
 function createEmptyPermissionConfig(): PermissionConfig {
   return {
@@ -76,6 +85,13 @@ export function getPermissionsLoadFailureMessage(): string {
 
 export function canSavePermissions(savingPermissions: boolean, permissionsLoadError: string | null): boolean {
   return !savingPermissions && permissionsLoadError == null;
+}
+
+export function getDisplayedPermissionLevel(
+  toolName: (typeof PERMISSION_TOOLS)[number],
+  storedLevel?: PermissionLevel,
+): PermissionLevel {
+  return storedLevel ?? DEFAULT_PERMISSION_LEVEL_BY_TOOL[toolName];
 }
 
 export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps) {
@@ -516,7 +532,7 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
 
             <div style={{ display: "grid", gap: 12 }}>
               {PERMISSION_TOOLS.map((toolName) => {
-                const level = permissionConfig.toolDefaults[toolName] ?? "confirm";
+                const level = getDisplayedPermissionLevel(toolName, permissionConfig.toolDefaults[toolName]);
                 return (
                   <div
                     key={toolName}

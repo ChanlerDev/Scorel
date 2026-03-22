@@ -112,7 +112,7 @@ These are hard boundaries. Do NOT implement in V0:
 - Runner executes in isolated child process; workspace path whitelist enforced
 - All `write_file` / `edit_file` / `bash` require user approval by default
 - `read_file` allowed by default but scoped to workspace root
-- Workspace must be explicitly selected at session creation; no default to home directory
+- V0 required explicit workspace selection with no home-directory default; V1 intentionally relaxes this for first-run UX by offering `~/Scorel` as the default workspace
 - Log redaction: mask Authorization headers, tokens, home/user paths in exports
 
 ## Git Conventions

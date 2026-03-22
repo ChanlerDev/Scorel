@@ -1,4 +1,4 @@
-import type { ScorelMessage, SessionMeta, ToolResult } from "../../shared/types.js";
+import type { AssistantMessage, ScorelMessage, SessionMeta, ToolResult } from "../../shared/types.js";
 import { SUBAGENT_DEFAULT_MAX_TURNS } from "../../shared/constants.js";
 
 export function canSpawnSubagent(session: SessionMeta): boolean {
@@ -12,8 +12,10 @@ export function getSubagentMaxTurns(value: unknown): number {
 }
 
 export function summarizeChildMessages(messages: ScorelMessage[]): string {
-  const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-  if (!lastAssistant || lastAssistant.role !== "assistant") {
+  const lastAssistant = [...messages].reverse().find(
+    (message): message is AssistantMessage => message.role === "assistant",
+  );
+  if (!lastAssistant) {
     return "Subagent completed without a final assistant message.";
   }
 
