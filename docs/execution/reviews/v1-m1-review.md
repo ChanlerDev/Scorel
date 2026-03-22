@@ -8,7 +8,82 @@ V1-M1 implements the four autonomy pillars (A1–A4) from the spec: auto_compact
 
 ---
 
-## Issues
+## Re-review (Round 2)
+
+> All critical and high-severity issues have been addressed. 22 of 23 original issues fixed; 1 remaining (M12, intentional design decision). 3 new low-severity observations added.
+
+### Resolution Status
+
+| ID | Severity | Issue | Status |
+|---|---|---|---|
+| C1 | Critical | `pendingApproval` single-slot race | **FIXED** — `Map<string, ApprovalRequest>` keyed by `toolCallId`; abort iterates by `sessionId` |
+| C2 | Critical | Permission IPC unvalidated | **FIXED** — `normalizePermissionConfig(config)` called before store on both `setGlobal` and `setSession` |
+| C3 | Critical | `resolvePermission` fallback mismatch | **FIXED** — Returns `{}` (no `level`); `resolveToolApproval` falls through to registry default |
+| C4 | Critical | `maybeAutoCompact` swallows errors | **FIXED** — `console.error` added; `ChatView` listens for `compact.failed` and renders warning |
+| H1 | High | Orphan child session | **FIXED** — API key check moved before `sessionManager.create()` |
+| H2 | High | `details` type unsound | **FIXED** — Changed to `details?: unknown` |
+| H3 | High | SettingsView silent permission reset | **FIXED** — `permissionsLoadError` state + `console.error` + save button disabled on load failure |
+| H4 | High | TodoPanel race + silent errors | **FIXED** — Event sub before load; `hasReceivedEventRef` prevents stale overwrite; `.catch()` sets `loadError` |
+| H5 | High | `parseJsonOrNull` throws | **FIXED** — try-catch + `console.error` + return `null`; test in `db-resilience.test.ts` |
+| H6 | High | `updateTodo` can't clear notes | **FIXED** — `CASE WHEN @notesProvided` pattern; opts accepts `string \| null`; test in `todos.test.ts` |
+| H7 | High | `executeTodoWrite` no try-catch | **FIXED** — Entire method wrapped; catch returns `isError: true` ToolResult |
+| M1 | Medium | `getSubagentDepth` dead code | **FIXED** — Removed; only `canSpawnSubagent` remains |
+| M2 | Medium | `SubagentStatus` duplicated | **FIXED** — `events.ts` imports from `types.ts` |
+| M3 | Medium | `SubagentRunResult` dead type | **FIXED** — Removed |
+| M4 | Medium | `SessionState` in wrong file | **FIXED** — Moved to `types.ts` |
+| M5 | Medium | `toolDefaults` key is `string` | **FIXED** — `Partial<Record<ToolName, PermissionLevel>>` |
+| M6 | Medium | `getAutoCompactConfig` no validation | **FIXED** — Validates type, finiteness, and range `(0,1]` |
+| M7 | Medium | DB boundary unsafe casts | **PARTIALLY FIXED** — `isTodoStatus` guard + notes sanitization + `normalizePermissionConfig` on read; structural `as TodoRow` casts remain (acceptable for schema-guaranteed columns) |
+| M8 | Medium | Test asserts Map order | **FIXED** — `.sort()` before comparing |
+| M9 | Medium | `makeDeniedWithReasonResult` type | **FIXED** — Returns `ToolResult` |
+| M10 | Medium | `deleteSessionTodos` duplication | **FIXED** — `db.ts` calls `deleteSessionTodos` from `todos.ts` |
+| M11 | Medium | `getModelContextLimit` no logging | **FIXED** — `console.warn` on fallback |
+| M12 | Medium | Default workspace `~/Scorel` | **NOT FIXED** — Intentional V1 UX decision; consider documenting in CLAUDE.md |
+
+### Fix Quality Assessment
+
+Fixes are not bandaid-level — they address root causes at the design layer:
+
+- **C1**: `Map<string, ApprovalRequest>` correctly supports concurrent parent/child approval with session-scoped abort cleanup
+- **C3**: `return {}` + caller fallthrough preserves separation of concerns between permission resolution and tool registry
+- **H4**: `hasReceivedEventRef` is the correct pattern for IPC/event race resolution — event wins if it arrives first
+- **H6**: `CASE WHEN @notesProvided` is the standard SQLite pattern for nullable-field updates with explicit null support
+
+### New Test Coverage
+
+- `tests/unit/db-resilience.test.ts`: Corrupted JSON returns null; dirty permission config gets normalized (filters invalid levels, unknown tools, non-string reasons)
+- `tests/unit/todos.test.ts`: Clearing notes to null; non-string notes sanitized to null
+- `tests/unit/tool-dispatch.test.ts:100-106`: Permission fallback to registry defaults (`read_file` → allow, `bash` → confirm)
+
+### New Observations (Round 2)
+
+#### N1 — SettingsView permission dropdown shows "Confirm" but runtime default may differ (Low)
+
+**File**: `src/renderer/components/SettingsView.tsx:519`
+
+`permissionConfig.toolDefaults[toolName] ?? "confirm"` displays "Confirm" for tools without explicit config. But at runtime, `resolveToolApproval` falls through to the registry default — `read_file` actually gets `"allow"`. Users may believe `read_file` requires approval when it does not. Data model is correct (unset tools are not stored); this is a display-only UX gap.
+
+#### N2 — `AutoCompactInput.messages` uses inline import type (Style)
+
+**File**: `src/main/core/auto-compact.ts:75`
+
+Uses `import("../../shared/types.js").ScorelMessage[]` when the module already imports from the same path at line 2. Should use the module-level import.
+
+#### N3 — `summarizeChildMessages` redundant guard could use type predicate (Style)
+
+**File**: `src/main/core/subagent.ts:16`
+
+`lastAssistant.role !== "assistant"` is needed for TypeScript narrowing but redundant at runtime. A type predicate on `.find()` would be cleaner:
+
+```ts
+const lastAssistant = [...messages].reverse().find(
+  (m): m is AssistantMessage => m.role === "assistant"
+);
+```
+
+---
+
+## Issues (Original Review — preserved for reference)
 
 ### C1 — `pendingApproval` single-slot race: child subagent overwrites parent approval
 
@@ -335,7 +410,7 @@ const threshold = typeof ac.threshold === "number" && ac.threshold > 0 && ac.thr
 | A1: auto_compact threshold config in session settings | Stored in `session.settings.autoCompact` | Matches |
 | A1: trigger after `llm.done`, before next user send | `maybeAutoCompact` called in model loop | Matches |
 | A1: reuse V0 manual compact pipeline | Calls `runMicroCompact` + `runManualCompact` | Matches |
-| A1: emit `compact.auto` event | Event emitted | Matches, but no UI handler |
+| A1: emit `compact.auto` event | Event emitted + UI handler | Matches |
 | A1: user can disable per session or globally | Config-based toggle | Matches |
 | A2: child gets fresh messages with task as first user message | Fresh session created with task injected | Matches |
 | A2: inherits parent tool registry and permissions | `permissionConfig` inherited | Matches |
@@ -351,23 +426,23 @@ const threshold = typeof ac.threshold === "number" && ac.threshold > 0 && ac.thr
 | A4: deny with reason | `makeDeniedWithReasonResult` with configurable message | Matches |
 | A4: session inherits global, can override | Layered resolution chain | Matches |
 | A4: settings UI permission editor | SettingsView extended | Matches |
-| A4: unknown tools default to `"confirm"` | Fallback returns `"confirm"` | Matches, but see C3 — conflicts with built-in tool defaults |
+| A4: unknown tools default to `"confirm"` | Fallback to registry default, then `"confirm"` for unknown tools | Matches |
 
 ---
 
 ## Systemic Observations
 
-### 1. DB Boundary Trust
+### 1. DB Boundary Trust (Improved)
 
-SQLite is untyped, but the codebase universally uses `as T` casts at the DB read boundary without runtime validation. This is a systemic risk — a single data corruption event silently passes through the type system and causes runtime failures downstream. Recommend adding a validation layer (hand-written type guards or lightweight schema) at the DB read boundary.
+The most impactful fix pattern was adding validation at the DB read boundary: `isTodoStatus` type guard, `normalizePermissionConfig` on deserialized permission config, and `parseJsonOrNull` try-catch. Structural `as TodoRow` casts remain for schema-guaranteed columns — this is acceptable since the schema defines the column types and migrations enforce them.
 
-### 2. Error Handling Asymmetry
+### 2. Error Handling Asymmetry (Resolved)
 
-Manual operations (`manualCompact`, `handleSavePermissions`) have thorough error handling and UI feedback. Auto/background operations (`maybeAutoCompact`, initial IPC loads) tend to silently swallow errors. For an autonomy-focused milestone, background operation observability is arguably more important than manual operation feedback.
+The asymmetry between manual and automatic operations is now addressed: `maybeAutoCompact` logs errors and surfaces them in the UI; `TodoPanel` surfaces load errors; `SettingsView` disables save on load failure. Background operations now have comparable observability to manual operations.
 
-### 3. Permission System Fail-Open Tendency
+### 3. Permission System Fail-Open Tendency (Resolved)
 
-The combination of unvalidated IPC inputs (C2), `"confirm"` fallback instead of `undefined` (C3), and missing `normalizePermissionConfig` on write paths creates a system that tends to fail open — errors result in more permissive behavior rather than more restrictive. Security-critical systems should fail closed.
+All three contributing factors have been fixed: IPC inputs are validated through `normalizePermissionConfig`; the permission fallback returns `{}` (undefined level) instead of `"confirm"`; and `resolveToolApproval` correctly falls through to registry defaults. The system now fails closed — invalid permission values are filtered out during normalization, and unknown tools default to `"confirm"`.
 
 ---
 
@@ -379,3 +454,6 @@ The combination of unvalidated IPC inputs (C2), `"confirm"` fallback instead of 
 4. **Todo input validation**: `executeTodoWrite` validates per-operation required fields with clear error messages
 5. **Migration idempotency**: DDL uses `IF NOT EXISTS`, version pragma set correctly
 6. **Convention compliance**: All new types use `type` not `interface`, no `any`, kebab-case filenames throughout
+7. **DB resilience** (post-fix): `parseJsonOrNull` try-catch, `normalizePermissionConfig` on read, `isTodoStatus` type guard — corrupted data degrades gracefully instead of crashing
+8. **TodoPanel race fix**: `hasReceivedEventRef` pattern correctly resolves the IPC/event ordering race; event subscription registered before initial load
+9. **Permission save guard**: `canSavePermissions` disables save button when load fails — prevents accidental overwrite of real config with defaults
