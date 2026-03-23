@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { McpServerConfig, PermissionConfig, ProviderConfig } from "../shared/types.js";
+import type {
+  EmbeddingConfig,
+  McpServerConfig,
+  PermissionConfig,
+  ProviderConfig,
+} from "../shared/types.js";
 
 // Type-safe bridge — matches ScorelBridge from V0_SPEC (M1 subset)
 const scorelBridge = {
@@ -41,6 +46,13 @@ const scorelBridge = {
   search: {
     query: (query: string, opts?: { sessionId?: string; limit?: number }) =>
       ipcRenderer.invoke("search:query", query, opts),
+  },
+  embeddings: {
+    getConfig: () => ipcRenderer.invoke("embeddings:getConfig"),
+    setConfig: (config: EmbeddingConfig) => ipcRenderer.invoke("embeddings:setConfig", config),
+    getStatus: () => ipcRenderer.invoke("embeddings:getStatus"),
+    getActiveCount: () => ipcRenderer.invoke("embeddings:getActiveCount"),
+    reindex: () => ipcRenderer.invoke("embeddings:reindex"),
   },
   compact: {
     manual: (sessionId: string) =>

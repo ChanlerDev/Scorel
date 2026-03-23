@@ -70,6 +70,15 @@ export class Orchestrator {
   private readonly compactTranscriptDir?: string;
   private readonly getGlobalPermissionConfig: () => PermissionConfig | null;
   private readonly mcpManager: Pick<McpManager, "callTool"> | null;
+  private readonly onCompactionPersisted: ((
+    compaction: {
+      id: string;
+      sessionId: string;
+      boundaryMessageId: string;
+      summaryText: string;
+      createdAt: number;
+    },
+  ) => void) | null;
   private readonly workspaceToolRunners = new Map<string, ToolRunner>();
   private readonly activeChildSessions = new Map<string, string>();
   private readonly pendingApprovals = new Map<string, ApprovalRequest>();
@@ -85,6 +94,13 @@ export class Orchestrator {
     compactTranscriptDir?: string;
     getGlobalPermissionConfig?: () => PermissionConfig | null;
     mcpManager?: Pick<McpManager, "callTool">;
+    onCompactionPersisted?: (compaction: {
+      id: string;
+      sessionId: string;
+      boundaryMessageId: string;
+      summaryText: string;
+      createdAt: number;
+    }) => void;
   }) {
     this.db = opts.db;
     this.sessionManager = opts.sessionManager;
@@ -96,6 +112,7 @@ export class Orchestrator {
     this.compactTranscriptDir = opts.compactTranscriptDir;
     this.getGlobalPermissionConfig = opts.getGlobalPermissionConfig ?? (() => null);
     this.mcpManager = opts.mcpManager ?? null;
+    this.onCompactionPersisted = opts.onCompactionPersisted ?? null;
   }
 
   async send(sessionId: string, text: string): Promise<void> {
@@ -554,6 +571,14 @@ export class Orchestrator {
         modelId,
         transcriptDir: this.compactTranscriptDir,
         transcriptMessages: storedMessages,
+      });
+
+      this.onCompactionPersisted?.({
+        id: result.compactionId,
+        sessionId,
+        boundaryMessageId: result.boundaryMessageId,
+        summaryText: result.summaryText,
+        createdAt: Date.now(),
       });
 
       this.sessionManager.setActiveCompact(sessionId, result.compactionId);

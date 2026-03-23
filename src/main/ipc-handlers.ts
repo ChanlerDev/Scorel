@@ -2,6 +2,8 @@ import { app, dialog, ipcMain, BrowserWindow, nativeTheme } from "electron";
 import * as fs from "node:fs";
 import type Database from "better-sqlite3";
 import type {
+  EmbeddingConfig,
+  EmbeddingStatus,
   McpServerConfig,
   PermissionConfig,
   ProviderConfig,
@@ -25,7 +27,14 @@ import type { ProviderEntry } from "./core/orchestrator.js";
 import type { McpManager } from "./mcp/manager.js";
 import { openaiAdapter } from "./provider/openai-adapter.js";
 import { anthropicAdapter } from "./provider/anthropic-adapter.js";
-import { normalizePermissionConfig, saveAppConfig, type AppConfig } from "./app-config.js";
+import {
+  normalizeEmbeddingConfig,
+  normalizePermissionConfig,
+  saveAppConfig,
+  type AppConfig,
+} from "./app-config.js";
+import type { EmbeddingIndexer } from "./search/embedding-indexer.js";
+import { countActiveEmbeddings } from "./storage/embeddings.js";
 
 export function registerIpcHandlers(opts: {
   db: Database.Database;
@@ -36,6 +45,7 @@ export function registerIpcHandlers(opts: {
   getMainWindow: () => BrowserWindow | null;
   appConfig: AppConfig;
   mcpManager: McpManager;
+  embeddingIndexer: EmbeddingIndexer;
 }): void {
   const {
     db,
@@ -46,6 +56,7 @@ export function registerIpcHandlers(opts: {
     getMainWindow,
     appConfig,
     mcpManager,
+    embeddingIndexer,
   } = opts;
 
   ipcMain.handle("app:selectDirectory", async () => {
@@ -131,7 +142,13 @@ export function registerIpcHandlers(opts: {
   ipcMain.handle(
     "search:query",
     async (_event, query: string, searchOpts?: { sessionId?: string; limit?: number }) => {
-      return searchMessages(db, query, searchOpts);
+      return searchMessages(db, query, searchOpts, {
+        embedding: appConfig.embedding,
+        embedQuery: (text, config) => embeddingIndexer.embedQuery(text, config),
+        logWarning: (message, error) => {
+          console.warn(message, error);
+        },
+      });
     },
   );
 
@@ -282,6 +299,28 @@ export function registerIpcHandlers(opts: {
 
   ipcMain.handle("permissions:getGlobal", async () => {
     return appConfig.permissions;
+  });
+
+  ipcMain.handle("embeddings:getConfig", async (): Promise<EmbeddingConfig> => {
+    return appConfig.embedding;
+  });
+
+  ipcMain.handle("embeddings:setConfig", async (_event, config: EmbeddingConfig): Promise<EmbeddingConfig> => {
+    appConfig.embedding = normalizeEmbeddingConfig(config);
+    saveAppConfig(app.getPath("userData"), appConfig);
+    return appConfig.embedding;
+  });
+
+  ipcMain.handle("embeddings:getStatus", async (): Promise<EmbeddingStatus> => {
+    return embeddingIndexer.getStatus();
+  });
+
+  ipcMain.handle("embeddings:getActiveCount", async (): Promise<number> => {
+    return countActiveEmbeddings(db);
+  });
+
+  ipcMain.handle("embeddings:reindex", async (): Promise<EmbeddingStatus> => {
+    return embeddingIndexer.reindexAll();
   });
 
   ipcMain.handle("permissions:setGlobal", async (_event, config: PermissionConfig) => {

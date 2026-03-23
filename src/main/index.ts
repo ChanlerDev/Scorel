@@ -16,6 +16,7 @@ import { McpManager } from "./mcp/manager.js";
 import { buildAppMenu } from "./menu.js";
 import { loadWindowState, saveWindowState, type WindowState } from "./window-state.js";
 import { loadAppConfig } from "./app-config.js";
+import { EmbeddingIndexer } from "./search/embedding-indexer.js";
 import type { ProviderConfig } from "../shared/types.js";
 import { DB_FILENAME } from "../shared/constants.js";
 
@@ -61,8 +62,6 @@ app.whenReady().then(() => {
   const appConfig = loadAppConfig(userDataPath);
   const dbPath = path.join(userDataPath, DB_FILENAME);
   const db = initDatabase(dbPath);
-
-  const sessionManager = new SessionManager(db);
   const eventBus = new EventBus();
   const skills = scanSkills(path.join(app.getAppPath(), "skills"));
   const compactTranscriptDir = path.join(userDataPath, "compact-transcripts");
@@ -78,6 +77,16 @@ app.whenReady().then(() => {
 
   // Mutable provider map — IPC handlers update it on upsert/delete
   const providerMap = buildProviderMap(listProviders(db));
+  const embeddingIndexer = new EmbeddingIndexer({
+    db,
+    getConfig: () => appConfig.embedding,
+    providers: providerMap,
+  });
+  const sessionManager = new SessionManager(db, {
+    onMessagePersisted: (sessionId, message) => {
+      embeddingIndexer.enqueueMessage(sessionId, message);
+    },
+  });
 
   const orchestrator = new Orchestrator({
     db,
@@ -92,6 +101,18 @@ app.whenReady().then(() => {
     compactTranscriptDir,
     getGlobalPermissionConfig: () => appConfig.permissions,
     mcpManager,
+    onCompactionPersisted: ({ id, sessionId, boundaryMessageId, summaryText, createdAt }) => {
+      embeddingIndexer.enqueueCompaction({
+        id,
+        sessionId,
+        boundaryMessageId,
+        summaryText,
+        providerId: "",
+        modelId: "",
+        transcriptPath: null,
+        createdAt,
+      });
+    },
   });
 
   registerIpcHandlers({
@@ -103,6 +124,7 @@ app.whenReady().then(() => {
     getMainWindow,
     appConfig,
     mcpManager,
+    embeddingIndexer,
   });
   void mcpManager.startAutoStartServers().catch((error: unknown) => {
     console.error("Failed to start auto-start MCP servers", error);

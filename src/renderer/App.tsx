@@ -436,6 +436,9 @@ export function App() {
                     <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
                       {result.sessionTitle ?? "Untitled"}
                     </div>
+                    <div style={{ color: "var(--text-secondary)", fontSize: 11, marginBottom: 4 }}>
+                      {result.signals.join(" + ")}
+                    </div>
                     <div style={{ color: "var(--text-secondary)", lineHeight: 1.4 }}>{renderSnippet(result.snippet)}</div>
                   </div>
                 ))}

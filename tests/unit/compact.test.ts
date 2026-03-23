@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import type Database from "better-sqlite3";
 import { initDatabase, createSession, insertMessage, getSessionDetail, searchMessages } from "../../src/main/storage/db.js";
-import { getCompaction } from "../../src/main/storage/compactions.js";
+import { getCompaction, insertCompaction } from "../../src/main/storage/compactions.js";
 import {
   applyMicroCompact,
   applyBoundaryResume,
@@ -274,7 +274,7 @@ describe("compact", () => {
     expect(lines.map((line) => line.message.role)).toEqual(["user", "assistant", "user"]);
   });
 
-  it("search finds content because compaction never deletes messages", () => {
+  it("search finds content because compaction never deletes messages", async () => {
     createSession(db, {
       id: "session-search",
       workspaceRoot: "/tmp/workspace",
@@ -285,9 +285,87 @@ describe("compact", () => {
     insertMessage(db, "session-search", 1, userMessage("u1", "nebula issue before compact", 100));
     insertMessage(db, "session-search", 2, assistantMessage("a1", "Investigated nebula issue", 101));
 
-    const results = searchMessages(db, "nebula", { sessionId: "session-search" });
+    const results = await searchMessages(db, "nebula", { sessionId: "session-search" });
 
     expect(results).toHaveLength(2);
     expect(new Set(results.map((result) => result.messageId))).toEqual(new Set(["u1", "a1"]));
+  });
+
+  it("semantic search can surface compaction summaries and navigate to the boundary message", async () => {
+    createSession(db, {
+      id: "session-search",
+      workspaceRoot: "/tmp/workspace",
+      providerId: "provider-1",
+      modelId: "model-1",
+    });
+
+    insertMessage(db, "session-search", 1, userMessage("u1", "kickoff discussion", 100));
+    insertMessage(db, "session-search", 2, assistantMessage("a1", "implemented login handler", 101));
+
+    insertCompaction(db, {
+      id: "compact-1",
+      sessionId: "session-search",
+      boundaryMessageId: "a1",
+      summaryText: "Authentication flow uses JWT tokens and a login handler.",
+      providerId: "provider-1",
+      modelId: "model-1",
+      transcriptPath: null,
+      createdAt: 102,
+    });
+
+    db.prepare(
+      `INSERT INTO embeddings (
+        id,
+        session_id,
+        source_id,
+        source_type,
+        target_message_id,
+        chunk_index,
+        chunk_text,
+        token_count,
+        model,
+        dimensions,
+        vector,
+        hash,
+        tombstone,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+    ).run(
+      "emb-compact-1",
+      "session-search",
+      "compact-1",
+      "compaction",
+      "a1",
+      0,
+      "Authentication flow uses JWT tokens and a login handler.",
+      9,
+      "text-embedding-3-small",
+      3,
+      Buffer.from(new Float32Array([1, 0, 0]).buffer),
+      "hash-compact-1",
+      102,
+    );
+
+    const results = await searchMessages(
+      db,
+      "authentication",
+      { sessionId: "session-search" },
+      {
+        embedding: {
+          enabled: true,
+          providerId: null,
+          model: "text-embedding-3-small",
+          dimensions: 3,
+        },
+        embedQuery: async () => new Float32Array([1, 0, 0]),
+      },
+    );
+
+    expect(results[0]).toMatchObject({
+      messageId: "a1",
+      snippet: "Authentication flow uses JWT tokens and a login handler.",
+      snippetSource: "semantic",
+      signals: ["semantic"],
+    });
   });
 });

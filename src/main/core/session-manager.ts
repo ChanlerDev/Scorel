@@ -119,9 +119,14 @@ function maybeRedact(content: string, redact?: boolean): string {
 export class SessionManager {
   private readonly db: Database.Database;
   private readonly runtimes = new Map<string, SessionRuntime>();
+  private readonly onMessagePersisted: ((sessionId: string, message: ScorelMessage) => void) | null;
 
-  constructor(db: Database.Database) {
+  constructor(
+    db: Database.Database,
+    opts?: { onMessagePersisted?: (sessionId: string, message: ScorelMessage) => void },
+  ) {
     this.db = db;
+    this.onMessagePersisted = opts?.onMessagePersisted ?? null;
   }
 
   // --- helpers ---
@@ -268,6 +273,7 @@ export class SessionManager {
   appendMessage(sessionId: string, message: ScorelMessage): number {
     const seq = dbGetNextSeq(this.db, sessionId);
     dbInsertMessage(this.db, sessionId, seq, message);
+    this.onMessagePersisted?.(sessionId, message);
     return seq;
   }
 

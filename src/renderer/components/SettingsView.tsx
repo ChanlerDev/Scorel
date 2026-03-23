@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import type {
+  EmbeddingConfig,
+  EmbeddingStatus,
   McpServerConfig,
   McpServerSummary,
   PermissionConfig,
@@ -53,6 +55,49 @@ function createEmptyPermissionConfig(): PermissionConfig {
     toolDefaults: {},
     denyReasons: {},
   };
+}
+
+function createDefaultEmbeddingConfig(): EmbeddingConfig {
+  return {
+    enabled: true,
+    providerId: null,
+    model: "text-embedding-3-small",
+    dimensions: 1536,
+  };
+}
+
+function createEmptyEmbeddingStatus(): EmbeddingStatus {
+  return {
+    state: "idle",
+    pendingJobs: 0,
+    activeJobs: 0,
+    indexedCount: 0,
+    totalCount: null,
+    lastError: null,
+  };
+}
+
+export function formatEmbeddingStatus(status: EmbeddingStatus, activeCount: number): string {
+  if (status.state === "reindexing") {
+    const total = status.totalCount ?? 0;
+    return `Re-indexing ${Math.min(status.indexedCount, total)}/${total} sources`;
+  }
+
+  if (status.state === "indexing") {
+    return `Indexing in background (${status.pendingJobs + status.activeJobs} queued)`;
+  }
+
+  if (status.lastError) {
+    return `Last error: ${status.lastError}`;
+  }
+
+  return `${activeCount} active embedding chunks`;
+}
+
+function embeddingConfigNeedsReindex(current: EmbeddingConfig, next: EmbeddingConfig): boolean {
+  return current.providerId !== next.providerId
+    || current.model !== next.model
+    || current.dimensions !== next.dimensions;
 }
 
 function createEmptyMcpDraft(): McpDraft {
@@ -268,6 +313,12 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
   const [permissionConfig, setPermissionConfig] = useState<PermissionConfig>(createEmptyPermissionConfig());
   const [savingPermissions, setSavingPermissions] = useState(false);
   const [permissionsLoadError, setPermissionsLoadError] = useState<string | null>(null);
+  const [embeddingConfig, setEmbeddingConfig] = useState<EmbeddingConfig>(createDefaultEmbeddingConfig());
+  const [savedEmbeddingConfig, setSavedEmbeddingConfig] = useState<EmbeddingConfig>(createDefaultEmbeddingConfig());
+  const [embeddingStatus, setEmbeddingStatus] = useState<EmbeddingStatus>(createEmptyEmbeddingStatus());
+  const [activeEmbeddingCount, setActiveEmbeddingCount] = useState(0);
+  const [savingEmbeddings, setSavingEmbeddings] = useState(false);
+  const [reindexingEmbeddings, setReindexingEmbeddings] = useState(false);
 
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.id === selectedProviderId) ?? null,
@@ -276,6 +327,10 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
   const selectedMcpServer = useMemo(
     () => mcpServers.find((server) => server.id === selectedMcpServerId) ?? null,
     [mcpServers, selectedMcpServerId],
+  );
+  const embeddingProviders = useMemo(
+    () => providers.filter((provider) => provider.api === "openai-chat-completions"),
+    [providers],
   );
 
   const loadProviders = useCallback(async (preferredProviderId?: string | null) => {
@@ -368,10 +423,50 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
     };
   }, []);
 
-  const setFeedback = (message: string, tone: "success" | "danger") => {
+  const loadEmbeddingSettings = useCallback(async () => {
+    const [config, status, activeCount] = await Promise.all([
+      window.scorel.embeddings.getConfig(),
+      window.scorel.embeddings.getStatus(),
+      window.scorel.embeddings.getActiveCount(),
+    ]);
+
+    setEmbeddingConfig(config);
+    setSavedEmbeddingConfig(config);
+    setEmbeddingStatus(status);
+    setActiveEmbeddingCount(activeCount);
+    setReindexingEmbeddings(status.state === "reindexing");
+  }, []);
+
+  useEffect(() => {
+    void loadEmbeddingSettings().catch((error: unknown) => {
+      console.error("Failed to load embedding settings:", error);
+      setFeedback(error instanceof Error ? error.message : String(error), "danger");
+    });
+  }, [loadEmbeddingSettings]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void Promise.all([
+        window.scorel.embeddings.getStatus(),
+        window.scorel.embeddings.getActiveCount(),
+      ]).then(([status, activeCount]) => {
+        setEmbeddingStatus(status);
+        setActiveEmbeddingCount(activeCount);
+        setReindexingEmbeddings(status.state === "reindexing");
+      }).catch((error: unknown) => {
+        console.error("Failed to refresh embedding status:", error);
+      });
+    }, 1500);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  function setFeedback(message: string, tone: "success" | "danger") {
     setStatus(message);
     setStatusTone(tone);
-  };
+  }
 
   const handleSelectProvider = (provider: ProviderConfig) => {
     setEditorMode("edit");
@@ -650,6 +745,47 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
     }
   };
 
+  const handleSaveEmbeddings = async () => {
+    setSavingEmbeddings(true);
+    setStatus(null);
+
+    try {
+      const saved = await window.scorel.embeddings.setConfig(embeddingConfig);
+      const activeCount = await window.scorel.embeddings.getActiveCount();
+      const shouldPromptReindex = activeCount > 0 && embeddingConfigNeedsReindex(savedEmbeddingConfig, saved);
+
+      setEmbeddingConfig(saved);
+      setSavedEmbeddingConfig(saved);
+      setActiveEmbeddingCount(activeCount);
+      setFeedback("Semantic search settings saved", "success");
+
+      if (shouldPromptReindex && window.confirm("Embedding model settings changed. Re-index existing history now?")) {
+        setReindexingEmbeddings(true);
+        const status = await window.scorel.embeddings.reindex();
+        setEmbeddingStatus(status);
+        setFeedback("Re-index started in background", "success");
+      }
+    } catch (error: unknown) {
+      setFeedback(error instanceof Error ? error.message : String(error), "danger");
+    } finally {
+      setSavingEmbeddings(false);
+    }
+  };
+
+  const handleReindexEmbeddings = async () => {
+    setReindexingEmbeddings(true);
+    setStatus(null);
+
+    try {
+      const status = await window.scorel.embeddings.reindex();
+      setEmbeddingStatus(status);
+      setFeedback("Re-index started in background", "success");
+    } catch (error: unknown) {
+      setFeedback(error instanceof Error ? error.message : String(error), "danger");
+      setReindexingEmbeddings(false);
+    }
+  };
+
   const handleSelectMcpServer = (server: McpServerSummary) => {
     setSelectedMcpServerId(server.id);
     setMcpEditorMode("edit");
@@ -820,7 +956,7 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
       <div style={headerStyle}>
         <div>
           <div style={{ fontSize: 22, fontWeight: 700 }}>Settings</div>
-          <div style={bodyTextStyle}>Manage providers and connection secrets.</div>
+          <div style={bodyTextStyle}>Manage providers, semantic search, and connection secrets.</div>
         </div>
         <button style={secondaryButtonStyle} onClick={onClose}>Close</button>
       </div>
@@ -869,6 +1005,100 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
           ) : renderProviderEditor()}
 
           <div style={{ marginTop: 28, display: "grid", gap: 16 }}>
+            <div>
+              <div style={sectionTitleStyle}>Semantic Search</div>
+              <div style={bodyTextStyle}>Configure embeddings and rebuild the semantic index when models change.</div>
+            </div>
+
+            <label style={{ ...labelStyle, display: "flex", alignItems: "center", gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={embeddingConfig.enabled}
+                onChange={(event) => setEmbeddingConfig((current) => ({
+                  ...current,
+                  enabled: event.target.checked,
+                }))}
+              />
+              Enable semantic search
+            </label>
+
+            <label style={labelStyle}>
+              Embedding provider
+              <select
+                value={embeddingConfig.providerId ?? ""}
+                onChange={(event) => setEmbeddingConfig((current) => ({
+                  ...current,
+                  providerId: event.target.value || null,
+                }))}
+                style={inputStyle}
+              >
+                <option value="">Auto (first OpenAI-compatible provider)</option>
+                {embeddingProviders.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={labelStyle}>
+              Embedding model
+              <input
+                value={embeddingConfig.model}
+                onChange={(event) => setEmbeddingConfig((current) => ({
+                  ...current,
+                  model: event.target.value,
+                }))}
+                style={inputStyle}
+              />
+            </label>
+
+            <label style={labelStyle}>
+              Dimensions
+              <input
+                type="number"
+                min={1}
+                value={embeddingConfig.dimensions}
+                onChange={(event) => setEmbeddingConfig((current) => ({
+                  ...current,
+                  dimensions: Number(event.target.value) || current.dimensions,
+                }))}
+                style={inputStyle}
+              />
+            </label>
+
+            <div
+              style={{
+                padding: "12px 14px",
+                borderRadius: 12,
+                background: "var(--bg-secondary)",
+                border: "1px solid var(--border)",
+                display: "grid",
+                gap: 6,
+              }}
+            >
+              <div><strong>Status:</strong> {formatEmbeddingStatus(embeddingStatus, activeEmbeddingCount)}</div>
+              <div><strong>State:</strong> {embeddingStatus.state}</div>
+              {embeddingStatus.lastError ? <div><strong>Error:</strong> {embeddingStatus.lastError}</div> : null}
+            </div>
+
+            <div style={actionsRowStyle}>
+              <button
+                style={secondaryButtonStyle}
+                onClick={() => void handleReindexEmbeddings()}
+                disabled={reindexingEmbeddings}
+              >
+                {reindexingEmbeddings ? "Re-indexing…" : "Re-index"}
+              </button>
+              <button
+                style={primaryButtonStyle}
+                onClick={() => void handleSaveEmbeddings()}
+                disabled={savingEmbeddings}
+              >
+                {savingEmbeddings ? "Saving…" : "Save Semantic Search"}
+              </button>
+            </div>
+
             <div>
               <div style={sectionTitleStyle}>MCP Servers</div>
               <div style={bodyTextStyle}>Manage external MCP tool servers.</div>

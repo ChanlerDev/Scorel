@@ -5,6 +5,7 @@ import * as path from "node:path";
 import {
   getDefaultWorkspacePath,
   loadAppConfig,
+  normalizeEmbeddingConfig,
   normalizePermissionConfig,
 } from "../../src/main/app-config.js";
 
@@ -78,6 +79,33 @@ describe("app-config", () => {
         bash: "blocked",
         "filesystem.read": "sandboxed",
       },
+    });
+  });
+
+  it("creates default embedding config on first load", () => {
+    const config = loadAppConfig(tempDir, { homeDir: fakeHomeDir });
+
+    expect(config.embedding).toEqual({
+      enabled: true,
+      providerId: null,
+      model: "text-embedding-3-small",
+      dimensions: 1536,
+    });
+  });
+
+  it("normalizes invalid embedding config entries", () => {
+    const config = normalizeEmbeddingConfig({
+      enabled: "yes",
+      providerId: "   ",
+      model: "   ",
+      dimensions: -42,
+    });
+
+    expect(config).toEqual({
+      enabled: true,
+      providerId: null,
+      model: "text-embedding-3-small",
+      dimensions: 1536,
     });
   });
 });

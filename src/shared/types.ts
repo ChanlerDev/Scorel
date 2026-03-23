@@ -89,6 +89,22 @@ export type ProviderConfig = {
   meta?: Record<string, unknown>;
 };
 
+export type EmbeddingConfig = {
+  enabled: boolean;
+  providerId: string | null;
+  model: string;
+  dimensions: number;
+};
+
+export type EmbeddingStatus = {
+  state: "idle" | "indexing" | "reindexing";
+  pendingJobs: number;
+  activeJobs: number;
+  indexedCount: number;
+  totalCount: number | null;
+  lastError: string | null;
+};
+
 // --- Tools ---
 
 export type BuiltInToolName =
@@ -260,6 +276,10 @@ export type SearchResult = {
   sessionTitle: string | null;
   role: ScorelMessage["role"];
   snippet: string;
+  snippetSource: "fts" | "semantic";
+  signals: Array<"keyword" | "semantic">;
+  similarityScore?: number;
+  rrfScore: number;
   ts: number;
   seq: number;
 };

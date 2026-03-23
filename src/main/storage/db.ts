@@ -1,5 +1,6 @@
 import Database from "better-sqlite3";
 import type {
+  EmbeddingConfig,
   ProviderConfig,
   PermissionConfig,
   SessionSummary,
@@ -15,7 +16,7 @@ import { deleteSessionTodos } from "./todos.js";
 // ---------------------------------------------------------------------------
 // Schema version — bump when adding migrations
 // ---------------------------------------------------------------------------
-const CURRENT_USER_VERSION = 4;
+const CURRENT_USER_VERSION = 5;
 
 // ---------------------------------------------------------------------------
 // DDL
@@ -169,6 +170,28 @@ function runMigrations(db: Database.Database): void {
         updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_mcp_servers_name ON mcp_servers(name);
+    `);
+    db.pragma(`user_version = ${CURRENT_USER_VERSION}`);
+  }
+
+  if (version < 5) {
+    db.exec(`
+      ALTER TABLE embeddings ADD COLUMN source_type TEXT NOT NULL DEFAULT 'message';
+      ALTER TABLE embeddings ADD COLUMN target_message_id TEXT NOT NULL DEFAULT '';
+      ALTER TABLE embeddings ADD COLUMN chunk_text TEXT NOT NULL DEFAULT '';
+      ALTER TABLE embeddings ADD COLUMN token_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE embeddings ADD COLUMN dimensions INTEGER NOT NULL DEFAULT 1536;
+
+      UPDATE embeddings
+      SET target_message_id = source_id
+      WHERE target_message_id = '';
+
+      CREATE INDEX IF NOT EXISTS idx_embeddings_lookup
+        ON embeddings(model, dimensions, tombstone, session_id);
+      CREATE INDEX IF NOT EXISTS idx_embeddings_source
+        ON embeddings(source_type, source_id, tombstone);
+      CREATE INDEX IF NOT EXISTS idx_embeddings_hash
+        ON embeddings(model, dimensions, hash, tombstone);
     `);
     db.pragma(`user_version = ${CURRENT_USER_VERSION}`);
   }
@@ -560,6 +583,7 @@ export function deleteSession(
       "DELETE FROM messages_fts WHERE session_id = ?",
     ).run(sessionId);
     db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
+    db.prepare("DELETE FROM embeddings WHERE session_id = ?").run(sessionId);
     db.prepare("DELETE FROM events WHERE session_id = ?").run(sessionId);
     db.prepare("DELETE FROM compactions WHERE session_id = ?").run(sessionId);
     deleteSessionTodos(db, sessionId);
@@ -683,6 +707,19 @@ export function getNextSeq(
   return (row?.max_seq ?? 0) + 1;
 }
 
+type SearchOptions = {
+  sessionId?: string;
+  limit?: number;
+};
+
+type SearchDeps = {
+  embedding?: EmbeddingConfig;
+  embedQuery?: (query: string, config: EmbeddingConfig) => Promise<Float32Array>;
+  logWarning?: (message: string, error: unknown) => void;
+  minScore?: number;
+  rrfK?: number;
+};
+
 type SearchMessageRow = {
   message_id: string;
   session_id: string;
@@ -693,16 +730,39 @@ type SearchMessageRow = {
   seq: number;
 };
 
-export function searchMessages(
+type VectorSearchRow = {
+  message_id: string;
+  session_id: string;
+  session_title: string | null;
+  role: ScorelMessage["role"];
+  snippet: string;
+  ts: number;
+  seq: number;
+  vector: Buffer;
+};
+
+type RankedSearchResult = SearchResult & {
+  keywordRank?: number;
+  semanticRank?: number;
+};
+
+function bufferToVector(blob: Buffer): Float32Array {
+  return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+}
+
+function cosineSimilarity(a: Float32Array, b: Float32Array): number {
+  let dot = 0;
+  for (let index = 0; index < a.length; index += 1) {
+    dot += (a[index] ?? 0) * (b[index] ?? 0);
+  }
+  return dot;
+}
+
+function searchMessagesFts(
   db: Database.Database,
   query: string,
-  opts?: { sessionId?: string; limit?: number },
-): SearchResult[] {
-  const normalizedQuery = query.trim();
-  if (normalizedQuery.length === 0) {
-    return [];
-  }
-
+  opts?: SearchOptions,
+): RankedSearchResult[] {
   const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
   const rows = db
     .prepare(
@@ -723,20 +783,178 @@ export function searchMessages(
        LIMIT @limit`,
     )
     .all({
-      query: normalizedQuery,
+      query,
       sessionId: opts?.sessionId ?? null,
       limit,
     }) as SearchMessageRow[];
 
-  return rows.map((row) => ({
+  return rows.map((row, index) => ({
     messageId: row.message_id,
     sessionId: row.session_id,
     sessionTitle: row.session_title,
     role: row.role,
     snippet: row.snippet,
+    snippetSource: "fts",
+    signals: ["keyword"],
+    rrfScore: 0,
     ts: row.ts,
     seq: row.seq,
+    keywordRank: index + 1,
   }));
+}
+
+function searchMessagesVector(
+  db: Database.Database,
+  queryVector: Float32Array,
+  config: EmbeddingConfig,
+  opts?: SearchOptions,
+  minScore = 0.3,
+): RankedSearchResult[] {
+  const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
+  const rows = db.prepare(
+    `SELECT
+       m.id AS message_id,
+       m.session_id,
+       s.title AS session_title,
+       m.role,
+       e.chunk_text AS snippet,
+       m.ts,
+       m.seq,
+       e.vector
+     FROM embeddings AS e
+     JOIN messages AS m ON m.id = e.target_message_id
+     JOIN sessions AS s ON s.id = m.session_id
+     WHERE e.tombstone = 0
+       AND e.model = @model
+       AND e.dimensions = @dimensions
+       AND (@sessionId IS NULL OR e.session_id = @sessionId)`,
+  ).all({
+    model: config.model,
+    dimensions: config.dimensions,
+    sessionId: opts?.sessionId ?? null,
+  }) as VectorSearchRow[];
+
+  const bestByMessage = new Map<string, RankedSearchResult>();
+
+  for (const row of rows) {
+    const score = cosineSimilarity(queryVector, bufferToVector(row.vector));
+    if (score < minScore) {
+      continue;
+    }
+
+    const existing = bestByMessage.get(row.message_id);
+    if (existing && (existing.similarityScore ?? -Infinity) >= score) {
+      continue;
+    }
+
+    bestByMessage.set(row.message_id, {
+      messageId: row.message_id,
+      sessionId: row.session_id,
+      sessionTitle: row.session_title,
+      role: row.role,
+      snippet: row.snippet,
+      snippetSource: "semantic",
+      signals: ["semantic"],
+      similarityScore: score,
+      rrfScore: 0,
+      ts: row.ts,
+      seq: row.seq,
+    });
+  }
+
+  return [...bestByMessage.values()]
+    .sort((left, right) => {
+      const scoreDelta = (right.similarityScore ?? 0) - (left.similarityScore ?? 0);
+      if (scoreDelta !== 0) {
+        return scoreDelta;
+      }
+      return right.ts - left.ts;
+    })
+    .slice(0, limit)
+    .map((result, index) => ({
+      ...result,
+      semanticRank: index + 1,
+    }));
+}
+
+function fuseSearchResults(
+  ftsResults: RankedSearchResult[],
+  vectorResults: RankedSearchResult[],
+  rrfK = 60,
+  limit = 50,
+): SearchResult[] {
+  const merged = new Map<string, RankedSearchResult>();
+
+  for (const result of ftsResults) {
+    merged.set(result.messageId, { ...result });
+  }
+
+  for (const result of vectorResults) {
+    const existing = merged.get(result.messageId);
+    if (!existing) {
+      merged.set(result.messageId, { ...result });
+      continue;
+    }
+
+    merged.set(result.messageId, {
+      ...existing,
+      similarityScore: result.similarityScore,
+      semanticRank: result.semanticRank,
+      signals: existing.signals.includes("semantic")
+        ? existing.signals
+        : [...existing.signals, "semantic"],
+    });
+  }
+
+  const ranked = [...merged.values()].map((result) => ({
+    ...result,
+    rrfScore: (result.keywordRank ? 1 / (rrfK + result.keywordRank) : 0)
+      + (result.semanticRank ? 1 / (rrfK + result.semanticRank) : 0),
+  }));
+
+  return ranked
+    .sort((left, right) => {
+      const rrfDelta = right.rrfScore - left.rrfScore;
+      if (rrfDelta !== 0) {
+        return rrfDelta;
+      }
+      const semanticDelta = (right.similarityScore ?? 0) - (left.similarityScore ?? 0);
+      if (semanticDelta !== 0) {
+        return semanticDelta;
+      }
+      return right.ts - left.ts;
+    })
+    .slice(0, limit)
+    .map(({ keywordRank: _keywordRank, semanticRank: _semanticRank, ...result }) => result);
+}
+
+export async function searchMessages(
+  db: Database.Database,
+  query: string,
+  opts?: SearchOptions,
+  deps?: SearchDeps,
+): Promise<SearchResult[]> {
+  const normalizedQuery = query.trim();
+  if (normalizedQuery.length === 0) {
+    return [];
+  }
+
+  const limit = Math.min(Math.max(opts?.limit ?? 50, 1), 200);
+  const ftsResults = searchMessagesFts(db, normalizedQuery, { ...opts, limit });
+
+  const embedding = deps?.embedding;
+  if (!embedding?.enabled || !deps?.embedQuery) {
+    return fuseSearchResults(ftsResults, [], deps?.rrfK, limit);
+  }
+
+  try {
+    const queryVector = await deps.embedQuery(normalizedQuery, embedding);
+    const vectorResults = searchMessagesVector(db, queryVector, embedding, { ...opts, limit }, deps?.minScore);
+    return fuseSearchResults(ftsResults, vectorResults, deps?.rrfK, limit);
+  } catch (error: unknown) {
+    deps?.logWarning?.("Semantic query embedding failed", error);
+    return fuseSearchResults(ftsResults, [], deps?.rrfK, limit);
+  }
 }
 
 export function rebuildFts(db: Database.Database): void {

@@ -1,4 +1,6 @@
 import type {
+  EmbeddingConfig,
+  EmbeddingStatus,
   ManualCompactResult,
   McpServerConfig,
   McpServerSummary,
@@ -41,6 +43,13 @@ type ScorelBridge = {
       query: string,
       opts?: { sessionId?: string; limit?: number },
     ): Promise<SearchResult[]>;
+  };
+  embeddings: {
+    getConfig(): Promise<EmbeddingConfig>;
+    setConfig(config: EmbeddingConfig): Promise<EmbeddingConfig>;
+    getStatus(): Promise<EmbeddingStatus>;
+    getActiveCount(): Promise<number>;
+    reindex(): Promise<EmbeddingStatus>;
   };
   compact: {
     manual(sessionId: string): Promise<ManualCompactResult>;

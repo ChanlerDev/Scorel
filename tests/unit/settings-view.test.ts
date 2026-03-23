@@ -54,4 +54,42 @@ describe("SettingsView", () => {
     expect(getDisplayedPermissionLevel?.("bash")).toBe("confirm");
     expect(getDisplayedPermissionLevel?.("read_file", "deny")).toBe("deny");
   });
+
+  it("formats embedding status for idle and reindexing states", () => {
+    const maybeFormatter = (
+      SettingsViewModule as Record<string, unknown>
+    ).formatEmbeddingStatus;
+
+    const formatEmbeddingStatus = typeof maybeFormatter === "function"
+      ? maybeFormatter as (
+        status: {
+          state: "idle" | "indexing" | "reindexing";
+          pendingJobs: number;
+          activeJobs: number;
+          indexedCount: number;
+          totalCount: number | null;
+          lastError: string | null;
+        },
+        activeCount: number,
+      ) => string
+      : null;
+
+    expect(formatEmbeddingStatus?.({
+      state: "idle",
+      pendingJobs: 0,
+      activeJobs: 0,
+      indexedCount: 0,
+      totalCount: null,
+      lastError: null,
+    }, 12)).toBe("12 active embedding chunks");
+
+    expect(formatEmbeddingStatus?.({
+      state: "reindexing",
+      pendingJobs: 4,
+      activeJobs: 1,
+      indexedCount: 3,
+      totalCount: 10,
+      lastError: null,
+    }, 12)).toBe("Re-indexing 3/10 sources");
+  });
 });

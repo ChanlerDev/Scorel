@@ -1,11 +1,12 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { PermissionConfig } from "../shared/types.js";
+import type { EmbeddingConfig, PermissionConfig } from "../shared/types.js";
 
 export type AppConfig = {
   defaultWorkspace: string;
   permissions: PermissionConfig;
+  embedding: EmbeddingConfig;
   mcp: {
     healthCheckIntervalMs: number;
     maxHealthFailures: number;
@@ -19,6 +20,13 @@ const DEFAULT_PERMISSION_CONFIG: PermissionConfig = {
   fullAccess: false,
   toolDefaults: {},
   denyReasons: {},
+};
+
+const DEFAULT_EMBEDDING_CONFIG: EmbeddingConfig = {
+  enabled: true,
+  providerId: null,
+  model: "text-embedding-3-small",
+  dimensions: 1536,
 };
 
 const DEFAULT_MCP_CONFIG: AppConfig["mcp"] = {
@@ -38,6 +46,7 @@ export function loadAppConfig(
   const fallbackConfig: AppConfig = {
     defaultWorkspace: getDefaultWorkspacePath(opts?.homeDir),
     permissions: DEFAULT_PERMISSION_CONFIG,
+    embedding: DEFAULT_EMBEDDING_CONFIG,
     mcp: DEFAULT_MCP_CONFIG,
   };
 
@@ -49,6 +58,7 @@ export function loadAppConfig(
         ? parsed.defaultWorkspace
         : fallbackConfig.defaultWorkspace,
       permissions: normalizePermissionConfig(parsed.permissions),
+      embedding: normalizeEmbeddingConfig(parsed.embedding),
       mcp: normalizeMcpConfig(parsed.mcp),
     };
     ensureDir(config.defaultWorkspace);
@@ -108,6 +118,26 @@ export function normalizePermissionConfig(value: unknown): PermissionConfig {
         ),
       )
       : {},
+  };
+}
+
+export function normalizeEmbeddingConfig(value: unknown): EmbeddingConfig {
+  if (!value || typeof value !== "object") {
+    return { ...DEFAULT_EMBEDDING_CONFIG };
+  }
+
+  const candidate = value as Partial<EmbeddingConfig>;
+  return {
+    enabled: candidate.enabled !== false,
+    providerId: typeof candidate.providerId === "string" && candidate.providerId.trim().length > 0
+      ? candidate.providerId.trim()
+      : null,
+    model: typeof candidate.model === "string" && candidate.model.trim().length > 0
+      ? candidate.model.trim()
+      : DEFAULT_EMBEDDING_CONFIG.model,
+    dimensions: typeof candidate.dimensions === "number" && Number.isInteger(candidate.dimensions) && candidate.dimensions > 0
+      ? candidate.dimensions
+      : DEFAULT_EMBEDDING_CONFIG.dimensions,
   };
 }
 
