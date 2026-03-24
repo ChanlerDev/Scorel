@@ -6,7 +6,6 @@ import type {
   ProviderConfig,
   ScorelMessage,
 } from "../../shared/types.js";
-import { FTS_CONTENT_MAX_CHARS } from "../../shared/constants.js";
 import { generateId } from "../core/id.js";
 import {
   countActiveEmbeddings,
@@ -89,13 +88,6 @@ function extractSearchableText(message: ScorelMessage): string | null {
         .join("\n")
         .trim();
       return text.length > 0 ? text : null;
-    }
-    case "toolResult": {
-      const text = message.content.map((part) => part.text).join("\n").trim();
-      if (text.length === 0) {
-        return null;
-      }
-      return text.length > FTS_CONTENT_MAX_CHARS ? text.slice(0, FTS_CONTENT_MAX_CHARS) : text;
     }
     default:
       return null;

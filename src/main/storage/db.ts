@@ -9,7 +9,6 @@ import type {
   SearchResult,
   WorkspaceRecord,
 } from "../../shared/types.js";
-import { FTS_CONTENT_MAX_CHARS } from "../../shared/constants.js";
 import { normalizePermissionConfig } from "../app-config.js";
 import { deleteSessionTodos } from "./todos.js";
 
@@ -600,7 +599,7 @@ export function deleteSession(
  * Extract searchable plain text from a message for FTS indexing.
  * - user: full content string
  * - assistant: joined text parts
- * - toolResult: content text parts, truncated to FTS_CONTENT_MAX_CHARS
+ * Only user and assistant messages are indexed for search.
  */
 function extractSearchableText(message: ScorelMessage): string | null {
   switch (message.role) {
@@ -612,15 +611,6 @@ function extractSearchableText(message: ScorelMessage): string | null {
         .map((p) => (p as { type: "text"; text: string }).text);
       const joined = texts.join("\n");
       return joined.length > 0 ? joined : null;
-    }
-    case "toolResult": {
-      const parts = message.content
-        .map((p) => p.text)
-        .join("\n");
-      if (parts.length === 0) return null;
-      return parts.length > FTS_CONTENT_MAX_CHARS
-        ? parts.slice(0, FTS_CONTENT_MAX_CHARS)
-        : parts;
     }
     default:
       return null;
@@ -778,6 +768,7 @@ function searchMessagesFts(
        JOIN messages AS m ON m.id = messages_fts.message_id
        JOIN sessions AS s ON s.id = m.session_id
        WHERE messages_fts MATCH @query
+         AND m.role IN ('user', 'assistant')
          AND (@sessionId IS NULL OR m.session_id = @sessionId)
        ORDER BY bm25(messages_fts), m.ts DESC
        LIMIT @limit`,
@@ -825,6 +816,7 @@ function searchMessagesVector(
      JOIN messages AS m ON m.id = e.target_message_id
      JOIN sessions AS s ON s.id = m.session_id
      WHERE e.tombstone = 0
+       AND m.role IN ('user', 'assistant')
        AND e.model = @model
        AND e.dimensions = @dimensions
        AND (@sessionId IS NULL OR e.session_id = @sessionId)`,

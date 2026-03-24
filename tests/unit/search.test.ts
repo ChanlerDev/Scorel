@@ -48,7 +48,7 @@ describe("searchMessages", () => {
     db = initDatabase(":memory:");
   });
 
-  it("returns highlighted snippets with session context across indexed roles", async () => {
+  it("returns highlighted snippets with session context across user and assistant messages only", async () => {
     createSession(db, {
       id: "session-a",
       workspaceRoot: "/tmp/a",
@@ -68,8 +68,8 @@ describe("searchMessages", () => {
 
     const results = await searchMessages(db, "nebula");
 
-    expect(results).toHaveLength(3);
-    expect(new Set(results.map((result) => result.messageId))).toEqual(new Set(["u1", "a1", "t1"]));
+    expect(results).toHaveLength(2);
+    expect(new Set(results.map((result) => result.messageId))).toEqual(new Set(["u1", "a1"]));
     expect(results.find((result) => result.messageId === "u1")).toMatchObject({
       sessionId: "session-a",
       sessionTitle: null,
@@ -78,6 +78,62 @@ describe("searchMessages", () => {
       ts: 100,
     });
     expect(results.every((result) => result.snippet.includes("<mark>nebula</mark>"))).toBe(true);
+  });
+
+  it("filters tool results from both keyword and semantic retrieval", async () => {
+    createSession(db, { id: "session-a", workspaceRoot: "/tmp/a" });
+    insertMessage(db, "session-a", 1, userMessage("u1", "what is your name", 100));
+    insertMessage(db, "session-a", 2, toolResultMessage("t1", "tool schema field name string", 101));
+
+    db.prepare(
+      `INSERT INTO embeddings (
+        id,
+        session_id,
+        source_id,
+        source_type,
+        target_message_id,
+        chunk_index,
+        chunk_text,
+        token_count,
+        model,
+        dimensions,
+        vector,
+        hash,
+        tombstone,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+    ).run(
+      "emb-tool-1",
+      "session-a",
+      "t1",
+      "message",
+      "t1",
+      0,
+      "tool schema field name string",
+      5,
+      "text-embedding-3-small",
+      3,
+      vector([1, 0, 0]),
+      "hash-tool-1",
+      101,
+    );
+
+    const results = await searchMessages(
+      db,
+      "name",
+      undefined,
+      {
+        embedding: {
+          enabled: true,
+          providerId: null,
+          model: "text-embedding-3-small",
+          dimensions: 3,
+        },
+        embedQuery: async () => new Float32Array([1, 0, 0]),
+      },
+    );
+
+    expect(results.map((result) => result.messageId)).toEqual(["u1"]);
   });
 
   it("supports session filtering and trims blank queries", async () => {
