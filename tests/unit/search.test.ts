@@ -128,6 +128,7 @@ describe("searchMessages", () => {
           providerId: null,
           model: "text-embedding-3-small",
           dimensions: 3,
+          minScore: 0.7,
         },
         embedQuery: async () => new Float32Array([1, 0, 0]),
       },
@@ -232,6 +233,7 @@ describe("searchMessages", () => {
           providerId: null,
           model: "text-embedding-3-small",
           dimensions: 3,
+          minScore: 0.7,
         },
         embedQuery: async () => new Float32Array([1, 0, 0]),
       },
@@ -313,6 +315,7 @@ describe("searchMessages", () => {
           providerId: null,
           model: "text-embedding-3-small",
           dimensions: 3,
+          minScore: 0.7,
         },
         embedQuery: async () => new Float32Array([1, 0, 0]),
       },
@@ -344,6 +347,7 @@ describe("searchMessages", () => {
           providerId: null,
           model: "text-embedding-3-small",
           dimensions: 3,
+          minScore: 0.7,
         },
         embedQuery: async () => {
           throw new Error("provider unavailable");
@@ -397,6 +401,7 @@ describe("searchMessages", () => {
           providerId: null,
           model: "text-embedding-3-small",
           dimensions: 3,
+          minScore: 0.7,
         },
         embedQuery: async () => new Float32Array([1, 0, 0]),
       },
@@ -405,5 +410,62 @@ describe("searchMessages", () => {
     expect(results).toHaveLength(1);
     expect(results[0]?.sessionId).toBe("session-b");
     expect(results[0]?.messageId).toBe("u2");
+  });
+
+  it("respects the configured semantic min score", async () => {
+    createSession(db, { id: "session-a", workspaceRoot: "/tmp/a" });
+    insertMessage(db, "session-a", 1, userMessage("u1", "identity prompt", 100));
+
+    db.prepare(
+      `INSERT INTO embeddings (
+        id,
+        session_id,
+        source_id,
+        source_type,
+        target_message_id,
+        chunk_index,
+        chunk_text,
+        token_count,
+        model,
+        dimensions,
+        vector,
+        hash,
+        tombstone,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+    ).run(
+      "emb-low-score",
+      "session-a",
+      "u1",
+      "message",
+      "u1",
+      0,
+      "identity prompt",
+      2,
+      "text-embedding-3-small",
+      2,
+      vector([0.65, Math.sqrt(1 - 0.65 ** 2)]),
+      "hash-low-score",
+      100,
+    );
+
+    const results = await searchMessages(
+      db,
+      "name",
+      undefined,
+      {
+        embedding: {
+          enabled: true,
+          providerId: null,
+          model: "text-embedding-3-small",
+          dimensions: 2,
+          minScore: 0.7,
+        },
+        embedQuery: async () => new Float32Array([1, 0]),
+        minScore: 0.7,
+      },
+    );
+
+    expect(results).toEqual([]);
   });
 });

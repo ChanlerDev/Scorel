@@ -94,6 +94,7 @@ export type EmbeddingConfig = {
   providerId: string | null;
   model: string;
   dimensions: number;
+  minScore: number;
 };
 
 export type EmbeddingStatus = {

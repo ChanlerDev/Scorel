@@ -63,6 +63,7 @@ function createDefaultEmbeddingConfig(): EmbeddingConfig {
     providerId: null,
     model: "text-embedding-3-small",
     dimensions: 1536,
+    minScore: 0.7,
   };
 }
 
@@ -1062,6 +1063,22 @@ export function SettingsView({ onClose, onProvidersChanged }: SettingsViewProps)
                 onChange={(event) => setEmbeddingConfig((current) => ({
                   ...current,
                   dimensions: Number(event.target.value) || current.dimensions,
+                }))}
+                style={inputStyle}
+              />
+            </label>
+
+            <label style={labelStyle}>
+              Semantic min score
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={embeddingConfig.minScore}
+                onChange={(event) => setEmbeddingConfig((current) => ({
+                  ...current,
+                  minScore: Math.min(1, Math.max(0, Number(event.target.value) || current.minScore)),
                 }))}
                 style={inputStyle}
               />

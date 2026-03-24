@@ -27,6 +27,7 @@ const DEFAULT_EMBEDDING_CONFIG: EmbeddingConfig = {
   providerId: null,
   model: "text-embedding-3-small",
   dimensions: 1536,
+  minScore: 0.7,
 };
 
 const DEFAULT_MCP_CONFIG: AppConfig["mcp"] = {
@@ -138,6 +139,9 @@ export function normalizeEmbeddingConfig(value: unknown): EmbeddingConfig {
     dimensions: typeof candidate.dimensions === "number" && Number.isInteger(candidate.dimensions) && candidate.dimensions > 0
       ? candidate.dimensions
       : DEFAULT_EMBEDDING_CONFIG.dimensions,
+    minScore: typeof candidate.minScore === "number" && candidate.minScore >= 0 && candidate.minScore <= 1
+      ? candidate.minScore
+      : DEFAULT_EMBEDDING_CONFIG.minScore,
   };
 }
 

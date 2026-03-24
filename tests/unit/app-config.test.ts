@@ -90,6 +90,7 @@ describe("app-config", () => {
       providerId: null,
       model: "text-embedding-3-small",
       dimensions: 1536,
+      minScore: 0.7,
     });
   });
 
@@ -106,6 +107,7 @@ describe("app-config", () => {
       providerId: null,
       model: "text-embedding-3-small",
       dimensions: 1536,
+      minScore: 0.7,
     });
   });
 });

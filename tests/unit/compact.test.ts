@@ -356,6 +356,7 @@ describe("compact", () => {
           providerId: null,
           model: "text-embedding-3-small",
           dimensions: 3,
+          minScore: 0.7,
         },
         embedQuery: async () => new Float32Array([1, 0, 0]),
       },

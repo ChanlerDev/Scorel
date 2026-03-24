@@ -941,7 +941,13 @@ export async function searchMessages(
 
   try {
     const queryVector = await deps.embedQuery(normalizedQuery, embedding);
-    const vectorResults = searchMessagesVector(db, queryVector, embedding, { ...opts, limit }, deps?.minScore);
+    const vectorResults = searchMessagesVector(
+      db,
+      queryVector,
+      embedding,
+      { ...opts, limit },
+      deps?.minScore ?? embedding.minScore,
+    );
     return fuseSearchResults(ftsResults, vectorResults, deps?.rrfK, limit);
   } catch (error: unknown) {
     deps?.logWarning?.("Semantic query embedding failed", error);
