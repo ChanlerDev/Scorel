@@ -1,0 +1,23 @@
+{
+  "name": "@scorel/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./llm": {
+      "types": "./src/llm.ts",
+      "import": "./src/llm.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "0.75.3"
+  }
+}
