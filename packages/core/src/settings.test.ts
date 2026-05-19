@@ -6,7 +6,6 @@ import {
   buildSystemPrompt,
   discoverOpenAICompatibleModels,
   loadScorelConfig,
-  loadScorelSettings,
   resolveScorelModel,
   selectScorelTools
 } from "./settings.js";
@@ -28,145 +27,14 @@ function testModel(id = "known-model"): Model<Api> {
   };
 }
 
-describe("Scorel settings", () => {
-  it("returns defaults when the settings file does not exist", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "scorel-settings-"));
-    try {
-      await expect(loadScorelSettings(join(dir, "missing.json"))).resolves.toMatchObject({
-        model: {
-          provider: "openai",
-          id: "gpt-4o-mini"
-        },
-        sessionsDir: expect.stringContaining(".scorel")
-      });
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("throws a clear error when settings JSON is invalid", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "scorel-settings-"));
-    try {
-      const path = join(dir, "settings.json");
-      await writeFile(path, "{bad json", "utf8");
-
-      await expect(loadScorelSettings(path)).rejects.toThrow(`Invalid Scorel settings JSON at ${path}`);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("resolves env model values before settings values", async () => {
-    const getModel = vi.fn(() => testModel("env-model"));
-    const createOpenAICompatibleChatModel = vi.fn(() => testModel("custom"));
-
-    const result = resolveScorelModel(
-      {
-        env: {
-          SCOREL_PROVIDER: "openai",
-          SCOREL_MODEL: "env-model"
-        },
-        settings: {
-          model: {
-            provider: "anthropic",
-            id: "settings-model"
-          }
-        }
-      },
-      { getModel, createOpenAICompatibleChatModel }
-    );
-
-    expect(result.model.id).toBe("env-model");
-    expect(result.apiKey).toBeUndefined();
-    expect(getModel).toHaveBeenCalledWith("openai", "env-model");
-    expect(createOpenAICompatibleChatModel).not.toHaveBeenCalled();
-  });
-
-  it("uses OpenAI-compatible helper only when a custom base URL is configured", async () => {
-    const getModel = vi.fn(() => testModel("known"));
-    const createOpenAICompatibleChatModel = vi.fn(() => testModel("custom"));
-
-    const result = resolveScorelModel(
-      {
-        env: {},
-        settings: {
-          model: {
-            provider: "amp",
-            id: "gpt-5.4-mini",
-            baseUrl: "https://amp.chanler.dev/v1",
-            apiKey: "from-settings"
-          }
-        }
-      },
-      { getModel, createOpenAICompatibleChatModel }
-    );
-
-    expect(result.model.id).toBe("custom");
-    expect(result.apiKey).toBe("from-settings");
-    expect(createOpenAICompatibleChatModel).toHaveBeenCalledWith({
-      provider: "amp",
-      id: "gpt-5.4-mini",
-      baseUrl: "https://amp.chanler.dev/v1"
-    });
-    expect(getModel).not.toHaveBeenCalled();
-  });
-
-  it("uses settings API key before generic provider environment keys", async () => {
-    const result = resolveScorelModel(
-      {
-        env: {
-          OPENAI_API_KEY: "generic-env-key"
-        },
-        settings: {
-          model: {
-            baseUrl: "https://amp.chanler.dev/v1",
-            apiKey: "settings-key"
-          }
-        }
-      },
-      { createOpenAICompatibleChatModel: vi.fn(() => testModel("custom")) }
-    );
-
-    expect(result.apiKey).toBe("settings-key");
-  });
-
-  it("does not pass OPENAI_API_KEY as a generic key for non-OpenAI known providers", async () => {
-    const result = resolveScorelModel(
-      {
-        env: {
-          OPENAI_API_KEY: "openai-key"
-        },
-        settings: {
-          model: {
-            provider: "anthropic",
-            id: "claude-test"
-          }
-        }
-      },
-      { getModel: vi.fn(() => testModel("known")) }
-    );
-
-    expect(result.apiKey).toBeUndefined();
-  });
-});
-
 describe("Scorel config", () => {
-  it("merges legacy settings, global TOML, project TOML, env, and CLI overrides in precedence order", async () => {
+  it("merges global TOML, project TOML, and CLI overrides in precedence order", async () => {
     const dir = await mkdtemp(join(tmpdir(), "scorel-config-"));
     try {
-      const legacyPath = join(dir, "settings.json");
       const globalPath = join(dir, "global.toml");
       const projectDir = join(dir, "project");
       const projectPath = join(projectDir, ".scorel", "config.toml");
       await mkdir(join(projectDir, ".scorel"), { recursive: true });
-      await writeFile(
-        legacyPath,
-        JSON.stringify({
-          model: { provider: "legacy", id: "legacy-model", baseUrl: "https://legacy.invalid", apiKey: "legacy-key" },
-          sessionsDir: join(dir, "legacy-sessions")
-        }),
-        "utf8"
-      );
       await writeFile(
         globalPath,
         `
@@ -211,28 +79,90 @@ preset = "coding"
         cwd: projectDir,
         globalConfigPath: globalPath,
         projectConfigPath: projectPath,
-        legacySettingsPath: legacyPath,
-        env: {
-          SCOREL_MODEL: "env-model",
-          SCOREL_API_KEY: "env-key"
-        },
         overrides: {
-          model: { providerId: "amp" }
+          model: { providerId: "amp", modelId: "project-model" }
         }
       });
 
       expect(config.model).toEqual({
         providerId: "amp",
-        modelId: "env-model"
+        modelId: "project-model"
       });
       expect(config.providers.amp).toMatchObject({
         protocol: "openai-completions",
         baseUrl: "https://amp.chanler.dev/v1",
-        apiKey: "env-key"
+        apiKey: "project-key"
       });
       expect(config.session.dir).toBe(join(dir, "global-sessions"));
       expect(config.tools.preset).toBe("coding");
       expect(config.agent.systemPrompt).toBe("Project prompt");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not read legacy settings JSON or Scorel env overrides", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "scorel-config-no-legacy-"));
+    try {
+      const projectPath = join(dir, "config.toml");
+      await writeFile(
+        join(dir, "settings.json"),
+        JSON.stringify({
+          model: { provider: "amp", id: "legacy-model", baseUrl: "https://legacy.invalid", apiKey: "legacy-key" },
+          sessionsDir: join(dir, "legacy-sessions")
+        }),
+        "utf8"
+      );
+      await writeFile(
+        projectPath,
+        `
+[providers.amp]
+protocol = "openai-completions"
+baseUrl = "https://amp.chanler.dev/v1"
+apiKey = "toml-key"
+
+[models.default]
+providerId = "amp"
+modelId = "toml-model"
+
+[[models.available]]
+providerId = "amp"
+modelId = "toml-model"
+`,
+        "utf8"
+      );
+
+      const previousEnv = {
+        SCOREL_PROVIDER: process.env.SCOREL_PROVIDER,
+        SCOREL_MODEL: process.env.SCOREL_MODEL,
+        SCOREL_BASE_URL: process.env.SCOREL_BASE_URL,
+        SCOREL_API_KEY: process.env.SCOREL_API_KEY
+      };
+      process.env.SCOREL_PROVIDER = "env-provider";
+      process.env.SCOREL_MODEL = "env-model";
+      process.env.SCOREL_BASE_URL = "https://env.invalid";
+      process.env.SCOREL_API_KEY = "env-key";
+      let config;
+      try {
+        config = await loadScorelConfig({
+          cwd: dir,
+          globalConfigPath: join(dir, "missing-global.toml"),
+          projectConfigPath: projectPath
+        });
+      } finally {
+        for (const [key, value] of Object.entries(previousEnv)) {
+          if (value === undefined) {
+            delete process.env[key];
+          } else {
+            process.env[key] = value;
+          }
+        }
+      }
+
+      expect(config.model).toEqual({ providerId: "amp", modelId: "toml-model" });
+      expect(config.providers.amp.apiKey).toBe("toml-key");
+      expect(config.session.dir).not.toBe(join(dir, "legacy-sessions"));
+      expect(config.providers).not.toHaveProperty("env-provider");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -292,9 +222,7 @@ modelId = "gpt-5.4-mini"
 
       const config = await loadScorelConfig({
         projectConfigPath: projectPath,
-        legacySettingsPath: join(dir, "missing-settings.json"),
         globalConfigPath: join(dir, "missing-global.toml"),
-        env: {},
         overrides: { model: { providerId: undefined, modelId: undefined } }
       });
 
@@ -363,7 +291,7 @@ modelId = "gpt-5.4-mini"
     });
   });
 
-  it("discovers OpenAI-compatible model ids without adding them to available models", async () => {
+  it("discovers OpenAI-compatible model ids as candidates for available model selection", async () => {
     const discovered = await discoverOpenAICompatibleModels({
       baseUrl: "https://amp.chanler.dev/v1",
       apiKey: "test",

@@ -73,25 +73,6 @@ export type ScorelConfigInput = Partial<{
   channels: Record<string, unknown>;
 }>;
 
-export type ScorelModelSettings = {
-  provider?: string;
-  id?: string;
-  baseUrl?: string;
-  apiKey?: string;
-};
-
-export type ScorelSettings = {
-  model: Required<Pick<ScorelModelSettings, "provider" | "id">> & Omit<ScorelModelSettings, "provider" | "id">;
-  sessionsDir: string;
-};
-
-export type ScorelSettingsInput = {
-  model?: ScorelModelSettings;
-  sessionsDir?: string;
-};
-
-export type ScorelEnvironment = Record<string, string | undefined>;
-
 export type ResolvedScorelModel = {
   model: Model<Api>;
   provider: string;
@@ -113,16 +94,10 @@ type ModelFactories = {
 
 export type LoadScorelConfigOptions = {
   cwd?: string;
-  env?: ScorelEnvironment;
   overrides?: ScorelConfigInput;
   globalConfigPath?: string;
   projectConfigPath?: string;
-  legacySettingsPath?: string;
 };
-
-export function defaultScorelSettingsPath(env: ScorelEnvironment = process.env): string {
-  return env.SCOREL_SETTINGS ?? join(homedir(), ".scorel", "settings.json");
-}
 
 export function defaultScorelConfigPath(): string {
   return join(homedir(), ".scorel", "config.toml");
@@ -136,83 +111,32 @@ export function defaultScorelSessionsDir(): string {
   return join(homedir(), ".scorel", "sessions");
 }
 
-export async function loadScorelSettings(path = defaultScorelSettingsPath()): Promise<ScorelSettings> {
-  if (!(await exists(path))) {
-    return normalizeSettings({});
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(await readFile(path, "utf8"));
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new Error(`Invalid Scorel settings JSON at ${path}: ${error.message}`);
-    }
-    throw error;
-  }
-
-  if (!isObject(parsed)) {
-    throw new Error(`Invalid Scorel settings at ${path}: expected a JSON object`);
-  }
-  return normalizeSettings(parsed);
-}
-
 export async function loadScorelConfig(options: LoadScorelConfigOptions = {}): Promise<ScorelConfig> {
   const cwd = options.cwd ?? process.cwd();
-  const env = options.env ?? process.env;
-  const legacySettingsPath = options.legacySettingsPath ?? defaultScorelSettingsPath(env);
-  const globalConfigPath = options.globalConfigPath ?? env.SCOREL_CONFIG ?? defaultScorelConfigPath();
+  const globalConfigPath = options.globalConfigPath ?? defaultScorelConfigPath();
   const projectConfigPath = options.projectConfigPath ?? defaultProjectScorelConfigPath(cwd);
 
   const layers: ScorelConfigInput[] = [];
-  if (await exists(legacySettingsPath)) {
-    layers.push(settingsToConfigInput(await loadScorelSettings(legacySettingsPath)));
-  }
   if (await exists(globalConfigPath)) {
     layers.push(await loadTomlConfig(globalConfigPath));
   }
   if (projectConfigPath !== globalConfigPath && await exists(projectConfigPath)) {
     layers.push(await loadTomlConfig(projectConfigPath));
   }
-  layers.push(envToConfigInput(env));
   if (options.overrides) {
     layers.push(options.overrides);
   }
 
-  const merged = mergeConfigInputs(...layers);
-  applyResolvedEnvOverrides(merged, env);
-  return normalizeConfig(merged);
+  return normalizeConfig(mergeConfigInputs(...layers));
 }
 
 export function resolveScorelModel(
   options: {
-    env?: ScorelEnvironment;
-    settings?: ScorelSettingsInput;
     config?: ScorelConfigInput;
   },
   factories: ModelFactories = {}
 ): ResolvedScorelModel {
-  if (options.config) {
-    return resolveScorelModelFromConfig(normalizeConfig(options.config), options.env ?? {}, factories);
-  }
-
-  const env = options.env ?? process.env;
-  const settings = normalizeSettings(options.settings ?? {});
-  const provider = env.SCOREL_PROVIDER ?? settings.model.provider;
-  const modelId = env.SCOREL_MODEL ?? settings.model.id;
-  const baseUrl = env.SCOREL_BASE_URL ?? settings.model.baseUrl;
-  const apiKey = env.SCOREL_API_KEY ?? settings.model.apiKey ?? (provider === "openai" ? env.OPENAI_API_KEY : undefined);
-  const makeKnownModel = factories.getModel ?? ((knownProvider, knownModelId) => defaultGetModel(knownProvider as never, knownModelId as never) as Model<Api>);
-  const makeOpenAICompatible = factories.createOpenAICompatibleChatModel ?? createOpenAICompatibleChatModel;
-
-  return {
-    provider,
-    modelId,
-    apiKey,
-    model: baseUrl
-      ? makeOpenAICompatible({ provider, id: modelId, baseUrl })
-      : requireModel(makeKnownModel(provider, modelId), provider, modelId)
-  };
+  return resolveScorelModelFromConfig(normalizeConfig(options.config ?? {}), factories);
 }
 
 export async function discoverOpenAICompatibleModels(options: {
@@ -262,7 +186,6 @@ export function selectScorelTools(
 
 function resolveScorelModelFromConfig(
   config: ScorelConfig,
-  env: ScorelEnvironment,
   factories: ModelFactories
 ): ResolvedScorelModel {
   const getProviders = factories.getProviders ?? defaultGetProviders;
@@ -285,7 +208,7 @@ function resolveScorelModelFromConfig(
     return {
       provider: providerId,
       modelId,
-      apiKey: env.SCOREL_API_KEY ?? customProvider.apiKey,
+      apiKey: customProvider.apiKey,
       model: makeOpenAICompatible({
         provider: providerId,
         id: modelId,
@@ -300,7 +223,7 @@ function resolveScorelModelFromConfig(
   return {
     provider: providerId,
     modelId,
-    apiKey: env.SCOREL_API_KEY ?? (providerId === "openai" ? env.OPENAI_API_KEY : undefined),
+    apiKey: undefined,
     model: requireModel(makeKnownModel(providerId, modelId), providerId, modelId)
   };
 }
@@ -324,39 +247,6 @@ function normalizeConfig(input: ScorelConfigInput): ScorelConfig {
       preset: normalizeToolPreset(input.tools?.preset)
     },
     channels: input.channels ?? {}
-  };
-}
-
-function normalizeSettings(input: ScorelSettingsInput): ScorelSettings {
-  return {
-    model: {
-      provider: input.model?.provider ?? "openai",
-      id: input.model?.id ?? "gpt-4o-mini",
-      baseUrl: input.model?.baseUrl,
-      apiKey: input.model?.apiKey
-    },
-    sessionsDir: input.sessionsDir ?? defaultScorelSessionsDir()
-  };
-}
-
-function settingsToConfigInput(settings: ScorelSettings): ScorelConfigInput {
-  const providerId = settings.model.provider;
-  const modelId = settings.model.id;
-  return {
-    providers: settings.model.baseUrl
-      ? {
-          [providerId]: {
-            protocol: "openai-completions",
-            baseUrl: settings.model.baseUrl,
-            apiKey: settings.model.apiKey
-          }
-        }
-      : {},
-    models: {
-      default: { providerId, modelId },
-      available: [{ providerId, modelId }]
-    },
-    session: { dir: settings.sessionsDir }
   };
 }
 
@@ -398,43 +288,6 @@ function tomlToConfigInput(value: Record<string, unknown>): ScorelConfigInput {
     session: objectAt(value.session) as ScorelConfigInput["session"],
     tools: objectAt(value.tools) as ScorelConfigInput["tools"],
     channels: objectAt(value.channels)
-  };
-}
-
-function envToConfigInput(env: ScorelEnvironment): ScorelConfigInput {
-  const input: ScorelConfigInput = {};
-  if (env.SCOREL_PROVIDER || env.SCOREL_MODEL || env.SCOREL_BASE_URL) {
-    const providerId = env.SCOREL_PROVIDER;
-    const modelId = env.SCOREL_MODEL;
-    if (providerId || modelId) {
-      input.model = { providerId, modelId };
-      input.models = { default: { providerId, modelId } };
-    }
-    if (env.SCOREL_BASE_URL) {
-      const provider = providerId ?? "openai";
-      input.providers = {
-        [provider]: {
-          protocol: "openai-completions",
-          baseUrl: env.SCOREL_BASE_URL,
-          apiKey: env.SCOREL_API_KEY
-        }
-      };
-    }
-  }
-  return input;
-}
-
-function applyResolvedEnvOverrides(config: ScorelConfigInput, env: ScorelEnvironment): void {
-  if (!env.SCOREL_API_KEY) {
-    return;
-  }
-  const providerId = config.model?.providerId ?? config.models?.default?.providerId;
-  if (!providerId || !config.providers?.[providerId]) {
-    return;
-  }
-  config.providers[providerId] = {
-    ...config.providers[providerId],
-    apiKey: env.SCOREL_API_KEY
   };
 }
 

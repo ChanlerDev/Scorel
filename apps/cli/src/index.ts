@@ -192,7 +192,6 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 
   const config = await loadScorelConfig({
     projectConfigPath: cliArgs.configPath,
-    env: process.env,
     overrides: {
       model: {
         providerId: cliArgs.provider,
@@ -203,7 +202,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       }
     }
   });
-  const resolvedModel = resolveScorelModel({ env: process.env, config });
+  const resolvedModel = resolveScorelModel({ config });
   const systemPrompt = await buildSystemPrompt({ config });
   const sessionId = cliArgs.sessionId ?? (cliArgs.resumeLatest && !cliArgs.newSession ? await findLatestSessionId(config.session.dir) : undefined);
   const session = await ScorelSession.create({

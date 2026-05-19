@@ -3,7 +3,6 @@ export {
   buildSystemPrompt,
   discoverOpenAICompatibleModels,
   loadScorelConfig,
-  loadScorelSettings,
   resolveScorelModel,
   selectScorelTools
 } from "./settings.js";
@@ -14,11 +13,7 @@ export type {
   ScorelConfig,
   ScorelConfigInput,
   ScorelCustomProviderConfig,
-  ScorelEnvironment,
-  ScorelModelSettings,
   ScorelModelRef,
-  ScorelSettings,
-  ScorelSettingsInput,
   ScorelToolPreset
 } from "./settings.js";
 export type {
