@@ -13,6 +13,29 @@ import type { ScorelTool } from "./types.js";
 
 export type ScorelToolPreset = "none" | "readonly" | "coding" | "all";
 export type ScorelCustomProtocol = "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative-ai";
+export type ScorelMcpStartup = "required" | "optional";
+
+export type ScorelMcpStdioServerConfig = {
+  transport: "stdio";
+  startup: ScorelMcpStartup;
+  command: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+};
+
+export type ScorelMcpSseServerConfig = {
+  transport: "sse";
+  startup: ScorelMcpStartup;
+  url: string;
+  headers?: Record<string, string>;
+};
+
+export type ScorelMcpServerConfig = ScorelMcpStdioServerConfig | ScorelMcpSseServerConfig;
+
+export type ScorelMcpConfig = {
+  servers: Record<string, ScorelMcpServerConfig>;
+};
 
 export type ScorelModelRef = {
   providerId: string;
@@ -58,6 +81,7 @@ export type ScorelConfig = {
     preset: ScorelToolPreset;
   };
   channels: Record<string, unknown>;
+  mcp: ScorelMcpConfig;
 };
 
 export type ScorelConfigInput = Partial<{
@@ -71,6 +95,9 @@ export type ScorelConfigInput = Partial<{
   session: Partial<ScorelConfig["session"]> & { sessionsDir?: string };
   tools: Partial<ScorelConfig["tools"]>;
   channels: Record<string, unknown>;
+  mcp: Partial<{
+    servers: Record<string, Partial<ScorelMcpServerConfig>>;
+  }>;
 }>;
 
 export type ResolvedScorelModel = {
@@ -246,7 +273,8 @@ function normalizeConfig(input: ScorelConfigInput): ScorelConfig {
     tools: {
       preset: normalizeToolPreset(input.tools?.preset)
     },
-    channels: input.channels ?? {}
+    channels: input.channels ?? {},
+    mcp: normalizeMcp(input.mcp)
   };
 }
 
@@ -287,7 +315,8 @@ function tomlToConfigInput(value: Record<string, unknown>): ScorelConfigInput {
     },
     session: objectAt(value.session) as ScorelConfigInput["session"],
     tools: objectAt(value.tools) as ScorelConfigInput["tools"],
-    channels: objectAt(value.channels)
+    channels: objectAt(value.channels),
+    mcp: objectAt(value.mcp) as ScorelConfigInput["mcp"]
   };
 }
 
@@ -332,6 +361,15 @@ function mergeInto(target: ScorelConfigInput, source: ScorelConfigInput): void {
   if (source.channels) {
     target.channels = { ...target.channels, ...source.channels };
   }
+  if (source.mcp) {
+    target.mcp = {
+      ...target.mcp,
+      servers: {
+        ...target.mcp?.servers,
+        ...definedObject(source.mcp.servers ?? {}) as Record<string, Partial<ScorelMcpServerConfig>>
+      }
+    };
+  }
 }
 
 function normalizeModelRef(input: Partial<ScorelModelRef>): ScorelModelRef {
@@ -373,6 +411,50 @@ function normalizeToolPreset(value: unknown): ScorelToolPreset {
   throw new Error(`Invalid tools preset: ${String(value)}`);
 }
 
+function normalizeMcp(input: ScorelConfigInput["mcp"]): ScorelMcpConfig {
+  const servers: Record<string, ScorelMcpServerConfig> = {};
+  for (const [serverId, server] of Object.entries(input?.servers ?? {})) {
+    if (server.transport === "stdio") {
+      if (!server.command) {
+        throw new Error(`MCP server ${serverId} must declare command`);
+      }
+      servers[serverId] = {
+        transport: "stdio",
+        startup: normalizeMcpStartup(server.startup),
+        command: server.command,
+        args: Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === "string") : undefined,
+        cwd: stringOrUndefined(server.cwd),
+        env: stringRecordOrUndefined(server.env)
+      };
+      continue;
+    }
+    if (server.transport === "sse") {
+      if (!server.url) {
+        throw new Error(`MCP server ${serverId} must declare url`);
+      }
+      servers[serverId] = {
+        transport: "sse",
+        startup: normalizeMcpStartup(server.startup),
+        url: server.url,
+        headers: stringRecordOrUndefined(server.headers)
+      };
+      continue;
+    }
+    throw new Error(`MCP server ${serverId} has unsupported transport ${String(server.transport)}`);
+  }
+  return { servers };
+}
+
+function normalizeMcpStartup(value: unknown): ScorelMcpStartup {
+  if (value === undefined) {
+    return "optional";
+  }
+  if (value === "required" || value === "optional") {
+    return value;
+  }
+  throw new Error(`Invalid MCP startup: ${String(value)}`);
+}
+
 function isSupportedProtocol(value: unknown): value is ScorelCustomProtocol {
   return value === "openai-completions" || value === "openai-responses" || value === "anthropic-messages" || value === "google-generative-ai";
 }
@@ -403,6 +485,13 @@ function objectAt(value: unknown): Record<string, unknown> | undefined {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function stringRecordOrUndefined(value: unknown): Record<string, string> | undefined {
+  if (!isObject(value)) {
+    return undefined;
+  }
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
 function definedObject<T extends Record<string, unknown>>(value: T): Partial<T> {

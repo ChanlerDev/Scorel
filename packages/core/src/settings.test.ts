@@ -101,6 +101,54 @@ preset = "coding"
     }
   });
 
+  it("parses MCP server config from TOML", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "scorel-config-mcp-"));
+    try {
+      const configPath = join(dir, "config.toml");
+      await writeFile(
+        configPath,
+        `
+[mcp.servers.echo]
+transport = "stdio"
+startup = "required"
+command = "node"
+args = ["server.mjs"]
+cwd = "/tmp"
+
+[mcp.servers.echo.env]
+TOKEN = "secret"
+
+[mcp.servers.remote]
+transport = "sse"
+startup = "optional"
+url = "https://mcp.example.invalid/sse"
+`,
+        "utf8"
+      );
+
+      const config = await loadScorelConfig({
+        globalConfigPath: join(dir, "missing-global.toml"),
+        projectConfigPath: configPath
+      });
+
+      expect(config.mcp.servers.echo).toEqual({
+        transport: "stdio",
+        startup: "required",
+        command: "node",
+        args: ["server.mjs"],
+        cwd: "/tmp",
+        env: { TOKEN: "secret" }
+      });
+      expect(config.mcp.servers.remote).toEqual({
+        transport: "sse",
+        startup: "optional",
+        url: "https://mcp.example.invalid/sse"
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not read legacy settings JSON or Scorel env overrides", async () => {
     const dir = await mkdtemp(join(tmpdir(), "scorel-config-no-legacy-"));
     try {

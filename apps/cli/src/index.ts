@@ -7,6 +7,7 @@ import { stdin as processStdin, stdout as processStdout } from "node:process";
 import {
   createReadonlyTools,
   createWriteTools,
+  createMcpToolRegistry,
   findLatestSessionId,
   buildSystemPrompt,
   loadScorelConfig,
@@ -197,30 +198,35 @@ export function formatHistory(history: ScorelHistoryItem[]): string {
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const cliArgs = parseCliArgs(args);
-  const session = await createCliSession(cliArgs);
+  const handle = await createCliSession(cliArgs);
+  const { session } = handle;
 
   process.stderr.write(`[session] ${session.store.sessionId}\n`);
 
-  if (shouldStartInteractiveShell(cliArgs)) {
-    const hadRuntimeError = await runInteractiveShell(session);
+  try {
+    if (shouldStartInteractiveShell(cliArgs)) {
+      const hadRuntimeError = await runInteractiveShell(session);
+      if (hadRuntimeError) {
+        process.exitCode = 1;
+      }
+      return;
+    }
+
+    const prompt = await readPromptFromArgsOrStdin(cliArgs.promptArgs);
+    if (prompt.length === 0) {
+      throw new Error("Prompt is required via command arguments or stdin.");
+    }
+
+    const hadRuntimeError = await runPromptInput(session, prompt);
     if (hadRuntimeError) {
       process.exitCode = 1;
     }
-    return;
-  }
-
-  const prompt = await readPromptFromArgsOrStdin(cliArgs.promptArgs);
-  if (prompt.length === 0) {
-    throw new Error("Prompt is required via command arguments or stdin.");
-  }
-
-  const hadRuntimeError = await runPromptInput(session, prompt);
-  if (hadRuntimeError) {
-    process.exitCode = 1;
+  } finally {
+    await handle.close();
   }
 }
 
-async function createCliSession(cliArgs: CliArgs): Promise<ScorelSession> {
+async function createCliSession(cliArgs: CliArgs): Promise<{ session: ScorelSession; close: () => Promise<void> }> {
   const config = await loadScorelConfig({
     projectConfigPath: cliArgs.configPath,
     overrides: {
@@ -236,13 +242,24 @@ async function createCliSession(cliArgs: CliArgs): Promise<ScorelSession> {
   const resolvedModel = resolveScorelModel({ config });
   const systemPrompt = await buildSystemPrompt({ config });
   const sessionId = cliArgs.sessionId ?? (cliArgs.resumeLatest && !cliArgs.newSession ? await findLatestSessionId(config.session.dir) : undefined);
-  return ScorelSession.create({
+  const baseTools = createCliTools(config.tools.preset);
+  const mcpRegistry = config.tools.preset === "all" ? await createMcpToolRegistry(config.mcp) : undefined;
+  for (const error of mcpRegistry?.errors ?? []) {
+    process.stderr.write(`[mcp:optional-error] ${error.serverId}: ${error.error}\n`);
+  }
+  const session = await ScorelSession.create({
     store: new SessionStore({ sessionsDir: config.session.dir, sessionId }),
     model: resolvedModel.model,
     systemPrompt,
-    tools: createCliTools(config.tools.preset),
+    tools: [...baseTools, ...(mcpRegistry?.tools ?? [])],
     streamOptions: { apiKey: resolvedModel.apiKey }
   });
+  return {
+    session,
+    close: async () => {
+      await mcpRegistry?.close();
+    }
+  };
 }
 
 async function runPromptInput(session: ScorelSession, prompt: string): Promise<boolean> {

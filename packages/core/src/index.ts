@@ -6,6 +6,7 @@ export {
   resolveScorelModel,
   selectScorelTools
 } from "./settings.js";
+export { createMcpToolRegistry, formatMcpToolName } from "./mcp.js";
 export { findLatestSessionId, replayLogEntries, ScorelSession, SessionStore } from "./session.js";
 export { createReadonlyTools, createWriteTools } from "./tools.js";
 export type {
@@ -13,9 +14,15 @@ export type {
   ScorelConfig,
   ScorelConfigInput,
   ScorelCustomProviderConfig,
+  ScorelMcpConfig,
+  ScorelMcpServerConfig,
+  ScorelMcpSseServerConfig,
+  ScorelMcpStartup,
+  ScorelMcpStdioServerConfig,
   ScorelModelRef,
   ScorelToolPreset
 } from "./settings.js";
+export type { McpToolClient, McpToolRegistry } from "./mcp.js";
 export type {
   AppendLogEntry,
   CompactLogEntry,
