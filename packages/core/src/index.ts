@@ -9,7 +9,16 @@ export type {
   ScorelSettings,
   ScorelSettingsInput
 } from "./settings.js";
-export type { LogEntry, SessionMeta } from "./session.js";
+export type {
+  AppendLogEntry,
+  CompactLogEntry,
+  LogEntry,
+  MessageLogEntry,
+  ReplayResult,
+  RewindLogEntry,
+  ScorelHistoryItem,
+  SessionMeta
+} from "./session.js";
 export type {
   ScorelEvent,
   ScorelEventListener,

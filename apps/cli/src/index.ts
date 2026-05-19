@@ -8,7 +8,7 @@ import {
   ScorelSession,
   SessionStore
 } from "@scorel/core";
-import type { ScorelEvent } from "@scorel/core";
+import type { ScorelEvent, ScorelHistoryItem, ScorelMessage } from "@scorel/core";
 
 export type CliArgs = {
   promptArgs: string[];
@@ -16,6 +16,12 @@ export type CliArgs = {
   newSession: boolean;
   resumeLatest: boolean;
 };
+
+export type PromptCommand =
+  | { type: "prompt"; prompt: string }
+  | { type: "history" }
+  | { type: "rewind"; targetMessageId: string }
+  | { type: "fork"; targetMessageId: string };
 
 export function parseCliArgs(args = process.argv.slice(2)): CliArgs {
   const promptArgs: string[] = [];
@@ -93,6 +99,35 @@ export function formatRuntimeEvent(event: ScorelEvent): Array<{ stream: "stdout"
   return [];
 }
 
+export function parsePromptCommand(prompt: string): PromptCommand {
+  const trimmed = prompt.trim();
+  if (trimmed === "/history") {
+    return { type: "history" };
+  }
+  if (trimmed === "/rewind" || trimmed.startsWith("/rewind ")) {
+    const targetMessageId = trimmed.slice("/rewind".length).trim();
+    if (!targetMessageId) {
+      throw new Error("/rewind requires a message id");
+    }
+    return { type: "rewind", targetMessageId };
+  }
+  if (trimmed === "/fork" || trimmed.startsWith("/fork ")) {
+    const targetMessageId = trimmed.slice("/fork".length).trim();
+    if (!targetMessageId) {
+      throw new Error("/fork requires a message id");
+    }
+    return { type: "fork", targetMessageId };
+  }
+  return { type: "prompt", prompt };
+}
+
+export function formatHistory(history: ScorelHistoryItem[]): string {
+  return history.map((item) => {
+    const marker = item.rewindable ? "*" : "-";
+    return `${item.id} ${marker} ${item.message.role} ${summarizeMessage(item.message)}`;
+  }).join("\n") + (history.length > 0 ? "\n" : "");
+}
+
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const cliArgs = parseCliArgs(args);
   const prompt = await readPromptFromArgsOrStdin(cliArgs.promptArgs);
@@ -113,6 +148,22 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 
   process.stderr.write(`[session] ${session.store.sessionId}\n`);
 
+  const command = parsePromptCommand(prompt);
+  if (command.type === "history") {
+    process.stdout.write(formatHistory(session.history()));
+    return;
+  }
+  if (command.type === "rewind") {
+    await session.rewind(command.targetMessageId);
+    process.stdout.write(`[rewind] ${command.targetMessageId} restored. Workspace files were not changed.\n`);
+    return;
+  }
+  if (command.type === "fork") {
+    const forked = await session.fork(command.targetMessageId);
+    process.stdout.write(`[fork] ${forked.store.sessionId}\n`);
+    return;
+  }
+
   session.runtime.subscribe((event) => {
     if (event.type === "runtime_end" && event.error) {
       runtimeError = event.error;
@@ -123,7 +174,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
   });
 
-  await session.prompt(prompt);
+  await session.prompt(command.prompt);
   process.stdout.write("\n");
   if (runtimeError) {
     process.exitCode = 1;
@@ -135,4 +186,30 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });
+}
+
+function summarizeMessage(message: ScorelMessage): string {
+  if (message.role === "user") {
+    return trimSingleLine(contentToText(message.content));
+  }
+  if (message.role === "assistant" || message.role === "toolResult") {
+    const text = message.content
+      .filter((content) => content.type === "text")
+      .map((content) => content.text)
+      .join(" ");
+    return trimSingleLine(text);
+  }
+  return trimSingleLine(message.kind);
+}
+
+function trimSingleLine(value: string): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
+}
+
+function contentToText(content: string | Array<{ type: string; text?: string }>): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  return content.filter((item) => item.type === "text").map((item) => item.text ?? "").join(" ");
 }

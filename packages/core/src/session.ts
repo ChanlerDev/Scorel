@@ -7,6 +7,7 @@ import type { ScorelMessage, ScorelRuntimeOptions, ScorelStreamSimple, ScorelToo
 
 export type MessageLogEntry = {
   kind: "message";
+  id: string;
   at: number;
   message: ScorelMessage;
 };
@@ -18,7 +19,38 @@ export type ChannelLogEntry = {
   externalId: string;
 };
 
-export type LogEntry = MessageLogEntry | ChannelLogEntry;
+export type RewindLogEntry = {
+  kind: "rewind";
+  id: string;
+  at: number;
+  targetMessageId: string;
+};
+
+export type CompactLogEntry = {
+  kind: "compact";
+  id: string;
+  at: number;
+};
+
+export type LogEntry = MessageLogEntry | ChannelLogEntry | RewindLogEntry | CompactLogEntry;
+
+export type AppendLogEntry =
+  | (Omit<MessageLogEntry, "id"> & { id?: string })
+  | ChannelLogEntry
+  | (Omit<RewindLogEntry, "id"> & { id?: string })
+  | (Omit<CompactLogEntry, "id"> & { id?: string });
+
+export type ScorelHistoryItem = {
+  id: string;
+  at: number;
+  message: ScorelMessage;
+  rewindable: boolean;
+};
+
+export type ReplayResult = {
+  messages: ScorelMessage[];
+  history: ScorelHistoryItem[];
+};
 
 export type SessionMeta = {
   id: string;
@@ -43,6 +75,10 @@ export type RuntimeSessionOptions = {
   tools?: ScorelTool[];
   streamSimple?: ScorelStreamSimple;
   streamOptions?: ScorelRuntimeOptions["streamOptions"];
+};
+
+export type ForkSessionOptions = Omit<RuntimeSessionOptions, "store"> & {
+  sessionId?: string;
 };
 
 export class SessionStore {
@@ -74,9 +110,11 @@ export class SessionStore {
     await writeFile(this.metaPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   }
 
-  async append(entry: LogEntry): Promise<void> {
+  async append(entry: AppendLogEntry): Promise<LogEntry> {
     await mkdir(this.sessionDir, { recursive: true });
-    await appendFile(this.logPath, `${JSON.stringify(entry)}\n`, "utf8");
+    const normalized = normalizeAppendLogEntry(entry);
+    await appendFile(this.logPath, `${JSON.stringify(normalized)}\n`, "utf8");
+    return normalized;
   }
 
   async readEntries(): Promise<LogEntry[]> {
@@ -93,7 +131,7 @@ export class SessionStore {
     const lines = contents.split("\n").filter((line) => line.trim().length > 0);
     return lines.map((line, index) => {
       try {
-        return JSON.parse(line) as LogEntry;
+        return normalizeReadLogEntry(JSON.parse(line), index);
       } catch (error) {
         throw new Error(`Invalid session log JSON at ${this.logPath}:${index + 1}: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -142,10 +180,14 @@ export async function findLatestSessionId(sessionsDir: string): Promise<string |
 export class ScorelSession {
   readonly store: SessionStore;
   readonly runtime: ScorelRuntime;
+  private readonly options: RuntimeSessionOptions;
+  private entries: LogEntry[];
 
-  private constructor(store: SessionStore, runtime: ScorelRuntime) {
+  private constructor(store: SessionStore, runtime: ScorelRuntime, options: RuntimeSessionOptions, entries: LogEntry[]) {
     this.store = store;
     this.runtime = runtime;
+    this.options = options;
+    this.entries = entries;
   }
 
   static async create(options: RuntimeSessionOptions): Promise<ScorelSession> {
@@ -165,34 +207,163 @@ export class ScorelSession {
       messages: replayed.messages
     });
 
+    const thisSession = new ScorelSession(options.store, runtime, options, entries);
+
     runtime.subscribe(async (event) => {
       if (event.type === "message_end") {
-        await options.store.append({ kind: "message", at: Date.now(), message: event.message });
+        const entry = await options.store.append({ kind: "message", at: Date.now(), message: event.message });
+        thisSession.entries.push(entry);
       }
     });
 
-    return new ScorelSession(options.store, runtime);
+    return thisSession;
   }
 
   prompt(message: string | ScorelMessage | ScorelMessage[]): Promise<void> {
     return this.persistInput(message).then(() => this.runtime.prompt(message));
   }
 
+  history(): ScorelHistoryItem[] {
+    return replayLogEntries(this.entries).history;
+  }
+
+  async rewind(targetMessageId: string): Promise<ReplayResult> {
+    const marker = await this.store.append({ kind: "rewind", at: Date.now(), targetMessageId });
+    this.entries.push(marker);
+    const replayed = replayLogEntries(this.entries);
+    this.runtime.loadMessages(replayed.messages);
+    return replayed;
+  }
+
+  async fork(targetMessageId: string, options: Partial<ForkSessionOptions> = {}): Promise<ScorelSession> {
+    const prefix = prefixEntriesForTarget(this.entries, targetMessageId);
+    const store = new SessionStore({ sessionsDir: this.store.sessionsDir, sessionId: options.sessionId });
+    await store.ensure({
+      cwd: process.cwd(),
+      model: { provider: this.options.model.provider, id: this.options.model.id }
+    });
+    for (const entry of prefix) {
+      await store.append(entry);
+    }
+    return ScorelSession.create({
+      ...this.options,
+      ...options,
+      store
+    });
+  }
+
   private async persistInput(message: string | ScorelMessage | ScorelMessage[]): Promise<void> {
     for (const item of toMessages(message)) {
-      await this.store.append({ kind: "message", at: Date.now(), message: item });
+      const entry = await this.store.append({ kind: "message", at: Date.now(), message: item });
+      this.entries.push(entry);
     }
   }
 }
 
-export function replayLogEntries(entries: LogEntry[]): { messages: ScorelMessage[] } {
-  return {
-    messages: entries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : []))
-  };
+export function replayLogEntries(entries: LogEntry[]): ReplayResult {
+  const activeEntries: MessageLogEntry[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "message") {
+      activeEntries.push(entry);
+      continue;
+    }
+    if (entry.kind === "rewind") {
+      rewindEntries(activeEntries, entry.targetMessageId);
+    }
+  }
+  return toReplayResult(activeEntries);
 }
 
 function createSessionId(): string {
   return randomUUID();
+}
+
+function createLogEntryId(prefix: string): string {
+  return `${prefix}-${randomUUID()}`;
+}
+
+function normalizeAppendLogEntry(entry: AppendLogEntry): LogEntry {
+  if (entry.kind === "message") {
+    return { ...entry, id: entry.id ?? createLogEntryId("msg") };
+  }
+  if (entry.kind === "rewind") {
+    return { ...entry, id: entry.id ?? createLogEntryId("rewind") };
+  }
+  if (entry.kind === "compact") {
+    return { ...entry, id: entry.id ?? createLogEntryId("compact") };
+  }
+  return entry;
+}
+
+function normalizeReadLogEntry(entry: unknown, index: number): LogEntry {
+  if (!isLogEntryLike(entry)) {
+    throw new Error("Entry is not an object");
+  }
+  if (entry.kind === "message") {
+    return { ...(entry as Omit<MessageLogEntry, "id"> & { id?: string }), id: typeof entry.id === "string" ? entry.id : `legacy-msg-${index + 1}` };
+  }
+  if (entry.kind === "rewind") {
+    return { ...(entry as Omit<RewindLogEntry, "id"> & { id?: string }), id: typeof entry.id === "string" ? entry.id : `legacy-rewind-${index + 1}` };
+  }
+  if (entry.kind === "compact") {
+    return { ...(entry as Omit<CompactLogEntry, "id"> & { id?: string }), id: typeof entry.id === "string" ? entry.id : `legacy-compact-${index + 1}` };
+  }
+  if (entry.kind === "channel") {
+    return entry as ChannelLogEntry;
+  }
+  throw new Error(`Unsupported session log entry kind: ${String(entry.kind)}`);
+}
+
+function isLogEntryLike(entry: unknown): entry is { kind: unknown; id?: unknown } {
+  return typeof entry === "object" && entry !== null && "kind" in entry;
+}
+
+function isRewindableBoundary(entry: MessageLogEntry): boolean {
+  return entry.message.role === "user";
+}
+
+function rewindEntries(entries: MessageLogEntry[], targetMessageId: string): void {
+  const index = entries.findIndex((entry) => entry.id === targetMessageId);
+  if (index === -1) {
+    throw new Error(`Cannot rewind to ${targetMessageId}: message id was not found in active history`);
+  }
+  if (!isRewindableBoundary(entries[index])) {
+    throw new Error(`Cannot rewind to ${targetMessageId}: not a rewindable turn boundary`);
+  }
+  entries.splice(index + 1);
+}
+
+function prefixEntriesForTarget(entries: LogEntry[], targetMessageId: string): MessageLogEntry[] {
+  const activeEntries: MessageLogEntry[] = [];
+  for (const entry of entries) {
+    if (entry.kind === "message") {
+      activeEntries.push(entry);
+      continue;
+    }
+    if (entry.kind === "rewind") {
+      rewindEntries(activeEntries, entry.targetMessageId);
+    }
+  }
+  const index = activeEntries.findIndex((entry) => entry.id === targetMessageId);
+  if (index === -1) {
+    throw new Error(`Cannot fork from ${targetMessageId}: message id was not found in active history`);
+  }
+  if (!isRewindableBoundary(activeEntries[index])) {
+    throw new Error(`Cannot fork from ${targetMessageId}: not a rewindable turn boundary`);
+  }
+  return activeEntries.slice(0, index + 1);
+}
+
+function toReplayResult(entries: MessageLogEntry[]): ReplayResult {
+  return {
+    messages: entries.map((entry) => entry.message),
+    history: entries.map((entry) => ({
+      id: entry.id,
+      at: entry.at,
+      message: entry.message,
+      rewindable: isRewindableBoundary(entry)
+    }))
+  };
 }
 
 function isNotFound(error: unknown): boolean {

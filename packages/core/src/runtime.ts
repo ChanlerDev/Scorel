@@ -84,6 +84,14 @@ export class ScorelRuntime {
     };
   }
 
+  loadMessages(messages: ScorelMessage[]): void {
+    if (this.state.status !== "idle") {
+      throw new Error("ScorelRuntime.loadMessages() can only run while idle");
+    }
+    this.state.messages.splice(0, this.state.messages.length, ...messages);
+    this.state.lastError = undefined;
+  }
+
   private async run(input: ScorelMessage[]): Promise<void> {
     this.state.status = "running";
     this.state.lastError = undefined;

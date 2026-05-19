@@ -340,6 +340,34 @@ describe("ScorelRuntime", () => {
     expect(runtime.state.messages[0]).toMatchObject({ role: "assistant" });
   });
 
+  it("loads replayed messages while idle before continuing", async () => {
+    const contexts: Context[] = [];
+    const runtime = new ScorelRuntime({
+      model: testModel(),
+      streamSimple: (_model, context) => {
+        contexts.push(context);
+        return assistantEventStream("continued");
+      }
+    });
+
+    runtime.loadMessages([{ role: "user", content: "replayed", timestamp: 1 }]);
+    await runtime.continue();
+
+    expect(contexts[0].messages).toContainEqual(expect.objectContaining({ role: "user", content: "replayed" }));
+  });
+
+  it("rejects loading replayed messages while running", async () => {
+    const runtime = new ScorelRuntime({
+      model: testModel(),
+      streamSimple: () => {
+        expect(() => runtime.loadMessages([])).toThrow("can only run while idle");
+        return assistantEventStream("done");
+      }
+    });
+
+    await runtime.prompt("start");
+  });
+
   it("applies steer messages at the next safe boundary while a run is active", async () => {
     const contexts: Context[] = [];
     const runtime = new ScorelRuntime({
