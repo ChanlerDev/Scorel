@@ -37,7 +37,7 @@ export class ScorelRuntime {
     this.state = {
       status: "idle",
       sessionId: options.sessionId ?? "default",
-      messages: []
+      messages: options.messages ? [...options.messages] : []
     };
   }
 

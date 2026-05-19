@@ -71,6 +71,7 @@ export type ScorelStreamSimple = (
 export type ScorelRuntimeOptions = {
   model: Model<Api>;
   sessionId?: string;
+  messages?: ScorelMessage[];
   systemPrompt?: string;
   tools?: ScorelTool[];
   streamSimple?: ScorelStreamSimple;

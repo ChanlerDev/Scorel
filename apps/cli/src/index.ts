@@ -1,8 +1,49 @@
 #!/usr/bin/env node
 
-import { createOpenAICompatibleChatModel, getModel } from "@scorel/core/llm";
-import { createReadonlyTools, ScorelRuntime } from "@scorel/core";
+import {
+  createReadonlyTools,
+  findLatestSessionId,
+  loadScorelSettings,
+  resolveScorelModel,
+  ScorelSession,
+  SessionStore
+} from "@scorel/core";
 import type { ScorelEvent } from "@scorel/core";
+
+export type CliArgs = {
+  promptArgs: string[];
+  sessionId?: string;
+  newSession: boolean;
+};
+
+export function parseCliArgs(args = process.argv.slice(2)): CliArgs {
+  const promptArgs: string[] = [];
+  let sessionId: string | undefined;
+  let newSession = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") {
+      continue;
+    }
+    if (arg === "--session") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--session requires a session id");
+      }
+      sessionId = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--new") {
+      newSession = true;
+      continue;
+    }
+    promptArgs.push(arg);
+  }
+
+  return { promptArgs, sessionId, newSession };
+}
 
 export async function readPromptFromArgsOrStdin(
   args = process.argv.slice(2),
@@ -47,22 +88,26 @@ export function formatRuntimeEvent(event: ScorelEvent): Array<{ stream: "stdout"
 }
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
-  const prompt = await readPromptFromArgsOrStdin(args);
+  const cliArgs = parseCliArgs(args);
+  const prompt = await readPromptFromArgsOrStdin(cliArgs.promptArgs);
   if (prompt.length === 0) {
     throw new Error("Prompt is required via command arguments or stdin.");
   }
 
-  const provider = process.env.SCOREL_PROVIDER ?? "openai";
-  const modelId = process.env.SCOREL_MODEL ?? "gpt-4o-mini";
-  const baseUrl = process.env.SCOREL_BASE_URL;
-  const apiKey = process.env.SCOREL_API_KEY ?? process.env.OPENAI_API_KEY;
-  const model = baseUrl
-    ? createOpenAICompatibleChatModel({ id: modelId, baseUrl, provider })
-    : getModel(provider as "openai", modelId as never);
-  const runtime = new ScorelRuntime({ model, tools: createReadonlyTools(), streamOptions: { apiKey } });
+  const settings = await loadScorelSettings();
+  const resolvedModel = resolveScorelModel({ env: process.env, settings });
+  const sessionId = cliArgs.sessionId ?? (cliArgs.newSession ? undefined : await findLatestSessionId(settings.sessionsDir));
+  const session = await ScorelSession.create({
+    store: new SessionStore({ sessionsDir: settings.sessionsDir, sessionId }),
+    model: resolvedModel.model,
+    tools: createReadonlyTools(),
+    streamOptions: { apiKey: resolvedModel.apiKey }
+  });
   let runtimeError: string | undefined;
 
-  runtime.subscribe((event) => {
+  process.stderr.write(`[session] ${session.store.sessionId}\n`);
+
+  session.runtime.subscribe((event) => {
     if (event.type === "runtime_end" && event.error) {
       runtimeError = event.error;
     }
@@ -72,7 +117,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
   });
 
-  await runtime.prompt(prompt);
+  await session.prompt(prompt);
   process.stdout.write("\n");
   if (runtimeError) {
     process.exitCode = 1;
