@@ -16,19 +16,29 @@ describe("readPromptFromArgsOrStdin", () => {
     expect(parseCliArgs(["--session", "abc123", "hello", "world"])).toEqual({
       promptArgs: ["hello", "world"],
       sessionId: "abc123",
-      newSession: false
+      newSession: false,
+      resumeLatest: false
     });
 
     expect(parseCliArgs(["--new", "hello"])).toEqual({
       promptArgs: ["hello"],
       sessionId: undefined,
-      newSession: true
+      newSession: true,
+      resumeLatest: false
     });
 
     expect(parseCliArgs(["--", "--new", "hello"])).toEqual({
       promptArgs: ["hello"],
       sessionId: undefined,
-      newSession: true
+      newSession: true,
+      resumeLatest: false
+    });
+
+    expect(parseCliArgs(["--resume", "hello"])).toEqual({
+      promptArgs: ["hello"],
+      sessionId: undefined,
+      newSession: false,
+      resumeLatest: true
     });
   });
 

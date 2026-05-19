@@ -121,4 +121,23 @@ describe("Scorel settings", () => {
 
     expect(result.apiKey).toBe("settings-key");
   });
+
+  it("does not pass OPENAI_API_KEY as a generic key for non-OpenAI known providers", async () => {
+    const result = resolveScorelModel(
+      {
+        env: {
+          OPENAI_API_KEY: "openai-key"
+        },
+        settings: {
+          model: {
+            provider: "anthropic",
+            id: "claude-test"
+          }
+        }
+      },
+      { getModel: vi.fn(() => testModel("known")) }
+    );
+
+    expect(result.apiKey).toBeUndefined();
+  });
 });

@@ -77,7 +77,7 @@ export function resolveScorelModel(
   const provider = env.SCOREL_PROVIDER ?? settings.model.provider;
   const modelId = env.SCOREL_MODEL ?? settings.model.id;
   const baseUrl = env.SCOREL_BASE_URL ?? settings.model.baseUrl;
-  const apiKey = env.SCOREL_API_KEY ?? settings.model.apiKey ?? env.OPENAI_API_KEY;
+  const apiKey = env.SCOREL_API_KEY ?? settings.model.apiKey ?? (provider === "openai" ? env.OPENAI_API_KEY : undefined);
   const makeKnownModel = factories.getModel ?? ((knownProvider, knownModelId) => defaultGetModel(knownProvider as never, knownModelId as never) as Model<Api>);
   const makeOpenAICompatible = factories.createOpenAICompatibleChatModel ?? createOpenAICompatibleChatModel;
 

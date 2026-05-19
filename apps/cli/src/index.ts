@@ -14,12 +14,14 @@ export type CliArgs = {
   promptArgs: string[];
   sessionId?: string;
   newSession: boolean;
+  resumeLatest: boolean;
 };
 
 export function parseCliArgs(args = process.argv.slice(2)): CliArgs {
   const promptArgs: string[] = [];
   let sessionId: string | undefined;
   let newSession = false;
+  let resumeLatest = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -39,10 +41,14 @@ export function parseCliArgs(args = process.argv.slice(2)): CliArgs {
       newSession = true;
       continue;
     }
+    if (arg === "--resume") {
+      resumeLatest = true;
+      continue;
+    }
     promptArgs.push(arg);
   }
 
-  return { promptArgs, sessionId, newSession };
+  return { promptArgs, sessionId, newSession, resumeLatest };
 }
 
 export async function readPromptFromArgsOrStdin(
@@ -96,7 +102,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
 
   const settings = await loadScorelSettings();
   const resolvedModel = resolveScorelModel({ env: process.env, settings });
-  const sessionId = cliArgs.sessionId ?? (cliArgs.newSession ? undefined : await findLatestSessionId(settings.sessionsDir));
+  const sessionId = cliArgs.sessionId ?? (cliArgs.resumeLatest && !cliArgs.newSession ? await findLatestSessionId(settings.sessionsDir) : undefined);
   const session = await ScorelSession.create({
     store: new SessionStore({ sessionsDir: settings.sessionsDir, sessionId }),
     model: resolvedModel.model,
