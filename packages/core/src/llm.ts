@@ -4,10 +4,12 @@ export type {
   AssistantMessageEvent,
   AssistantMessageEventStream,
   Context,
+  ImageContent,
   Message,
   Model,
   SimpleStreamOptions,
   Static,
+  TextContent,
   Tool,
   ToolCall,
   ToolResultMessage,
@@ -33,16 +35,28 @@ export function createOpenAICompatibleChatModel(options: {
   provider?: string;
   name?: string;
 }): Model<"openai-completions"> {
+  const provider = options.provider ?? "openai";
+  const isOfficialOpenAI = provider === "openai" && options.baseUrl.includes("api.openai.com");
   return {
     id: options.id,
     name: options.name ?? options.id,
     api: "openai-completions",
-    provider: options.provider ?? "openai",
+    provider,
     baseUrl: options.baseUrl,
     reasoning: false,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128000,
-    maxTokens: 4096
+    maxTokens: 4096,
+    compat: isOfficialOpenAI
+      ? undefined
+      : {
+          supportsStore: false,
+          supportsDeveloperRole: false,
+          supportsReasoningEffort: false,
+          maxTokensField: "max_tokens",
+          requiresToolResultName: true,
+          supportsStrictMode: false
+        }
   };
 }
