@@ -4,19 +4,25 @@ import {
   createReadonlyTools,
   createWriteTools,
   findLatestSessionId,
-  loadScorelSettings,
+  buildSystemPrompt,
+  loadScorelConfig,
   resolveScorelModel,
+  selectScorelTools,
   ScorelSession,
   SessionStore
 } from "@scorel/core";
 import type { ScorelEvent, ScorelHistoryItem, ScorelMessage } from "@scorel/core";
-import type { ScorelTool } from "@scorel/core";
+import type { ScorelTool, ScorelToolPreset } from "@scorel/core";
 
 export type CliArgs = {
   promptArgs: string[];
   sessionId?: string;
   newSession: boolean;
   resumeLatest: boolean;
+  configPath?: string;
+  provider?: string;
+  model?: string;
+  toolsPreset?: ScorelToolPreset;
 };
 
 export type PromptCommand =
@@ -30,6 +36,10 @@ export function parseCliArgs(args = process.argv.slice(2)): CliArgs {
   let sessionId: string | undefined;
   let newSession = false;
   let resumeLatest = false;
+  let configPath: string | undefined;
+  let provider: string | undefined;
+  let model: string | undefined;
+  let toolsPreset: ScorelToolPreset | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -53,10 +63,46 @@ export function parseCliArgs(args = process.argv.slice(2)): CliArgs {
       resumeLatest = true;
       continue;
     }
+    if (arg === "--config") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--config requires a path");
+      }
+      configPath = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--provider") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--provider requires a provider id");
+      }
+      provider = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--model") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--model requires a model id");
+      }
+      model = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--tools") {
+      const value = args[index + 1];
+      if (!isToolPreset(value)) {
+        throw new Error("--tools requires one of: none, readonly, coding, all");
+      }
+      toolsPreset = value;
+      index += 1;
+      continue;
+    }
     promptArgs.push(arg);
   }
 
-  return { promptArgs, sessionId, newSession, resumeLatest };
+  return { promptArgs, sessionId, newSession, resumeLatest, configPath, provider, model, toolsPreset };
 }
 
 export async function readPromptFromArgsOrStdin(
@@ -101,8 +147,11 @@ export function formatRuntimeEvent(event: ScorelEvent): Array<{ stream: "stdout"
   return [];
 }
 
-export function createCliTools(): ScorelTool[] {
-  return [...createReadonlyTools().filter((tool) => tool.name !== "ls"), ...createWriteTools()];
+export function createCliTools(preset: ScorelToolPreset = "coding"): ScorelTool[] {
+  return selectScorelTools(preset, {
+    readonlyTools: createReadonlyTools().filter((tool) => tool.name !== "ls"),
+    writeTools: createWriteTools()
+  });
 }
 
 export function parsePromptCommand(prompt: string): PromptCommand {
@@ -141,13 +190,27 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     throw new Error("Prompt is required via command arguments or stdin.");
   }
 
-  const settings = await loadScorelSettings();
-  const resolvedModel = resolveScorelModel({ env: process.env, settings });
-  const sessionId = cliArgs.sessionId ?? (cliArgs.resumeLatest && !cliArgs.newSession ? await findLatestSessionId(settings.sessionsDir) : undefined);
+  const config = await loadScorelConfig({
+    projectConfigPath: cliArgs.configPath,
+    env: process.env,
+    overrides: {
+      model: {
+        providerId: cliArgs.provider,
+        modelId: cliArgs.model
+      },
+      tools: {
+        preset: cliArgs.toolsPreset
+      }
+    }
+  });
+  const resolvedModel = resolveScorelModel({ env: process.env, config });
+  const systemPrompt = await buildSystemPrompt({ config });
+  const sessionId = cliArgs.sessionId ?? (cliArgs.resumeLatest && !cliArgs.newSession ? await findLatestSessionId(config.session.dir) : undefined);
   const session = await ScorelSession.create({
-    store: new SessionStore({ sessionsDir: settings.sessionsDir, sessionId }),
+    store: new SessionStore({ sessionsDir: config.session.dir, sessionId }),
     model: resolvedModel.model,
-    tools: createCliTools(),
+    systemPrompt,
+    tools: createCliTools(config.tools.preset),
     streamOptions: { apiKey: resolvedModel.apiKey }
   });
   let runtimeError: string | undefined;
@@ -218,4 +281,8 @@ function contentToText(content: string | Array<{ type: string; text?: string }>)
     return content;
   }
   return content.filter((item) => item.type === "text").map((item) => item.text ?? "").join(" ");
+}
+
+function isToolPreset(value: unknown): value is ScorelToolPreset {
+  return value === "none" || value === "readonly" || value === "coding" || value === "all";
 }

@@ -21,6 +21,8 @@ import type { Model } from "@earendil-works/pi-ai";
 
 export {
   createAssistantMessageEventStream,
+  getModels,
+  getProviders,
   getModel,
   streamSimple,
   StringEnum,
@@ -34,6 +36,7 @@ export function createOpenAICompatibleChatModel(options: {
   baseUrl: string;
   provider?: string;
   name?: string;
+  metadata?: Partial<Model<"openai-completions">>;
 }): Model<"openai-completions"> {
   const provider = options.provider ?? "openai";
   const isOfficialOpenAI = provider === "openai" && options.baseUrl.includes("api.openai.com");
@@ -43,14 +46,14 @@ export function createOpenAICompatibleChatModel(options: {
     api: "openai-completions",
     provider,
     baseUrl: options.baseUrl,
-    reasoning: false,
-    input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 4096,
+    reasoning: options.metadata?.reasoning ?? false,
+    input: options.metadata?.input ?? ["text"],
+    cost: options.metadata?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: options.metadata?.contextWindow ?? 128000,
+    maxTokens: options.metadata?.maxTokens ?? 4096,
     compat: isOfficialOpenAI
       ? undefined
-      : {
+      : options.metadata?.compat ?? {
           supportsStore: false,
           supportsDeveloperRole: false,
           supportsReasoningEffort: false,

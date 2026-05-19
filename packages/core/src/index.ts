@@ -1,13 +1,25 @@
 export { convertToLlm, ScorelRuntime } from "./runtime.js";
-export { loadScorelSettings, resolveScorelModel } from "./settings.js";
+export {
+  buildSystemPrompt,
+  discoverOpenAICompatibleModels,
+  loadScorelConfig,
+  loadScorelSettings,
+  resolveScorelModel,
+  selectScorelTools
+} from "./settings.js";
 export { findLatestSessionId, replayLogEntries, ScorelSession, SessionStore } from "./session.js";
 export { createReadonlyTools, createWriteTools } from "./tools.js";
 export type {
   ResolvedScorelModel,
+  ScorelConfig,
+  ScorelConfigInput,
+  ScorelCustomProviderConfig,
   ScorelEnvironment,
   ScorelModelSettings,
+  ScorelModelRef,
   ScorelSettings,
-  ScorelSettingsInput
+  ScorelSettingsInput,
+  ScorelToolPreset
 } from "./settings.js";
 export type {
   AppendLogEntry,

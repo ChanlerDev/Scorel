@@ -38,34 +38,83 @@ describe("readPromptFromArgsOrStdin", () => {
       promptArgs: ["hello", "world"],
       sessionId: "abc123",
       newSession: false,
-      resumeLatest: false
+      resumeLatest: false,
+      toolsPreset: undefined,
+      model: undefined,
+      provider: undefined,
+      configPath: undefined
     });
 
     expect(parseCliArgs(["--new", "hello"])).toEqual({
       promptArgs: ["hello"],
       sessionId: undefined,
       newSession: true,
-      resumeLatest: false
+      resumeLatest: false,
+      toolsPreset: undefined,
+      model: undefined,
+      provider: undefined,
+      configPath: undefined
     });
 
     expect(parseCliArgs(["--", "--new", "hello"])).toEqual({
       promptArgs: ["hello"],
       sessionId: undefined,
       newSession: true,
-      resumeLatest: false
+      resumeLatest: false,
+      toolsPreset: undefined,
+      model: undefined,
+      provider: undefined,
+      configPath: undefined
     });
 
     expect(parseCliArgs(["--resume", "hello"])).toEqual({
       promptArgs: ["hello"],
       sessionId: undefined,
       newSession: false,
-      resumeLatest: true
+      resumeLatest: true,
+      toolsPreset: undefined,
+      model: undefined,
+      provider: undefined,
+      configPath: undefined
+    });
+  });
+
+  it("parses M5 config, model, and tool preset flags separately from prompt text", () => {
+    expect(parseCliArgs([
+      "--config",
+      "/tmp/scorel.toml",
+      "--provider",
+      "amp",
+      "--model",
+      "gpt-5.4-mini",
+      "--tools",
+      "readonly",
+      "inspect",
+      "repo"
+    ])).toEqual({
+      promptArgs: ["inspect", "repo"],
+      sessionId: undefined,
+      newSession: false,
+      resumeLatest: false,
+      toolsPreset: "readonly",
+      model: "gpt-5.4-mini",
+      provider: "amp",
+      configPath: "/tmp/scorel.toml"
     });
   });
 
   it("rejects a missing session id", () => {
     expect(() => parseCliArgs(["--session"])).toThrow("--session requires a session id");
   });
+
+  it("rejects missing or invalid M5 flag values", () => {
+    expect(() => parseCliArgs(["--config"])).toThrow("--config requires a path");
+    expect(() => parseCliArgs(["--provider"])).toThrow("--provider requires a provider id");
+    expect(() => parseCliArgs(["--model"])).toThrow("--model requires a model id");
+    expect(() => parseCliArgs(["--tools"])).toThrow("--tools requires one of: none, readonly, coding, all");
+    expect(() => parseCliArgs(["--tools", "danger"])).toThrow("--tools requires one of: none, readonly, coding, all");
+  });
+
 
   it("parses slash commands separately from model prompts", () => {
     expect(parsePromptCommand("/history")).toEqual({ type: "history" });
@@ -118,7 +167,12 @@ describe("readPromptFromArgsOrStdin", () => {
     ).toEqual([{ stream: "stderr", text: "[runtime:error] provider failed\n" }]);
   });
 
-  it("uses bash instead of exposing a separate ls tool by default", () => {
-    expect(createCliTools().map((tool) => tool.name)).toEqual(["read", "glob", "grep", "bash", "write", "edit"]);
+  it("uses bash instead of exposing a separate ls tool for coding preset", () => {
+    expect(createCliTools("coding").map((tool) => tool.name)).toEqual(["read", "glob", "grep", "bash", "write", "edit"]);
+  });
+
+  it("can disable write tools with readonly preset", () => {
+    expect(createCliTools("readonly").map((tool) => tool.name)).toEqual(["read", "glob", "grep"]);
+    expect(createCliTools("none").map((tool) => tool.name)).toEqual([]);
   });
 });
