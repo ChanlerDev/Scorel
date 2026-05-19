@@ -1,7 +1,7 @@
 export { convertToLlm, ScorelRuntime } from "./runtime.js";
 export { loadScorelSettings, resolveScorelModel } from "./settings.js";
 export { findLatestSessionId, replayLogEntries, ScorelSession, SessionStore } from "./session.js";
-export { createReadonlyTools } from "./tools.js";
+export { createReadonlyTools, createWriteTools } from "./tools.js";
 export type {
   ResolvedScorelModel,
   ScorelEnvironment,

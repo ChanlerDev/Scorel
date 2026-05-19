@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatHistory, formatRuntimeEvent, parseCliArgs, parsePromptCommand, readPromptFromArgsOrStdin } from "./index.js";
+import { createCliTools, formatHistory, formatRuntimeEvent, parseCliArgs, parsePromptCommand, readPromptFromArgsOrStdin } from "./index.js";
 import type { AssistantMessage } from "@scorel/core/llm";
 
 function assistantMessage(text: string, timestamp: number): AssistantMessage {
@@ -116,5 +116,9 @@ describe("readPromptFromArgsOrStdin", () => {
         error: "provider failed"
       })
     ).toEqual([{ stream: "stderr", text: "[runtime:error] provider failed\n" }]);
+  });
+
+  it("uses bash instead of exposing a separate ls tool by default", () => {
+    expect(createCliTools().map((tool) => tool.name)).toEqual(["read", "glob", "grep", "bash", "write", "edit"]);
   });
 });

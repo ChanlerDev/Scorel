@@ -2,6 +2,7 @@
 
 import {
   createReadonlyTools,
+  createWriteTools,
   findLatestSessionId,
   loadScorelSettings,
   resolveScorelModel,
@@ -9,6 +10,7 @@ import {
   SessionStore
 } from "@scorel/core";
 import type { ScorelEvent, ScorelHistoryItem, ScorelMessage } from "@scorel/core";
+import type { ScorelTool } from "@scorel/core";
 
 export type CliArgs = {
   promptArgs: string[];
@@ -99,6 +101,10 @@ export function formatRuntimeEvent(event: ScorelEvent): Array<{ stream: "stdout"
   return [];
 }
 
+export function createCliTools(): ScorelTool[] {
+  return [...createReadonlyTools().filter((tool) => tool.name !== "ls"), ...createWriteTools()];
+}
+
 export function parsePromptCommand(prompt: string): PromptCommand {
   const trimmed = prompt.trim();
   if (trimmed === "/history") {
@@ -141,7 +147,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const session = await ScorelSession.create({
     store: new SessionStore({ sessionsDir: settings.sessionsDir, sessionId }),
     model: resolvedModel.model,
-    tools: createReadonlyTools(),
+    tools: createCliTools(),
     streamOptions: { apiKey: resolvedModel.apiKey }
   });
   let runtimeError: string | undefined;
