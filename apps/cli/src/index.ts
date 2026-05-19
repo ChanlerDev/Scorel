@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+import { realpath } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+import { createInterface } from "node:readline/promises";
+import { stdin as processStdin, stdout as processStdout } from "node:process";
 import {
   createReadonlyTools,
   createWriteTools,
@@ -29,7 +33,8 @@ export type PromptCommand =
   | { type: "prompt"; prompt: string }
   | { type: "history" }
   | { type: "rewind"; targetMessageId: string }
-  | { type: "fork"; targetMessageId: string };
+  | { type: "fork"; targetMessageId: string }
+  | { type: "exit" };
 
 export function parseCliArgs(args = process.argv.slice(2)): CliArgs {
   const promptArgs: string[] = [];
@@ -154,8 +159,15 @@ export function createCliTools(preset: ScorelToolPreset = "coding"): ScorelTool[
   });
 }
 
+export function shouldStartInteractiveShell(cliArgs: CliArgs, stdinIsTty = Boolean(process.stdin.isTTY)): boolean {
+  return cliArgs.promptArgs.length === 0 && stdinIsTty;
+}
+
 export function parsePromptCommand(prompt: string): PromptCommand {
   const trimmed = prompt.trim();
+  if (trimmed === "/exit") {
+    return { type: "exit" };
+  }
   if (trimmed === "/history") {
     return { type: "history" };
   }
@@ -185,11 +197,30 @@ export function formatHistory(history: ScorelHistoryItem[]): string {
 
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const cliArgs = parseCliArgs(args);
+  const session = await createCliSession(cliArgs);
+
+  process.stderr.write(`[session] ${session.store.sessionId}\n`);
+
+  if (shouldStartInteractiveShell(cliArgs)) {
+    const hadRuntimeError = await runInteractiveShell(session);
+    if (hadRuntimeError) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const prompt = await readPromptFromArgsOrStdin(cliArgs.promptArgs);
   if (prompt.length === 0) {
     throw new Error("Prompt is required via command arguments or stdin.");
   }
 
+  const hadRuntimeError = await runPromptInput(session, prompt);
+  if (hadRuntimeError) {
+    process.exitCode = 1;
+  }
+}
+
+async function createCliSession(cliArgs: CliArgs): Promise<ScorelSession> {
   const config = await loadScorelConfig({
     projectConfigPath: cliArgs.configPath,
     overrides: {
@@ -205,34 +236,37 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   const resolvedModel = resolveScorelModel({ config });
   const systemPrompt = await buildSystemPrompt({ config });
   const sessionId = cliArgs.sessionId ?? (cliArgs.resumeLatest && !cliArgs.newSession ? await findLatestSessionId(config.session.dir) : undefined);
-  const session = await ScorelSession.create({
+  return ScorelSession.create({
     store: new SessionStore({ sessionsDir: config.session.dir, sessionId }),
     model: resolvedModel.model,
     systemPrompt,
     tools: createCliTools(config.tools.preset),
     streamOptions: { apiKey: resolvedModel.apiKey }
   });
+}
+
+async function runPromptInput(session: ScorelSession, prompt: string): Promise<boolean> {
   let runtimeError: string | undefined;
-
-  process.stderr.write(`[session] ${session.store.sessionId}\n`);
-
   const command = parsePromptCommand(prompt);
+  if (command.type === "exit") {
+    return false;
+  }
   if (command.type === "history") {
     process.stdout.write(formatHistory(session.history()));
-    return;
+    return false;
   }
   if (command.type === "rewind") {
     await session.rewind(command.targetMessageId);
     process.stdout.write(`[rewind] ${command.targetMessageId} restored. Workspace files were not changed.\n`);
-    return;
+    return false;
   }
   if (command.type === "fork") {
     const forked = await session.fork(command.targetMessageId);
     process.stdout.write(`[fork] ${forked.store.sessionId}\n`);
-    return;
+    return false;
   }
 
-  session.runtime.subscribe((event) => {
+  const unsubscribe = session.runtime.subscribe((event) => {
     if (event.type === "runtime_end" && event.error) {
       runtimeError = event.error;
     }
@@ -242,14 +276,36 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     }
   });
 
-  await session.prompt(command.prompt);
-  process.stdout.write("\n");
-  if (runtimeError) {
-    process.exitCode = 1;
+  try {
+    await session.prompt(command.prompt);
+  } finally {
+    unsubscribe();
+    process.stdout.write("\n");
   }
+  return runtimeError !== undefined;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+async function runInteractiveShell(session: ScorelSession): Promise<boolean> {
+  const reader = createInterface({ input: processStdin, output: processStdout });
+  let hadRuntimeError = false;
+  try {
+    while (true) {
+      const prompt = (await reader.question("scorel> ")).trim();
+      if (prompt.length === 0) {
+        continue;
+      }
+      if (parsePromptCommand(prompt).type === "exit") {
+        break;
+      }
+      hadRuntimeError = (await runPromptInput(session, prompt)) || hadRuntimeError;
+    }
+  } finally {
+    reader.close();
+  }
+  return hadRuntimeError;
+}
+
+if (await isMainModule()) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
@@ -284,4 +340,11 @@ function contentToText(content: string | Array<{ type: string; text?: string }>)
 
 function isToolPreset(value: unknown): value is ScorelToolPreset {
   return value === "none" || value === "readonly" || value === "coding" || value === "all";
+}
+
+async function isMainModule(): Promise<boolean> {
+  if (!process.argv[1]) {
+    return false;
+  }
+  return import.meta.url === pathToFileURL(await realpath(process.argv[1])).href;
 }

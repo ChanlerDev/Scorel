@@ -4,14 +4,19 @@
   "private": true,
   "type": "module",
   "bin": {
-    "scorel": "./src/index.ts"
+    "scorel": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
+    "build": "node ../../scripts/build-cli.mjs",
     "dev": "tsx src/index.ts",
+    "prepack": "pnpm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
+  "devDependencies": {
     "@scorel/core": "workspace:*"
   }
 }

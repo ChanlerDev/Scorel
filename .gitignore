@@ -1,2 +1,3 @@
 .alma-snapshots
 node_modules
+apps/cli/dist

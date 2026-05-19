@@ -1,5 +1,15 @@
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { createCliTools, formatHistory, formatRuntimeEvent, parseCliArgs, parsePromptCommand, readPromptFromArgsOrStdin } from "./index.js";
+import {
+  createCliTools,
+  formatHistory,
+  formatRuntimeEvent,
+  parseCliArgs,
+  parsePromptCommand,
+  readPromptFromArgsOrStdin,
+  shouldStartInteractiveShell
+} from "./index.js";
 import type { AssistantMessage } from "@scorel/core/llm";
 
 function assistantMessage(text: string, timestamp: number): AssistantMessage {
@@ -120,6 +130,7 @@ describe("readPromptFromArgsOrStdin", () => {
     expect(parsePromptCommand("/history")).toEqual({ type: "history" });
     expect(parsePromptCommand("/rewind msg-1")).toEqual({ type: "rewind", targetMessageId: "msg-1" });
     expect(parsePromptCommand("/fork msg-1")).toEqual({ type: "fork", targetMessageId: "msg-1" });
+    expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
     expect(parsePromptCommand("hello /history")).toEqual({ type: "prompt", prompt: "hello /history" });
   });
 
@@ -174,5 +185,23 @@ describe("readPromptFromArgsOrStdin", () => {
   it("can disable write tools with readonly preset", () => {
     expect(createCliTools("readonly").map((tool) => tool.name)).toEqual(["read", "glob", "grep"]);
     expect(createCliTools("none").map((tool) => tool.name)).toEqual([]);
+  });
+
+  it("enters interactive shell only for no-argument TTY usage", () => {
+    const baseArgs = parseCliArgs(["--config", "/tmp/scorel.toml"]);
+    expect(shouldStartInteractiveShell(baseArgs, true)).toBe(true);
+    expect(shouldStartInteractiveShell(baseArgs, false)).toBe(false);
+    expect(shouldStartInteractiveShell(parseCliArgs(["hello"]), true)).toBe(false);
+    expect(shouldStartInteractiveShell(parseCliArgs(["/history"]), true)).toBe(false);
+  });
+
+  it("packages the CLI from built dist output", async () => {
+    const packageJsonPath = fileURLToPath(new URL("../package.json", import.meta.url));
+    const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+
+    expect(packageJson.bin).toEqual({ scorel: "./dist/index.js" });
+    expect(packageJson.files).toContain("dist");
+    expect(packageJson.scripts.build).toBe("node ../../scripts/build-cli.mjs");
+    expect(packageJson.scripts.prepack).toBe("pnpm run build");
   });
 });
