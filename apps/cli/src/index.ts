@@ -10,6 +10,7 @@ import {
   createMcpToolRegistry,
   findLatestSessionId,
   buildSystemPrompt,
+  loadScorelExtensions,
   loadScorelConfig,
   resolveScorelModel,
   selectScorelTools,
@@ -17,7 +18,7 @@ import {
   SessionStore
 } from "@scorel/core";
 import type { ScorelEvent, ScorelHistoryItem, ScorelMessage } from "@scorel/core";
-import type { ScorelTool, ScorelToolPreset } from "@scorel/core";
+import type { ScorelSlashCommand, ScorelTool, ScorelToolPreset } from "@scorel/core";
 
 export type CliArgs = {
   promptArgs: string[];
@@ -35,6 +36,7 @@ export type PromptCommand =
   | { type: "history" }
   | { type: "rewind"; targetMessageId: string }
   | { type: "fork"; targetMessageId: string }
+  | { type: "extension"; name: string; args: string }
   | { type: "exit" };
 
 export function parseCliArgs(args = process.argv.slice(2)): CliArgs {
@@ -186,6 +188,10 @@ export function parsePromptCommand(prompt: string): PromptCommand {
     }
     return { type: "fork", targetMessageId };
   }
+  if (trimmed.startsWith("/") && trimmed.length > 1) {
+    const [nameWithSlash, ...args] = trimmed.split(/\s+/);
+    return { type: "extension", name: nameWithSlash.slice(1), args: args.join(" ") };
+  }
   return { type: "prompt", prompt };
 }
 
@@ -199,13 +205,13 @@ export function formatHistory(history: ScorelHistoryItem[]): string {
 export async function main(args = process.argv.slice(2)): Promise<void> {
   const cliArgs = parseCliArgs(args);
   const handle = await createCliSession(cliArgs);
-  const { session } = handle;
+  const { commands, session } = handle;
 
   process.stderr.write(`[session] ${session.store.sessionId}\n`);
 
   try {
     if (shouldStartInteractiveShell(cliArgs)) {
-      const hadRuntimeError = await runInteractiveShell(session);
+      const hadRuntimeError = await runInteractiveShell(session, commands);
       if (hadRuntimeError) {
         process.exitCode = 1;
       }
@@ -217,7 +223,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
       throw new Error("Prompt is required via command arguments or stdin.");
     }
 
-    const hadRuntimeError = await runPromptInput(session, prompt);
+    const hadRuntimeError = await runPromptInput(session, prompt, commands);
     if (hadRuntimeError) {
       process.exitCode = 1;
     }
@@ -226,7 +232,7 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   }
 }
 
-async function createCliSession(cliArgs: CliArgs): Promise<{ session: ScorelSession; close: () => Promise<void> }> {
+async function createCliSession(cliArgs: CliArgs): Promise<{ session: ScorelSession; commands: Record<string, ScorelSlashCommand>; close: () => Promise<void> }> {
   const config = await loadScorelConfig({
     projectConfigPath: cliArgs.configPath,
     overrides: {
@@ -247,22 +253,36 @@ async function createCliSession(cliArgs: CliArgs): Promise<{ session: ScorelSess
   for (const error of mcpRegistry?.errors ?? []) {
     process.stderr.write(`[mcp:optional-error] ${error.serverId}: ${error.error}\n`);
   }
+  const extensionRegistry = await loadScorelExtensions({
+    config,
+    logger: {
+      error: (message) => process.stderr.write(`${message}\n`)
+    }
+  });
+  const extensionTools = extensionRegistry.collectTools();
+  const commands = extensionRegistry.collectCommands();
   const session = await ScorelSession.create({
     store: new SessionStore({ sessionsDir: config.session.dir, sessionId }),
     model: resolvedModel.model,
     systemPrompt,
-    tools: [...baseTools, ...(mcpRegistry?.tools ?? [])],
+    tools: [...baseTools, ...(mcpRegistry?.tools ?? []), ...extensionTools],
+    hooks: extensionRegistry.wrapRuntimeHooks(),
     streamOptions: { apiKey: resolvedModel.apiKey }
+  });
+  session.runtime.subscribe((event) => {
+    void extensionRegistry.emit(event);
   });
   return {
     session,
+    commands,
     close: async () => {
+      await extensionRegistry.deactivate();
       await mcpRegistry?.close();
     }
   };
 }
 
-async function runPromptInput(session: ScorelSession, prompt: string): Promise<boolean> {
+async function runPromptInput(session: ScorelSession, prompt: string, commands: Record<string, ScorelSlashCommand> = {}): Promise<boolean> {
   let runtimeError: string | undefined;
   const command = parsePromptCommand(prompt);
   if (command.type === "exit") {
@@ -280,6 +300,10 @@ async function runPromptInput(session: ScorelSession, prompt: string): Promise<b
   if (command.type === "fork") {
     const forked = await session.fork(command.targetMessageId);
     process.stdout.write(`[fork] ${forked.store.sessionId}\n`);
+    return false;
+  }
+  if (command.type === "extension") {
+    process.stdout.write(await runSlashCommand(command, commands, session));
     return false;
   }
 
@@ -302,7 +326,33 @@ async function runPromptInput(session: ScorelSession, prompt: string): Promise<b
   return runtimeError !== undefined;
 }
 
-async function runInteractiveShell(session: ScorelSession): Promise<boolean> {
+export async function runSlashCommand(
+  command: Extract<PromptCommand, { type: "extension" }>,
+  commands: Record<string, ScorelSlashCommand>,
+  session: ScorelSession
+): Promise<string> {
+  const registered = commands[command.name];
+  if (!registered) {
+    return `Unknown slash command: /${command.name}\n`;
+  }
+  try {
+    const result = await registered.run({
+      args: command.args,
+      raw: `/${command.name}${command.args ? ` ${command.args}` : ""}`,
+      session,
+      stdout: process.stdout,
+      stderr: process.stderr,
+      logger: {
+        error: (message) => process.stderr.write(`${message}\n`)
+      }
+    });
+    return typeof result === "string" ? `${result}\n` : "";
+  } catch (error) {
+    return `[extension:command-error] /${command.name}: ${error instanceof Error ? error.message : String(error)}\n`;
+  }
+}
+
+async function runInteractiveShell(session: ScorelSession, commands: Record<string, ScorelSlashCommand>): Promise<boolean> {
   const reader = createInterface({ input: processStdin, output: processStdout });
   let hadRuntimeError = false;
   try {
@@ -314,7 +364,7 @@ async function runInteractiveShell(session: ScorelSession): Promise<boolean> {
       if (parsePromptCommand(prompt).type === "exit") {
         break;
       }
-      hadRuntimeError = (await runPromptInput(session, prompt)) || hadRuntimeError;
+      hadRuntimeError = (await runPromptInput(session, prompt, commands)) || hadRuntimeError;
     }
   } finally {
     reader.close();

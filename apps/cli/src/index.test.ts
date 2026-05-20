@@ -7,6 +7,7 @@ import {
   formatRuntimeEvent,
   parseCliArgs,
   parsePromptCommand,
+  runSlashCommand,
   readPromptFromArgsOrStdin,
   shouldStartInteractiveShell
 } from "./index.js";
@@ -131,6 +132,7 @@ describe("readPromptFromArgsOrStdin", () => {
     expect(parsePromptCommand("/rewind msg-1")).toEqual({ type: "rewind", targetMessageId: "msg-1" });
     expect(parsePromptCommand("/fork msg-1")).toEqual({ type: "fork", targetMessageId: "msg-1" });
     expect(parsePromptCommand("/exit")).toEqual({ type: "exit" });
+    expect(parsePromptCommand("/hello world")).toEqual({ type: "extension", name: "hello", args: "world" });
     expect(parsePromptCommand("hello /history")).toEqual({ type: "prompt", prompt: "hello /history" });
   });
 
@@ -185,6 +187,37 @@ describe("readPromptFromArgsOrStdin", () => {
   it("can disable write tools with readonly preset", () => {
     expect(createCliTools("readonly").map((tool) => tool.name)).toEqual(["read", "glob", "grep"]);
     expect(createCliTools("none").map((tool) => tool.name)).toEqual([]);
+  });
+
+  it("runs registered extension slash commands and isolates command failures", async () => {
+    await expect(runSlashCommand(
+      { type: "extension", name: "hello", args: "world" },
+      {
+        hello: {
+          description: "Hello",
+          run: ({ args }) => `hello ${args}`
+        }
+      },
+      {} as never
+    )).resolves.toBe("hello world\n");
+
+    await expect(runSlashCommand(
+      { type: "extension", name: "missing", args: "" },
+      {},
+      {} as never
+    )).resolves.toContain("Unknown slash command");
+
+    await expect(runSlashCommand(
+      { type: "extension", name: "bad", args: "" },
+      {
+        bad: {
+          run: () => {
+            throw new Error("command exploded");
+          }
+        }
+      },
+      {} as never
+    )).resolves.toContain("command exploded");
   });
 
   it("enters interactive shell only for no-argument TTY usage", () => {

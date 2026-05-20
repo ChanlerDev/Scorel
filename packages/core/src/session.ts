@@ -75,6 +75,7 @@ export type RuntimeSessionOptions = {
   tools?: ScorelTool[];
   streamSimple?: ScorelStreamSimple;
   streamOptions?: ScorelRuntimeOptions["streamOptions"];
+  hooks?: ScorelRuntimeOptions["hooks"];
 };
 
 export type ForkSessionOptions = Omit<RuntimeSessionOptions, "store"> & {
@@ -204,6 +205,7 @@ export class ScorelSession {
       tools: options.tools,
       streamSimple: options.streamSimple,
       streamOptions: options.streamOptions,
+      hooks: options.hooks,
       messages: replayed.messages
     });
 

@@ -7,6 +7,12 @@ export {
   selectScorelTools
 } from "./settings.js";
 export { createMcpToolRegistry, formatMcpToolName } from "./mcp.js";
+export {
+  defaultGlobalExtensionsDir,
+  defaultProjectExtensionsDir,
+  loadScorelExtensions,
+  ScorelExtensionRegistry
+} from "./extension.js";
 export { findLatestSessionId, replayLogEntries, ScorelSession, SessionStore } from "./session.js";
 export { createReadonlyTools, createWriteTools } from "./tools.js";
 export type {
@@ -24,6 +30,15 @@ export type {
   ScorelToolPreset
 } from "./settings.js";
 export type { McpToolClient, McpToolRegistry } from "./mcp.js";
+export type {
+  LoadScorelExtensionsOptions,
+  ScorelExtension,
+  ScorelExtensionContext,
+  ScorelExtensionError,
+  ScorelExtensionLogger,
+  ScorelSlashCommand,
+  ScorelSlashCommandContext
+} from "./extension.js";
 export type {
   AppendLogEntry,
   CompactLogEntry,
