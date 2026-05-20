@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { Type } from "./llm.js";
 import type { TSchema } from "./llm.js";
@@ -96,9 +97,16 @@ async function connectMcpServer(serverId: string, config: ScorelMcpServerConfig)
     return adaptSdkClient(client);
   }
 
-  await client.connect(new SSEClientTransport(new URL(config.url), {
-    requestInit: config.headers ? { headers: config.headers } : undefined,
-    eventSourceInit: config.headers ? { fetch: (input, init) => fetch(input, { ...init, headers: config.headers }) } : undefined
+  if (config.transport === "sse") {
+    await client.connect(new SSEClientTransport(new URL(config.url), {
+      requestInit: config.headers ? { headers: config.headers } : undefined,
+      eventSourceInit: config.headers ? { fetch: (input, init) => fetch(input, { ...init, headers: config.headers }) } : undefined
+    }));
+    return adaptSdkClient(client);
+  }
+
+  await client.connect(new StreamableHTTPClientTransport(new URL(config.url), {
+    requestInit: config.headers ? { headers: config.headers } : undefined
   }));
   return adaptSdkClient(client);
 }

@@ -122,6 +122,14 @@ TOKEN = "secret"
 transport = "sse"
 startup = "optional"
 url = "https://mcp.example.invalid/sse"
+
+[mcp.servers.http]
+transport = "streamable-http"
+startup = "optional"
+url = "https://mcp.example.invalid/mcp"
+
+[mcp.servers.http.headers]
+Authorization = "Bearer token"
 `,
         "utf8"
       );
@@ -143,6 +151,12 @@ url = "https://mcp.example.invalid/sse"
         transport: "sse",
         startup: "optional",
         url: "https://mcp.example.invalid/sse"
+      });
+      expect(config.mcp.servers.http).toEqual({
+        transport: "streamable-http",
+        startup: "optional",
+        url: "https://mcp.example.invalid/mcp",
+        headers: { Authorization: "Bearer token" }
       });
     } finally {
       await rm(dir, { recursive: true, force: true });

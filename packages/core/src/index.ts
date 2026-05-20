@@ -18,6 +18,7 @@ export type {
   ScorelMcpServerConfig,
   ScorelMcpSseServerConfig,
   ScorelMcpStartup,
+  ScorelMcpStreamableHttpServerConfig,
   ScorelMcpStdioServerConfig,
   ScorelModelRef,
   ScorelToolPreset

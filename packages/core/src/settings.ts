@@ -31,7 +31,14 @@ export type ScorelMcpSseServerConfig = {
   headers?: Record<string, string>;
 };
 
-export type ScorelMcpServerConfig = ScorelMcpStdioServerConfig | ScorelMcpSseServerConfig;
+export type ScorelMcpStreamableHttpServerConfig = {
+  transport: "streamable-http";
+  startup: ScorelMcpStartup;
+  url: string;
+  headers?: Record<string, string>;
+};
+
+export type ScorelMcpServerConfig = ScorelMcpStdioServerConfig | ScorelMcpSseServerConfig | ScorelMcpStreamableHttpServerConfig;
 
 export type ScorelMcpConfig = {
   servers: Record<string, ScorelMcpServerConfig>;
@@ -428,12 +435,12 @@ function normalizeMcp(input: ScorelConfigInput["mcp"]): ScorelMcpConfig {
       };
       continue;
     }
-    if (server.transport === "sse") {
+    if (server.transport === "sse" || server.transport === "streamable-http") {
       if (!server.url) {
         throw new Error(`MCP server ${serverId} must declare url`);
       }
       servers[serverId] = {
-        transport: "sse",
+        transport: server.transport,
         startup: normalizeMcpStartup(server.startup),
         url: server.url,
         headers: stringRecordOrUndefined(server.headers)
