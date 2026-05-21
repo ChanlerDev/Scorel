@@ -1,125 +1,222 @@
-# d002 — Channel：外部输入的统一入口
+# d002 — Entry、Host、EventBus 与 Gateway
 
 > 上游：`d000-architecture.md`
-> 主题：把 CLI 输入、HTTP 请求、IM 消息、cron 触发都归一为"向 Agent 注入一条 `AgentMessage`"。
+> 主题：把 CLI、GUI、HTTP、IM、cron、GitHub App 等入口收敛到同一套 session host、event store 和 gateway，而不是让每个入口各自拼装 agent。
 
 ---
 
-## 1. 设计目标
+## 1. 核心结构
 
-真实使用场景里，用户和 Agent 的对话入口从来不止一个——命令行、浏览器、IM 机器人、定时任务都可能想让它工作。如果每个入口都自带一套语义和状态，Session 资产化的前提（同一份 JSONL、同一个 replay 函数）就无法成立。
+Scorel 的入口会很多，但架构只保留四层：
 
-Channel 的设计目标是：**无论消息从哪里来，进入 Agent 的姿势永远一样**。
+```text
+Entry   -> Gateway   -> Host       -> Core
+用户入口   连接网关      运行宿主       执行内核
+```
 
-这里没有"Channel 协议"这种大词，只有一个很窄的接口和一条统一的注入路径。
+- **Entry**：用户或外部系统怎么进来。
+- **Gateway**：用什么连接协议控制/订阅 session，例如 HTTP+SSE、WebSocket、Webhook、IPC。
+- **Host**：Core 跑在哪里，session、event store 和 live event 怎么管理。
+- **Core**：真正执行 agent loop、session replay、tools、extensions、config。
+
+入口可以很多，但厚的层只有 **Host** 和 **Core**。
 
 ---
 
-## 2. ChannelAdapter 接口
+## 2. Entry
+
+Entry 只处理输入输出和用户体验。
+
+| Entry | 职责 |
+|-------|------|
+| 非交互式 CLI | 参数解析、一次性 prompt、stdout/stderr 输出 |
+| 交互式 CLI / TUI | 多轮输入、session 切换、history/rewind/fork 命令 |
+| GUI | session list、chat view、tool panel、event timeline、config 可视化 |
+| HTTP client / mobile Shortcut | 发送文字、录音或自动化指令，接收结果 |
+| IM connector | 接收 IM 消息，回写 IM 回复 |
+| GitHub App / Webhook | 接收 issue / PR / action 事件，回写 comment |
+| Cron / Scheduler | 定时触发任务 |
+
+Entry 不直接实现 runtime，不直接写 JSONL，不自己执行 tools。
+
+---
+
+## 3. Host
+
+Host 是 runtime 宿主。它负责把 `packages/core` 按某种生命周期跑起来。
 
 ```typescript
-interface ChannelAdapter {
-  readonly id: string;                       // 'cli' | 'http' | 'telegram' | 'cron'
-  start(inject: MessageInjector): Promise<void>;
-  stop(): Promise<void>;
+interface ScorelHost {
+  createSession(input: CreateSessionInput): Promise<SessionRef>;
+  openSession(sessionId: string): Promise<SessionRef>;
+  listSessions(): Promise<SessionSummary[]>;
+  closeSession(sessionId: string): Promise<void>;
+
+  prompt(sessionId: string, input: PromptInput): Promise<RunRef>;
+  abort(sessionId: string): Promise<void>;
+  events(sessionId: string): AsyncIterable<ScorelEvent>;
+  history(sessionId: string): Promise<ScorelHistoryItem[]>;
+  rewind(sessionId: string, targetMessageId: string): Promise<ReplayResult>;
+  fork(sessionId: string, targetMessageId: string): Promise<SessionRef>;
 }
-
-type MessageInjector = (msg: AgentMessage) => Promise<void>;
 ```
 
-Channel 只负责两件事：
-1. 从外部源接收消息
-2. 调 `inject(msg)` 把它扔进 Agent
+所有操作都带 `sessionId`，所以 in-process host 和 daemon host 都支持多 session。
 
-它 **不** 关心 Agent 是否在运行、是否要等回复——这些由核心统一处理。
+### InProcessHost
+
+Runtime 跑在当前进程内。
+
+- 给非交互式 CLI、交互式 CLI、未来 TUI 使用。
+- 可以打开多个 session。
+- CLI UI 当前可以只 active 一个 session。
+- 进程退出后 active runtime 缓存消失，但 JSONL 已持久化，下次通过 replay 恢复。
+
+### DaemonHost
+
+Runtime 跑在长期后台进程内。
+
+- 给 GUI、HTTP、IM、GitHub、cron、mobile、cloud server 使用。
+- 长期持有 active session registry。
+- 持有 per-session runtime。
+- 管 abort。
+- 管 session writer ownership。
+- 拥有 per-session EventBus。
+- 从 per-session JSONL event store replay session。
 
 ---
 
-## 3. Injector：空闲 vs 运行中
+## 4. Event Store 与 EventBus
 
-```typescript
-function createInjector(agent: Agent): MessageInjector {
-  return async (msg) => {
-    if (agent.state.isStreaming) {
-      agent.steer(msg);        // 正在跑：入队等下一个 turn 结束
-    } else {
-      await agent.prompt(msg); // 空闲：直接唤醒
-    }
-  };
-}
+Scorel 应该同时有 durable event store 和 live EventBus：
+
+```text
+Session JSONL
+  durable event store
+        |
+        v
+Session replay
+  builds messages/history/state
+
+ScorelRuntime
+  emits live ScorelEvent
+        |
+        v
+Host EventBus
+        |
+        +--> CLI renderer
+        +--> GUI timeline
+        +--> HTTP SSE
+        +--> WebSocket
+        +--> Extension onEvent
+        +--> Session persistence
 ```
 
-这是 Channel 归一的核心——**任何 Channel 都不需要关心 Agent 当前状态**。pi-agent-core 的 `steer()` 负责把消息排到下一个 turn 开始，`prompt()` 负责启动新 turn。
+职责划分：
 
-> **边界**：Scorel 初期不支持工具执行中段的硬中断。用户若想"立刻停"，UI 层应该显式调 `abort()`，而不是期望 `steer()` 能打断当前工具。
+- **Session JSONL**：每个 session 的 durable event store，用于 replay / rewind / fork / audit。
+- **Runtime**：发执行过程中的 live event。
+- **Host EventBus**：负责 per-session fan-out、订阅管理、断连处理。
+- **Gateway**：把 Host/EventBus 暴露成 SSE / WebSocket / Webhook / IPC。
+- **Session persistence**：只把可 replay 的 durable event 写入 JSONL，不把所有 transient event 都落盘。
+
+事件分两类：
+
+| 类型 | 示例 | 是否持久化 |
+|------|------|------------|
+| Durable session event | `user_message`、`assistant_message`、`tool_result`、`run_started`、`run_finished`、`rewind`、`fork`、`compact`、`channel_metadata` | 落 JSONL |
+| Live runtime event | `message_delta`、`thinking_delta`、`tool_execution_start`、`tool_execution_update`、`token_count`、`gateway_connected` | 默认不落主 JSONL |
+
+这样 GUI 可以看到完整 streaming timeline，session replay 又不会被 delta/event 噪音污染。
+
+Claude Code 的 JSONL 更接近 durable message chain：message、thinking、tool_use、tool_result 和 parent link 会进入日志。Codex 的 rollout JSONL 更偏 trace：session meta、turn context、event message、response item 都会记录。Scorel 采用中间路线：主 JSONL 优先保证 replay，完整 trace 后续可作为 debug/trace log 增加。
 
 ---
 
-## 4. 消息载体：`<system_reminder>` 包裹
+## 5. Gateway
 
-非 CLI 的 Channel 注入时，用 `<system_reminder>` XML 包裹原始内容，让 LLM 明确区分"用户亲口说"和"系统代为转达"：
+Gateway 是连接层，把 Host 操作和 EventBus 映射成外部协议。
 
-```typescript
-await inject({
-  role: 'user',
-  content: `<system_reminder source="telegram" from="${msg.from}">
-${msg.content}
-</system_reminder>`,
-  timestamp: Date.now(),
-});
+M9 最小 HTTP / SSE：
 
-// 同步记录 channel 元数据，便于审计
-await session.append({
-  kind: 'channel',
-  channel: 'telegram',
-  externalId: msg.id,
-  at: Date.now(),
-});
+```text
+POST /sessions
+GET  /sessions
+POST /sessions/:id/prompt
+POST /sessions/:id/abort
+GET  /sessions/:id/events
+GET  /sessions/:id/history
 ```
 
-`channel` 类型的 LogEntry 不走 LLM（参见 `d001` 两层消息），只供 replay / UI / 审计使用。
+SSE 只负责从某个 session 接收事件：
+
+```text
+GET /sessions/:id/events?fromSeq=123
+```
+
+WebSocket 可作为后续统一 gateway：
+
+```text
+client -> { type: "subscribe", sessionId, fromSeq }
+client -> { type: "prompt", sessionId, text }
+client -> { type: "abort", sessionId }
+server -> { sessionId, seq, type, payload }
+```
+
+后续可扩展：
+
+- WebSocket command/event gateway
+- polling run status
+- final response
+- Webhook
+- media input
+- config API
+- auth / audit
+
+Gateway 不创建 runtime，不写 JSONL，不执行 tools。它只负责连接、鉴权、协议编解码和按 session 路由事件。
 
 ---
 
-## 5. 初期落地的 Channel
+## 6. Core
 
-| Channel | 形态 | 初期范围 |
-|---------|------|----------|
-| `cli` | stdin/stdout REPL | ✅ 初期 |
-| `http` | POST /chat (SSE) | ✅ 初期（Cloud Daemon 的最小形态） |
-| `telegram` | Bot API | 后期 |
-| `wechat` | WeCom / 非官方桥 | 后期 |
-| `cron` | 定时任务触发（`node-cron`） | 后期 |
+Core 是纯库，负责真正执行。
 
-初期只需要 `cli` 一条就能跑通本地体验；`http` 在 Cloud Daemon 起步时补上。IM 与 cron 走同一个 `ChannelAdapter` 接口，不需要额外架构变更。
+- `ScorelRuntime`：agent loop、LLM stream、tool call、abort、runtime events。
+- `ScorelSession`：JSONL、replay、history、rewind、fork、meta。
+- tools：readonly、write、MCP wrapper。
+- extensions：tools、commands、hooks、events。
+- config：TOML、provider/model resolver、tool preset。
+- prompt：system prompt 组装。
+- pi-ai model layer：provider protocol 和 stream。
 
----
-
-## 6. 应用形态与 Channel 的映射
-
-Scorel 的三种 App 形态，本质上都是"一组 Channel + 核心"：
-
-**CLI（初期）**
-- 进程内直接持有 Agent，`cli` Channel 串起 REPL
-- 斜杠命令由 Extension 注册（详见 `d004-extensions.md`）
-
-**GUI（后期）**
-- Tauri 架构：Main 进程持有 Agent，Renderer 通过 IPC 订阅 `ScorelEvent`
-- Agent 不走 HTTP，延迟等于函数调用
-
-**Cloud Daemon（后期）**
-- 持久运行，同时挂多个 Channel：`http` + `telegram` + `cron` + ...
-- Daemon 是 SessionStore 的唯一写入者，CLI/GUI 可以 Bind 到 Daemon 共享 session，避免多进程并发写 JSONL
+Core 不启动 HTTP server，不读终端，不画 GUI，不知道 Slack/GitHub/Shortcut。
 
 ---
 
-## 7. 延后项
+## 7. 落地顺序
 
-- IM Channel（Telegram、企业微信、Slack、WeCom）的具体实现
-- `cron` Channel 的调度模型
-- GUI / Cloud Daemon 的完整设计（有了 Channel 抽象后，它们是"组装题"而不是"架构题"）
-- Bind 模式下 CLI/GUI ↔ Daemon 的认证与状态同步协议
+M9：
+
+- 建立 `ScorelHost` 抽象。
+- 实现 `InProcessHost`，让 CLI 本地路径逐步使用它。
+- 实现 `DaemonHost`，持有 sessions、runtimes、per-session EventBus。
+- 新增 daemon app，暴露 HTTP / SSE gateway。
+- 实现 session writer ownership。
+
+M10：
+
+- GUI 连接 daemon。
+- 做 session list、chat view、event timeline、tool panel、abort。
+- 做配置可视化。
+
+Future：
+
+- IM connector。
+- GitHub App / Webhook。
+- mobile Shortcut / audio input。
+- cloud server deployment。
+- auth、多租户、审计、任务队列。
 
 ---
 
-*Channel 层只负责把多样的外部输入变成统一的 `AgentMessage`。一旦进入 Agent，所有下游模块看到的都是同一种形状。*
+*最终判断：Scorel 应该是 event-driven runtime，但 EventBus 属于 Host，不直接塞进 Runtime。Runtime 发事件，Host 管事件，Service 暴露事件，Entry 渲染事件。*

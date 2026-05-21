@@ -1,19 +1,23 @@
-# d001 — 会话资产：Event Sourcing + Replay
+# d001 — 会话资产：Session Event Store + Replay
 
 > 上游：`d000-architecture.md`
-> 主题：把对话、工具调用、文件修改全部收敛到一条 append-only JSONL 上，所有"时间旅行"都是同一个 `replay` 函数的不同输入。
+> 主题：把可恢复的 session 状态收敛到一条 append-only JSONL 事件日志上，所有"时间旅行"都是同一个 `replay` 函数的不同输入。
 
 ---
 
 ## 1. 设计目标
 
-Scorel 不把会话当做"可丢的上下文"，而当做**资产**。资产的核心要求有三条：
+Scorel 不把会话当做"可丢的上下文"，而当做**资产**。每个 session 的 JSONL 是该 session 的 durable event store：session 实例从它 replay 出 messages、history、rewind/fork 状态和必要的审计信息。
 
-1. **不丢失**：JSONL 只追加、不修改，任何历史都可被重建
-2. **可重放**：Rewind、Fork、File Checkpoint 都通过同一个 `replay()` 函数从 JSONL 推导出目标状态
-3. **可隔离**：会话中的"自定义记录"（rewind 标记、文件快照引用、channel 元数据）只存在于应用层，LLM 永远看不到（由 `convertToLlm` 在边界上过滤）
+资产的核心要求有三条：
 
-这三条要求共同决定了架构形状：**单一日志 + 纯函数 replay + 两层消息**。
+1. **不丢失**：JSONL 只追加、不修改，任何 durable session 状态都可被重建
+2. **可重放**：Rewind、Fork、Compact 都通过同一个 `replay()` 函数从 JSONL 推导出目标状态
+3. **可隔离**：rewind 标记、channel 元数据、运行元数据只存在于应用层，LLM 永远看不到（由 `convertToLlm` 在边界上过滤）
+
+这三条要求共同决定了架构形状：**session event store + 纯函数 replay + 两层消息**。
+
+JSONL 不等于完整 runtime trace。Streaming delta、UI 连接、token 计数这类 transient event 可以通过 Host EventBus 广播，默认不进入主 replay log，避免 session 日志膨胀。
 
 ---
 
@@ -30,18 +34,33 @@ Scorel 不把会话当做"可丢的上下文"，而当做**资产**。资产的�
     meta.json           ← session 元信息（cwd / model / created_at）
 ```
 
-每行是一条 `LogEntry`：
+每行是一条 durable `LogEntry`：
 
 ```typescript
 type LogEntry =
-  | { kind: 'message'; message: AgentMessage }                           // 普通消息
+  | { kind: 'message'; message: ScorelMessage }                          // 可 replay 的消息
+  | { kind: 'run_started'; runId: string; at: number }                   // run 边界
+  | { kind: 'run_finished'; runId: string; at: number; error?: string }  // run 结果
   | { kind: 'rewind'; targetId: string; at: number }                     // rewind 标记
-  | { kind: 'file_snapshot'; path: string; hash: string; at: number }    // 文件快照引用
   | { kind: 'compact'; summary: string; beforeId: string; at: number }   // 压缩标记
   | { kind: 'channel'; channel: string; externalId: string; at: number } // channel 元数据
 ```
 
 所有非 `message` 类型只用于**应用层**：replay 期间被消费，`convertToLlm` 阶段被过滤，LLM 不会看到它们。
+
+默认不写入主 JSONL 的 live event：
+
+```text
+message_update delta
+thinking_delta
+tool_execution_start
+tool_execution_update
+token_count
+gateway_connected
+gateway_disconnected
+```
+
+如果后续需要完整调试 trace，可以另设 trace log 或 debug 模式，不污染主 replay log。
 
 ---
 
