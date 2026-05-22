@@ -6,7 +6,9 @@
   "packageManager": "pnpm@11.1.2",
   "scripts": {
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "docs:push": "bash scripts/docs-push.sh",
+    "docs:pull": "bash scripts/docs-pull.sh"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
