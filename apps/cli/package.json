@@ -1,0 +1,21 @@
+{
+  "name": "@scorel/app-cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "scorel": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@scorel/client": "workspace:*",
+    "@scorel/daemon": "workspace:*"
+  },
+  "devDependencies": {}
+}

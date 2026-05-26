@@ -1,0 +1,20 @@
+{
+  "name": "@scorel/app-daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "scorel-daemon": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@scorel/daemon": "workspace:*"
+  },
+  "devDependencies": {}
+}

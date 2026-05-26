@@ -98,6 +98,7 @@ S####: <type>: <description>
 规则：
 
 - 一个 PR 对应一个 S spec。
+- Commit message 使用 title-only semantic commit：只写标题，不写正文。
 - 按业务含义拆 commit，不把无关实现混在一起。
 - 文档、实现、测试可以拆 commit，但 PR title 必须带 S 编号。
 - 首个 docs baseline 已完成；后续提交只按当前 S spec 收敛范围。
