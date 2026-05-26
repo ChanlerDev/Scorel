@@ -5,4 +5,6 @@ export const coreProtocolDependency = protocolPackageName;
 export const coreProtocolVersion = protocolVersion;
 export type CoreScorelEvent = ScorelEvent;
 
+export * from "./runtime/index.js";
 export * from "./session/index.js";
+export * from "./tools/index.js";

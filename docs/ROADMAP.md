@@ -50,7 +50,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | M1.1 | [`S0002`](spec/ship/S0002-package-skeleton.md) | 建立最终 workspace 和包边界，让后续代码有正确落点。 | Done |
 | M1.2 | [`S0003`](spec/ship/S0003-protocol-contracts.md) | 锁定 M1 所需跨包协议，让 core/daemon/client/CLI 不重复定义契约。 | Done |
 | M1.3 | [`S0004`](spec/ship/S0004-session-core.md) | 实现 append-only JSONL session 和 context replay，让对话成为可恢复资产。 | Done |
-| M1.4 | [`S0005`](spec/ship/S0005-runtime-loop.md) | 实现最小 runtime loop，让给定 context 能产生可测试的 assistant event stream。 | Planned |
+| M1.4 | [`S0005`](spec/ship/S0005-runtime-loop.md) | 实现最小 runtime loop，让给定 context 能产生可测试的 assistant event stream。 | Done |
 | M1.5 | [`S0006`](spec/ship/S0006-embedded-daemon-client.md) | 用 embedded daemon + DaemonClient 串起 session、runtime 和事件流。 | Planned |
 | M1.6 | [`S0007`](spec/ship/S0007-cli-alpha.md) | 暴露 `scorel chat`，验证用户可见的本地多轮对话体验。 | Planned |
 
@@ -143,7 +143,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0002`](spec/ship/S0002-package-skeleton.md) | 创建最终包骨架 | Done |
 | [`S0003`](spec/ship/S0003-protocol-contracts.md) | 定义 M1 协议契约 | Done |
 | [`S0004`](spec/ship/S0004-session-core.md) | 实现 JSONL session core | Done |
-| [`S0005`](spec/ship/S0005-runtime-loop.md) | 实现最小 runtime loop | Planned |
+| [`S0005`](spec/ship/S0005-runtime-loop.md) | 实现最小 runtime loop | Done |
 | [`S0006`](spec/ship/S0006-embedded-daemon-client.md) | 实现 embedded daemon + client | Planned |
 | [`S0007`](spec/ship/S0007-cli-alpha.md) | 实现 CLI Alpha | Planned |
 
