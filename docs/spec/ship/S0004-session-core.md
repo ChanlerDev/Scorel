@@ -17,6 +17,7 @@ Make conversation history a recoverable asset by implementing append-only JSONL 
 ## Success Criteria
 
 - A session can be created, appended to, closed, loaded again, and replayed to the same tree.
+- Session storage APIs name the directory `sessionsDir`; it is the directory that directly contains `{sessionId}.jsonl`, not the product root or user home.
 - Context building produces the expected LLM message sequence for a linear M1 conversation.
 - Invalid or partial JSONL fails predictably with typed errors.
 - Session code lives in `@scorel/core` and depends only on `@scorel/protocol` plus allowed runtime dependencies.

@@ -173,19 +173,19 @@ export class SessionTree implements Iterable<PersistentEvent> {
 }
 
 export type CreateSessionOptions = {
-  rootDir: string;
+  sessionsDir: string;
   header: SessionHeader;
 };
 
 export type LoadSessionOptions =
   | {
-      rootDir: string;
+      sessionsDir: string;
       sessionId: SessionId;
       filePath?: never;
     }
   | {
       filePath: string;
-      rootDir?: never;
+      sessionsDir?: never;
       sessionId?: never;
     };
 
@@ -222,18 +222,20 @@ export class JsonlSession {
   }
 }
 
-export const sessionFilePath = (rootDir: string, sessionId: SessionId): string => join(rootDir, `${sessionId}.jsonl`);
+export const sessionFilePath = (sessionsDir: string, sessionId: SessionId): string =>
+  join(sessionsDir, `${sessionId}.jsonl`);
 
-export const createSession = async ({ rootDir, header }: CreateSessionOptions): Promise<JsonlSession> => {
+export const createSession = async ({ sessionsDir, header }: CreateSessionOptions): Promise<JsonlSession> => {
   const validHeader = parseHeader(header);
-  await mkdir(rootDir, { recursive: true });
-  const filePath = sessionFilePath(rootDir, validHeader.sessionId);
+  await mkdir(sessionsDir, { recursive: true });
+  const filePath = sessionFilePath(sessionsDir, validHeader.sessionId);
   await writeFile(filePath, `${JSON.stringify(validHeader)}\n`, { encoding: "utf8", flag: "wx" });
   return new JsonlSession(filePath, validHeader);
 };
 
 export const loadSession = async (options: LoadSessionOptions): Promise<JsonlSession> => {
-  const filePath = options.filePath !== undefined ? options.filePath : sessionFilePath(options.rootDir, options.sessionId);
+  const filePath =
+    options.filePath !== undefined ? options.filePath : sessionFilePath(options.sessionsDir, options.sessionId);
   const content = await readFile(filePath, "utf8");
   const lines: string[] = content.split(/\r?\n/);
   const headerLine = lines[0];

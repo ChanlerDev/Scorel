@@ -56,9 +56,9 @@ const tempRoot = () => mkdtemp(join(tmpdir(), "scorel-session-"));
 
 describe("session core", () => {
   it("creates, appends, closes, reloads, and replays the same session tree", async () => {
-    const rootDir = await tempRoot();
+    const sessionsDir = await tempRoot();
     const session = await createSession({
-      rootDir,
+      sessionsDir,
       header: {
         version: 1,
         sessionId,
@@ -72,7 +72,7 @@ describe("session core", () => {
     await session.append(assistantEvent("evt_2", "evt_1", 2, "hi"));
     await session.close();
 
-    const loaded = await loadSession({ rootDir, sessionId });
+    const loaded = await loadSession({ sessionsDir, sessionId });
 
     expect(loaded.header).toEqual(session.header);
     expect([...loaded.tree].map((event) => event.id)).toEqual(["evt_1", "evt_2"]);
@@ -86,9 +86,9 @@ describe("session core", () => {
   });
 
   it("tracks branch leaves and builds context for the selected leaf", async () => {
-    const rootDir = await tempRoot();
+    const sessionsDir = await tempRoot();
     const session = await createSession({
-      rootDir,
+      sessionsDir,
       header: {
         version: 1,
         sessionId,
@@ -111,20 +111,20 @@ describe("session core", () => {
   });
 
   it("fails predictably for missing header, invalid JSON, duplicate ids, invalid parents, and non-monotonic seq", async () => {
-    const rootDir = await tempRoot();
-    await writeFile(join(rootDir, "missing.jsonl"), "");
-    await expect(loadSession({ filePath: join(rootDir, "missing.jsonl") })).rejects.toMatchObject({
+    const sessionsDir = await tempRoot();
+    await writeFile(join(sessionsDir, "missing.jsonl"), "");
+    await expect(loadSession({ filePath: join(sessionsDir, "missing.jsonl") })).rejects.toMatchObject({
       code: "missing_header",
     });
 
-    await writeFile(join(rootDir, "invalid-json.jsonl"), '{"version":1}\n{nope}\n');
-    await expect(loadSession({ filePath: join(rootDir, "invalid-json.jsonl") })).rejects.toMatchObject({
+    await writeFile(join(sessionsDir, "invalid-json.jsonl"), '{"version":1}\n{nope}\n');
+    await expect(loadSession({ filePath: join(sessionsDir, "invalid-json.jsonl") })).rejects.toMatchObject({
       code: "invalid_json",
       line: 2,
     });
 
     const session = await createSession({
-      rootDir,
+      sessionsDir,
       header: {
         version: 1,
         sessionId,

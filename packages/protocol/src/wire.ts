@@ -15,7 +15,7 @@ export type SendMessageOptions = {
 
 export type ClientRequestMap = {
   create_session: {
-    request: { meta?: Partial<SessionMeta> };
+    request: { sessionId?: SessionId; meta?: Partial<SessionMeta> };
     response: { sessionId: SessionId };
   };
   load_session: {
