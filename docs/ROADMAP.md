@@ -28,13 +28,13 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 - `docs/SHIP.md` 描述 AI 开发与交付协议。
 - 第一批可执行 spec 足够启动实现。
 
-**Status**: In Progress
+**Status**: Done
 
 ---
 
 ## M1: CLI Alpha
 
-**Goal**: 用户可以在本地运行 `scorel chat`，完成最小多轮 agent loop，并持久化 session。
+**Goal**: 用户可以在本地运行 `scorel chat`，通过 daemon/client 主链路完成最小多轮 agent loop，并持久化、恢复 session。
 
 **Done when**:
 
@@ -42,6 +42,24 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 - 一轮 LLM + tool loop 可完成。
 - JSONL session 可恢复。
 - 基础测试和 typecheck 通过。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M1.1 | [`S0002`](spec/ship/S0002-package-skeleton.md) | 建立最终 workspace 和包边界，让后续代码有正确落点。 | Planned |
+| M1.2 | [`S0003`](spec/ship/S0003-protocol-contracts.md) | 锁定 M1 所需跨包协议，让 core/daemon/client/CLI 不重复定义契约。 | Planned |
+| M1.3 | [`S0004`](spec/ship/S0004-session-core.md) | 实现 append-only JSONL session 和 context replay，让对话成为可恢复资产。 | Planned |
+| M1.4 | [`S0005`](spec/ship/S0005-runtime-loop.md) | 实现最小 runtime loop，让给定 context 能产生可测试的 assistant event stream。 | Planned |
+| M1.5 | [`S0006`](spec/ship/S0006-embedded-daemon-client.md) | 用 embedded daemon + DaemonClient 串起 session、runtime 和事件流。 | Planned |
+| M1.6 | [`S0007`](spec/ship/S0007-cli-alpha.md) | 暴露 `scorel chat`，验证用户可见的本地多轮对话体验。 | Planned |
+
+**Not in M1**:
+
+- Local socket / WebSocket daemon.
+- Remote control, auth, reconnect after process boundary.
+- File checkpoint, rewind UX, compact UX, permission policy.
+- WebUI / GUI / channels / MCP tiered loading.
 
 **Status**: Planned
 
@@ -123,6 +141,11 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 |---|---|---|
 | [`S0001`](spec/ship/S0001-docs-baseline.md) | 建立初始 docs baseline | Done |
 | [`S0002`](spec/ship/S0002-package-skeleton.md) | 创建最终包骨架 | Planned |
+| [`S0003`](spec/ship/S0003-protocol-contracts.md) | 定义 M1 协议契约 | Planned |
+| [`S0004`](spec/ship/S0004-session-core.md) | 实现 JSONL session core | Planned |
+| [`S0005`](spec/ship/S0005-runtime-loop.md) | 实现最小 runtime loop | Planned |
+| [`S0006`](spec/ship/S0006-embedded-daemon-client.md) | 实现 embedded daemon + client | Planned |
+| [`S0007`](spec/ship/S0007-cli-alpha.md) | 实现 CLI Alpha | Planned |
 
 ---
 

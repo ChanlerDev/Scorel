@@ -2,9 +2,9 @@
 
 ## Goal
 
-Create the final package and app skeleton for the clean Scorel rewrite.
+Create the final workspace skeleton so every later M1 implementation has the correct package boundary from day one.
 
-## Scope
+## Deliverable
 
 - Create `packages/protocol`.
 - Create `packages/core`.
@@ -15,7 +15,17 @@ Create the final package and app skeleton for the clean Scorel rewrite.
 - Add minimal package manifests, tsconfigs, source entrypoints, and smoke tests.
 - Keep dependency direction aligned with ADR-004.
 
-## Not In Scope
+## Success Criteria
+
+- Every package has a minimal public export.
+- Every package has an import smoke test.
+- `@scorel/protocol` has no internal package dependency.
+- `@scorel/core` depends on `@scorel/protocol`, not on daemon/client/apps.
+- `@scorel/daemon` may depend on protocol/core, not on client/apps.
+- `@scorel/client` depends on protocol only.
+- `apps/cli` and `apps/daemon` are entrypoint shells only.
+
+## Boundaries
 
 - No protocol event definitions beyond minimal placeholders.
 - No runtime loop.
@@ -23,19 +33,11 @@ Create the final package and app skeleton for the clean Scorel rewrite.
 - No CLI chat behavior.
 - No WebUI / GUI.
 
-## Acceptance Criteria
+## Verification
 
-- [ ] `pnpm -r typecheck` passes.
-- [ ] `pnpm -r test` passes.
-- [ ] Every package has a minimal public export.
-- [ ] `@scorel/client` does not depend on `@scorel/core` or `@scorel/daemon`.
-- [ ] `@scorel/daemon` does not depend on `@scorel/client`.
-- [ ] `apps/cli` and `apps/daemon` are entrypoint shells only.
-
-## Test Requirements
-
-- Add import smoke tests for each package.
-- Add a simple dependency-boundary test or document manual `package.json` inspection.
+- `pnpm -r typecheck`
+- `pnpm -r test`
+- Dependency-boundary smoke test or explicit package manifest inspection.
 
 ## Affected Paths
 
@@ -51,3 +53,4 @@ Create the final package and app skeleton for the clean Scorel rewrite.
 ## Risks
 
 - Adding behavior in this spec will blur the foundation. Keep it skeleton-only.
+- If package exports are too clever now, later specs will inherit accidental API shape. Use minimal exports.
