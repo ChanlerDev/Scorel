@@ -10,5 +10,6 @@
 - `discussions/2026-05-26-ai-roadmap-versioning.md` — AI 开发 Roadmap 与版本策略讨论 → docs ADR-005
 - `discussions/2026-05-26-clean-initial-environment.md` — 清理旧实现，建立干净初始环境
 - `discussions/2026-05-26-s0002-package-skeleton.md` — S0002 包骨架执行记录
+- `discussions/2026-05-26-s0003-protocol-contracts.md` — S0003 M1 协议契约执行记录
 - `decisions/adr-001-final-package-structure.md` — 最终包结构与多 App 边界决策 → docs ADR-004
 - `decisions/adr-002-ai-delivery-versioning.md` — AI 开发流程与版本策略 → docs ADR-005
