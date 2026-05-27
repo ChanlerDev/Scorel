@@ -17,3 +17,5 @@ export type AgentTool = {
 };
 
 export const defineTool = (tool: AgentTool): AgentTool => tool;
+
+export * from "./coding-tools.js";

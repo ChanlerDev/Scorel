@@ -55,6 +55,38 @@ describe("@scorel/app-cli", () => {
     expect(lines.at(-1)).toMatchObject({ type: "assistant_message" });
     expect(lines.at(-1).seq).toBeGreaterThan(resumedUserEvent.seq);
   });
+
+  it("runs S0008 coding tools through CLI-visible daemon/client flow", async () => {
+    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));
+    const sessionId = "ses_cli_tools";
+    await import("node:fs/promises").then(({ writeFile }) => writeFile(join(workspaceDir, "note.txt"), "hello\nworld\n"));
+
+    const result = await runCliWithInput(
+      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId, "--cwd", workspaceDir],
+      [
+        "/read note.txt",
+        "/edit note.txt world scorel",
+        "/bash cat note.txt",
+        "/write created.txt done",
+        ".exit",
+        "",
+      ].join("\n"),
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("[tool:Read]");
+    expect(result.stdout).toContain("hello");
+    expect(result.stdout).toContain("[tool:Edit]");
+    expect(result.stdout).toContain("[tool:Bash]");
+    expect(result.stdout).toContain("scorel");
+    expect(result.stdout).toContain("[tool:Write]");
+
+    const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
+    const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
+    const toolResults = lines.filter((line) => line.type === "tool_result");
+    expect(toolResults.map((line) => line.message.content[0].toolName)).toEqual(["Read", "Edit", "Bash", "Write"]);
+  });
 });
 
 const runCliWithInput = async (

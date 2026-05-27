@@ -2,6 +2,7 @@ import {
   ScorelRuntime,
   buildContext,
   corePackageName,
+  createCodingTools,
   createSession,
   defineTool,
   loadSession,
@@ -48,8 +49,11 @@ export type EmbeddedDaemonOptions = {
   createId?: () => string;
 };
 
-export const createM1FakeRuntime = (): ScorelRuntime => {
+export const createM1FakeRuntime = (options: { cwd?: string } = {}): ScorelRuntime => {
   const runtime = new ScorelRuntime({ provider: createM1FakeProvider() });
+  for (const tool of createCodingTools({ cwd: options.cwd ?? process.cwd() })) {
+    runtime.registerTool(tool);
+  }
   runtime.registerTool(
     defineTool({
       name: "echo",
@@ -72,6 +76,15 @@ const createM1FakeProvider = (): RuntimeProvider => ({
     }
 
     const input = lastUserText(context);
+    const codingToolCall = parseFakeCodingToolCall(input);
+    if (codingToolCall) {
+      return {
+        role: "assistant",
+        content: [{ type: "tool_call", ...codingToolCall }],
+        stopReason: "tool_call",
+      };
+    }
+
     if (input.startsWith("/echo ")) {
       return {
         role: "assistant",
@@ -92,6 +105,48 @@ const createM1FakeProvider = (): RuntimeProvider => ({
     return assistantText(text);
   },
 });
+
+const parseFakeCodingToolCall = (
+  input: string,
+): { toolCallId: string; toolName: string; args: Record<string, unknown> } | undefined => {
+  if (input.startsWith("/read ")) {
+    return {
+      toolCallId: "call_read",
+      toolName: "Read",
+      args: { path: input.slice("/read ".length).trim() },
+    };
+  }
+  if (input.startsWith("/write ")) {
+    const [path, ...contentParts] = input.slice("/write ".length).trim().split(/\s+/);
+    if (!path) {
+      return undefined;
+    }
+    return {
+      toolCallId: "call_write",
+      toolName: "Write",
+      args: { path, content: contentParts.join(" ") },
+    };
+  }
+  if (input.startsWith("/edit ")) {
+    const [path, oldString, newString] = input.slice("/edit ".length).trim().split(/\s+/);
+    if (!path || oldString === undefined || newString === undefined) {
+      return undefined;
+    }
+    return {
+      toolCallId: "call_edit",
+      toolName: "Edit",
+      args: { path, old_string: oldString, new_string: newString },
+    };
+  }
+  if (input.startsWith("/bash ")) {
+    return {
+      toolCallId: "call_bash",
+      toolName: "Bash",
+      args: { command: input.slice("/bash ".length).trim() },
+    };
+  }
+  return undefined;
+};
 
 const assistantText = (text: string): ScorelMessage & { role: "assistant" } => ({
   role: "assistant",

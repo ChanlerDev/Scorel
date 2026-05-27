@@ -12,7 +12,7 @@ import {
   createM1FakeRuntime,
   daemonPackageName,
 } from "@scorel/daemon";
-import { asClientId, asDeviceId, asSessionId, type ErrorEvent } from "@scorel/protocol";
+import { asClientId, asDeviceId, asSessionId, type ErrorEvent, type ScorelEvent } from "@scorel/protocol";
 
 export const cliAppName = "@scorel/app-cli" as const;
 export const cliClientDependency = clientPackageName;
@@ -27,6 +27,7 @@ export type CliIo = {
 type ChatOptions = {
   sessionsDir: string;
   sessionId: ReturnType<typeof asSessionId>;
+  cwd: string;
 };
 
 const defaultSessionsDir = (): string => join(homedir(), ".scorel", "sessions");
@@ -51,7 +52,7 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
   const daemon = new EmbeddedDaemon({
     sessionsDir: options.sessionsDir,
     deviceId: asDeviceId("device_local"),
-    createRuntime: () => createM1FakeRuntime(),
+    createRuntime: () => createM1FakeRuntime({ cwd: options.cwd }),
   });
   const client = new DaemonClient(createEmbeddedTransport(daemon), {
     clientId: asClientId("client_cli"),
@@ -78,6 +79,9 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
       const unsubscribe = client.subscribe((event) => {
         if (event.type === "text_delta") {
           io.output.write(event.delta);
+        }
+        if (event.type === "tool_result") {
+          writeToolResult(io.output, event);
         }
         if (event.type === "error") {
           writeEventError(io.error, event);
@@ -118,6 +122,7 @@ const loadOrCreateSession = async (client: DaemonClient, options: ChatOptions): 
 const parseChatOptions = (argv: string[]): ChatOptions => {
   let sessionId = asSessionId("ses_default");
   let sessionsDir = process.env.SCOREL_SESSIONS_DIR ?? defaultSessionsDir();
+  let cwd = process.cwd();
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -131,10 +136,15 @@ const parseChatOptions = (argv: string[]): ChatOptions => {
       index += 1;
       continue;
     }
+    if (arg === "--cwd") {
+      cwd = requireValue(argv, index, "--cwd");
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown chat option: ${arg}`);
   }
 
-  return { sessionId, sessionsDir };
+  return { sessionId, sessionsDir, cwd };
 };
 
 const requireValue = (argv: string[], index: number, flag: string): string => {
@@ -152,11 +162,21 @@ const promptIfInteractive = (output: NodeJS.WritableStream): void => {
 };
 
 const writeUsage = (output: NodeJS.WritableStream): void => {
-  output.write("Usage: scorel chat [--session <id>] [--sessions-dir <dir>]\n");
+  output.write("Usage: scorel chat [--session <id>] [--sessions-dir <dir>] [--cwd <dir>]\n");
 };
 
 const writeEventError = (output: NodeJS.WritableStream, event: ErrorEvent): void => {
   output.write(`scorel event error: ${event.message}\n`);
+};
+
+const writeToolResult = (output: NodeJS.WritableStream, event: Extract<ScorelEvent, { type: "tool_result" }>): void => {
+  const block = event.message.content.find((candidate) => candidate.type === "tool_result");
+  if (!block || typeof block.result !== "object" || block.result === null) {
+    return;
+  }
+  const result = block.result as { content?: Array<{ type: string; text?: string }> };
+  const text = result.content?.find((candidate) => candidate.type === "text")?.text ?? "";
+  output.write(`\n[tool:${block.toolName}]${block.isError ? " error" : ""}\n${text}\n`);
 };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
