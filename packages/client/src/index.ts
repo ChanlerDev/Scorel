@@ -96,6 +96,16 @@ export class DaemonClient {
     return response.sessionId;
   }
 
+  async loadSession(sessionId: SessionId): Promise<ClientRequestMap["load_session"]["response"]> {
+    const response = await this.#request("load_session", { sessionId, lastSeq: this.#lastSeq });
+    this.#sessionId = response.sessionId;
+    this.#lastSeq = response.currentSeq;
+    for (const event of response.events) {
+      this.#recordEvent(event);
+    }
+    return response;
+  }
+
   async sendMessage(
     content: string | ContentBlock[],
     options?: { parentId?: EventId | null },

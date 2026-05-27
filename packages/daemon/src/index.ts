@@ -3,9 +3,12 @@ import {
   buildContext,
   corePackageName,
   createSession,
+  defineTool,
   loadSession,
   type JsonlSession,
   type RawRuntimeEvent,
+  type RuntimeProvider,
+  type ToolResult,
 } from "@scorel/core";
 import {
   asClientId,
@@ -26,6 +29,7 @@ import {
   type Seq,
   type SessionId,
   type SessionMeta,
+  type ScorelMessage,
   type TransientEvent,
   type Unsubscribe,
 } from "@scorel/protocol";
@@ -42,6 +46,82 @@ export type EmbeddedDaemonOptions = {
   createRuntime: (sessionId: SessionId) => ScorelRuntime;
   now?: () => number;
   createId?: () => string;
+};
+
+export const createM1FakeRuntime = (): ScorelRuntime => {
+  const runtime = new ScorelRuntime({ provider: createM1FakeProvider() });
+  runtime.registerTool(
+    defineTool({
+      name: "echo",
+      description: "Echo input text for CLI Alpha verification",
+      execute: async (_toolCallId, args): Promise<ToolResult> => ({
+        content: [{ type: "text", text: String((args as { text?: unknown }).text ?? "") }],
+      }),
+    }),
+  );
+  return runtime;
+};
+
+const createM1FakeProvider = (): RuntimeProvider => ({
+  streamTurn: async function* ({ context }) {
+    const toolResult = lastToolResultText(context);
+    if (toolResult !== undefined) {
+      const text = `Tool: ${toolResult}`;
+      yield { type: "text_delta", delta: text };
+      return assistantText(text);
+    }
+
+    const input = lastUserText(context);
+    if (input.startsWith("/echo ")) {
+      return {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_call",
+            toolCallId: "call_echo",
+            toolName: "echo",
+            args: { text: input.slice("/echo ".length) },
+          },
+        ],
+        stopReason: "tool_call",
+      };
+    }
+
+    const text = `Echo: ${input}`;
+    yield { type: "text_delta", delta: text };
+    return assistantText(text);
+  },
+});
+
+const assistantText = (text: string): ScorelMessage & { role: "assistant" } => ({
+  role: "assistant",
+  content: [{ type: "text", text }],
+  stopReason: "end_turn",
+});
+
+const lastUserText = (context: ScorelMessage[]): string => {
+  const user = findLast(context, (message) => message.role === "user");
+  return user?.content.find((block) => block.type === "text")?.text ?? "";
+};
+
+const lastToolResultText = (context: ScorelMessage[]): string | undefined => {
+  const toolResult = context.at(-1)?.role === "tool_result" ? context.at(-1) : undefined;
+  const block = toolResult?.content.find((candidate) => candidate.type === "tool_result");
+  if (!block || typeof block.result !== "object" || block.result === null) {
+    return undefined;
+  }
+  const result = block.result as { content?: Array<{ type: string; text?: string }> };
+  return result.content?.find((candidate) => candidate.type === "text")?.text;
+};
+
+const findLast = <TValue>(values: TValue[], predicate: (value: TValue) => boolean): TValue | undefined => {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const value = values[index];
+    if (value !== undefined && predicate(value)) {
+      return value;
+    }
+  }
+  return undefined;
 };
 
 type SessionLane = {
@@ -66,6 +146,12 @@ type Connection = {
   clientId: ClientId;
   sessionId?: SessionId;
   emit: (message: DaemonMessage) => void;
+};
+
+type RuntimeEventState = {
+  parentId: EventId;
+  assistantEventId: EventId;
+  finalAssistantEventId: EventId;
 };
 
 export class EmbeddedDaemon {
@@ -117,6 +203,9 @@ export class EmbeddedDaemon {
       case "create_session":
         await this.#handleCreateSession(connection, message);
         break;
+      case "load_session":
+        await this.#handleLoadSession(connection, message);
+        break;
       case "send_message":
         await this.#handleSendMessage(connection, message);
         break;
@@ -140,7 +229,6 @@ export class EmbeddedDaemon {
       case "disconnect":
         this.disconnect(connection);
         break;
-      case "load_session":
       case "list_sessions":
       case "subscribe_events":
         connection.emit({
@@ -163,11 +251,37 @@ export class EmbeddedDaemon {
     this.#respond(connection, request, { sessionId });
   }
 
+  async #handleLoadSession(connection: Connection, request: ClientRequest<"load_session">): Promise<void> {
+    try {
+      const lane = await this.#getLane(request.sessionId);
+      connection.sessionId = request.sessionId;
+      const persistentEvents = [...lane.session.tree];
+      const sessionEvents = this.#events.get(request.sessionId) ?? [];
+      if (sessionEvents.length === 0 && persistentEvents.length > 0) {
+        this.#events.set(request.sessionId, persistentEvents);
+      }
+      this.#respond(connection, request, {
+        sessionId: request.sessionId,
+        activeLeafId: lane.session.activeLeafId,
+        currentSeq: lane.session.currentSeq,
+        events: persistentEvents,
+        meta: lane.session.header.meta,
+      });
+    } catch (cause) {
+      connection.emit({
+        type: "error",
+        requestId: request.requestId,
+        ok: false,
+        code: "session_not_found",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  }
+
   async #handleSendMessage(connection: Connection, request: ClientRequest<"send_message">): Promise<void> {
     const lane = await this.#getLane(request.sessionId);
     lane.queue = lane.queue.then(async () => {
       const userEventId = asEventId(this.#createId());
-      const assistantEventId = asEventId(this.#createId());
       const content = typeof request.content === "string" ? [{ type: "text" as const, text: request.content }] : request.content;
       const userEvent = await this.#appendPersistent(lane, {
         type: "user_message",
@@ -178,14 +292,18 @@ export class EmbeddedDaemon {
         ts: this.#now(),
         message: { role: "user", content },
       });
-      let parentId: EventId = userEvent.id;
+      const firstAssistantEventId = asEventId(this.#createId());
+      const state: RuntimeEventState = {
+        parentId: userEvent.id,
+        assistantEventId: firstAssistantEventId,
+        finalAssistantEventId: firstAssistantEventId,
+      };
 
       for await (const rawEvent of lane.runtime.executeTurn(buildContext(lane.session.tree, userEvent.id), undefined, {})) {
-        const maybeParentId = await this.#handleRuntimeEvent(lane, connection.clientId, assistantEventId, parentId, rawEvent);
-        parentId = maybeParentId ?? parentId;
+        await this.#handleRuntimeEvent(lane, connection.clientId, state, rawEvent);
       }
 
-      this.#respond(connection, request, { userEventId, assistantEventId });
+      this.#respond(connection, request, { userEventId, assistantEventId: state.finalAssistantEventId });
     });
 
     await lane.queue;
@@ -194,10 +312,9 @@ export class EmbeddedDaemon {
   async #handleRuntimeEvent(
     lane: SessionLane,
     clientId: ClientId,
-    assistantEventId: EventId,
-    parentId: EventId,
+    state: RuntimeEventState,
     rawEvent: RawRuntimeEvent,
-  ): Promise<EventId | undefined> {
+  ): Promise<void> {
     switch (rawEvent.type) {
       case "turn_start":
         this.#broadcastTransient(lane.session.header.sessionId, {
@@ -214,8 +331,8 @@ export class EmbeddedDaemon {
           sessionId: lane.session.header.sessionId,
           clientId,
           ts: this.#now(),
-          eventId: assistantEventId,
-          parentId,
+          eventId: state.assistantEventId,
+          parentId: state.parentId,
           role: rawEvent.role,
         });
         break;
@@ -225,56 +342,53 @@ export class EmbeddedDaemon {
           sessionId: lane.session.header.sessionId,
           clientId,
           ts: this.#now(),
-          eventId: assistantEventId,
+          eventId: state.assistantEventId,
           delta: rawEvent.delta,
         });
         break;
-      case "message_end":
-        return (
+      case "message_end": {
+        const appended = (
           await this.#appendPersistent(lane, {
             type: "assistant_message",
-            id: assistantEventId,
-            parentId,
+            id: state.assistantEventId,
+            parentId: state.parentId,
             sessionId: lane.session.header.sessionId,
             clientId,
             ts: this.#now(),
             message: rawEvent.message,
           })
         ).id;
+        state.parentId = appended;
+        state.finalAssistantEventId = appended;
+        state.assistantEventId = asEventId(this.#createId());
+        break;
+      }
       case "tool_execution_start":
-        this.#broadcastTransient(lane.session.header.sessionId, {
-          type: "error",
-          sessionId: lane.session.header.sessionId,
-          clientId,
-          ts: this.#now(),
-          code: "invalid_request",
-          message: `tool start: ${rawEvent.toolName}`,
-        });
         break;
       case "tool_execution_end": {
         const toolResultId = asEventId(this.#createId());
-        return (
-          await this.#appendPersistent(lane, {
-            type: "tool_result",
-            id: toolResultId,
-            parentId,
-            sessionId: lane.session.header.sessionId,
-            clientId,
-            ts: this.#now(),
-            message: {
-              role: "tool_result",
-              content: [
-                {
-                  type: "tool_result",
-                  toolCallId: rawEvent.toolCallId,
-                  toolName: rawEvent.toolName,
-                  result: rawEvent.result,
-                  isError: rawEvent.isError,
-                },
-              ],
-            },
-          })
-        ).id;
+        await this.#appendPersistent(lane, {
+          type: "tool_result",
+          id: toolResultId,
+          parentId: state.parentId,
+          sessionId: lane.session.header.sessionId,
+          clientId,
+          ts: this.#now(),
+          message: {
+            role: "tool_result",
+            content: [
+              {
+                type: "tool_result",
+                toolCallId: rawEvent.toolCallId,
+                toolName: rawEvent.toolName,
+                result: rawEvent.result,
+                isError: rawEvent.isError,
+              },
+            ],
+          },
+        });
+        state.parentId = toolResultId;
+        break;
       }
       case "turn_end":
         this.#broadcastTransient(lane.session.header.sessionId, {
@@ -297,7 +411,6 @@ export class EmbeddedDaemon {
         });
         break;
     }
-    return undefined;
   }
 
   async #appendPersistent(

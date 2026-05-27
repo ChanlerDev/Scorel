@@ -30,7 +30,7 @@ Expose the M1 product experience: `scorel chat` starts the embedded path, stream
 
 ## Verification
 
-- `pnpm --filter @scorel/cli test`
+- `pnpm --filter @scorel/app-cli test`
 - End-to-end test runs CLI against fake runtime/provider and verifies multi-turn persistence.
 - Manual smoke test with a real provider may be documented, but CI must not require API credentials.
 - `pnpm -r typecheck`

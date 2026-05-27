@@ -32,6 +32,9 @@ importers:
       '@scorel/daemon':
         specifier: workspace:*
         version: link:../../packages/daemon
+      '@scorel/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
 
   apps/daemon:
     dependencies:

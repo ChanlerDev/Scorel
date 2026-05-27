@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@scorel/client": "workspace:*",
-    "@scorel/daemon": "workspace:*"
+    "@scorel/daemon": "workspace:*",
+    "@scorel/protocol": "workspace:*"
   },
   "devDependencies": {}
 }
