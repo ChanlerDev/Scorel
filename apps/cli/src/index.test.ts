@@ -87,6 +87,32 @@ describe("@scorel/app-cli", () => {
     const toolResults = lines.filter((line) => line.type === "tool_result");
     expect(toolResults.map((line) => line.message.content[0].toolName)).toEqual(["Read", "Edit", "Bash", "Write"]);
   });
+
+  it("runs S0009 code discovery tools through CLI-visible daemon/client flow", async () => {
+    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));
+    const sessionId = "ses_cli_search";
+    const { mkdir: makeDir, writeFile } = await import("node:fs/promises");
+    await makeDir(join(workspaceDir, "src"));
+    await writeFile(join(workspaceDir, "src", "target.ts"), "export const target = true;\n");
+    await writeFile(join(workspaceDir, "src", "other.js"), "target\n");
+
+    const result = await runCliWithInput(
+      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId, "--cwd", workspaceDir],
+      ["/glob src/*.ts", "/grep target src/*.ts", ".exit", ""].join("\n"),
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("[tool:Glob]");
+    expect(result.stdout).toContain("src/target.ts");
+    expect(result.stdout).toContain("[tool:Grep]");
+    expect(result.stdout).toContain("src/target.ts");
+
+    const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
+    const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
+    const toolResults = lines.filter((line) => line.type === "tool_result");
+    expect(toolResults.map((line) => line.message.content[0].toolName)).toEqual(["Glob", "Grep"]);
+  });
 });
 
 const runCliWithInput = async (

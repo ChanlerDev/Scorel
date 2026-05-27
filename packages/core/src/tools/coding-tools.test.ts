@@ -102,4 +102,46 @@ describe("coding tools", () => {
       bash.execute("call_bash", { command: "sleep 2", timeoutMs: 10 }, new AbortController().signal, () => undefined),
     ).rejects.toThrow("timed out");
   });
+
+  it("finds files with Glob using stable result limits", async () => {
+    const cwd = await tempRoot();
+    await mkdir(join(cwd, "src"));
+    await writeFile(join(cwd, "src", "b.ts"), "");
+    await writeFile(join(cwd, "src", "a.ts"), "");
+    await writeFile(join(cwd, "src", "c.js"), "");
+    const glob = toolByName(cwd, "Glob");
+
+    const result = await glob.execute(
+      "call_glob",
+      { pattern: "src/*.ts", maxResults: 1 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(result)).toBe("src/a.ts\n[truncated: 2 matches > 1 limit]");
+    expect(result.details).toMatchObject({ matches: ["src/a.ts"], totalMatches: 2, truncated: true });
+  });
+
+  it("searches file contents with Grep and structured limits", async () => {
+    const cwd = await tempRoot();
+    await mkdir(join(cwd, "src"));
+    await writeFile(join(cwd, "src", "a.ts"), "alpha\nbeta\n");
+    await writeFile(join(cwd, "src", "b.ts"), "alphabet\n");
+    await writeFile(join(cwd, "src", "c.js"), "alpha\n");
+    const grep = toolByName(cwd, "Grep");
+
+    const result = await grep.execute(
+      "call_grep",
+      { pattern: "alpha", glob: "src/*.ts", outputMode: "content", maxResults: 1 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(result)).toBe("src/a.ts:1:alpha\n[truncated: 2 matches > 1 limit]");
+    expect(result.details).toMatchObject({
+      matches: [{ path: "src/a.ts", line: 1, text: "alpha" }],
+      totalMatches: 2,
+      truncated: true,
+    });
+  });
 });

@@ -145,6 +145,24 @@ const parseFakeCodingToolCall = (
       args: { command: input.slice("/bash ".length).trim() },
     };
   }
+  if (input.startsWith("/glob ")) {
+    return {
+      toolCallId: "call_glob",
+      toolName: "Glob",
+      args: { pattern: input.slice("/glob ".length).trim() },
+    };
+  }
+  if (input.startsWith("/grep ")) {
+    const [pattern, glob] = input.slice("/grep ".length).trim().split(/\s+/);
+    if (!pattern) {
+      return undefined;
+    }
+    return {
+      toolCallId: "call_grep",
+      toolName: "Grep",
+      args: { pattern, glob, outputMode: "content" },
+    };
+  }
   return undefined;
 };
 

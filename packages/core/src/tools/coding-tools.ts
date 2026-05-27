@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -50,6 +50,27 @@ type BashArgs = {
   cwd?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
+};
+
+type GlobArgs = {
+  pattern: string;
+  cwd?: string;
+  maxResults?: number;
+};
+
+type GrepArgs = {
+  pattern: string;
+  cwd?: string;
+  glob?: string;
+  outputMode?: "files_with_matches" | "content" | "count";
+  maxResults?: number;
+  maxOutputBytes?: number;
+};
+
+type GrepMatch = {
+  path: string;
+  line: number;
+  text: string;
 };
 
 export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
@@ -208,6 +229,60 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
         }
       },
     }),
+    defineTool({
+      name: "Glob",
+      description: "Find files by glob pattern under the workspace.",
+      execute: async (_toolCallId, args) => {
+        const input = parseGlobArgs(args);
+        const searchRoot = input.cwd ? resolveWorkspacePath(input.cwd) : root;
+        const limit = input.maxResults ?? 100;
+        const matcher = globMatcher(input.pattern);
+        const files = await listFiles(searchRoot, root);
+        const matches = files.filter((file) => matcher(file)).sort();
+        const selected = matches.slice(0, limit);
+        return textResult(formatLimitedLines(selected, matches.length, limit), {
+          matches: selected,
+          totalMatches: matches.length,
+          truncated: matches.length > limit,
+        });
+      },
+    }),
+    defineTool({
+      name: "Grep",
+      description: "Search file contents with regex and structured match output.",
+      execute: async (_toolCallId, args) => {
+        const input = parseGrepArgs(args);
+        const searchRoot = input.cwd ? resolveWorkspacePath(input.cwd) : root;
+        const limit = input.maxResults ?? 100;
+        const outputLimit = input.maxOutputBytes ?? maxOutputBytes;
+        const regex = new RegExp(input.pattern);
+        const fileMatcher = input.glob ? globMatcher(input.glob) : () => true;
+        const files = (await listFiles(searchRoot, root)).filter((file) => fileMatcher(file)).sort();
+        const matches: GrepMatch[] = [];
+
+        for (const file of files) {
+          const path = resolve(root, file);
+          const content = await readFile(path, "utf8");
+          const lines = content.split(/\r?\n/);
+          for (const [index, line] of lines.entries()) {
+            if (regex.test(line)) {
+              matches.push({ path: file, line: index + 1, text: line });
+            }
+            regex.lastIndex = 0;
+          }
+        }
+
+        const selected = matches.slice(0, limit);
+        const mode = input.outputMode ?? "files_with_matches";
+        const lines = formatGrepLines(selected, mode);
+        return textResult(truncate(formatLimitedLines(lines, matches.length, limit), outputLimit, "grep"), {
+          matches: selected,
+          totalMatches: matches.length,
+          truncated: matches.length > limit,
+          outputMode: mode,
+        });
+      },
+    }),
   ];
 };
 
@@ -245,6 +320,36 @@ const parseBashArgs = (args: unknown): BashArgs => {
     command: expectString(input.command, "command"),
     cwd: optionalString(input.cwd, "cwd"),
     timeoutMs: optionalNumber(input.timeoutMs, "timeoutMs"),
+    maxOutputBytes: optionalNumber(input.maxOutputBytes, "maxOutputBytes"),
+  };
+};
+
+const parseGlobArgs = (args: unknown): GlobArgs => {
+  const input = expectRecord(args);
+  return {
+    pattern: expectString(input.pattern, "pattern"),
+    cwd: optionalString(input.cwd, "cwd"),
+    maxResults: optionalNumber(input.maxResults, "maxResults"),
+  };
+};
+
+const parseGrepArgs = (args: unknown): GrepArgs => {
+  const input = expectRecord(args);
+  const outputMode = optionalString(input.outputMode, "outputMode");
+  if (
+    outputMode !== undefined &&
+    outputMode !== "files_with_matches" &&
+    outputMode !== "content" &&
+    outputMode !== "count"
+  ) {
+    throw new Error("outputMode must be files_with_matches, content, or count");
+  }
+  return {
+    pattern: expectString(input.pattern, "pattern"),
+    cwd: optionalString(input.cwd, "cwd"),
+    glob: optionalString(input.glob, "glob"),
+    outputMode,
+    maxResults: optionalNumber(input.maxResults, "maxResults"),
     maxOutputBytes: optionalNumber(input.maxOutputBytes, "maxOutputBytes"),
   };
 };
@@ -371,3 +476,78 @@ const isTimeoutError = (cause: unknown): boolean =>
 
 const isExecError = (cause: unknown): cause is Error & { code?: number | string; stdout?: string; stderr?: string } =>
   cause instanceof Error && ("stdout" in cause || "stderr" in cause || "code" in cause);
+
+const listFiles = async (directory: string, root: string): Promise<string[]> => {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    const absolute = resolve(directory, entry.name);
+    if (!isWithin(root, absolute)) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      files.push(...(await listFiles(absolute, root)));
+      continue;
+    }
+    if (entry.isFile()) {
+      files.push(relative(root, absolute));
+    }
+  }
+  return files;
+};
+
+const globMatcher = (pattern: string): ((path: string) => boolean) => {
+  if (pattern.length === 0) {
+    throw new Error("pattern must not be empty");
+  }
+  const regex = new RegExp(`^${globToRegex(pattern)}$`);
+  return (path) => regex.test(path);
+};
+
+const globToRegex = (pattern: string): string => {
+  let output = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    const next = pattern[index + 1];
+    if (char === "*" && next === "*") {
+      output += ".*";
+      index += 1;
+      continue;
+    }
+    if (char === "*") {
+      output += "[^/]*";
+      continue;
+    }
+    if (char === "?") {
+      output += "[^/]";
+      continue;
+    }
+    output += escapeRegex(char ?? "");
+  }
+  return output;
+};
+
+const escapeRegex = (value: string): string => value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
+
+const formatLimitedLines = (lines: string[], total: number, limit: number): string => {
+  const body = lines.join("\n");
+  if (total <= limit) {
+    return body;
+  }
+  const suffix = `[truncated: ${total} matches > ${limit} limit]`;
+  return body.length > 0 ? `${body}\n${suffix}` : suffix;
+};
+
+const formatGrepLines = (matches: GrepMatch[], mode: NonNullable<GrepArgs["outputMode"]>): string[] => {
+  if (mode === "content") {
+    return matches.map((match) => `${match.path}:${match.line}:${match.text}`);
+  }
+  if (mode === "count") {
+    const counts = new Map<string, number>();
+    for (const match of matches) {
+      counts.set(match.path, (counts.get(match.path) ?? 0) + 1);
+    }
+    return [...counts.entries()].map(([path, count]) => `${path}:${count}`);
+  }
+  return [...new Set(matches.map((match) => match.path))];
+};
