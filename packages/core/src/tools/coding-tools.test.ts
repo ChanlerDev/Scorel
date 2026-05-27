@@ -144,4 +144,43 @@ describe("coding tools", () => {
       truncated: true,
     });
   });
+
+  it("maintains a structured Todo list with one in-progress item", async () => {
+    const cwd = await tempRoot();
+    const todo = toolByName(cwd, "Todo");
+
+    await expect(
+      todo.execute(
+        "call_todo",
+        {
+          todos: [
+            { id: "1", content: "Read file", status: "in_progress" },
+            { id: "2", content: "Edit file", status: "in_progress" },
+          ],
+        },
+        new AbortController().signal,
+        () => undefined,
+      ),
+    ).rejects.toThrow("at most one in_progress");
+
+    const result = await todo.execute(
+      "call_todo",
+      {
+        todos: [
+          { id: "1", content: "Read file", status: "completed" },
+          { id: "2", content: "Edit file", status: "in_progress" },
+        ],
+      },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(result)).toBe("[completed] 1 Read file\n[in_progress] 2 Edit file");
+    expect(result.details).toMatchObject({
+      todos: [
+        { id: "1", content: "Read file", status: "completed" },
+        { id: "2", content: "Edit file", status: "in_progress" },
+      ],
+    });
+  });
 });

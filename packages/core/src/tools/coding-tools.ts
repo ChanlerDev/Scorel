@@ -24,6 +24,7 @@ type FileReadSnapshot = {
 
 type CodingToolsState = {
   reads: Map<string, FileReadSnapshot>;
+  todos: TodoItem[];
 };
 
 type ReadArgs = {
@@ -73,9 +74,21 @@ type GrepMatch = {
   text: string;
 };
 
+type TodoStatus = "pending" | "in_progress" | "completed";
+
+type TodoItem = {
+  id: string;
+  content: string;
+  status: TodoStatus;
+};
+
+type TodoArgs = {
+  todos: TodoItem[];
+};
+
 export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
   const root = resolve(options.cwd);
-  const state: CodingToolsState = { reads: new Map() };
+  const state: CodingToolsState = { reads: new Map(), todos: [] };
   const defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
   const maxTimeoutMs = options.maxTimeoutMs ?? 120_000;
   const maxOutputBytes = options.maxOutputBytes ?? 16_000;
@@ -283,6 +296,15 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
         });
       },
     }),
+    defineTool({
+      name: "Todo",
+      description: "Maintain a plain session-scoped Todo list.",
+      execute: async (_toolCallId, args) => {
+        const input = parseTodoArgs(args);
+        state.todos = input.todos;
+        return textResult(formatTodos(state.todos), { todos: state.todos });
+      },
+    }),
   ];
 };
 
@@ -351,6 +373,39 @@ const parseGrepArgs = (args: unknown): GrepArgs => {
     outputMode,
     maxResults: optionalNumber(input.maxResults, "maxResults"),
     maxOutputBytes: optionalNumber(input.maxOutputBytes, "maxOutputBytes"),
+  };
+};
+
+const parseTodoArgs = (args: unknown): TodoArgs => {
+  const input = expectRecord(args);
+  if (!Array.isArray(input.todos)) {
+    throw new Error("todos must be an array");
+  }
+  const todos = input.todos.map(parseTodoItem);
+  const inProgressCount = todos.filter((todo) => todo.status === "in_progress").length;
+  if (inProgressCount > 1) {
+    throw new Error("Todo allows at most one in_progress item");
+  }
+  const ids = new Set<string>();
+  for (const todo of todos) {
+    if (ids.has(todo.id)) {
+      throw new Error(`duplicate Todo id: ${todo.id}`);
+    }
+    ids.add(todo.id);
+  }
+  return { todos };
+};
+
+const parseTodoItem = (value: unknown): TodoItem => {
+  const input = expectRecord(value);
+  const status = expectString(input.status, "status");
+  if (status !== "pending" && status !== "in_progress" && status !== "completed") {
+    throw new Error("status must be pending, in_progress, or completed");
+  }
+  return {
+    id: expectString(input.id, "id"),
+    content: expectString(input.content, "content"),
+    status,
   };
 };
 
@@ -551,3 +606,6 @@ const formatGrepLines = (matches: GrepMatch[], mode: NonNullable<GrepArgs["outpu
   }
   return [...new Set(matches.map((match) => match.path))];
 };
+
+const formatTodos = (todos: TodoItem[]): string =>
+  todos.map((todo) => `[${todo.status}] ${todo.id} ${todo.content}`).join("\n");

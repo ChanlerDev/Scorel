@@ -113,6 +113,37 @@ describe("@scorel/app-cli", () => {
     const toolResults = lines.filter((line) => line.type === "tool_result");
     expect(toolResults.map((line) => line.message.content[0].toolName)).toEqual(["Glob", "Grep"]);
   });
+
+  it("runs S0010 Todo through CLI-visible daemon/client flow", async () => {
+    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));
+    const sessionId = "ses_cli_todo";
+
+    const result = await runCliWithInput(
+      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId, "--cwd", workspaceDir],
+      ["/todo 1:completed:Read file|2:in_progress:Edit file", ".exit", ""].join("\n"),
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("[tool:Todo]");
+    expect(result.stdout).toContain("[completed] 1 Read file");
+    expect(result.stdout).toContain("[in_progress] 2 Edit file");
+
+    const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
+    const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
+    const todoResult = lines.find((line) => line.type === "tool_result");
+    expect(todoResult.message.content[0]).toMatchObject({
+      toolName: "Todo",
+      result: {
+        details: {
+          todos: [
+            { id: "1", content: "Read file", status: "completed" },
+            { id: "2", content: "Edit file", status: "in_progress" },
+          ],
+        },
+      },
+    });
+  });
 });
 
 const runCliWithInput = async (

@@ -163,8 +163,29 @@ const parseFakeCodingToolCall = (
       args: { pattern, glob, outputMode: "content" },
     };
   }
+  if (input.startsWith("/todo ")) {
+    return {
+      toolCallId: "call_todo",
+      toolName: "Todo",
+      args: { todos: parseFakeTodos(input.slice("/todo ".length).trim()) },
+    };
+  }
   return undefined;
 };
+
+const parseFakeTodos = (input: string): Array<{ id: string; status: string; content: string }> =>
+  input
+    .split("|")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .map((item) => {
+      const [id, status, ...contentParts] = item.split(":");
+      return {
+        id: id ?? "",
+        status: status ?? "pending",
+        content: contentParts.join(":"),
+      };
+    });
 
 const assistantText = (text: string): ScorelMessage & { role: "assistant" } => ({
   role: "assistant",
