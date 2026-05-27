@@ -35,7 +35,7 @@ apps/
 
 早期文档倾向单包 `@scorel/core`，内部用 `src/protocol/` 建硬边界。这适合 0 到 1 快速落地，但长期会出现三个问题：
 
-1. WebUI 运行在浏览器，不应被 `fs`、MCP stdio、socket server、checkpoint 等 Node-only 依赖污染。
+1. WebUI 运行在浏览器，不应被 `fs`、MCP stdio、socket server 等 Node-only 依赖污染。
 2. CLI / GUI / WebUI / IM 都要处理连接、重连、`lastSeq` resync、transient delta、本地 tree projection，如果没有 Client 层会重复实现。
 3. Daemon 是产品运行面，不只是 Core 的一个子目录。它需要独立承载 local daemon、remote daemon、embedded host、service/Docker 部署。
 
@@ -64,7 +64,7 @@ apps/
 - `EventTypeHandler`
 - 内置工具、MCP tool registry
 - Hooks、Extensions、PromptBuilder、Config
-- File Checkpoint / Compact
+- Compact
 
 约束：可以依赖 `@scorel/protocol` 和 pi-ai，不依赖 `@scorel/daemon` / `@scorel/client` / `apps/*`。
 

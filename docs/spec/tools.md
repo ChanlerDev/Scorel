@@ -15,7 +15,7 @@
 
 三个问题都 **复用 pi-ai + pi-agent-core 已有的抽象**，Scorel 不重新发明；但上层代码只依赖 Scorel 自己 re-export / adapter 后的类型，避免把底层包名泄漏到 app、daemon、extension。
 
-**初期不做权限审批**：所有工具默认允许执行，用户靠自己的判断和 File Checkpoint（`spec/session.md §6`）的可回滚性兜底。权限策略作为后期能力再补。
+**M2 不做权限审批、沙箱和快照恢复**：先把 Coding Agent Alpha 跑通，让用户能在本地工作区完成真实搜索、读写、命令验证和 Todo 进度跟踪。M2 的安全边界来自清晰工具语义、pre-read / stale check、精确编辑失败规则、超时与输出截断，而不是恢复机制。
 
 ---
 
@@ -27,7 +27,7 @@ Scorel 对外暴露自己的 `AgentTool` / `Type` adapter，语义对齐 pi-ai �
 import { Type, type AgentTool } from '@scorel/core/tools';
 
 const readTool: AgentTool = {
-  name: 'read',
+  name: 'Read',
   label: 'Read File',
   description: '读取文件内容',
   parameters: Type.Object({
@@ -51,19 +51,29 @@ const readTool: AgentTool = {
 
 ## 3. 内置工具集
 
-| 工具 | 说明 | 执行模式 | 触发 File Checkpoint |
-|------|------|---------|---------------------|
-| `bash` | 命令执行，超时保护 | sequential | — |
-| `read` | 文件读取，支持行范围 | parallel | — |
-| `write` | 文件写入 | sequential | ✅ |
-| `edit` | 精确字符串替换 | sequential | ✅ |
-| `grep` | ripgrep 封装 | parallel | — |
-| `glob` | fast-glob 封装 | parallel | — |
-| `ls` | 目录列表 | parallel | — |
+M2 落地七个用户可见工具，语义参考 Claude Code 的基础 coding 工具，但按 Scorel 的 daemon/client/session 边界实现：
 
-**执行模式**：只读工具 parallel、写类或有副作用的工具 sequential。底层 pi-agent-core 已有对应抽象，Scorel 只通过 adapter 透出，不自建调度。
+| 工具 | 说明 | 执行模式 | M2 关键约束 |
+|------|------|---------|------------|
+| `Read` | 读取文件，支持行范围 | parallel | 只读文件不读目录；结果带稳定行号；大文件可用 offset/limit |
+| `Write` | 创建新文件或完整重写文件 | sequential | 写既有文件前必须先 `Read`；读后文件被外部修改必须失败；优先用 `Edit` 修改既有文件 |
+| `Edit` | 精确字符串替换 | sequential | 编辑前必须先 `Read`；读后文件被外部修改必须失败；`old_string` 不存在或不唯一时失败，除非显式 replace_all |
+| `Bash` | 命令执行 | sequential | 指定 cwd；超时保护；输出截断；失败作为 tool result 返回 |
+| `Glob` | 按文件名 / glob pattern 找文件 | parallel | 返回结构化路径列表；排序稳定；限制结果数量 |
+| `Grep` | 基于 ripgrep 的内容搜索 | parallel | 返回结构化匹配；支持 glob/type 过滤；限制结果数量和输出体积 |
+| `Todo` | 普通 Todo List | sequential | 创建、更新、删除任务；状态变化持久化并在 CLI 可见展示 |
 
-**File Checkpoint 接入点**：`write` / `edit` 以及任何写类自定义工具，执行前由 `beforeToolCall` hook 统一做快照。详见 `spec/session.md §6`。
+**执行模式**：只读工具 parallel、写类或有副作用的工具 sequential。底层 pi-agent-core 已有对应抽象时优先复用，Scorel 只通过 adapter 透出，不自建复杂调度。
+
+**工具使用原则**：
+- 读文件用 `Read`，不要让 `Bash` 代替 `cat` / `head` / `tail`。
+- 改既有文件优先用 `Edit`，不要让 `Bash` 代替 `sed -i` / heredoc / redirect。
+- `Write` 只用于创建新文件或完整重写。
+- 找文件用 `Glob`，搜内容用 `Grep`；不要把常规搜索塞进 `Bash rg/find`。
+- `Bash` 负责构建、测试、Git 状态、项目脚本等命令型工作。
+- 多步骤 coding task 用 `Todo` 记录当前计划和状态；CLI 必须能展示这些变化。
+
+**M2 之后再扩展**：`LS`、Web、LSP、notebook、subagent、MCP 动态工具等能力在基础 coding loop 稳定后再补齐。
 
 ---
 
@@ -73,18 +83,20 @@ const readTool: AgentTool = {
 
 | 预设 | 包含 |
 |------|------|
-| `coding` | 全部内置 |
-| `readonly` | `read` / `grep` / `glob` / `ls` |
-| `all` | 内置 + 已连接的 MCP |
+| `coding` | `Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` / `Todo` |
+| `readonly` | `Read` / `Glob` / `Grep` |
+| `all` | 内置 + 已连接的 MCP（M2 后） |
 | `none` | 不启用任何工具 |
 
 预设在 `config.toml` 的 `[tools]` 段声明（见 `spec/extensions.md §5`）。Extension 可以额外追加工具。
 
 ---
 
-## 5. MCP 集成
+## 5. MCP 集成（M2 后）
 
 pi-ai 本身不内置 MCP，Scorel 自己接——TypeScript 生态的 MCP SDK 已经成熟，接入成本不高。
+
+MCP 不属于 M2。M2 先把内置 coding 工具和 session/daemon/client/CLI 主链路跑通；MCP 在后续 ecosystem 阶段接入。
 
 ### 5.1 MCP 工具转换
 
@@ -110,7 +122,7 @@ function mcpToAgentTool(client: McpClient, tool: McpTool): AgentTool {
 
 MCP 生态里很多 server 用 Zod / 原生 JSON Schema，Scorel 工具签名统一在 TypeBox 风格 schema。JSON Schema 到 TypeBox 的转换由 adapter 层负责。
 
-### 5.2 初期：启动时加载
+### 5.2 后续：启动时加载
 
 ```typescript
 interface McpServerConfig {
@@ -121,9 +133,9 @@ interface McpServerConfig {
 }
 ```
 
-所有配置的 MCP 服务器在 session 启动时连接并加载工具描述，全部作为 `coding` / `all` 预设的一部分。
+所有配置的 MCP 服务器在 session 启动时连接并加载工具描述，全部作为 `all` 预设的一部分。是否进入 `coding` 预设，需要等内置 M2 工具稳定后再决定。
 
-### 5.3 延后：按需分级加载
+### 5.3 更后续：按需分级加载
 
 初期不做的：按 keyword 触发的 **Tier 2** 动态加载（`transformContext` 拦截用户消息，命中关键词才 attach 对应工具）。
 
@@ -144,13 +156,14 @@ interface McpServerConfig {
 ## 7. 初期范围与延后项
 
 **初期落地**
-- 内置工具集（7 个）
+- M2 内置工具集：`Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` / `Todo`
 - 工具集预设：`coding` / `readonly` / `all` / `none`
-- MCP 启动时加载
-- `write` / `edit` 触发 File Checkpoint
 
 **延后**
+- `LS` 等便利只读工具
+- WebFetch / WebSearch、LSP、notebook editing、worktree mode
 - **权限审批（PermissionPolicy）**：默认全允许，后期补黑名单 / 询问 / 拒绝规则
+- MCP 启动时加载
 - MCP Tier 2 按需加载
 - Subagent 工具（工具内 `new Agent()` 递归调用，隔离上下文）
 

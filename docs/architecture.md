@@ -21,7 +21,7 @@
 | `spec/runtime.md` | ScorelRuntime：执行引擎、persist 策略、cancel 处理、双队列 |
 | `spec/daemon.md` | Daemon 层：协议、transport、广播、重连同步、并发控制、auth |
 | `spec/client.md` | DaemonClient SDK：Client 侧统一接口 |
-| `spec/session.md` | Session 存储：JSONL v1、树状结构、Rewind、Fork、Checkpoint、压缩 |
+| `spec/session.md` | Session 存储：JSONL v1、树状结构、Rewind、Fork、压缩 |
 | `spec/tools.md` | 工具系统：内置工具集、MCP 集成 |
 | `spec/extensions.md` | 扩展点：Hooks、Extensions、System Prompt 组装、配置系统 |
 | `spec/channels.md` | Channel：Daemon 内部的非交互式消息注入适配器 |
@@ -50,7 +50,7 @@ Scorel 是构建在 **pi-ai** 之上的 **应用层编排平台**：
 | 统一 Daemon 层 | 所有 Entry 是 thin client，Daemon 唯一持有 Runtime + Session（ADR-002） |
 | 包边界分层 | `protocol / core / daemon / client / apps` 分层，Daemon 独立于 Core（ADR-004） |
 | 三种部署模式共用一套协议 | embedded / local socket / remote WS，DaemonClient API 不变 |
-| Event Sourcing + Replay | Rewind / Fork / File Checkpoint / Compact 共享同一个 replay 函数 |
+| Event Sourcing + Replay | Rewind / Fork / Compact 共享同一个 replay 函数 |
 
 ---
 
@@ -208,13 +208,13 @@ ScorelRuntime.executeTurn(context)
     │     └── compactIfOverThreshold(messages)   2. 超阈值触发压缩
     │
     ├── convertToLlm(messages)                ← Scorel 拦截
-    │     └── 过滤 rewind / file_snapshot / channel_metadata 等自定义消息
+    │     └── 过滤 rewind / channel_metadata 等自定义消息
     │
     ├── pi-ai.streamSimple(model, context)
     │     └── transformMessages                ← pi-ai 内部：跨 provider 转换
     │
     ├── 工具调度
-    │     ├── beforeToolCall                  ← Scorel 拦截：File Checkpoint
+    │     ├── beforeToolCall                  ← 可拦截 / 修改工具调用
     │     ├── tool.execute()
     │     └── afterToolCall
     │
@@ -240,7 +240,7 @@ pi-ai / pi-agent-core 内置 **两层消息抽象**，Scorel 深度依赖它：
 | **应用层** | `AgentMessage`（UserMessage / AssistantMessage / ToolResultMessage / **自定义类型**） | UI / 存储 / Extension / Channel |
 | **LLM 层** | `Message`（LLM 协议要求的严格子集） | LLM |
 
-转换点：`convertToLlm(AgentMessage[]) → Message[]`。自定义类型（`rewind`、`file_snapshot`、`channel_metadata`）只存在于应用层，LLM 永远看不到。
+转换点：`convertToLlm(AgentMessage[]) → Message[]`。自定义类型（`rewind`、`channel_metadata`）只存在于应用层，LLM 永远看不到。
 
 这是 Event Sourcing 架构能工作的根本原因——**存储里可以出现任何消息，LLM 只看到清洗过的那一份**。
 
@@ -259,7 +259,7 @@ pi-ai / pi-agent-core 内置 **两层消息抽象**，Scorel 深度依赖它：
    - Entry 面向同一个 DaemonClient API，部署差异收敛到 transport / daemon host
 
 3. **Event Sourcing：一切时间旅行都是 Replay**
-   - Rewind / Fork / File Checkpoint / Compact 都是同一个 replay 函数的不同输入
+   - Rewind / Fork / Compact 都是同一个 replay 函数的不同输入
    - JSONL 永不删除，一切历史可追溯、可调试、可审计
 
 4. **两层消息，清晰隔离**
@@ -311,7 +311,7 @@ pi-ai / pi-agent-core 内置 **两层消息抽象**，Scorel 深度依赖它：
 | **pi-\* 包版本紧耦合** | pi-ai 和 pi-agent-core 版本必须同步 | 依赖范围锁死到 patch 级，更新前先跑回归 |
 | **Steering 不能 mid-turn 打断** | 工具执行中用户插话要等工具完成 | UX 承诺 "等待当前工具"，长工具用 `cancel()` 兜底 |
 | **TypeBox vs Zod 不兼容** | MCP 生态常见 Zod | 写 TypeBox ↔ JSON Schema 转换层（pi-ai 已有 `convertJsonSchemaToTypeBox`） |
-| **Event Sourcing 的 JSONL 膨胀** | 长 session 文件会很大 | Compact 标记 + 旧 snapshot 归档到 `.archive/`（后期） |
+| **Event Sourcing 的 JSONL 膨胀** | 长 session 文件会很大 | Compact 标记 + 历史浏览按需分页（后期） |
 | **Daemon 单点故障** | Daemon 进程挂掉 = 所有 client 断连 | 优雅退出 + crash recovery（重启后从 JSONL replay 恢复状态） |
 | **环形缓冲溢出** | 长时间断线 client 重连时缓冲不够 | 降级到 JSONL persistent fallback；可配置缓冲深度 |
 | **Remote Daemon 安全** | WS 暴露到公网 | TLS 强制 + token auth + 可选 IP 白名单 |

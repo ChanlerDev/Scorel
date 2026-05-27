@@ -58,7 +58,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 
 - Local socket / WebSocket daemon.
 - Remote control, auth, reconnect after process boundary.
-- File checkpoint, rewind UX, compact UX, permission policy.
+- Rewind UX, compact UX, permission policy.
 - WebUI / GUI / channels / MCP tiered loading.
 
 **Status**: Done
@@ -67,13 +67,35 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 
 ## M2: Safe Coding CLI
 
-**Goal**: 用户敢让 agent 修改真实仓库，因为文件改动、上下文和中断状态都可恢复。
+**Goal**: 用户可以让 `scorel chat` 在真实工作区内完成小到中等 coding task：理解文件、搜索代码、编辑文件、运行验证、记录 Todo 进度，并在 CLI 中看见工具调用和任务状态变化。
 
 **Done when**:
 
-- 写类工具有 checkpoint。
-- rewind / compact / cancel / steer / followUp 可用。
-- CLI 能操作核心恢复能力。
+- 内置 `Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` / `Todo` 工具可通过 runtime loop 调用。
+- `Read` 支持大文件的行范围读取，并返回稳定的行号格式。
+- `Write` 写入新文件或完整重写文件；修改既有文件前必须先读，读后文件被外部修改必须失败。
+- `Edit` 基于精确字符串替换；未读文件、读后文件被外部修改、匹配不到、匹配不唯一都必须失败。
+- `Bash` 在指定工作目录执行命令，具备超时、输出截断和错误结果返回。
+- `Glob` / `Grep` 提供结构化代码发现能力，避免模型把搜索全部塞进 shell 文本输出。
+- `Todo` 提供普通 Todo List：任务创建、状态更新、删除；CLI 可见地展示 Todo 列表和状态变化。
+- 工具调用、工具结果、Todo 状态和错误都能通过 daemon/client 事件流传给 CLI，并写入 session JSONL。
+- `scorel chat` 可以在临时真实仓库中完成一次小型代码修改并运行验证命令。
+- 基础测试和 typecheck 通过。
+
+**Not in M2**:
+
+- Rewind / compact / cancel / steer / followUp UX.
+- Permission approval policy, sandbox, checkpoint/snapshot restore, remote daemon, MCP, GUI.
+- WebFetch / WebSearch, LSP, notebook editing, worktree mode, subagent/team orchestration.
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M2.1 | [`S0008`](spec/ship/S0008-coding-tools.md) | 暴露 `Read` / `Write` / `Edit` / `Bash`，打通文件读写和命令执行主链路。 | Planned |
+| M2.2 | [`S0009`](spec/ship/S0009-code-discovery-tools.md) | 暴露 `Glob` / `Grep`，让代码发现成为结构化工具结果。 | Planned |
+| M2.3 | [`S0010`](spec/ship/S0010-todo-tool-and-cli.md) | 暴露普通 Todo List，并在 CLI 中展示 Todo 列表和状态变化。 | Planned |
+| M2.4 | [`S0011`](spec/ship/S0011-coding-agent-alpha-smoke.md) | 端到端验证一次真实仓库 coding task：搜索、读取、编辑、测试、Todo 进度和恢复。 | Planned |
 
 **Status**: Planned
 
@@ -146,6 +168,10 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0005`](spec/ship/S0005-runtime-loop.md) | 实现最小 runtime loop | Done |
 | [`S0006`](spec/ship/S0006-embedded-daemon-client.md) | 实现 embedded daemon + client | Done |
 | [`S0007`](spec/ship/S0007-cli-alpha.md) | 实现 CLI Alpha | Done |
+| [`S0008`](spec/ship/S0008-coding-tools.md) | 实现文件读写和命令执行工具 | Planned |
+| [`S0009`](spec/ship/S0009-code-discovery-tools.md) | 实现代码发现工具 | Planned |
+| [`S0010`](spec/ship/S0010-todo-tool-and-cli.md) | 实现 Todo 工具和 CLI 可见状态 | Planned |
+| [`S0011`](spec/ship/S0011-coding-agent-alpha-smoke.md) | 验证 M2 coding agent alpha 端到端体验 | Planned |
 
 ---
 

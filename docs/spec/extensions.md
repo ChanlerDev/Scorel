@@ -28,7 +28,7 @@ Scorel 的 Hooks 分两类：**原生 Hook**（来自 pi-agent-core，串行/拦
 
 | Hook | 能力 | 典型用途 |
 |------|------|---------|
-| `beforeToolCall` | 拦截 / 修改工具调用 | File Checkpoint；未来的权限审批 |
+| `beforeToolCall` | 拦截 / 修改工具调用 | 参数归一化；未来的权限审批 |
 | `afterToolCall` | 覆盖工具结果 | 结果修正、日志审计 |
 | `transformContext` | 修改消息列表 | 压缩、rewind 解析；未来的记忆注入 |
 | `convertToLlm` | 过滤消息送 LLM | 隔离应用层自定义消息 |

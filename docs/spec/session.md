@@ -10,8 +10,8 @@
 Scorel 不把会话当做"可丢的上下文"，而当做**资产**。资产的核心要求有三条：
 
 1. **不丢失**：JSONL 只追加、不修改，任何历史都可被重建
-2. **可重放**：Rewind、Fork、File Checkpoint 都通过同一个机制从 JSONL 推导出目标状态
-3. **可隔离**：会话中的"自定义记录"（rewind 标记、文件快照引用、channel 元数据）只存在于应用层，LLM 永远看不到（由 `convertToLlm` 在边界上过滤）
+2. **可重放**：Rewind、Fork、Compact 等能力都通过同一个机制从 JSONL 推导出目标状态
+3. **可隔离**：会话中的"自定义记录"（rewind 标记、channel 元数据）只存在于应用层，LLM 永远看不到（由 `convertToLlm` 在边界上过滤）
 
 这三条要求共同决定了架构形状：**单一日志 + 树状结构 + 两层消息**。
 
@@ -176,11 +176,7 @@ async function rewindTo(targetEventId: EventId, expectedLeafId: EventId) {
   // 3. 更新 active leaf
   sessionLane.setActiveLeaf(targetEventId);
 
-  // 4. 如有 File Checkpoint → 恢复文件
-  const filesToRestore = collectSnapshots(tree, targetEventId);
-  for (const [path, hash] of filesToRestore) {
-    await fs.writeFile(path, await session.readSnapshot(hash));
-  }
+  // 4. 文件系统回滚不属于 session replay；用户仍通过 Git / 编辑工具处理工作区状态。
 }
 ```
 
@@ -217,44 +213,7 @@ Clone 不引入任何新机制，只是在已有 JSONL 上切一刀、复制一�
 
 ---
 
-## 6. File Checkpoint：写类工具的前置快照
-
-任何写类工具（`write` / `edit` / 自定义）执行**前**，自动对目标文件做快照。快照记录和消息**共用同一条 JSONL**，rewind 时一并恢复。
-
-```typescript
-// 在 beforeToolCall hook 里做（spec/extensions.md 的 hook 机制）
-beforeToolCall: async (ctx) => {
-  if (!isWriteTool(ctx.toolName)) return;
-
-  const path = extractPath(ctx.toolName, ctx.args);
-  if (!(await fs.exists(path))) return;
-
-  const content = await fs.readFile(path);
-  const hash = sha256(content);
-  await session.writeSnapshot(hash, content);  // content-addressable 去重
-  await session.append({ kind: 'file_snapshot', path, hash, at: Date.now() });
-}
-```
-
-**去重机制**：hash 作为文件名，同一内容只存一份。Coding Agent 场景下"多次读同一个文件"非常友好。
-
-**为什么不用 Git**：
-- Git 会误伤用户未提交的改动
-- Git 操作粒度是仓库级，不是 session 级
-- 跨仓库 / 非 Git 目录（如 `/tmp`）Git 不管用
-
-**存储结构**：
-```
-~/.scorel/sessions/
-  {sessionId}.jsonl         ← 主日志（append-only）
-  {sessionId}/
-    snapshots/
-      {hash}.blob           ← 文件快照内容（按哈希去重）
-```
-
----
-
-## 7. 压缩：`transformContext` 管线
+## 6. 压缩：`transformContext` 管线
 
 压缩全部实现为 `transformContext` hook，每轮推理前执行。初期两层：
 
@@ -296,7 +255,7 @@ const compactionPipeline: TransformContextHook = async (messages, signal) => {
 
 **用户手动触发**（如 `/compact` 斜杠命令）直接跑一次 Layer 2，不需要另一条独立逻辑。
 
-### 7.1 Auto Compact 安全约束
+### 6.1 Auto Compact 安全约束
 
 **自动 compact 绝不压缩当前 turn**。当前 turn（user message + assistant + 所有 tool_result）必须完整保留，否则 LLM 看不到自己的 tool_use/tool_result pair。
 
@@ -315,14 +274,14 @@ if (estimateTokens(compactCandidates) > threshold) {
 
 手动 compact 同理：只能 compact 到当前 activeLeaf 的最近一条 user message 之前。
 
-### 7.2 树模型中的 Compact
+### 6.2 树模型中的 Compact
 - CompactEvent 只影响**它的后代**的 context 构建
 - 在 compact 点之前分叉的其他分支不受影响
 - 旧事件仍在 JSONL 中，可供历史浏览
 
 ---
 
-## 8. 两层消息在本模块的落点
+## 7. 两层消息在本模块的落点
 
 `convertToLlm` 边界现在由 EventTypeHandler 的 `convertToLlm` 方法实现（详见 `spec/events.md §6`）。对 Session 模块来说：
 
@@ -336,19 +295,17 @@ if (estimateTokens(compactCandidates) > threshold) {
 
 ---
 
-## 9. 初期范围与延后项
+## 8. 初期范围与延后项
 
-**初期落地**
+**近期落地**
 - v1 JSONL 格式 + SessionHeader
 - SessionTree + buildContext
-- Rewind（乐观锁 + 不跨 compact）
-- File Checkpoint（基于 `beforeToolCall` hook）
-- 压缩 Layer 1 + Layer 2
 
 **延后**
+- Rewind（乐观锁 + 不跨 compact）
+- 压缩 Layer 1 + Layer 2
 - Fork / Clone（跨 session 复制）
 - 后续 schema migration（等真实 v2 出现再设计）
-- Snapshot 归档（旧 snapshot 移到 `.archive/` 防止膨胀）
 - 压缩摘要的 prompt 调优与策略自适应
 - 跨 session 的资产检索（依赖后期 Memory 模块）
 
