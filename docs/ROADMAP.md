@@ -95,9 +95,9 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | M2.1 | [`S0008`](spec/ship/S0008-coding-tools.md) | 暴露 `Read` / `Write` / `Edit` / `Bash`，打通文件读写和命令执行主链路。 | Done |
 | M2.2 | [`S0009`](spec/ship/S0009-code-discovery-tools.md) | 暴露 `Glob` / `Grep`，让代码发现成为结构化工具结果。 | Done |
 | M2.3 | [`S0010`](spec/ship/S0010-todo-tool-and-cli.md) | 暴露普通 Todo List，并在 CLI 中展示 Todo 列表和状态变化。 | Done |
-| M2.4 | [`S0011`](spec/ship/S0011-coding-agent-alpha-smoke.md) | 端到端验证一次真实仓库 coding task：搜索、读取、编辑、测试、Todo 进度和恢复。 | Planned |
+| M2.4 | [`S0011`](spec/ship/S0011-coding-agent-alpha-smoke.md) | 端到端验证一次真实仓库 coding task：搜索、读取、编辑、测试、Todo 进度和恢复。 | Done |
 
-**Status**: Planned
+**Status**: Done
 
 ---
 
@@ -171,7 +171,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0008`](spec/ship/S0008-coding-tools.md) | 实现文件读写和命令执行工具 | Done |
 | [`S0009`](spec/ship/S0009-code-discovery-tools.md) | 实现代码发现工具 | Done |
 | [`S0010`](spec/ship/S0010-todo-tool-and-cli.md) | 实现 Todo 工具和 CLI 可见状态 | Done |
-| [`S0011`](spec/ship/S0011-coding-agent-alpha-smoke.md) | 验证 M2 coding agent alpha 端到端体验 | Planned |
+| [`S0011`](spec/ship/S0011-coding-agent-alpha-smoke.md) | 验证 M2 coding agent alpha 端到端体验 | Done |
 
 ---
 

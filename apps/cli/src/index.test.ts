@@ -144,6 +144,59 @@ describe("@scorel/app-cli", () => {
       },
     });
   });
+
+  it("passes S0011 coding-agent-alpha smoke with tools, Todo, persistence, and resume", async () => {
+    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));
+    const sessionId = "ses_cli_coding_alpha";
+    const { mkdir: makeDir, writeFile } = await import("node:fs/promises");
+    await makeDir(join(workspaceDir, "src"));
+    await writeFile(join(workspaceDir, "src", "value.txt"), "status=wrong\n");
+
+    const first = await runCliWithInput(
+      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId, "--cwd", workspaceDir],
+      [
+        "/todo 1:in_progress:Find value|2:pending:Fix value|3:pending:Verify",
+        "/grep wrong src/*.txt",
+        "/read src/value.txt",
+        "/edit src/value.txt wrong right",
+        "/bash grep right src/value.txt",
+        "/todo 1:completed:Find value|2:completed:Fix value|3:completed:Verify",
+        ".exit",
+        "",
+      ].join("\n"),
+    );
+
+    expect(first.code).toBe(0);
+    for (const toolName of ["Todo", "Grep", "Read", "Edit", "Bash"]) {
+      expect(first.stdout).toContain(`[tool:${toolName}]`);
+    }
+    expect(first.stdout).toContain("[completed] 3 Verify");
+    expect(first.stdout).toContain("status=right");
+
+    const second = await runCliWithInput(
+      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId, "--cwd", workspaceDir],
+      "resume-ok\n.exit\n",
+    );
+    expect(second.code).toBe(0);
+    expect(second.stderr).toContain("resumed session ses_cli_coding_alpha");
+
+    const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
+    const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
+    const toolNames = lines
+      .filter((line) => line.type === "tool_result")
+      .map((line) => line.message.content[0].toolName);
+    expect(toolNames).toEqual(["Todo", "Grep", "Read", "Edit", "Bash", "Todo"]);
+    const lastTodo = lines.filter((line) => line.type === "tool_result").at(-1);
+    expect(lastTodo.message.content[0].result.details.todos).toEqual([
+      { id: "1", content: "Find value", status: "completed" },
+      { id: "2", content: "Fix value", status: "completed" },
+      { id: "3", content: "Verify", status: "completed" },
+    ]);
+    const resumedUser = lines.find((line) => line.type === "user_message" && line.message.content[0].text === "resume-ok");
+    const resumedUserIndex = lines.indexOf(resumedUser);
+    expect(resumedUser.parentId).toBe(lines[resumedUserIndex - 1].id);
+  });
 });
 
 const runCliWithInput = async (
