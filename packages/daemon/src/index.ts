@@ -162,6 +162,12 @@ export class EmbeddedDaemon {
           throughSeq: asSeq(this.#seqs.get(message.sessionId) ?? 0),
         });
         break;
+      case "subscribe_events":
+        connection.sessionId = message.sessionId;
+        this.#respond(connection, message, {
+          currentSeq: asSeq(this.#seqs.get(message.sessionId) ?? 0),
+        });
+        break;
       case "get_status":
         this.#respond(connection, message, {
           running: false,
@@ -177,7 +183,6 @@ export class EmbeddedDaemon {
         this.disconnect(connection);
         break;
       case "list_sessions":
-      case "subscribe_events":
         connection.emit({
           type: "error",
           requestId: message.requestId,

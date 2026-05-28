@@ -162,7 +162,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
-| M3.1 | [`S0013`](spec/ship/S0013-local-daemon-protocol.md) | 补齐本地 daemon 所需的协议、socket transport 合同和边界测试入口。 | Planned |
+| M3.1 | [`S0013`](spec/ship/S0013-local-daemon-protocol.md) | 补齐本地 daemon 所需的协议、socket transport 合同和边界测试入口。 | Done |
 | M3.2 | [`S0014`](spec/ship/S0014-local-daemon-lifecycle.md) | 实现可独立启动/停止的本地 daemon 进程和连接发现状态。 | Planned |
 | M3.3 | [`S0015`](spec/ship/S0015-local-attach-and-broadcast.md) | 暴露 `scorel attach` 并验证多个本地 client 共享同一 session 事件流。 | Planned |
 | M3.4 | [`S0016`](spec/ship/S0016-local-daemon-resync-smoke.md) | 验证本地 client 断线重连后的 missed event 补发和真实产品 smoke。 | Planned |
@@ -237,7 +237,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0010`](spec/ship/S0010-todo-tool-and-cli.md) | 实现 Todo 工具和 CLI 可见状态 | Done |
 | [`S0011`](spec/ship/S0011-coding-agent-alpha-smoke.md) | 验证 M2 coding agent alpha 端到端体验 | Done |
 | [`S0012`](spec/ship/S0012-coding-tools-maturity.md) | 成熟化内置 coding tools 契约与实现 | Done |
-| [`S0013`](spec/ship/S0013-local-daemon-protocol.md) | 补齐本地 daemon 协议与 socket transport 合同 | Planned |
+| [`S0013`](spec/ship/S0013-local-daemon-protocol.md) | 补齐本地 daemon 协议与 socket transport 合同 | Done |
 | [`S0014`](spec/ship/S0014-local-daemon-lifecycle.md) | 实现本地 daemon 进程生命周期和连接发现 | Planned |
 | [`S0015`](spec/ship/S0015-local-attach-and-broadcast.md) | 实现本地 attach 与多 client 广播 | Planned |
 | [`S0016`](spec/ship/S0016-local-daemon-resync-smoke.md) | 验证本地 daemon 断线补发与端到端 smoke | Planned |
