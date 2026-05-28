@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -7,7 +8,7 @@ import { Readable, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { cliAppName, cliClientDependency, cliDaemonDependency, runCli } from "@scorel/app-cli";
-import type { ScorelConfig } from "@scorel/daemon";
+import { createLocalDaemonState, type ScorelConfig } from "@scorel/daemon";
 
 describe("@scorel/app-cli", () => {
   it("is an entrypoint shell over client/daemon", () => {
@@ -22,6 +23,49 @@ describe("@scorel/app-cli", () => {
 
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("scorel daemon stopped");
+  });
+
+  it("reports a clear error when attach cannot find a local daemon", async () => {
+    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-attach-"));
+    const result = await runCliWithInput(["attach", "--session", "ses_missing"], "", testConfig("http://127.0.0.1:1"), sessionsDir);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("scorel attach error: local daemon is not running");
+  });
+
+  it("attaches to a local daemon socket from daemon state", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-attach-"));
+    const socketPath = join(stateDir, "daemon.sock");
+    const server = createNetServer((socket) => {
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk) => {
+        for (const line of chunk.toString().split("\n").filter(Boolean)) {
+          const message = JSON.parse(line) as { type: string; clientId?: string; requestId?: string };
+          if (message.type === "connect") {
+            socket.write(`${JSON.stringify({ type: "connected", clientId: message.clientId, sessionId: "ses_attach", currentSeq: 0 })}\n`);
+          }
+          if (message.type === "resync_events") {
+            socket.write(`${JSON.stringify({ type: "response", requestType: "resync_events", requestId: message.requestId, ok: true, data: { events: [], throughSeq: 0 } })}\n`);
+          }
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+    await createLocalDaemonState({
+      stateDir,
+      pid: 123,
+      socketPath,
+      token: "local-secret",
+      startedAt: 1,
+    });
+
+    try {
+      const result = await runCliWithInput(["attach", "--session", "ses_attach"], "", testConfig("http://127.0.0.1:1"), stateDir);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("scorel attach connected session ses_attach");
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
   });
 
   it("runs a real OpenAI-compatible coding loop through CLI, tools, persistence, and resume", async () => {

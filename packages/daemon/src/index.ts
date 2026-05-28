@@ -28,6 +28,7 @@ import {
   type ClientMessage,
   type ClientRequest,
   type ConnectParams,
+  type ConnectResult,
   type DaemonTransport,
   type DaemonMessage,
   type DeviceId,
@@ -71,6 +72,7 @@ export type LocalDaemonSocketConnection = {
 export type LocalDaemonSocketServerOptions = {
   socketPath: string;
   token: string;
+  onClientConnect?: (connection: LocalDaemonSocketConnection, params: ConnectParams) => ConnectResult;
   onClientMessage: (connection: LocalDaemonSocketConnection, message: ClientMessage) => DaemonMessage | void;
 };
 
@@ -144,11 +146,16 @@ export const startLocalDaemonSocketServer = async (
             continue;
           }
           connection.clientId = message.clientId;
-          connection.send({
-            type: "connected",
+          const result = options.onClientConnect?.(connection, message) ?? {
             clientId: message.clientId,
             sessionId: message.sessionId,
             currentSeq: message.lastSeq ?? asSeq(0),
+          };
+          connection.send({
+            type: "connected",
+            clientId: result.clientId,
+            sessionId: result.sessionId,
+            currentSeq: result.currentSeq,
           });
           continue;
         }
@@ -175,6 +182,59 @@ export const startLocalDaemonSocketServer = async (
       await rm(options.socketPath, { force: true });
     },
   };
+};
+
+export const startEmbeddedDaemonSocketServer = async (
+  options: { daemon: EmbeddedDaemon; socketPath: string; token: string },
+): Promise<LocalDaemonSocketServer> => {
+  const connections = new WeakMap<LocalDaemonSocketConnection, Connection>();
+  const daemonConnectionFor = (socketConnection: LocalDaemonSocketConnection, params?: ConnectParams): Connection => {
+    const existing = connections.get(socketConnection);
+    if (existing) {
+      return existing;
+    }
+    const connection: Connection = {
+      clientId: params?.clientId ?? asClientId("socket_unconnected"),
+      emit: (daemonMessage) => socketConnection.send(daemonMessage),
+    };
+    connections.set(socketConnection, connection);
+    return connection;
+  };
+
+  return startLocalDaemonSocketServer({
+    socketPath: options.socketPath,
+    token: options.token,
+    onClientConnect: (socketConnection, params) => {
+      const daemonConnection = daemonConnectionFor(socketConnection, params);
+      daemonConnection.clientId = params.clientId;
+      const result = options.daemon.connect(daemonConnection, params.sessionId);
+      return {
+        clientId: params.clientId,
+        sessionId: result.sessionId,
+        currentSeq: result.currentSeq,
+      };
+    },
+    onClientMessage: (socketConnection, message) => {
+      const daemonConnection = daemonConnectionFor(socketConnection);
+      if (!daemonConnection.clientId) {
+        return {
+          type: "error",
+          ok: false,
+          code: "invalid_request",
+          message: "socket is not connected",
+        };
+      }
+      void options.daemon.handleMessage(daemonConnection, message).catch((cause) => {
+        socketConnection.send({
+          type: "error",
+          ok: false,
+          code: "internal_error",
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+      });
+      return undefined;
+    },
+  });
 };
 
 const closeServer = (server: Server): Promise<void> =>

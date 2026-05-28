@@ -6,6 +6,7 @@ import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
 
 import { DaemonClient, clientPackageName } from "@scorel/client";
+import { NodeSocketTransport } from "@scorel/client/node";
 import {
   EmbeddedDaemon,
   createEmbeddedTransport,
@@ -16,7 +17,7 @@ import {
   scorelSessionsDir,
   type ScorelConfig,
 } from "@scorel/daemon";
-import { asClientId, asDeviceId, asSessionId, type ErrorEvent, type ScorelEvent } from "@scorel/protocol";
+import { asClientId, asDeviceId, asSeq, asSessionId, type ErrorEvent, type ScorelEvent } from "@scorel/protocol";
 
 export const cliAppName = "@scorel/app-cli" as const;
 export const cliClientDependency = clientPackageName;
@@ -58,8 +59,53 @@ export const runCli = async (
   if (command === "daemon") {
     return runCliDaemon(rest, { stateDir: runOptions.sessionsDir ?? join(homedir(), ".scorel"), output: io.output, error: io.error });
   }
+  if (command === "attach") {
+    return runAttach(parseAttachOptions(rest), { stateDir: runOptions.sessionsDir ?? join(homedir(), ".scorel"), output: io.output, error: io.error });
+  }
   writeUsage(io.error);
   return command === "--help" || command === "-h" ? 0 : 1;
+};
+
+type AttachOptions = {
+  sessionId: ReturnType<typeof asSessionId>;
+};
+
+const runAttach = async (
+  options: AttachOptions,
+  io: { stateDir: string; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
+): Promise<number> => {
+  const state = await readLocalDaemonState({ stateDir: io.stateDir });
+  if (!state) {
+    io.error.write("scorel attach error: local daemon is not running\n");
+    return 1;
+  }
+  const client = new DaemonClient(new NodeSocketTransport({ path: state.socketPath, token: state.token }), {
+    clientId: asClientId("client_cli_attach"),
+  });
+  try {
+    await client.connect(options.sessionId);
+    await client.resync(asSeq(0));
+    io.output.write(`scorel attach connected session ${options.sessionId}\n`);
+    client.disconnect();
+    return 0;
+  } catch (cause) {
+    io.error.write(`scorel attach error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+    return 1;
+  }
+};
+
+const parseAttachOptions = (argv: string[]): AttachOptions => {
+  let sessionId = asSessionId("ses_default");
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--session") {
+      sessionId = asSessionId(requireValue(argv, index, "--session"));
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown attach option: ${arg}`);
+  }
+  return { sessionId };
 };
 
 const runCliDaemon = async (
