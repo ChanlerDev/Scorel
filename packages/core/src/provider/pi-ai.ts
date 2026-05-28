@@ -218,7 +218,7 @@ const toolParameters = (name: string): Tool["parameters"] => {
         pattern: Type.String(),
         path: Type.Optional(Type.String()),
         glob: Type.Optional(Type.String()),
-        output_mode: Type.Optional(Type.Union([Type.Literal("files_with_matches"), Type.Literal("content"), Type.Literal("count")])),
+        output_mode: Type.Optional(Type.Union([Type.Literal("files"), Type.Literal("content"), Type.Literal("count")])),
         "-B": Type.Optional(Type.Number()),
         "-A": Type.Optional(Type.Number()),
         "-C": Type.Optional(Type.Number()),

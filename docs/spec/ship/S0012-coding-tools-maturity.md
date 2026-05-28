@@ -81,8 +81,8 @@ This is a tool-semantics hardening spec, not a checkpoint, sandbox, permission U
 
 - Arguments: `pattern`, `path?`, `glob?`, `output_mode?`, `-B?`, `-A?`, `-C?`, `context?`, `-n?`, `-i?`, `type?`, `head_limit?`, `offset?`, `multiline?`.
 - Uses ripgrep for content search.
-- Default `output_mode` is `files_with_matches`.
-- Supports `content`, `files_with_matches`, and `count`.
+- Default `output_mode` is `files`.
+- Supports `content`, `files`, and `count`.
 - Adds result limits by default.
 - Uses ripgrep `--max-columns 500` to avoid noisy minified/base64 lines.
 - Returns relative paths and pagination metadata.
@@ -121,7 +121,7 @@ This is a tool-semantics hardening spec, not a checkpoint, sandbox, permission U
 - `Edit` rejects missing, ambiguous, unchanged, stale, and incomplete-coverage edits.
 - `Write` and `Edit` do not return full file contents in model-facing tool results.
 - `Glob` returns ripgrep-backed file results with pagination metadata.
-- `Grep` returns ripgrep-backed search results for `files_with_matches`, `content`, and `count`.
+- `Grep` returns ripgrep-backed search results for `files`, `content`, and `count`.
 - CLI smoke uses `TodoWrite` and still verifies search, read, edit, bash, persistence, and resume.
 - `pnpm --filter @scorel/core test -- tools`
 - `pnpm --filter @scorel/app-cli test -- coding-agent-alpha`

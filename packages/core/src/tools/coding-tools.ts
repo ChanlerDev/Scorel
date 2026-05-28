@@ -75,7 +75,7 @@ type GrepArgs = {
   pattern: string;
   path?: string;
   glob?: string;
-  output_mode?: "files_with_matches" | "content" | "count";
+  output_mode?: "files" | "content" | "count";
   before_context?: number;
   after_context?: number;
   context?: number;
@@ -331,10 +331,11 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
     }),
     defineTool({
       name: "Grep",
-      description: "Search file contents with ripgrep. Use this instead of Bash grep or rg.",
+      description:
+        'Search file contents with ripgrep. Default output_mode is "files" for matching paths; use "content" for matching lines or "count" for match counts.',
       execute: async (_toolCallId, args, signal) => {
         const input = parseGrepArgs(args);
-        const mode = input.output_mode ?? "files_with_matches";
+        const mode = input.output_mode ?? "files";
         const limit = input.head_limit ?? DEFAULT_GREP_LIMIT;
         const offset = input.offset ?? 0;
         const rgArgs = grepArgs(input, mode);
@@ -457,11 +458,11 @@ const parseGrepArgs = (args: unknown): GrepArgs => {
   const outputMode = optionalString(input.output_mode ?? input.outputMode, "output_mode");
   if (
     outputMode !== undefined &&
-    outputMode !== "files_with_matches" &&
+    outputMode !== "files" &&
     outputMode !== "content" &&
     outputMode !== "count"
   ) {
-    throw new Error("output_mode must be files_with_matches, content, or count");
+    throw new Error("output_mode must be files, content, or count");
   }
   return {
     pattern: expectString(input.pattern, "pattern"),
@@ -796,7 +797,7 @@ const grepArgs = (input: GrepArgs, mode: NonNullable<GrepArgs["output_mode"]>): 
   if (input.case_insensitive) {
     args.push("-i");
   }
-  if (mode === "files_with_matches") {
+  if (mode === "files") {
     args.push("-l");
   } else if (mode === "count") {
     args.push("-c");

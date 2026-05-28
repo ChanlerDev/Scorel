@@ -304,12 +304,21 @@ describe("coding tools", () => {
 
     const files = await grep.execute(
       "call_grep",
-      { pattern: "alpha", glob: "src/*.ts" },
+      { pattern: "alpha", glob: "src/*.ts", output_mode: "files" },
       new AbortController().signal,
       () => undefined,
     );
     expect(textOf(files)).toContain("Found 2 files");
-    expect(files.details).toMatchObject({ mode: "files_with_matches", numFiles: 2 });
+    expect(files.details).toMatchObject({ mode: "files", numFiles: 2 });
+
+    await expect(
+      grep.execute(
+        "call_grep",
+        { pattern: "alpha", glob: "src/*.ts", output_mode: "paths" },
+        new AbortController().signal,
+        () => undefined,
+      ),
+    ).rejects.toThrow("output_mode must be files, content, or count");
 
     const count = await grep.execute(
       "call_grep",
