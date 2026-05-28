@@ -1,6 +1,7 @@
 import { daemonPackageName } from "@scorel/daemon";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState } from "@scorel/daemon";
 
@@ -63,3 +64,9 @@ export const runDaemonCommand = async (
   options.error.write("Usage: scorel-daemon start|status|stop\n");
   return command === "--help" || command === "-h" ? 0 : 1;
 };
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  runDaemonCommand(process.argv.slice(2)).then((code) => {
+    process.exitCode = code;
+  });
+}

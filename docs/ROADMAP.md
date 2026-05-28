@@ -242,6 +242,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0015`](spec/ship/S0015-local-attach-and-broadcast.md) | 实现本地 attach 与多 client 广播 | Done |
 | [`S0016`](spec/ship/S0016-local-daemon-resync-smoke.md) | 验证本地 daemon 断线补发与端到端 smoke | Done |
 | [`S0017`](spec/ship/S0017-grep-files-output-mode.md) | 简化 Grep 文件路径输出模式命名 | Done |
+| [`S0018`](spec/ship/S0018-daemon-entrypoint-smoke.md) | 修复 daemon app 开发态入口执行路径 | Done |
 
 ---
 

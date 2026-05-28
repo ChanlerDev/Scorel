@@ -16,11 +16,6 @@
     "typescript": "^5.9.3",
     "vitest": "4.0.13"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
   "engines": {
     "node": ">=22.19.0"
   }
