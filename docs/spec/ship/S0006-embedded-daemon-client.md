@@ -17,7 +17,7 @@ Close the internal M1 control loop by connecting DaemonClient to an embedded dae
 
 - `DaemonClient.sendMessage()` causes daemon to append the user event, execute runtime, persist assistant output, and broadcast events.
 - Daemon is the only writer to session storage in this path.
-- Embedded daemon accepts `sessionsDir`, the directory that directly stores session JSONL files. Product defaults such as `~/.scorel/sessions` are selected by apps, not by core session APIs.
+- Embedded daemon accepts `sessionsDir`, the directory that directly stores session JSONL files. The product default is fixed at `~/.scorel/sessions`; tests and debugging may pass an explicit directory.
 - Client receives transient streaming events and final persistent events.
 - Multiple embedded clients can subscribe to the same session in-process for tests.
 - CLI-facing code never imports runtime/session directly.

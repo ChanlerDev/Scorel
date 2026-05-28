@@ -1,4 +1,5 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
@@ -6,6 +7,7 @@ import { Readable, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { cliAppName, cliClientDependency, cliDaemonDependency, runCli } from "@scorel/app-cli";
+import type { ScorelConfig } from "@scorel/daemon";
 
 describe("@scorel/app-cli", () => {
   it("is an entrypoint shell over client/daemon", () => {
@@ -14,194 +16,110 @@ describe("@scorel/app-cli", () => {
     expect(cliDaemonDependency).toBe("@scorel/daemon");
   });
 
-  it("runs scorel chat through embedded daemon/client and resumes persisted sessions", async () => {
-    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
-    const sessionId = "ses_cli_alpha";
-
-    const first = await runCliWithInput(
-      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId],
-      "hello\n/echo tools\n.exit\n",
-    );
-    expect(first.code).toBe(0);
-    expect(first.stderr).toContain("created session ses_cli_alpha");
-    expect(first.stdout).toContain("Echo: hello");
-    expect(first.stdout).toContain("Tool: tools");
-
-    const second = await runCliWithInput(
-      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId],
-      "again\n.exit\n",
-    );
-    expect(second.code).toBe(0);
-    expect(second.stderr).toContain("resumed session ses_cli_alpha");
-    expect(second.stdout).toContain("Echo: again");
-
-    const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
-    const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
-    expect(lines.map((line) => line.type ?? "header")).toEqual([
-      "header",
-      "user_message",
-      "assistant_message",
-      "user_message",
-      "assistant_message",
-      "tool_result",
-      "assistant_message",
-      "user_message",
-      "assistant_message",
-    ]);
-
-    const finalFirstRunEvent = lines[6];
-    const resumedUserEvent = lines[7];
-    expect(resumedUserEvent.parentId).toBe(finalFirstRunEvent.id);
-    expect(lines.at(-1)).toMatchObject({ type: "assistant_message" });
-    expect(lines.at(-1).seq).toBeGreaterThan(resumedUserEvent.seq);
-  });
-
-  it("runs S0008 coding tools through CLI-visible daemon/client flow", async () => {
+  it("runs a real OpenAI-compatible coding loop through CLI, tools, persistence, and resume", async () => {
     const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
     const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));
-    const sessionId = "ses_cli_tools";
-    await import("node:fs/promises").then(({ writeFile }) => writeFile(join(workspaceDir, "note.txt"), "hello\nworld\n"));
-
-    const result = await runCliWithInput(
-      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId, "--cwd", workspaceDir],
-      [
-        "/read note.txt",
-        "/edit note.txt world scorel",
-        "/bash cat note.txt",
-        "/write created.txt done",
-        ".exit",
-        "",
-      ].join("\n"),
-    );
-
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("[tool:Read]");
-    expect(result.stdout).toContain("hello");
-    expect(result.stdout).toContain("[tool:Edit]");
-    expect(result.stdout).toContain("[tool:Bash]");
-    expect(result.stdout).toContain("scorel");
-    expect(result.stdout).toContain("[tool:Write]");
-
-    const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
-    const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
-    const toolResults = lines.filter((line) => line.type === "tool_result");
-    expect(toolResults.map((line) => line.message.content[0].toolName)).toEqual(["Read", "Edit", "Bash", "Write"]);
-  });
-
-  it("runs S0009 code discovery tools through CLI-visible daemon/client flow", async () => {
-    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
-    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));
-    const sessionId = "ses_cli_search";
-    const { mkdir: makeDir, writeFile } = await import("node:fs/promises");
-    await makeDir(join(workspaceDir, "src"));
-    await writeFile(join(workspaceDir, "src", "target.ts"), "export const target = true;\n");
-    await writeFile(join(workspaceDir, "src", "other.js"), "target\n");
-
-    const result = await runCliWithInput(
-      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId, "--cwd", workspaceDir],
-      ["/glob src/*.ts", "/grep target src/*.ts", ".exit", ""].join("\n"),
-    );
-
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("[tool:Glob]");
-    expect(result.stdout).toContain("src/target.ts");
-    expect(result.stdout).toContain("[tool:Grep]");
-    expect(result.stdout).toContain("src/target.ts");
-
-    const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
-    const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
-    const toolResults = lines.filter((line) => line.type === "tool_result");
-    expect(toolResults.map((line) => line.message.content[0].toolName)).toEqual(["Glob", "Grep"]);
-  });
-
-  it("runs S0010 Todo through CLI-visible daemon/client flow", async () => {
-    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
-    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));
-    const sessionId = "ses_cli_todo";
-
-    const result = await runCliWithInput(
-      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId, "--cwd", workspaceDir],
-      ["/todo 1:completed:Read file|2:in_progress:Edit file", ".exit", ""].join("\n"),
-    );
-
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain("[tool:Todo]");
-    expect(result.stdout).toContain("[completed] 1 Read file");
-    expect(result.stdout).toContain("[in_progress] 2 Edit file");
-
-    const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
-    const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
-    const todoResult = lines.find((line) => line.type === "tool_result");
-    expect(todoResult.message.content[0]).toMatchObject({
-      toolName: "Todo",
-      result: {
-        details: {
-          todos: [
-            { id: "1", content: "Read file", status: "completed" },
-            { id: "2", content: "Edit file", status: "in_progress" },
-          ],
-        },
-      },
-    });
-  });
-
-  it("passes S0011 coding-agent-alpha smoke with tools, Todo, persistence, and resume", async () => {
-    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
-    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));
-    const sessionId = "ses_cli_coding_alpha";
-    const { mkdir: makeDir, writeFile } = await import("node:fs/promises");
-    await makeDir(join(workspaceDir, "src"));
+    const sessionId = "ses_cli_real_coding_alpha";
+    await mkdir(join(workspaceDir, "src"));
     await writeFile(join(workspaceDir, "src", "value.txt"), "status=wrong\n");
-
-    const first = await runCliWithInput(
-      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId, "--cwd", workspaceDir],
-      [
-        "/todo 1:in_progress:Find value|2:pending:Fix value|3:pending:Verify",
-        "/grep wrong src/*.txt",
-        "/read src/value.txt",
-        "/edit src/value.txt wrong right",
-        "/bash grep right src/value.txt",
-        "/todo 1:completed:Find value|2:completed:Fix value|3:completed:Verify",
-        ".exit",
-        "",
-      ].join("\n"),
-    );
-
-    expect(first.code).toBe(0);
-    for (const toolName of ["Todo", "Grep", "Read", "Edit", "Bash"]) {
-      expect(first.stdout).toContain(`[tool:${toolName}]`);
-    }
-    expect(first.stdout).toContain("[completed] 3 Verify");
-    expect(first.stdout).toContain("status=right");
-
-    const second = await runCliWithInput(
-      ["chat", "--sessions-dir", sessionsDir, "--session", sessionId, "--cwd", workspaceDir],
-      "resume-ok\n.exit\n",
-    );
-    expect(second.code).toBe(0);
-    expect(second.stderr).toContain("resumed session ses_cli_coding_alpha");
-
-    const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
-    const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
-    const toolNames = lines
-      .filter((line) => line.type === "tool_result")
-      .map((line) => line.message.content[0].toolName);
-    expect(toolNames).toEqual(["Todo", "Grep", "Read", "Edit", "Bash", "Todo"]);
-    const lastTodo = lines.filter((line) => line.type === "tool_result").at(-1);
-    expect(lastTodo.message.content[0].result.details.todos).toEqual([
-      { id: "1", content: "Find value", status: "completed" },
-      { id: "2", content: "Fix value", status: "completed" },
-      { id: "3", content: "Verify", status: "completed" },
+    const server = await startChatServer([
+      {
+        content: null,
+        tool_calls: [
+          toolCall("call_todo_1", "Todo", {
+            todos: [
+              { id: "1", content: "Find value", status: "in_progress" },
+              { id: "2", content: "Fix value", status: "pending" },
+              { id: "3", content: "Verify", status: "pending" },
+            ],
+          }),
+        ],
+      },
+      {
+        content: null,
+        tool_calls: [toolCall("call_grep", "Grep", { pattern: "wrong", glob: "src/*.txt", outputMode: "content" })],
+      },
+      {
+        content: null,
+        tool_calls: [toolCall("call_read", "Read", { path: "src/value.txt" })],
+      },
+      {
+        content: null,
+        tool_calls: [toolCall("call_edit", "Edit", { path: "src/value.txt", old_string: "wrong", new_string: "right" })],
+      },
+      {
+        content: null,
+        tool_calls: [toolCall("call_bash", "Bash", { command: "grep right src/value.txt" })],
+      },
+      {
+        content: null,
+        tool_calls: [
+          toolCall("call_todo_2", "Todo", {
+            todos: [
+              { id: "1", content: "Find value", status: "completed" },
+              { id: "2", content: "Fix value", status: "completed" },
+              { id: "3", content: "Verify", status: "completed" },
+            ],
+          }),
+        ],
+      },
+      { content: "Done. status is fixed.", tool_calls: [] },
+      { content: "Resume sees completed work.", tool_calls: [] },
     ]);
-    const resumedUser = lines.find((line) => line.type === "user_message" && line.message.content[0].text === "resume-ok");
-    const resumedUserIndex = lines.indexOf(resumedUser);
-    expect(resumedUser.parentId).toBe(lines[resumedUserIndex - 1].id);
+
+    try {
+      const config = testConfig(server.baseURL);
+      const first = await runCliWithInput(
+        ["chat", "--session", sessionId, "--cwd", workspaceDir],
+        "Fix the failing status value and verify it.\n.exit\n",
+        config,
+        sessionsDir,
+      );
+
+      expect(first.code).toBe(0);
+      expect(first.stderr).toContain("created session ses_cli_real_coding_alpha");
+      for (const toolName of ["Todo", "Grep", "Read", "Edit", "Bash"]) {
+        expect(first.stdout).toContain(`[tool:${toolName}]`);
+      }
+      expect(first.stdout).toContain("[completed] 3 Verify");
+      expect(first.stdout).toContain("status=right");
+      expect(first.stdout).toContain("Done. status is fixed.");
+
+      const second = await runCliWithInput(
+        ["chat", "--session", sessionId, "--cwd", workspaceDir],
+        "Continue from previous context.\n.exit\n",
+        config,
+        sessionsDir,
+      );
+      expect(second.code).toBe(0);
+      expect(second.stderr).toContain("resumed session ses_cli_real_coding_alpha");
+      expect(second.stdout).toContain("Resume sees completed work.");
+
+      const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
+      const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
+      const toolNames = lines
+        .filter((line) => line.type === "tool_result")
+        .map((line) => line.message.content[0].toolName);
+      expect(toolNames).toEqual(["Todo", "Grep", "Read", "Edit", "Bash", "Todo"]);
+      expect(server.requests.length).toBe(8);
+      expect(server.requests[0]).toMatchObject({
+        model: "gpt-5.4-mini",
+        tools: expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "Read" }) })]),
+      });
+      expect(server.requests.at(-1)).toMatchObject({
+        messages: expect.arrayContaining([expect.objectContaining({ role: "tool" })]),
+      });
+    } finally {
+      await server.close();
+    }
   });
 });
 
 const runCliWithInput = async (
   argv: string[],
   input: string,
+  config: ScorelConfig,
+  sessionsDir: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> => {
   const stdout = new StringWritable();
   const stderr = new StringWritable();
@@ -209,7 +127,7 @@ const runCliWithInput = async (
     input: Readable.from([input]),
     output: stdout,
     error: stderr,
-  });
+  }, { config, sessionsDir });
   return { code, stdout: stdout.toString(), stderr: stderr.toString() };
 };
 
@@ -225,3 +143,100 @@ class StringWritable extends Writable {
     return this.#chunks.join("");
   }
 }
+
+type AssistantResponse = {
+  content: string | null;
+  tool_calls: Array<ReturnType<typeof toolCall>>;
+};
+
+const startChatServer = async (responses: AssistantResponse[]) => {
+  const requests: unknown[] = [];
+  let index = 0;
+  const server = createServer(async (request, response) => {
+    if (request.method !== "POST" || request.url !== "/chat/completions") {
+      response.writeHead(404).end();
+      return;
+    }
+    requests.push(await readJson(request));
+    const item = responses[index++];
+    if (!item) {
+      response.writeHead(500).end(JSON.stringify({ error: { message: "unexpected request" } }));
+      return;
+    }
+    writeSse(response, toSseChunks(item));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("missing server address");
+  }
+  return {
+    baseURL: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
+};
+
+const toolCall = (id: string, name: string, args: unknown) => ({
+  id,
+  type: "function" as const,
+  function: {
+    name,
+    arguments: JSON.stringify(args),
+  },
+});
+
+const testConfig = (baseURL: string): ScorelConfig => ({
+  model: {
+    type: "custom",
+    api: "openai-completions",
+    provider: "scorel-test",
+    id: "gpt-5.4-mini",
+    baseUrl: baseURL,
+    apiKey: "chanleramp",
+    contextWindow: 400000,
+    maxTokens: 128000,
+    reasoning: true,
+  },
+});
+
+const readJson = async (request: IncomingMessage): Promise<unknown> => {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+};
+
+const writeSse = (response: ServerResponse, chunks: unknown[]): void => {
+  response.writeHead(200, { "content-type": "text/event-stream" });
+  for (const chunk of chunks) {
+    response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  }
+  response.write("data: [DONE]\n\n");
+  response.end();
+};
+
+const toSseChunks = (item: AssistantResponse): unknown[] => {
+  const chunks = [];
+  if (item.content) {
+    chunks.push({
+      id: "chatcmpl-scorel-cli-test",
+      object: "chat.completion.chunk",
+      choices: [{ index: 0, delta: { content: item.content } }],
+    });
+  }
+  for (const [index, toolCall] of item.tool_calls.entries()) {
+    chunks.push({
+      id: "chatcmpl-scorel-cli-test",
+      object: "chat.completion.chunk",
+      choices: [{ index: 0, delta: { tool_calls: [{ index, ...toolCall }] } }],
+    });
+  }
+  chunks.push({
+    id: "chatcmpl-scorel-cli-test",
+    object: "chat.completion.chunk",
+    choices: [{ index: 0, delta: {}, finish_reason: item.tool_calls.length > 0 ? "tool_calls" : "stop" }],
+  });
+  return chunks;
+};

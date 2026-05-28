@@ -3,13 +3,15 @@ import {
   buildContext,
   corePackageName,
   createCodingTools,
+  createPiAiProvider,
   createSession,
-  defineTool,
+  loadScorelConfig,
   loadSession,
+  resolvePiAiModel,
+  scorelSessionsDir,
+  type ScorelConfig,
   type JsonlSession,
   type RawRuntimeEvent,
-  type RuntimeProvider,
-  type ToolResult,
 } from "@scorel/core";
 import {
   asClientId,
@@ -40,6 +42,12 @@ export const daemonCoreDependency = corePackageName;
 export const daemonProtocolDependency = protocolPackageName;
 export const daemonProtocolVersion = protocolVersion;
 export type EmbeddedDaemonTransport = DaemonTransport;
+export { loadScorelConfig, scorelSessionsDir, type ScorelConfig };
+
+export type RuntimeFactoryOptions = {
+  cwd: string;
+  config: ScorelConfig;
+};
 
 export type EmbeddedDaemonOptions = {
   sessionsDir: string;
@@ -49,173 +57,17 @@ export type EmbeddedDaemonOptions = {
   createId?: () => string;
 };
 
-export const createM1FakeRuntime = (options: { cwd?: string } = {}): ScorelRuntime => {
-  const runtime = new ScorelRuntime({ provider: createM1FakeProvider() });
-  for (const tool of createCodingTools({ cwd: options.cwd ?? process.cwd() })) {
+export const createRealRuntime = (options: RuntimeFactoryOptions): ScorelRuntime => {
+  const runtime = new ScorelRuntime({
+    provider: createPiAiProvider({
+      model: resolvePiAiModel(options.config.model),
+      apiKey: options.config.model.apiKey,
+    }),
+  });
+  for (const tool of createCodingTools({ cwd: options.cwd })) {
     runtime.registerTool(tool);
   }
-  runtime.registerTool(
-    defineTool({
-      name: "echo",
-      description: "Echo input text for CLI Alpha verification",
-      execute: async (_toolCallId, args): Promise<ToolResult> => ({
-        content: [{ type: "text", text: String((args as { text?: unknown }).text ?? "") }],
-      }),
-    }),
-  );
   return runtime;
-};
-
-const createM1FakeProvider = (): RuntimeProvider => ({
-  streamTurn: async function* ({ context }) {
-    const toolResult = lastToolResultText(context);
-    if (toolResult !== undefined) {
-      const text = `Tool: ${toolResult}`;
-      yield { type: "text_delta", delta: text };
-      return assistantText(text);
-    }
-
-    const input = lastUserText(context);
-    const codingToolCall = parseFakeCodingToolCall(input);
-    if (codingToolCall) {
-      return {
-        role: "assistant",
-        content: [{ type: "tool_call", ...codingToolCall }],
-        stopReason: "tool_call",
-      };
-    }
-
-    if (input.startsWith("/echo ")) {
-      return {
-        role: "assistant",
-        content: [
-          {
-            type: "tool_call",
-            toolCallId: "call_echo",
-            toolName: "echo",
-            args: { text: input.slice("/echo ".length) },
-          },
-        ],
-        stopReason: "tool_call",
-      };
-    }
-
-    const text = `Echo: ${input}`;
-    yield { type: "text_delta", delta: text };
-    return assistantText(text);
-  },
-});
-
-const parseFakeCodingToolCall = (
-  input: string,
-): { toolCallId: string; toolName: string; args: Record<string, unknown> } | undefined => {
-  if (input.startsWith("/read ")) {
-    return {
-      toolCallId: "call_read",
-      toolName: "Read",
-      args: { path: input.slice("/read ".length).trim() },
-    };
-  }
-  if (input.startsWith("/write ")) {
-    const [path, ...contentParts] = input.slice("/write ".length).trim().split(/\s+/);
-    if (!path) {
-      return undefined;
-    }
-    return {
-      toolCallId: "call_write",
-      toolName: "Write",
-      args: { path, content: contentParts.join(" ") },
-    };
-  }
-  if (input.startsWith("/edit ")) {
-    const [path, oldString, newString] = input.slice("/edit ".length).trim().split(/\s+/);
-    if (!path || oldString === undefined || newString === undefined) {
-      return undefined;
-    }
-    return {
-      toolCallId: "call_edit",
-      toolName: "Edit",
-      args: { path, old_string: oldString, new_string: newString },
-    };
-  }
-  if (input.startsWith("/bash ")) {
-    return {
-      toolCallId: "call_bash",
-      toolName: "Bash",
-      args: { command: input.slice("/bash ".length).trim() },
-    };
-  }
-  if (input.startsWith("/glob ")) {
-    return {
-      toolCallId: "call_glob",
-      toolName: "Glob",
-      args: { pattern: input.slice("/glob ".length).trim() },
-    };
-  }
-  if (input.startsWith("/grep ")) {
-    const [pattern, glob] = input.slice("/grep ".length).trim().split(/\s+/);
-    if (!pattern) {
-      return undefined;
-    }
-    return {
-      toolCallId: "call_grep",
-      toolName: "Grep",
-      args: { pattern, glob, outputMode: "content" },
-    };
-  }
-  if (input.startsWith("/todo ")) {
-    return {
-      toolCallId: "call_todo",
-      toolName: "Todo",
-      args: { todos: parseFakeTodos(input.slice("/todo ".length).trim()) },
-    };
-  }
-  return undefined;
-};
-
-const parseFakeTodos = (input: string): Array<{ id: string; status: string; content: string }> =>
-  input
-    .split("|")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0)
-    .map((item) => {
-      const [id, status, ...contentParts] = item.split(":");
-      return {
-        id: id ?? "",
-        status: status ?? "pending",
-        content: contentParts.join(":"),
-      };
-    });
-
-const assistantText = (text: string): ScorelMessage & { role: "assistant" } => ({
-  role: "assistant",
-  content: [{ type: "text", text }],
-  stopReason: "end_turn",
-});
-
-const lastUserText = (context: ScorelMessage[]): string => {
-  const user = findLast(context, (message) => message.role === "user");
-  return user?.content.find((block) => block.type === "text")?.text ?? "";
-};
-
-const lastToolResultText = (context: ScorelMessage[]): string | undefined => {
-  const toolResult = context.at(-1)?.role === "tool_result" ? context.at(-1) : undefined;
-  const block = toolResult?.content.find((candidate) => candidate.type === "tool_result");
-  if (!block || typeof block.result !== "object" || block.result === null) {
-    return undefined;
-  }
-  const result = block.result as { content?: Array<{ type: string; text?: string }> };
-  return result.content?.find((candidate) => candidate.type === "text")?.text;
-};
-
-const findLast = <TValue>(values: TValue[], predicate: (value: TValue) => boolean): TValue | undefined => {
-  for (let index = values.length - 1; index >= 0; index -= 1) {
-    const value = values[index];
-    if (value !== undefined && predicate(value)) {
-      return value;
-    }
-  }
-  return undefined;
 };
 
 type SessionLane = {

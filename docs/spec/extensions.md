@@ -155,21 +155,53 @@ class PromptBuilder {
 
 **格式**：TOML
 
-**优先级**（高 → 低）：
-1. CLI 参数 / 环境变量
-2. `.scorel/config.toml`（项目级）
-3. `~/.scorel/config.toml`（全局）
-4. 内置默认值
+**读取顺序**（高 → 低）：
+1. `.scorel/config.toml`（项目级）
+2. `~/.scorel/config.toml`（用户级）
+
+`~/.scorel` 是固定用户级根目录；`~/.scorel/config.toml` 是固定用户级配置文件；JSONL session 默认固定写入 `~/.scorel/sessions`。这些路径是产品约定，不作为可配置字段暴露。测试和内部嵌入场景可以通过代码注入临时 session 目录，但这不是用户配置面。
+
+环境变量不参与通用配置覆盖，只通过 `apiKeyEnv` 指向具体密钥。CLI 参数也不复制完整 config schema；只有明确属于交互控制的参数才进入 CLI。
 
 ### 5.2 初期配置示例
 
+pi-ai 已支持的内置 provider 使用 `type = "builtin"`，Scorel 只把 provider/model/api key 交给 pi-ai，不在本仓库重写 provider 协议：
+
 ```toml
-[agent]
-model = "anthropic:claude-opus-4-5"
+[model]
+type = "builtin"
+provider = "openai"
+id = "gpt-5.4-mini"
+apiKeyEnv = "SCOREL_API_KEY"
+```
 
-[session]
-auto_compact_threshold = 0.7
+自定义兼容 endpoint 使用 `type = "custom"`，并显式声明兼容协议。这个分支和 builtin provider 分开，避免把任意自定义 endpoint 混成 pi-ai 内置 provider：
 
+```toml
+[model]
+type = "custom"
+api = "openai-completions"
+provider = "chanleramp"
+id = "gpt-5.4-mini"
+baseUrl = "https://amp.chanler.dev/v1"
+apiKeyEnv = "SCOREL_API_KEY"
+contextWindow = 400000
+maxTokens = 128000
+reasoning = true
+```
+
+`api` 初期只接受以下四个值：
+
+```text
+openai-completions
+openai-responses
+google-generative-ai
+anthropic-messages
+```
+
+工具配置和扩展配置在对应模块稳定后进入同一个 schema：
+
+```toml
 [tools]
 preset = "coding"
 
@@ -186,7 +218,13 @@ command = "mcp-server-github"
 disabled = ["experimental-memory"]
 ```
 
-### 5.3 延后段落
+### 5.3 Schema 规则
+
+配置必须通过 `SCOREL_CONFIG_SCHEMA` 校验。未知 section 和未知 key 都应由通用 schema 校验拒绝，例如根级 `sessionsDir = "/tmp/nope"` 必须报 `Unsupported config key: sessionsDir`，不能为单个字段写特殊判断。
+
+当前已落地的稳定 section 只有 `[model]`。未来新增 `[tools]` / `[mcp]` / `[extensions]` 时，必须先把字段加入 schema，再接入加载逻辑和测试。
+
+### 5.4 延后段落
 
 - `[permissions]` — 权限策略。初期工具默认全允许，权限审批整体后补
 - `[channels.telegram]` / `[channels.wechat]` — IM Channel 配置
@@ -203,12 +241,13 @@ disabled = ["experimental-memory"]
 - 广播事件：`turn_finish` / `turn_error` / `rewind` / `compact`
 - Extension 加载 + 错误隔离（`tools` / `commands` / `onEvent`）
 - System Prompt 组装与预算
-- TOML 配置的核心段：`[agent]` / `[session]` / `[tools]` / `[channels]` / `[mcp]` / `[extensions]`
+- TOML 配置的核心段：`[model]`，并通过 `SCOREL_CONFIG_SCHEMA` 统一拒绝未知 section/key
 
 **延后**
 - Extension 的沙箱与权限边界（现阶段信任本地扩展）
 - Prompt 的模板化与多语种切换
 - 热更新配置（初期启动时读一次即可）
+- `[tools]` / `[channels]` / `[mcp]` / `[extensions]` 的完整配置 schema
 - Skills 加载（`~/.scorel/skills/*/SKILL.md`）
 
 ---

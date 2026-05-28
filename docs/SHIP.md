@@ -27,6 +27,8 @@
 pnpm typecheck && pnpm test
 ```
 
+涉及 `scorel chat` 真实产品路径的 spec，还必须补一条手工 smoke：用真实 LLM provider、真实临时工作区和真实 JSONL session 验证端到端行为。不能用 mock/fake provider 作为完成证明。
+
 后续可以收敛成 `pnpm check` 或 `node scripts/check.mjs`，但 SHIP 里记录的命令必须始终可直接执行。
 
 ---
@@ -185,6 +187,7 @@ codex/S####-slug
 - 模块接口变化 → 对应 `docs/spec/*.md`
 - 新工作单元 → `docs/spec/ship/S####-*.md`（只在准备实现或范围已确认时创建）
 - 计划变化 → `docs/ROADMAP.md`
+- 配置 schema / provider 接入变化 → `docs/spec/extensions.md` + 当前 S spec
 - 讨论和取舍 → `self/discussions/`
 - 决策锁定 → `self/decisions/` + 必要时同步 `docs/decisions/`
 

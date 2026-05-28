@@ -75,7 +75,7 @@ This is M2.1. It makes `scorel chat` capable of reading files, editing files, wr
 ## Acceptance Criteria
 
 - `scorel chat` can use the built-in tools through the daemon/client path.
-- A fake-provider test can trigger `Read`, `Write`, `Edit`, and `Bash` without real API credentials.
+- A real-provider smoke can trigger `Read`, `Write`, `Edit`, and `Bash` through model tool calls.
 - Tool call and tool result events are persisted in JSONL and restored into context.
 - `Write` and `Edit` reject existing-file changes when the file was not read first.
 - `Write` and `Edit` reject stale writes after external file modification.

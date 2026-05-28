@@ -52,7 +52,7 @@ This is M2.2. It keeps common code search out of ad hoc shell output so tool res
 ## Acceptance Criteria
 
 - `scorel chat` can use `Glob` and `Grep` through the daemon/client path.
-- Fake-provider tests can trigger both tools without real API credentials.
+- A real-provider smoke can trigger both tools through model tool calls.
 - `Glob` returns stable path lists and respects result limits.
 - `Grep` returns structured matches and respects result/output limits.
 - Tool calls and results are persisted in JSONL and restored into context.

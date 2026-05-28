@@ -1,7 +1,6 @@
 #!/usr/bin/env -S node --import tsx
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Readable, Writable } from "node:stream";
 
@@ -9,8 +8,11 @@ import { DaemonClient, clientPackageName } from "@scorel/client";
 import {
   EmbeddedDaemon,
   createEmbeddedTransport,
-  createM1FakeRuntime,
+  createRealRuntime,
   daemonPackageName,
+  loadScorelConfig,
+  scorelSessionsDir,
+  type ScorelConfig,
 } from "@scorel/daemon";
 import { asClientId, asDeviceId, asSessionId, type ErrorEvent, type ScorelEvent } from "@scorel/protocol";
 
@@ -24,17 +26,24 @@ export type CliIo = {
   error: NodeJS.WritableStream;
 };
 
+export type CliRunOptions = {
+  config?: ScorelConfig;
+  sessionsDir?: string;
+};
+
 type ChatOptions = {
   sessionsDir: string;
   sessionId: ReturnType<typeof asSessionId>;
   cwd: string;
+  config?: ScorelConfig;
 };
 
-const defaultSessionsDir = (): string => join(homedir(), ".scorel", "sessions");
+const defaultSessionsDir = (): string => scorelSessionsDir(homedir());
 
 export const runCli = async (
   argv: string[],
   io: CliIo = { input: process.stdin, output: process.stdout, error: process.stderr },
+  runOptions: CliRunOptions = {},
 ): Promise<number> => {
   const [command, ...rest] = argv;
   if (command === "chat") {
@@ -42,17 +51,18 @@ export const runCli = async (
       writeUsage(io.output);
       return 0;
     }
-    return runChat(parseChatOptions(rest), io);
+    return runChat({ ...parseChatOptions(rest), config: runOptions.config, sessionsDir: runOptions.sessionsDir ?? defaultSessionsDir() }, io);
   }
   writeUsage(io.error);
   return command === "--help" || command === "-h" ? 0 : 1;
 };
 
 export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> => {
+  const config = options.config ?? (await loadScorelConfig({ cwd: options.cwd }));
   const daemon = new EmbeddedDaemon({
     sessionsDir: options.sessionsDir,
     deviceId: asDeviceId("device_local"),
-    createRuntime: () => createM1FakeRuntime({ cwd: options.cwd }),
+    createRuntime: () => createRealRuntime({ cwd: options.cwd, config }),
   });
   const client = new DaemonClient(createEmbeddedTransport(daemon), {
     clientId: asClientId("client_cli"),
@@ -61,7 +71,7 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
   await daemon.start();
   try {
     await client.connect(options.sessionId);
-    const resumed = await loadOrCreateSession(client, options);
+    const resumed = await loadOrCreateSession(client, options, config);
     io.error.write(`scorel chat ${resumed ? "resumed" : "created"} session ${options.sessionId}\n`);
 
     const rl = createInterface({ input: io.input as Readable, crlfDelay: Infinity });
@@ -106,14 +116,14 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
   }
 };
 
-const loadOrCreateSession = async (client: DaemonClient, options: ChatOptions): Promise<boolean> => {
+const loadOrCreateSession = async (client: DaemonClient, options: ChatOptions, config: ScorelConfig): Promise<boolean> => {
   try {
     await client.loadSession(options.sessionId);
     return true;
   } catch {
     await client.createSession({
       sessionId: options.sessionId,
-      meta: { model: "m1-fake-provider" },
+      meta: { model: config.model.id },
     });
     return false;
   }
@@ -121,18 +131,12 @@ const loadOrCreateSession = async (client: DaemonClient, options: ChatOptions): 
 
 const parseChatOptions = (argv: string[]): ChatOptions => {
   let sessionId = asSessionId("ses_default");
-  let sessionsDir = process.env.SCOREL_SESSIONS_DIR ?? defaultSessionsDir();
   let cwd = process.cwd();
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--session") {
       sessionId = asSessionId(requireValue(argv, index, "--session"));
-      index += 1;
-      continue;
-    }
-    if (arg === "--sessions-dir") {
-      sessionsDir = requireValue(argv, index, "--sessions-dir");
       index += 1;
       continue;
     }
@@ -144,7 +148,7 @@ const parseChatOptions = (argv: string[]): ChatOptions => {
     throw new Error(`Unknown chat option: ${arg}`);
   }
 
-  return { sessionId, sessionsDir, cwd };
+  return { sessionId, sessionsDir: defaultSessionsDir(), cwd };
 };
 
 const requireValue = (argv: string[], index: number, flag: string): string => {
@@ -162,7 +166,7 @@ const promptIfInteractive = (output: NodeJS.WritableStream): void => {
 };
 
 const writeUsage = (output: NodeJS.WritableStream): void => {
-  output.write("Usage: scorel chat [--session <id>] [--sessions-dir <dir>] [--cwd <dir>]\n");
+  output.write("Usage: scorel chat [--session <id>] [--cwd <dir>]\n");
 };
 
 const writeEventError = (output: NodeJS.WritableStream, event: ErrorEvent): void => {

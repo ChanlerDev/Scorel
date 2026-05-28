@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@mariozechner/pi-ai": "0.73.1",
     "@scorel/protocol": "workspace:*"
-  },
-  "devDependencies": {}
+  }
 }

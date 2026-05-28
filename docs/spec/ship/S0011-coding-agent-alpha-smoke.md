@@ -8,7 +8,9 @@ This is M2.4. It proves `scorel chat` can complete a small coding task in a real
 
 ## Deliverable
 
-- End-to-end fake-provider coding smoke test.
+- End-to-end real-provider coding smoke test.
+- Strict config schema for pi-ai builtin/custom model selection.
+- Fixed Scorel user root and session path: `~/.scorel` and `~/.scorel/sessions`.
 - Temporary repository fixture with source files and a test command.
 - Scripted task that requires `Glob` or `Grep`, `Read`, `Edit` or `Write`, `Bash`, and `Todo`.
 - Assertions for CLI-visible tool output and Todo status changes.
@@ -31,26 +33,57 @@ The smoke should use a small real workspace, for example:
 
 ## Scope
 
-- Use fake provider / scripted tool calls for deterministic CI.
+- Use pi-ai for real provider protocol handling in product validation.
+- Keep fixed product paths out of config; config only covers variable model/provider settings.
+- Keep pi-ai builtin models and custom compatible endpoints as separate config branches.
 - Verify the full daemon/client/CLI path.
 - Keep the fixture small and fast.
 - Treat this spec as M2 completion proof.
 
 ## Not In Scope
 
-- Real provider smoke as a CI requirement.
+- Mock-only or scripted fake-provider validation as completion proof.
 - Broad benchmark suite.
 - Permission approval, sandbox, checkpoint, remote daemon, MCP, GUI.
 - Complex multi-file refactors.
 
 ## Acceptance Criteria
 
-- The end-to-end smoke fails before the integrated M2 path is complete.
+- The end-to-end smoke fails before the integrated real-provider M2 path is complete.
 - The smoke passes after S0008, S0009, and S0010 are implemented.
 - CLI output includes visible Todo transitions and tool progress/result output.
 - JSONL contains the expected user message, assistant/tool events, and Todo state changes.
 - Resume loads enough context for the model to continue from the completed task.
 - `pnpm typecheck && pnpm test` passes.
+
+## Config Shape
+
+Builtin pi-ai model:
+
+```toml
+[model]
+type = "builtin"
+provider = "openai"
+id = "gpt-5.4-mini"
+apiKeyEnv = "SCOREL_API_KEY"
+```
+
+Custom compatible endpoint:
+
+```toml
+[model]
+type = "custom"
+api = "openai-completions"
+provider = "chanleramp"
+id = "gpt-5.4-mini"
+baseUrl = "https://amp.chanler.dev/v1"
+apiKeyEnv = "SCOREL_API_KEY"
+contextWindow = 400000
+maxTokens = 128000
+reasoning = true
+```
+
+Supported custom `api` values for M2 are `openai-completions`, `openai-responses`, `google-generative-ai`, and `anthropic-messages`.
 
 ## Verification
 
@@ -73,5 +106,5 @@ The smoke should use a small real workspace, for example:
 ## Risks
 
 - A smoke that only checks isolated tool calls will not prove product value. It must go through CLI-visible daemon/client flow.
-- A real-provider-only smoke would be flaky and hard to reproduce. Keep CI fake-provider based.
+- A mock-only smoke can hide the product failure mode where `scorel chat` cannot actually call an LLM. Completion proof must include a real provider run.
 - If resume is skipped, Scorel loses its product distinction from a disposable coding chat.

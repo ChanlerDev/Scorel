@@ -79,6 +79,8 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 - `Glob` / `Grep` 提供结构化代码发现能力，避免模型把搜索全部塞进 shell 文本输出。
 - `Todo` 提供普通 Todo List：任务创建、状态更新、删除；CLI 可见地展示 Todo 列表和状态变化。
 - 工具调用、工具结果、Todo 状态和错误都能通过 daemon/client 事件流传给 CLI，并写入 session JSONL。
+- `scorel chat` 使用 pi-ai 接入真实 LLM；pi-ai 内置 provider 和自定义兼容 endpoint 在 config 中分成两条明确路径。
+- Config 通过 `SCOREL_CONFIG_SCHEMA` 统一拒绝未知 section/key；固定产品路径如 `~/.scorel` 和 `~/.scorel/sessions` 不暴露成用户配置项。
 - `scorel chat` 可以在临时真实仓库中完成一次小型代码修改并运行验证命令。
 - 基础测试和 typecheck 通过。
 

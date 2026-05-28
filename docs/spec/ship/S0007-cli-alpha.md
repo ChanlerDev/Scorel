@@ -11,7 +11,7 @@ Expose the M1 product experience: `scorel chat` starts the embedded path, stream
 - Prompt input loop for minimal multi-turn chat.
 - Streaming assistant output.
 - Basic status/error output.
-- Fake runtime or fake provider mode for automated tests.
+- Real provider runtime path for manual/product validation.
 
 ## Success Criteria
 
@@ -31,8 +31,7 @@ Expose the M1 product experience: `scorel chat` starts the embedded path, stream
 ## Verification
 
 - `pnpm --filter @scorel/app-cli test`
-- End-to-end test runs CLI against fake runtime/provider and verifies multi-turn persistence.
-- Manual smoke test with a real provider may be documented, but CI must not require API credentials.
+- End-to-end validation runs CLI against a real provider and verifies multi-turn persistence.
 - `pnpm -r typecheck`
 - `pnpm -r test`
 
@@ -47,4 +46,4 @@ Expose the M1 product experience: `scorel chat` starts the embedded path, stream
 ## Risks
 
 - Putting UX shortcuts directly into CLI can bypass daemon/client and invalidate the architecture.
-- Depending on real provider credentials for validation will make M1 hard to reproduce. Keep fake-provider tests first.
+- Mock-only validation can make the CLI look complete while no real model can run. Keep deterministic unit coverage, but product completion requires real-provider validation.
