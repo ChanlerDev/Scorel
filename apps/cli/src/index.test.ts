@@ -16,6 +16,14 @@ describe("@scorel/app-cli", () => {
     expect(cliDaemonDependency).toBe("@scorel/daemon");
   });
 
+  it("routes daemon status to local daemon discovery", async () => {
+    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-state-"));
+    const result = await runCliWithInput(["daemon", "status"], "", testConfig("http://127.0.0.1:1"), sessionsDir);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("scorel daemon stopped");
+  });
+
   it("runs a real OpenAI-compatible coding loop through CLI, tools, persistence, and resume", async () => {
     const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
     const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));

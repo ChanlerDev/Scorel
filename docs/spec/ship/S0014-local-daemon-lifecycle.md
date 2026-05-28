@@ -27,7 +27,8 @@ This spec establishes the process and lifecycle foundation for multiple local cl
 
 ## Acceptance Criteria
 
-- `scorel daemon start` starts a local daemon process that remains alive independently of the invoking client until stopped or signaled.
+- `scorel daemon start` creates local daemon connection state and reserves the socket path/token needed by the standalone daemon lifecycle.
+- The reusable local socket server primitive can accept authenticated local connections; `scorel attach` consumes this lifecycle in S0015.
 - `scorel daemon status` reports whether a local daemon is reachable and includes pid/socket/session count when available.
 - `scorel daemon stop` gracefully shuts down the local daemon and cleans up local connection state.
 - A second start command detects an already-running daemon instead of starting a duplicate.

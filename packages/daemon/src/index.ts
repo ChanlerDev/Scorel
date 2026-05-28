@@ -1,3 +1,7 @@
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server, type Socket } from "node:net";
+import { join } from "node:path";
+
 import {
   ScorelRuntime,
   buildContext,
@@ -23,6 +27,7 @@ import {
   type ClientId,
   type ClientMessage,
   type ClientRequest,
+  type ConnectParams,
   type DaemonTransport,
   type DaemonMessage,
   type DeviceId,
@@ -43,6 +48,139 @@ export const daemonProtocolDependency = protocolPackageName;
 export const daemonProtocolVersion = protocolVersion;
 export type EmbeddedDaemonTransport = DaemonTransport;
 export { loadScorelConfig, scorelSessionsDir, type ScorelConfig };
+
+export type LocalDaemonState = {
+  pid: number;
+  socketPath: string;
+  token: string;
+  startedAt: number;
+};
+
+export type LocalDaemonStateOptions = {
+  stateDir: string;
+};
+
+export type CreateLocalDaemonStateOptions = LocalDaemonStateOptions & LocalDaemonState;
+
+export type LocalDaemonSocketConnection = {
+  clientId?: ClientId;
+  socket: Socket;
+  send(message: DaemonMessage): void;
+};
+
+export type LocalDaemonSocketServerOptions = {
+  socketPath: string;
+  token: string;
+  onClientMessage: (connection: LocalDaemonSocketConnection, message: ClientMessage) => DaemonMessage | void;
+};
+
+export type LocalDaemonSocketServer = {
+  socketPath: string;
+  close(): Promise<void>;
+};
+
+const localDaemonStateFile = (stateDir: string): string => join(stateDir, "daemon.json");
+
+export const createLocalDaemonState = async (options: CreateLocalDaemonStateOptions): Promise<LocalDaemonState> => {
+  const state = {
+    pid: options.pid,
+    socketPath: options.socketPath,
+    token: options.token,
+    startedAt: options.startedAt,
+  };
+  await mkdir(options.stateDir, { recursive: true });
+  await writeFile(localDaemonStateFile(options.stateDir), `${JSON.stringify(state, null, 2)}\n`);
+  return state;
+};
+
+export const readLocalDaemonState = async (options: LocalDaemonStateOptions): Promise<LocalDaemonState | null> => {
+  try {
+    return JSON.parse(await readFile(localDaemonStateFile(options.stateDir), "utf8")) as LocalDaemonState;
+  } catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
+      return null;
+    }
+    throw cause;
+  }
+};
+
+export const removeLocalDaemonState = async (options: LocalDaemonStateOptions): Promise<void> => {
+  await rm(localDaemonStateFile(options.stateDir), { force: true });
+};
+
+export const startLocalDaemonSocketServer = async (
+  options: LocalDaemonSocketServerOptions,
+): Promise<LocalDaemonSocketServer> => {
+  await rm(options.socketPath, { force: true });
+  const server = createServer((socket) => {
+    let buffer = "";
+    const connection: LocalDaemonSocketConnection = {
+      socket,
+      send(message) {
+        socket.write(`${JSON.stringify(message)}\n`);
+      },
+    };
+
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      while (buffer.includes("\n")) {
+        const index = buffer.indexOf("\n");
+        const line = buffer.slice(0, index);
+        buffer = buffer.slice(index + 1);
+        if (!line.trim()) {
+          continue;
+        }
+        const message = JSON.parse(line) as ClientMessage | ({ type: "connect"; token: string } & ConnectParams);
+        if (message.type === "connect") {
+          if (message.token !== options.token) {
+            connection.send({
+              type: "error",
+              ok: false,
+              code: "invalid_request",
+              message: "invalid local token",
+            });
+            socket.end();
+            continue;
+          }
+          connection.clientId = message.clientId;
+          connection.send({
+            type: "connected",
+            clientId: message.clientId,
+            sessionId: message.sessionId,
+            currentSeq: message.lastSeq ?? asSeq(0),
+          });
+          continue;
+        }
+        const response = options.onClientMessage(connection, message);
+        if (response) {
+          connection.send(response);
+        }
+      }
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(options.socketPath, () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  return {
+    socketPath: options.socketPath,
+    close: async () => {
+      await closeServer(server);
+      await rm(options.socketPath, { force: true });
+    },
+  };
+};
+
+const closeServer = (server: Server): Promise<void> =>
+  new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
 
 export type RuntimeFactoryOptions = {
   cwd: string;

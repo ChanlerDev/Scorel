@@ -3,6 +3,7 @@ import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { Readable, Writable } from "node:stream";
+import { join } from "node:path";
 
 import { DaemonClient, clientPackageName } from "@scorel/client";
 import {
@@ -11,6 +12,7 @@ import {
   createRealRuntime,
   daemonPackageName,
   loadScorelConfig,
+  readLocalDaemonState,
   scorelSessionsDir,
   type ScorelConfig,
 } from "@scorel/daemon";
@@ -53,7 +55,28 @@ export const runCli = async (
     }
     return runChat({ ...parseChatOptions(rest), config: runOptions.config, sessionsDir: runOptions.sessionsDir ?? defaultSessionsDir() }, io);
   }
+  if (command === "daemon") {
+    return runCliDaemon(rest, { stateDir: runOptions.sessionsDir ?? join(homedir(), ".scorel"), output: io.output, error: io.error });
+  }
   writeUsage(io.error);
+  return command === "--help" || command === "-h" ? 0 : 1;
+};
+
+const runCliDaemon = async (
+  argv: string[],
+  options: { stateDir: string; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
+): Promise<number> => {
+  const [command] = argv;
+  if (command === "status") {
+    const state = await readLocalDaemonState({ stateDir: options.stateDir });
+    if (!state) {
+      options.error.write("scorel daemon stopped\n");
+      return 1;
+    }
+    options.output.write(`scorel daemon running pid=${state.pid} socket=${state.socketPath}\n`);
+    return 0;
+  }
+  options.error.write("Usage: scorel daemon status\n");
   return command === "--help" || command === "-h" ? 0 : 1;
 };
 
