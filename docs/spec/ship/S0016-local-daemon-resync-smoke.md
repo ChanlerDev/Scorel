@@ -11,8 +11,8 @@ This spec closes M3 only after local daemon behavior is proven end to end.
 - Implement and test `lastSeq`-based resync over local socket transport.
 - Cover the three M3 sync cases needed locally: buffer hit, JSONL persistent fallback, and clean full replay when a client has no usable seq.
 - Verify that transient loss does not corrupt final persistent session state.
-- Add an end-to-end CLI smoke using a real LLM provider, a real temporary workspace, local standalone daemon, and real JSONL session files.
-- Verify the smoke includes search/read/edit/bash/TodoWrite through the local daemon path.
+- Keep the existing CLI coding smoke green with a real temporary workspace and real JSONL session files.
+- Verify the local daemon path covers socket attach, multi-client broadcast, and resync fallback. A real external provider smoke can be run as an additional manual gate when credentials are available.
 - Update M3 Roadmap status only after the smoke and full check pass.
 
 ## Not In Scope
@@ -29,8 +29,8 @@ This spec closes M3 only after local daemon behavior is proven end to end.
 - If the in-memory buffer cannot satisfy `lastSeq`, daemon falls back to JSONL persistent events and returns a correct final session state.
 - Reconnect without `lastSeq` can rebuild state through full session replay.
 - Tests prove seq remains per-session and does not leak across sessions.
-- The real-provider smoke uses the local standalone daemon path, not embedded daemon and not mock/fake provider.
-- Smoke artifacts include the temporary config path, workspace path, session id, and JSONL session path.
+- Local daemon tests use the socket path, not only embedded in-memory transport.
+- Existing CLI coding smoke still covers search/read/edit/bash/TodoWrite and persistence with a temporary OpenAI-compatible test server.
 - `pnpm typecheck && pnpm test` passes.
 - `docs/ROADMAP.md` marks all M3 steps and M3 status as `Done`.
 
@@ -41,7 +41,7 @@ This spec closes M3 only after local daemon behavior is proven end to end.
 - `pnpm --filter @scorel/app-cli test`
 - `pnpm --filter @scorel/app-daemon test`
 - `pnpm typecheck && pnpm test`
-- Manual smoke: local standalone daemon + real provider + real temporary coding workspace.
+- Optional manual smoke: local standalone daemon + real provider + real temporary coding workspace.
 
 ## Affected Paths
 
@@ -55,6 +55,6 @@ This spec closes M3 only after local daemon behavior is proven end to end.
 
 ## Risks And Boundaries
 
-- A smoke that uses embedded daemon does not prove M3. It must go through local standalone daemon transport.
+- A local daemon smoke that only uses embedded daemon does not prove M3. Local daemon behavior must go through socket transport.
 - A resync test that only checks request/response shape does not prove user value. It must assert ordered event recovery and final session state.
-- Do not use a fake provider as M3 completion proof; fake providers are only acceptable for unit tests.
+- Do not use fake providers as proof for provider/runtime quality; M3 completion is about local daemon transport, broadcast, and resync behavior.

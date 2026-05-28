@@ -19,17 +19,23 @@ import {
 } from "./index.js";
 
 const createDaemon = () =>
-  new EmbeddedDaemon({
-    sessionsDir: mkdtempSync(join(tmpdir(), "scorel-s0013-")),
-    deviceId: asDeviceId("device_test"),
-    createRuntime: () => new ScorelRuntime({ provider: emptyProvider }),
-    now: () => 1,
-    createId: () => "evt_test",
-  });
+  {
+    let nextId = 0;
+    return new EmbeddedDaemon({
+      sessionsDir: mkdtempSync(join(tmpdir(), "scorel-s0013-")),
+      deviceId: asDeviceId("device_test"),
+      createRuntime: () => new ScorelRuntime({ provider: emptyProvider }),
+      now: () => 1,
+      createId: () => {
+        nextId += 1;
+        return `evt_test_${nextId}`;
+      },
+    });
+  };
 
 const emptyProvider: RuntimeProvider = {
   streamTurn: async function* () {
-    return { role: "assistant", content: [{ type: "text", text: "" }], stopReason: "end_turn" };
+    return { role: "assistant", content: [{ type: "text", text: "ok" }], stopReason: "end_turn" };
   },
 };
 
@@ -170,6 +176,64 @@ describe("daemon protocol boundary", () => {
       await expect(waitForDaemonMessage(clientBMessages, (message) => message.type === "event")).resolves.toMatchObject({
         type: "event",
         event: { type: "user_message", sessionId: "ses_socket" },
+      });
+    } finally {
+      clientA.close();
+      clientB.close();
+      await server.close();
+      await daemon.shutdown();
+    }
+  });
+
+  it("falls back to persistent JSONL events when socket resync buffer is cold", async () => {
+    const daemon = createDaemon();
+    const socketPath = join(mkdtempSync(join(tmpdir(), "scorel-resync-socket-")), "daemon.sock");
+    const server = await startEmbeddedDaemonSocketServer({
+      daemon,
+      socketPath,
+      token: "local-secret",
+    });
+    await daemon.start();
+    const clientA = await connectTestSocket(socketPath, "local-secret", "client_a", "ses_resync");
+    const clientB = await connectTestSocket(socketPath, "local-secret", "client_b", "ses_resync");
+    const clientAMessages: DaemonMessage[] = [];
+    const clientBMessages: DaemonMessage[] = [];
+
+    try {
+      clientA.onMessage((message) => clientAMessages.push(message));
+      clientB.onMessage((message) => clientBMessages.push(message));
+      clientA.send({
+        type: "create_session",
+        requestId: asRequestId("req_create_resync"),
+        sessionId: asSessionId("ses_resync"),
+        meta: { model: "test-model" },
+      });
+      await waitForDaemonMessage(clientAMessages, (message) => "requestId" in message && message.requestId === "req_create_resync");
+      clientA.send({
+        type: "send_message",
+        requestId: asRequestId("req_send_resync"),
+        sessionId: asSessionId("ses_resync"),
+        content: "hello",
+      });
+      await waitForDaemonMessage(clientAMessages, (message) => message.type === "event" && message.event.type === "assistant_message");
+      daemon.releaseSessionEventBuffer(asSessionId("ses_resync"));
+
+      clientB.send({
+        type: "resync_events",
+        requestId: asRequestId("req_resync_cold"),
+        sessionId: asSessionId("ses_resync"),
+        fromSeq: asSeq(1),
+      });
+
+      await expect(
+        waitForDaemonMessage(clientBMessages, (message) => "requestId" in message && message.requestId === "req_resync_cold"),
+      ).resolves.toMatchObject({
+        type: "response",
+        requestType: "resync_events",
+        data: {
+          events: expect.arrayContaining([expect.objectContaining({ type: "assistant_message" })]),
+          throughSeq: expect.any(Number),
+        },
       });
     } finally {
       clientA.close();

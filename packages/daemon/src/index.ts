@@ -342,6 +342,10 @@ export class EmbeddedDaemon {
     this.#connections.delete(connection);
   }
 
+  releaseSessionEventBuffer(sessionId: SessionId): void {
+    this.#events.delete(sessionId);
+  }
+
   async handleMessage(connection: Connection, message: ClientMessage): Promise<void> {
     this.#assertStarted();
     switch (message.type) {
@@ -356,7 +360,7 @@ export class EmbeddedDaemon {
         break;
       case "resync_events":
         this.#respond(connection, message, {
-          events: this.#eventsAfter(message.sessionId, message.fromSeq),
+          events: await this.#resyncEvents(message.sessionId, message.fromSeq),
           throughSeq: asSeq(this.#seqs.get(message.sessionId) ?? 0),
         });
         break;
@@ -599,6 +603,16 @@ export class EmbeddedDaemon {
   #eventsAfter(sessionId: SessionId, fromSeq: Seq | undefined): ScorelEvent[] {
     const from = Number(fromSeq ?? 0);
     return (this.#events.get(sessionId) ?? []).filter((event) => Number(event.seq) > from);
+  }
+
+  async #resyncEvents(sessionId: SessionId, fromSeq: Seq | undefined): Promise<ScorelEvent[]> {
+    const buffered = this.#eventsAfter(sessionId, fromSeq);
+    if (buffered.length > 0) {
+      return buffered;
+    }
+    const from = Number(fromSeq ?? 0);
+    const lane = await this.#getLane(sessionId);
+    return [...lane.session.tree].filter((event) => Number(event.seq) > from);
   }
 
   async #getLane(sessionId: SessionId): Promise<SessionLane> {
