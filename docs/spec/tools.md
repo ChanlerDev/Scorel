@@ -15,7 +15,7 @@
 
 三个问题都 **复用 pi-ai + pi-agent-core 已有的抽象**，Scorel 不重新发明；但上层代码只依赖 Scorel 自己 re-export / adapter 后的类型，避免把底层包名泄漏到 app、daemon、extension。
 
-**M2 不做权限审批、沙箱和快照恢复**：先把 Coding Agent Alpha 跑通，让用户能在本地工作区完成真实搜索、读写、命令验证和 Todo 进度跟踪。M2 的安全边界来自清晰工具语义、pre-read / stale check、精确编辑失败规则、超时与输出截断，而不是恢复机制。
+**M2 / S0012 不做权限审批、沙箱和快照恢复**：先把 Coding Agent Alpha 跑通，让用户能在本地工作区完成真实搜索、读写、命令验证和 Todo 进度跟踪。当前安全边界来自清晰工具语义、read coverage / stale check、精确编辑失败规则、超时与输出截断，而不是恢复机制。
 
 ---
 
@@ -31,9 +31,10 @@ const readTool: AgentTool = {
   label: 'Read File',
   description: '读取文件内容',
   parameters: Type.Object({
-    path: Type.String(),
+    file_path: Type.String(),
     offset: Type.Optional(Type.Number()),
     limit: Type.Optional(Type.Number()),
+    full: Type.Optional(Type.Boolean()),
   }),
   execute: async (toolCallId, args, signal, onUpdate) => {
     const content = await fs.readFile(args.path, 'utf-8');
@@ -55,23 +56,23 @@ M2 落地七个用户可见工具，语义参考 Claude Code 的基础 coding �
 
 | 工具 | 说明 | 执行模式 | M2 关键约束 |
 |------|------|---------|------------|
-| `Read` | 读取文件，支持行范围 | parallel | 只读文件不读目录；结果带稳定行号；大文件可用 offset/limit |
-| `Write` | 创建新文件或完整重写文件 | sequential | 写既有文件前必须先 `Read`；读后文件被外部修改必须失败；优先用 `Edit` 修改既有文件 |
-| `Edit` | 精确字符串替换 | sequential | 编辑前必须先 `Read`；读后文件被外部修改必须失败；`old_string` 不存在或不唯一时失败，除非显式 replace_all |
+| `Read` | 读取文本文件，支持行范围 | parallel | 只读文件不读目录；结果带稳定行号；默认最多返回 2000 个完整行，并同时受当前模型 context window 1% 的估算 token 预算限制；`full: true` 使用 10% 预算；无 context window 时 fallback 为 200000；token 估算按带行号的返回文本计算，暂按约 3 字符/token；预算截断只按整行回退；结果带 startLine/endLine/totalLines/truncated/nextOffset/canWrite/estimatedTokens/tokenBudget；同一文件版本下读段可累积，覆盖完整文件后解锁写入 |
+| `Write` | 创建新文件或完整重写文件 | sequential | 写既有文件前必须已读覆盖完整当前文件；读后文件被外部修改必须失败；模型侧结果不返回旧/新完整内容；优先用 `Edit` 修改既有文件 |
+| `Edit` | 精确字符串替换 | sequential | 编辑前必须已读覆盖完整当前文件；读后文件被外部修改必须失败；`old_string` 不存在或不唯一时失败，除非显式 replace_all；模型侧结果只返回成功与替换计数 |
 | `Bash` | 命令执行 | sequential | 指定 cwd；超时保护；输出截断；失败作为 tool result 返回 |
-| `Glob` | 按文件名 / glob pattern 找文件 | parallel | 返回结构化路径列表；排序稳定；限制结果数量 |
-| `Grep` | 基于 ripgrep 的内容搜索 | parallel | 返回结构化匹配；支持 glob/type 过滤；限制结果数量和输出体积 |
-| `Todo` | 普通 Todo List | sequential | 创建、更新、删除任务；状态变化持久化并在 CLI 可见展示 |
+| `Glob` | 按文件名 / glob pattern 找文件 | parallel | 基于 ripgrep file discovery；返回结构化路径列表；排序稳定；支持分页 |
+| `Grep` | 基于 ripgrep 的内容搜索 | parallel | 支持 glob/type/-A/-B/-C/context/-n/-i/multiline 过滤；支持 content/files/count 输出；限制结果数量，并用 max-columns 控制超长行 |
+| `TodoWrite` | 完整替换 Todo List | sequential | 参数是完整 todos；返回 oldTodos/currentTodos；全 completed 时系统清空 currentTodos |
 
 **执行模式**：只读工具 parallel、写类或有副作用的工具 sequential。底层 pi-agent-core 已有对应抽象时优先复用，Scorel 只通过 adapter 透出，不自建复杂调度。
 
 **工具使用原则**：
-- 读文件用 `Read`，不要让 `Bash` 代替 `cat` / `head` / `tail`。
+- 读文件用 `Read`，不要让 `Bash` 代替 `cat` / `head` / `tail`。长文件默认截断；继续阅读用 `offset`，同一版本下读段覆盖完整文件后即可写。`full: true` 请求一次读完整文件，并使用 10% context window 预算。`Read` 不会为了满足预算截断单行；如果单行过长会失败并提示换搜索/专用工具。
 - 改既有文件优先用 `Edit`，不要让 `Bash` 代替 `sed -i` / heredoc / redirect。
 - `Write` 只用于创建新文件或完整重写。
 - 找文件用 `Glob`，搜内容用 `Grep`；不要把常规搜索塞进 `Bash rg/find`。
 - `Bash` 负责构建、测试、Git 状态、项目脚本等命令型工作。
-- 多步骤 coding task 用 `Todo` 记录当前计划和状态；CLI 必须能展示这些变化。
+- 多步骤 coding task 用 `TodoWrite` 记录当前计划和状态；CLI 必须能展示这些变化。
 
 **M2 之后再扩展**：`LS`、Web、LSP、notebook、subagent、MCP 动态工具等能力在基础 coding loop 稳定后再补齐。
 
@@ -83,7 +84,7 @@ M2 落地七个用户可见工具，语义参考 Claude Code 的基础 coding �
 
 | 预设 | 包含 |
 |------|------|
-| `coding` | `Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` / `Todo` |
+| `coding` | `Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` / `TodoWrite` |
 | `readonly` | `Read` / `Glob` / `Grep` |
 | `all` | 内置 + 已连接的 MCP（M2 后） |
 | `none` | 不启用任何工具 |
@@ -156,7 +157,7 @@ interface McpServerConfig {
 ## 7. 初期范围与延后项
 
 **初期落地**
-- M2 内置工具集：`Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` / `Todo`
+- M2/S0012 内置工具集：`Read` / `Write` / `Edit` / `Bash` / `Glob` / `Grep` / `TodoWrite`
 - 工具集预设：`coding` / `readonly` / `all` / `none`
 
 **延后**

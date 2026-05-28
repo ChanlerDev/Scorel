@@ -103,6 +103,51 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 
 ---
 
+## M2.5: Coding Tools Maturity
+
+**Goal**: 让 M2 工具契约更接近成熟 coding agent：read coverage 写锁、ripgrep-backed search、`TodoWrite` 完整列表语义，以及更稳定的 tool result。
+
+**Done when**:
+
+- `Todo` 替换为 `TodoWrite`，参数为完整 Todo List。
+- `TodoWrite` 返回旧列表和当前列表；全 completed 时系统清空当前列表。
+- `Read` 默认截断长文件，并以同一文件版本的累计读段决定是否解锁 `Write` / `Edit`。
+- `Read` 默认按完整行截断长文件，并返回当前读取范围、总行数和继续读取 offset。
+- `Read` 同时受行数和当前模型 context window 动态估算 token 预算限制，不返回半行；普通读取 1%，`full: true` 10%。
+- `Write` 创建新文件不需要 read，更新既有文件必须先读段覆盖完整当前文件且通过 stale check。
+- `Edit` 必须先读段覆盖完整当前文件，并保持精确匹配失败规则。
+- `Glob` / `Grep` 使用 ripgrep 路径，支持分页和结构化结果。
+- CLI smoke 仍覆盖搜索、读取、编辑、命令验证、TodoWrite、持久化和 resume。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M2.5.1 | [`S0012`](spec/ship/S0012-coding-tools-maturity.md) | 成熟化内置 coding tools 契约与实现。 | Done |
+
+**Not in M2.5**:
+
+- MultiEdit、checkpoint、sandbox、permission approval UI、LSP、background Bash、MCP。
+
+**Status**: Done
+
+---
+
+## Future: Background Commands And Monitors
+
+**Goal**: 为长时间运行的构建、测试、dev server、日志监控提供明确的后台任务模型，而不是把 monitor 语义塞进一次性 `Bash`。
+
+**Candidate scope**:
+
+- Background Bash / task id / poll / stop。
+- 超长输出归档和增量读取。
+- Dev server readiness 检测。
+- 权限策略与 command classifier。
+
+**Status**: Planned
+
+---
+
 ## M3: Local Daemon
 
 **Goal**: 多个本地 client 可以连接同一个 daemon，共享同一个 session 和事件流。
@@ -174,6 +219,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0009`](spec/ship/S0009-code-discovery-tools.md) | 实现代码发现工具 | Done |
 | [`S0010`](spec/ship/S0010-todo-tool-and-cli.md) | 实现 Todo 工具和 CLI 可见状态 | Done |
 | [`S0011`](spec/ship/S0011-coding-agent-alpha-smoke.md) | 验证 M2 coding agent alpha 端到端体验 | Done |
+| [`S0012`](spec/ship/S0012-coding-tools-maturity.md) | 成熟化内置 coding tools 契约与实现 | Done |
 
 ---
 

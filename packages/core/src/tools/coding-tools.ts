@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import type { AgentTool, ToolResult } from "./index.js";
@@ -14,12 +14,22 @@ export type CodingToolsOptions = {
   defaultTimeoutMs?: number;
   maxTimeoutMs?: number;
   maxOutputBytes?: number;
+  maxReadTokens?: number;
+  contextWindow?: number;
 };
 
 type FileReadSnapshot = {
+  content: string;
   hash: string;
   mtimeMs: number;
+  ranges: ReadRange[];
   size: number;
+  totalLines: number;
+};
+
+type ReadRange = {
+  startLine: number;
+  endLine: number;
 };
 
 type CodingToolsState = {
@@ -31,12 +41,12 @@ type ReadArgs = {
   path: string;
   offset?: number;
   limit?: number;
+  full?: boolean;
 };
 
 type WriteArgs = {
   path: string;
   content: string;
-  createParents?: boolean;
 };
 
 type EditArgs = {
@@ -51,40 +61,50 @@ type BashArgs = {
   cwd?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  description?: string;
 };
 
 type GlobArgs = {
   pattern: string;
-  cwd?: string;
-  maxResults?: number;
+  path?: string;
+  head_limit?: number;
+  offset?: number;
 };
 
 type GrepArgs = {
   pattern: string;
-  cwd?: string;
+  path?: string;
   glob?: string;
-  outputMode?: "files_with_matches" | "content" | "count";
-  maxResults?: number;
-  maxOutputBytes?: number;
-};
-
-type GrepMatch = {
-  path: string;
-  line: number;
-  text: string;
+  output_mode?: "files_with_matches" | "content" | "count";
+  before_context?: number;
+  after_context?: number;
+  context?: number;
+  line_numbers?: boolean;
+  case_insensitive?: boolean;
+  type?: string;
+  head_limit?: number;
+  offset?: number;
+  multiline?: boolean;
 };
 
 type TodoStatus = "pending" | "in_progress" | "completed";
 
 type TodoItem = {
-  id: string;
   content: string;
   status: TodoStatus;
+  activeForm?: string;
 };
 
-type TodoArgs = {
+type TodoWriteArgs = {
   todos: TodoItem[];
 };
+
+const DEFAULT_SEARCH_LIMIT = 100;
+const DEFAULT_GREP_LIMIT = 250;
+const DEFAULT_READ_LIMIT = 2_000;
+const DEFAULT_CONTEXT_WINDOW = 200_000;
+const READ_TOKEN_BUDGET_RATIO = 0.01;
+const FULL_READ_TOKEN_BUDGET_RATIO = 0.1;
 
 export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
   const root = resolve(options.cwd);
@@ -92,6 +112,8 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
   const defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
   const maxTimeoutMs = options.maxTimeoutMs ?? 120_000;
   const maxOutputBytes = options.maxOutputBytes ?? 16_000;
+  const normalReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, READ_TOKEN_BUDGET_RATIO);
+  const fullReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, FULL_READ_TOKEN_BUDGET_RATIO);
 
   const resolveWorkspacePath = (input: string): string => {
     if (input.length === 0) {
@@ -104,38 +126,49 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
     return candidate;
   };
 
-  const assertFreshRead = async (path: string, toolName: string): Promise<void> => {
+  const workspaceTarget = (input: string | undefined): string => {
+    const target = input ? resolveWorkspacePath(input) : root;
+    return relative(root, target) || ".";
+  };
+
+  const assertFreshReadableCoverage = async (path: string, toolName: string): Promise<FileReadSnapshot> => {
     const snapshot = state.reads.get(path);
     if (!snapshot) {
       throw new Error(`Read must be used before ${toolName} on existing file: ${path}`);
+    }
+    if (!hasCompleteCoverage(snapshot.ranges, snapshot.totalLines)) {
+      throw new Error(`The complete file must be read before ${toolName} on existing file: ${path}`);
     }
     const current = await snapshotFile(path);
     if (!sameSnapshot(snapshot, current)) {
       throw new Error(`File changed since last Read: ${path}`);
     }
+    return snapshot;
   };
 
   return [
     defineTool({
       name: "Read",
-      description: "Read a file from the local filesystem with stable 1-based line numbers.",
+      description:
+        "Read a text file from the workspace. Long reads are truncated by complete lines; accumulated coverage unlocks Write/Edit.",
       execute: async (_toolCallId, args) => {
         const input = parseReadArgs(args);
+        if (input.full && (input.offset !== undefined || input.limit !== undefined)) {
+          throw new Error("full cannot be combined with offset or limit");
+        }
         const path = resolveWorkspacePath(input.path);
+        assertReadableFileKind(path);
         const fileStat = await stat(path);
         if (fileStat.isDirectory()) {
-          throw new Error(`Read cannot read a directory: ${input.path}`);
+          throw new Error(`Read cannot read a directory: ${input.path}. Use Glob to find files.`);
         }
 
-        const content = await readFile(path, "utf8");
-        state.reads.set(path, await snapshotFile(path, content));
-        const lines = content.split(/\r?\n/);
-        if (lines.at(-1) === "") {
-          lines.pop();
-        }
-
+        const buffer = await readFile(path);
+        assertTextBuffer(buffer, input.path);
+        const content = buffer.toString("utf8");
+        const lines = linesOf(content);
         const offset = input.offset ?? 1;
-        const limit = input.limit ?? lines.length;
+        const limit = input.full ? Math.max(lines.length, 1) : (input.limit ?? DEFAULT_READ_LIMIT);
         if (!Number.isInteger(offset) || offset < 1) {
           throw new Error("offset must be a positive integer");
         }
@@ -144,46 +177,72 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
         }
 
         const startIndex = offset - 1;
-        const selected = lines.slice(startIndex, startIndex + limit);
-        const text = selected.map((line, index) => `${String(offset + index).padStart(6, " ")}\t${line}`).join("\n");
+        const candidate = lines.slice(startIndex, startIndex + limit);
+        const tokenBudget = input.full ? fullReadTokens : normalReadTokens;
+        const selected = selectCompleteLinesWithinBudget(candidate, offset, tokenBudget);
         const endLine = selected.length === 0 ? offset - 1 : offset + selected.length - 1;
+        const truncated = startIndex + selected.length < lines.length;
+        const nextOffset = truncated ? endLine + 1 : null;
+        const current = await snapshotFile(path, content);
+        const previous = state.reads.get(path);
+        const previousRanges = previous && sameSnapshot(previous, current) ? previous.ranges : [];
+        const currentRange = selected.length > 0 ? [{ startLine: offset, endLine }] : [];
+        const ranges = mergeRanges([...previousRanges, ...currentRange]);
+        const canWrite = hasCompleteCoverage(ranges, lines.length);
+        state.reads.set(path, { ...current, ranges });
 
-        return {
-          content: [{ type: "text", text }],
-          details: {
-            path,
-            startLine: offset,
-            endLine,
-            totalLines: lines.length,
-            size: fileStat.size,
-          },
-        };
+        const rendered = renderReadLines(selected, offset);
+        const truncationNotice = truncated
+          ? `\n\n[Showing lines ${offset}-${endLine}/${lines.length}. Next offset: ${nextOffset}.]`
+          : "";
+        const text = `${rendered}${truncationNotice}`;
+
+        return textResult(text, {
+          path,
+          startLine: offset,
+          endLine,
+          totalLines: lines.length,
+          truncated,
+          nextOffset,
+          size: fileStat.size,
+          estimatedTokens: estimateTokens(rendered),
+          tokenBudget,
+          canWrite,
+        });
       },
     }),
     defineTool({
       name: "Write",
-      description: "Create a new file or fully rewrite a file. Existing files must be read first.",
+      description:
+        "Create a new file or fully overwrite an existing file. Existing files require complete read coverage of the current file.",
       execute: async (_toolCallId, args) => {
         const input = parseWriteArgs(args);
         const path = resolveWorkspacePath(input.path);
-        if (await exists(path)) {
-          await assertFreshRead(path, "Write");
-        } else if (input.createParents) {
-          await mkdir(dirname(path), { recursive: true });
-        }
+        const previous = (await exists(path)) ? await assertFreshReadableCoverage(path, "Write") : undefined;
 
-        await writeFile(path, input.content, "utf8");
-        state.reads.set(path, await snapshotFile(path, input.content));
-        return textResult(`wrote ${byteLength(input.content)} bytes to ${path}`, { path, bytes: byteLength(input.content) });
+        await mkdir(dirname(path), { recursive: true });
+        await atomicWriteFile(path, input.content);
+        state.reads.set(path, await snapshotFile(path, input.content, completeRanges(linesOf(input.content).length)));
+
+        const type = previous ? "update" : "create";
+        return textResult(
+          type === "create" ? `File created successfully at: ${path}` : `The file ${path} has been updated successfully.`,
+          {
+            type,
+            filePath: path,
+            bytes: byteLength(input.content),
+          },
+        );
       },
     }),
     defineTool({
       name: "Edit",
-      description: "Perform exact string replacement in a file. Existing files must be read first.",
+      description:
+        "Perform an exact string replacement in an existing file. Requires complete read coverage and a unique old_string unless replace_all is true.",
       execute: async (_toolCallId, args) => {
         const input = parseEditArgs(args);
         const path = resolveWorkspacePath(input.path);
-        await assertFreshRead(path, "Edit");
+        await assertFreshReadableCoverage(path, "Edit");
         if (input.old_string === input.new_string) {
           throw new Error("old_string and new_string must differ");
         }
@@ -191,21 +250,29 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
         const content = await readFile(path, "utf8");
         const count = countOccurrences(content, input.old_string);
         if (count === 0) {
-          throw new Error("old_string was not found");
+          throw new Error(`String to replace not found in file.\nString: ${input.old_string}`);
         }
         if (count > 1 && !input.replace_all) {
-          throw new Error(`old_string matched ${count} times; set replace_all to replace every match`);
+          throw new Error(
+            `Found ${count} matches of the string to replace, but replace_all is false. Provide more context or set replace_all to true.\nString: ${input.old_string}`,
+          );
         }
 
         const next = input.replace_all
           ? content.split(input.old_string).join(input.new_string)
           : content.replace(input.old_string, input.new_string);
-        await writeFile(path, next, "utf8");
-        state.reads.set(path, await snapshotFile(path, next));
-        return textResult(`edited ${path}: replaced ${input.replace_all ? count : 1} occurrence(s)`, {
-          path,
-          replacements: input.replace_all ? count : 1,
-        });
+        await atomicWriteFile(path, next);
+        state.reads.set(path, await snapshotFile(path, next, completeRanges(linesOf(next).length)));
+        return textResult(
+          input.replace_all
+            ? `The file ${path} has been updated. All occurrences were successfully replaced.`
+            : `The file ${path} has been updated successfully.`,
+          {
+            filePath: path,
+            replacements: input.replace_all ? count : 1,
+            replaceAll: input.replace_all ?? false,
+          },
+        );
       },
     }),
     defineTool({
@@ -244,65 +311,93 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
     }),
     defineTool({
       name: "Glob",
-      description: "Find files by glob pattern under the workspace.",
-      execute: async (_toolCallId, args) => {
+      description: "Find files by glob pattern using ripgrep file discovery.",
+      execute: async (_toolCallId, args, signal) => {
         const input = parseGlobArgs(args);
-        const searchRoot = input.cwd ? resolveWorkspacePath(input.cwd) : root;
-        const limit = input.maxResults ?? 100;
-        const matcher = globMatcher(input.pattern);
-        const files = await listFiles(searchRoot, root);
-        const matches = files.filter((file) => matcher(file)).sort();
-        const selected = matches.slice(0, limit);
-        return textResult(formatLimitedLines(selected, matches.length, limit), {
-          matches: selected,
-          totalMatches: matches.length,
-          truncated: matches.length > limit,
+        const limit = input.head_limit ?? DEFAULT_SEARCH_LIMIT;
+        const offset = input.offset ?? 0;
+        const all = await runRipgrep(["--files", "--hidden", "--glob", input.pattern, ...vcsExcludes()], workspaceTarget(input.path), root, signal);
+        const selected = paginate(all, limit, offset);
+        const text = selected.items.map(toWorkspaceRelative(root)).join("\n");
+        return textResult(text || "No files found", {
+          filenames: selected.items.map(toWorkspaceRelative(root)),
+          numFiles: selected.items.length,
+          totalFiles: all.length,
+          truncated: selected.truncated,
+          ...(selected.appliedLimit !== undefined ? { appliedLimit: selected.appliedLimit } : {}),
+          ...(offset > 0 ? { appliedOffset: offset } : {}),
         });
       },
     }),
     defineTool({
       name: "Grep",
-      description: "Search file contents with regex and structured match output.",
-      execute: async (_toolCallId, args) => {
+      description: "Search file contents with ripgrep. Use this instead of Bash grep or rg.",
+      execute: async (_toolCallId, args, signal) => {
         const input = parseGrepArgs(args);
-        const searchRoot = input.cwd ? resolveWorkspacePath(input.cwd) : root;
-        const limit = input.maxResults ?? 100;
-        const outputLimit = input.maxOutputBytes ?? maxOutputBytes;
-        const regex = new RegExp(input.pattern);
-        const fileMatcher = input.glob ? globMatcher(input.glob) : () => true;
-        const files = (await listFiles(searchRoot, root)).filter((file) => fileMatcher(file)).sort();
-        const matches: GrepMatch[] = [];
+        const mode = input.output_mode ?? "files_with_matches";
+        const limit = input.head_limit ?? DEFAULT_GREP_LIMIT;
+        const offset = input.offset ?? 0;
+        const rgArgs = grepArgs(input, mode);
+        const raw = await runRipgrep(rgArgs, workspaceTarget(input.path), root, signal);
 
-        for (const file of files) {
-          const path = resolve(root, file);
-          const content = await readFile(path, "utf8");
-          const lines = content.split(/\r?\n/);
-          for (const [index, line] of lines.entries()) {
-            if (regex.test(line)) {
-              matches.push({ path: file, line: index + 1, text: line });
-            }
-            regex.lastIndex = 0;
-          }
+        if (mode === "content") {
+          const selected = paginate(raw, limit, offset);
+          const lines = selected.items.map(relativizeGrepLine(root));
+          return textResult(formatPaginatedText(lines, selected, offset), {
+            mode,
+            content: lines.join("\n"),
+            numLines: lines.length,
+            filenames: [],
+            numFiles: 0,
+            ...(selected.appliedLimit !== undefined ? { appliedLimit: selected.appliedLimit } : {}),
+            ...(offset > 0 ? { appliedOffset: offset } : {}),
+          });
         }
 
-        const selected = matches.slice(0, limit);
-        const mode = input.outputMode ?? "files_with_matches";
-        const lines = formatGrepLines(selected, mode);
-        return textResult(truncate(formatLimitedLines(lines, matches.length, limit), outputLimit, "grep"), {
-          matches: selected,
-          totalMatches: matches.length,
-          truncated: matches.length > limit,
-          outputMode: mode,
-        });
+        if (mode === "count") {
+          const selected = paginate(raw, limit, offset);
+          const lines = selected.items.map(relativizeCountLine(root));
+          const counts = parseCountLines(lines);
+          return textResult(formatPaginatedText(lines, selected, offset), {
+            mode,
+            content: lines.join("\n"),
+            filenames: [],
+            numFiles: counts.files,
+            numMatches: counts.matches,
+            ...(selected.appliedLimit !== undefined ? { appliedLimit: selected.appliedLimit } : {}),
+            ...(offset > 0 ? { appliedOffset: offset } : {}),
+          });
+        }
+
+        const sorted = await sortPathsByMtime(root, raw);
+        const selected = paginate(sorted, limit, offset);
+        const filenames = selected.items.map(toWorkspaceRelative(root));
+        return textResult(
+          filenames.length === 0
+            ? "No files found"
+            : `Found ${filenames.length} ${filenames.length === 1 ? "file" : "files"}${formatLimitSuffix(selected, offset)}\n${filenames.join("\n")}`,
+          {
+            mode,
+            filenames,
+            numFiles: filenames.length,
+            ...(selected.appliedLimit !== undefined ? { appliedLimit: selected.appliedLimit } : {}),
+            ...(offset > 0 ? { appliedOffset: offset } : {}),
+          },
+        );
       },
     }),
     defineTool({
-      name: "Todo",
-      description: "Maintain a plain session-scoped Todo list.",
+      name: "TodoWrite",
+      description: "Replace the current session todo list with a complete updated list.",
       execute: async (_toolCallId, args) => {
-        const input = parseTodoArgs(args);
-        state.todos = input.todos;
-        return textResult(formatTodos(state.todos), { todos: state.todos });
+        const input = parseTodoWriteArgs(args);
+        const oldTodos = state.todos;
+        const allDone = input.todos.length > 0 && input.todos.every((todo) => todo.status === "completed");
+        state.todos = allDone ? [] : input.todos;
+        const message = allDone
+          ? "Todos have been modified successfully. All items are completed, so the current todo list has been cleared."
+          : "Todos have been modified successfully. Continue using the todo list to track progress.";
+        return textResult(message, { oldTodos, currentTodos: state.todos });
       },
     }),
   ];
@@ -311,25 +406,25 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
 const parseReadArgs = (args: unknown): ReadArgs => {
   const input = expectRecord(args);
   return {
-    path: expectString(input.path, "path"),
+    path: expectPath(input),
     offset: optionalNumber(input.offset, "offset"),
     limit: optionalNumber(input.limit, "limit"),
+    full: optionalBoolean(input.full, "full"),
   };
 };
 
 const parseWriteArgs = (args: unknown): WriteArgs => {
   const input = expectRecord(args);
   return {
-    path: expectString(input.path, "path"),
+    path: expectPath(input),
     content: expectString(input.content, "content"),
-    createParents: optionalBoolean(input.createParents, "createParents"),
   };
 };
 
 const parseEditArgs = (args: unknown): EditArgs => {
   const input = expectRecord(args);
   return {
-    path: expectString(input.path, "path"),
+    path: expectPath(input),
     old_string: expectString(input.old_string, "old_string"),
     new_string: expectString(input.new_string, "new_string"),
     replace_all: optionalBoolean(input.replace_all, "replace_all"),
@@ -341,8 +436,9 @@ const parseBashArgs = (args: unknown): BashArgs => {
   return {
     command: expectString(input.command, "command"),
     cwd: optionalString(input.cwd, "cwd"),
-    timeoutMs: optionalNumber(input.timeoutMs, "timeoutMs"),
+    timeoutMs: optionalNumber(input.timeoutMs ?? input.timeout, "timeout"),
     maxOutputBytes: optionalNumber(input.maxOutputBytes, "maxOutputBytes"),
+    description: optionalString(input.description, "description"),
   };
 };
 
@@ -350,33 +446,41 @@ const parseGlobArgs = (args: unknown): GlobArgs => {
   const input = expectRecord(args);
   return {
     pattern: expectString(input.pattern, "pattern"),
-    cwd: optionalString(input.cwd, "cwd"),
-    maxResults: optionalNumber(input.maxResults, "maxResults"),
+    path: optionalString(input.path ?? input.cwd, "path"),
+    head_limit: optionalNumber(input.head_limit ?? input.maxResults, "head_limit"),
+    offset: optionalNumber(input.offset, "offset"),
   };
 };
 
 const parseGrepArgs = (args: unknown): GrepArgs => {
   const input = expectRecord(args);
-  const outputMode = optionalString(input.outputMode, "outputMode");
+  const outputMode = optionalString(input.output_mode ?? input.outputMode, "output_mode");
   if (
     outputMode !== undefined &&
     outputMode !== "files_with_matches" &&
     outputMode !== "content" &&
     outputMode !== "count"
   ) {
-    throw new Error("outputMode must be files_with_matches, content, or count");
+    throw new Error("output_mode must be files_with_matches, content, or count");
   }
   return {
     pattern: expectString(input.pattern, "pattern"),
-    cwd: optionalString(input.cwd, "cwd"),
+    path: optionalString(input.path ?? input.cwd, "path"),
     glob: optionalString(input.glob, "glob"),
-    outputMode,
-    maxResults: optionalNumber(input.maxResults, "maxResults"),
-    maxOutputBytes: optionalNumber(input.maxOutputBytes, "maxOutputBytes"),
+    output_mode: outputMode,
+    before_context: optionalNumber(input["-B"], "-B"),
+    after_context: optionalNumber(input["-A"], "-A"),
+    context: optionalNumber(input.context ?? input["-C"], "context"),
+    line_numbers: optionalBoolean(input["-n"], "-n"),
+    case_insensitive: optionalBoolean(input["-i"] ?? input.case_insensitive, "-i"),
+    type: optionalString(input.type, "type"),
+    head_limit: optionalNumber(input.head_limit ?? input.maxResults, "head_limit"),
+    offset: optionalNumber(input.offset, "offset"),
+    multiline: optionalBoolean(input.multiline, "multiline"),
   };
 };
 
-const parseTodoArgs = (args: unknown): TodoArgs => {
+const parseTodoWriteArgs = (args: unknown): TodoWriteArgs => {
   const input = expectRecord(args);
   if (!Array.isArray(input.todos)) {
     throw new Error("todos must be an array");
@@ -384,14 +488,7 @@ const parseTodoArgs = (args: unknown): TodoArgs => {
   const todos = input.todos.map(parseTodoItem);
   const inProgressCount = todos.filter((todo) => todo.status === "in_progress").length;
   if (inProgressCount > 1) {
-    throw new Error("Todo allows at most one in_progress item");
-  }
-  const ids = new Set<string>();
-  for (const todo of todos) {
-    if (ids.has(todo.id)) {
-      throw new Error(`duplicate Todo id: ${todo.id}`);
-    }
-    ids.add(todo.id);
+    throw new Error("TodoWrite allows at most one in_progress item");
   }
   return { todos };
 };
@@ -403,9 +500,9 @@ const parseTodoItem = (value: unknown): TodoItem => {
     throw new Error("status must be pending, in_progress, or completed");
   }
   return {
-    id: expectString(input.id, "id"),
     content: expectString(input.content, "content"),
     status,
+    activeForm: optionalString(input.activeForm, "activeForm"),
   };
 };
 
@@ -415,6 +512,8 @@ const expectRecord = (value: unknown): Record<string, unknown> => {
   }
   return value as Record<string, unknown>;
 };
+
+const expectPath = (input: Record<string, unknown>): string => expectString(input.file_path ?? input.path, "file_path");
 
 const expectString = (value: unknown, name: string): string => {
   if (typeof value !== "string") {
@@ -450,12 +549,16 @@ const optionalBoolean = (value: unknown, name: string): boolean | undefined => {
   return value;
 };
 
-const snapshotFile = async (path: string, content?: string): Promise<FileReadSnapshot> => {
+const snapshotFile = async (path: string, content?: string, ranges?: ReadRange[]): Promise<FileReadSnapshot> => {
   const [fileStat, fileContent] = await Promise.all([stat(path), content ?? readFile(path, "utf8")]);
+  const totalLines = linesOf(fileContent).length;
   return {
+    content: fileContent,
     hash: createHash("sha256").update(fileContent).digest("hex"),
     mtimeMs: fileStat.mtimeMs,
+    ranges: ranges ?? [],
     size: fileStat.size,
+    totalLines,
   };
 };
 
@@ -476,6 +579,118 @@ const isWithin = (root: string, path: string): boolean => {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 };
 
+const linesOf = (content: string): string[] => {
+  const lines = content.split(/\r?\n/);
+  if (lines.at(-1) === "") {
+    lines.pop();
+  }
+  return lines;
+};
+
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico"]);
+const DOCUMENT_EXTENSIONS = new Set([".pdf", ".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx"]);
+const BINARY_EXTENSIONS = new Set([
+  ".zip",
+  ".tar",
+  ".gz",
+  ".bz2",
+  ".xz",
+  ".7z",
+  ".rar",
+  ".dmg",
+  ".pkg",
+  ".exe",
+  ".dll",
+  ".so",
+  ".dylib",
+  ".class",
+  ".jar",
+  ".wasm",
+  ".pyc",
+  ".sqlite",
+  ".db",
+]);
+
+const assertReadableFileKind = (path: string): void => {
+  const ext = extname(path).toLowerCase();
+  if (IMAGE_EXTENSIONS.has(ext)) {
+    throw new Error(`Read does not yet support image files (${ext}). A dedicated image Read path is planned; do not read this file as text.`);
+  }
+  if (DOCUMENT_EXTENSIONS.has(ext)) {
+    throw new Error(`Read does not yet support document files (${ext}). PDF/page and document-aware Read support is planned; do not read this file as text.`);
+  }
+  if (BINARY_EXTENSIONS.has(ext)) {
+    throw new Error(`Read cannot read binary files (${ext}). Use an appropriate binary/document tool instead.`);
+  }
+};
+
+const assertTextBuffer = (buffer: Buffer, path: string): void => {
+  if (buffer.includes(0)) {
+    throw new Error(`Read cannot read binary file as text: ${path}`);
+  }
+  const decoded = buffer.toString("utf8");
+  const replacementChars = decoded.match(/\uFFFD/g)?.length ?? 0;
+  if (replacementChars > 0 && replacementChars / Math.max(decoded.length, 1) > 0.01) {
+    throw new Error(`Read cannot safely decode file as UTF-8 text: ${path}`);
+  }
+};
+
+const selectCompleteLinesWithinBudget = (
+  lines: string[],
+  offset: number,
+  maxTokens: number,
+): string[] => {
+  let selected = lines;
+  while (selected.length > 0 && estimateTokens(renderReadLines(selected, offset)) > maxTokens) {
+    selected = selected.slice(0, -1);
+  }
+  if (selected.length === 0 && lines.length > 0) {
+    throw new Error(
+      `Line ${offset} exceeds Read output token budget (${maxTokens} estimated tokens). Use Grep or a more specific tool; Read will not return partial lines.`,
+    );
+  }
+  return selected;
+};
+
+const estimateTokens = (value: string): number => Math.ceil(value.length / 3);
+
+const renderReadLines = (lines: string[], offset: number): string =>
+  lines.map((line, index) => `${String(offset + index).padStart(6, " ")}\t${line}`).join("\n");
+
+const readTokenBudget = (contextWindow: number | undefined, ratio: number): number => {
+  const window = contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  if (!Number.isFinite(window) || window <= 0) {
+    return Math.max(1, Math.floor(DEFAULT_CONTEXT_WINDOW * ratio));
+  }
+  return Math.max(1, Math.floor(window * ratio));
+};
+
+const completeRanges = (totalLines: number): ReadRange[] => (totalLines === 0 ? [] : [{ startLine: 1, endLine: totalLines }]);
+
+const hasCompleteCoverage = (ranges: ReadRange[], totalLines: number): boolean => {
+  if (totalLines === 0) {
+    return true;
+  }
+  const merged = mergeRanges(ranges);
+  return merged.length === 1 && merged[0]?.startLine === 1 && merged[0].endLine >= totalLines;
+};
+
+const mergeRanges = (ranges: ReadRange[]): ReadRange[] => {
+  const sorted = ranges
+    .filter((range) => range.startLine <= range.endLine)
+    .sort((left, right) => left.startLine - right.startLine || left.endLine - right.endLine);
+  const merged: ReadRange[] = [];
+  for (const range of sorted) {
+    const last = merged.at(-1);
+    if (!last || range.startLine > last.endLine + 1) {
+      merged.push({ ...range });
+      continue;
+    }
+    last.endLine = Math.max(last.endLine, range.endLine);
+  }
+  return merged;
+};
+
 const countOccurrences = (content: string, needle: string): number => {
   if (needle.length === 0) {
     throw new Error("old_string must not be empty");
@@ -489,6 +704,17 @@ const countOccurrences = (content: string, needle: string): number => {
     }
     count += 1;
     index = found + needle.length;
+  }
+};
+
+const atomicWriteFile = async (path: string, content: string): Promise<void> => {
+  const temp = resolve(dirname(path), `.${randomUUID()}.tmp`);
+  try {
+    await writeFile(temp, content, "utf8");
+    await rename(temp, path);
+  } catch (cause) {
+    await rm(temp, { force: true }).catch(() => undefined);
+    throw cause;
   }
 };
 
@@ -532,80 +758,178 @@ const isTimeoutError = (cause: unknown): boolean =>
 const isExecError = (cause: unknown): cause is Error & { code?: number | string; stdout?: string; stderr?: string } =>
   cause instanceof Error && ("stdout" in cause || "stderr" in cause || "code" in cause);
 
-const listFiles = async (directory: string, root: string): Promise<string[]> => {
-  const entries = await readdir(directory, { withFileTypes: true });
-  const files: string[] = [];
-  for (const entry of entries) {
-    const absolute = resolve(directory, entry.name);
-    if (!isWithin(root, absolute)) {
-      continue;
+const runRipgrep = async (args: string[], target: string, cwd: string, signal: AbortSignal): Promise<string[]> => {
+  try {
+    const result = await execFileAsync("rg", [...args, target], {
+      cwd,
+      signal,
+      maxBuffer: 20_000_000,
+    });
+    return splitOutput(result.stdout);
+  } catch (cause) {
+    if (isExecError(cause) && cause.code === 1) {
+      return [];
     }
-    if (entry.isDirectory()) {
-      files.push(...(await listFiles(absolute, root)));
-      continue;
+    if (isExecError(cause) && typeof cause.stdout === "string" && cause.stdout.trim().length > 0) {
+      return splitOutput(cause.stdout);
     }
-    if (entry.isFile()) {
-      files.push(relative(root, absolute));
-    }
+    const message = cause instanceof Error ? cause.message : String(cause);
+    throw new Error(`ripgrep failed: ${message}`);
   }
-  return files;
 };
 
-const globMatcher = (pattern: string): ((path: string) => boolean) => {
-  if (pattern.length === 0) {
-    throw new Error("pattern must not be empty");
+const splitOutput = (output: string): string[] =>
+  output
+    .trim()
+    .split("\n")
+    .map((line) => line.replace(/\r$/, ""))
+    .filter(Boolean);
+
+const vcsExcludes = (): string[] =>
+  [".git", ".svn", ".hg", ".bzr", ".jj", ".sl"].flatMap((dir) => ["--glob", `!${dir}`]);
+
+const grepArgs = (input: GrepArgs, mode: NonNullable<GrepArgs["output_mode"]>): string[] => {
+  const args = ["--hidden", "--max-columns", "500", ...vcsExcludes()];
+  if (input.multiline) {
+    args.push("-U", "--multiline-dotall");
   }
-  const regex = new RegExp(`^${globToRegex(pattern)}$`);
-  return (path) => regex.test(path);
+  if (input.case_insensitive) {
+    args.push("-i");
+  }
+  if (mode === "files_with_matches") {
+    args.push("-l");
+  } else if (mode === "count") {
+    args.push("-c");
+  } else {
+    if (input.line_numbers ?? true) {
+      args.push("-n");
+    }
+    if (input.context !== undefined) {
+      args.push("-C", String(input.context));
+    } else {
+      if (input.before_context !== undefined) {
+        args.push("-B", String(input.before_context));
+      }
+      if (input.after_context !== undefined) {
+        args.push("-A", String(input.after_context));
+      }
+    }
+  }
+  if (input.type) {
+    args.push("--type", input.type);
+  }
+  if (input.glob) {
+    for (const pattern of splitGlobPatterns(input.glob)) {
+      args.push("--glob", pattern);
+    }
+  }
+  if (input.pattern.startsWith("-")) {
+    args.push("-e", input.pattern);
+  } else {
+    args.push(input.pattern);
+  }
+  return args;
 };
 
-const globToRegex = (pattern: string): string => {
-  let output = "";
-  for (let index = 0; index < pattern.length; index += 1) {
-    const char = pattern[index];
-    const next = pattern[index + 1];
-    if (char === "*" && next === "*") {
-      output += ".*";
-      index += 1;
+const splitGlobPatterns = (value: string): string[] =>
+  value
+    .split(/\s+/)
+    .flatMap((part) => (part.includes("{") && part.includes("}") ? [part] : part.split(",")))
+    .filter(Boolean);
+
+const paginate = <T>(items: T[], limit: number, offset: number): { items: T[]; truncated: boolean; appliedLimit?: number } => {
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error("head_limit must be a non-negative integer");
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error("offset must be a non-negative integer");
+  }
+  if (limit === 0) {
+    return { items: items.slice(offset), truncated: false };
+  }
+  const selected = items.slice(offset, offset + limit);
+  const truncated = items.length - offset > limit;
+  return {
+    items: selected,
+    truncated,
+    ...(truncated ? { appliedLimit: limit } : {}),
+  };
+};
+
+const toWorkspaceRelative = (root: string): ((path: string) => string) => (path) => {
+  const absolute = isAbsolute(path) ? path : resolve(root, path);
+  return relative(root, absolute) || ".";
+};
+
+const relativizeGrepLine = (root: string): ((line: string) => string) => (line) => {
+  const colon = line.indexOf(":");
+  if (colon <= 0) {
+    return line;
+  }
+  const file = line.slice(0, colon);
+  const rest = line.slice(colon);
+  return `${toWorkspaceRelative(root)(file)}${rest}`;
+};
+
+const relativizeCountLine = (root: string): ((line: string) => string) => (line) => {
+  const colon = line.lastIndexOf(":");
+  if (colon <= 0) {
+    return line;
+  }
+  const file = line.slice(0, colon);
+  const rest = line.slice(colon);
+  return `${toWorkspaceRelative(root)(file)}${rest}`;
+};
+
+const sortPathsByMtime = async (root: string, paths: string[]): Promise<string[]> => {
+  const entries = await Promise.all(
+    paths.map(async (path) => {
+      try {
+        const info = await stat(isAbsolute(path) ? path : resolve(root, path));
+        return { path, mtimeMs: info.mtimeMs };
+      } catch {
+        return { path, mtimeMs: 0 };
+      }
+    }),
+  );
+  return entries
+    .sort((left, right) => {
+      const time = right.mtimeMs - left.mtimeMs;
+      return time === 0 ? left.path.localeCompare(right.path) : time;
+    })
+    .map((entry) => entry.path);
+};
+
+const formatPaginatedText = <T>(lines: string[], page: { appliedLimit?: number }, offset: number): string => {
+  const body = lines.length > 0 ? lines.join("\n") : "No matches found";
+  const suffix = formatLimitSuffix(page, offset);
+  return suffix ? `${body}\n\n[Showing results with pagination =${suffix}]` : body;
+};
+
+const formatLimitSuffix = <T>(page: { appliedLimit?: number }, offset: number): string => {
+  const parts = [];
+  if (page.appliedLimit !== undefined) {
+    parts.push(`limit: ${page.appliedLimit}`);
+  }
+  if (offset > 0) {
+    parts.push(`offset: ${offset}`);
+  }
+  return parts.length > 0 ? ` ${parts.join(", ")}` : "";
+};
+
+const parseCountLines = (lines: string[]): { files: number; matches: number } => {
+  let files = 0;
+  let matches = 0;
+  for (const line of lines) {
+    const colon = line.lastIndexOf(":");
+    if (colon <= 0) {
       continue;
     }
-    if (char === "*") {
-      output += "[^/]*";
-      continue;
+    const count = Number.parseInt(line.slice(colon + 1), 10);
+    if (Number.isFinite(count)) {
+      files += 1;
+      matches += count;
     }
-    if (char === "?") {
-      output += "[^/]";
-      continue;
-    }
-    output += escapeRegex(char ?? "");
   }
-  return output;
+  return { files, matches };
 };
-
-const escapeRegex = (value: string): string => value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
-
-const formatLimitedLines = (lines: string[], total: number, limit: number): string => {
-  const body = lines.join("\n");
-  if (total <= limit) {
-    return body;
-  }
-  const suffix = `[truncated: ${total} matches > ${limit} limit]`;
-  return body.length > 0 ? `${body}\n${suffix}` : suffix;
-};
-
-const formatGrepLines = (matches: GrepMatch[], mode: NonNullable<GrepArgs["outputMode"]>): string[] => {
-  if (mode === "content") {
-    return matches.map((match) => `${match.path}:${match.line}:${match.text}`);
-  }
-  if (mode === "count") {
-    const counts = new Map<string, number>();
-    for (const match of matches) {
-      counts.set(match.path, (counts.get(match.path) ?? 0) + 1);
-    }
-    return [...counts.entries()].map(([path, count]) => `${path}:${count}`);
-  }
-  return [...new Set(matches.map((match) => match.path))];
-};
-
-const formatTodos = (todos: TodoItem[]): string =>
-  todos.map((todo) => `[${todo.status}] ${todo.id} ${todo.content}`).join("\n");

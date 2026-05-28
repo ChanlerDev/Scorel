@@ -26,26 +26,26 @@ describe("@scorel/app-cli", () => {
       {
         content: null,
         tool_calls: [
-          toolCall("call_todo_1", "Todo", {
+          toolCall("call_todo_1", "TodoWrite", {
             todos: [
-              { id: "1", content: "Find value", status: "in_progress" },
-              { id: "2", content: "Fix value", status: "pending" },
-              { id: "3", content: "Verify", status: "pending" },
+              { content: "Find value", status: "in_progress", activeForm: "Finding value" },
+              { content: "Fix value", status: "pending", activeForm: "Fixing value" },
+              { content: "Verify", status: "pending", activeForm: "Verifying" },
             ],
           }),
         ],
       },
       {
         content: null,
-        tool_calls: [toolCall("call_grep", "Grep", { pattern: "wrong", glob: "src/*.txt", outputMode: "content" })],
+        tool_calls: [toolCall("call_grep", "Grep", { pattern: "wrong", glob: "src/*.txt", output_mode: "content" })],
       },
       {
         content: null,
-        tool_calls: [toolCall("call_read", "Read", { path: "src/value.txt" })],
+        tool_calls: [toolCall("call_read", "Read", { file_path: "src/value.txt" })],
       },
       {
         content: null,
-        tool_calls: [toolCall("call_edit", "Edit", { path: "src/value.txt", old_string: "wrong", new_string: "right" })],
+        tool_calls: [toolCall("call_edit", "Edit", { file_path: "src/value.txt", old_string: "wrong", new_string: "right" })],
       },
       {
         content: null,
@@ -54,11 +54,11 @@ describe("@scorel/app-cli", () => {
       {
         content: null,
         tool_calls: [
-          toolCall("call_todo_2", "Todo", {
+          toolCall("call_todo_2", "TodoWrite", {
             todos: [
-              { id: "1", content: "Find value", status: "completed" },
-              { id: "2", content: "Fix value", status: "completed" },
-              { id: "3", content: "Verify", status: "completed" },
+              { content: "Find value", status: "completed", activeForm: "Finding value" },
+              { content: "Fix value", status: "completed", activeForm: "Fixing value" },
+              { content: "Verify", status: "completed", activeForm: "Verifying" },
             ],
           }),
         ],
@@ -78,10 +78,10 @@ describe("@scorel/app-cli", () => {
 
       expect(first.code).toBe(0);
       expect(first.stderr).toContain("created session ses_cli_real_coding_alpha");
-      for (const toolName of ["Todo", "Grep", "Read", "Edit", "Bash"]) {
+      for (const toolName of ["TodoWrite", "Grep", "Read", "Edit", "Bash"]) {
         expect(first.stdout).toContain(`[tool:${toolName}]`);
       }
-      expect(first.stdout).toContain("[completed] 3 Verify");
+      expect(first.stdout).toContain("All items are completed");
       expect(first.stdout).toContain("status=right");
       expect(first.stdout).toContain("Done. status is fixed.");
 
@@ -100,11 +100,23 @@ describe("@scorel/app-cli", () => {
       const toolNames = lines
         .filter((line) => line.type === "tool_result")
         .map((line) => line.message.content[0].toolName);
-      expect(toolNames).toEqual(["Todo", "Grep", "Read", "Edit", "Bash", "Todo"]);
+      expect(toolNames).toEqual(["TodoWrite", "Grep", "Read", "Edit", "Bash", "TodoWrite"]);
       expect(server.requests.length).toBe(8);
+      const firstRequest = server.requests[0] as { tools?: Array<{ function?: { name?: string; parameters?: unknown } }> };
+      const readTool = firstRequest.tools?.find((tool) => tool.function?.name === "Read");
       expect(server.requests[0]).toMatchObject({
         model: "gpt-5.4-mini",
-        tools: expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "Read" }) })]),
+        tools: expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "TodoWrite" }) })]),
+      });
+      expect(readTool).toMatchObject({
+        function: {
+          parameters: expect.objectContaining({
+            properties: expect.objectContaining({
+              file_path: expect.any(Object),
+              full: expect.any(Object),
+            }),
+          }),
+        },
       });
       expect(server.requests.at(-1)).toMatchObject({
         messages: expect.arrayContaining([expect.objectContaining({ role: "tool" })]),

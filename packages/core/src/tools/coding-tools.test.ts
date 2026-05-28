@@ -30,8 +30,123 @@ describe("coding tools", () => {
 
     const result = await read.execute("call_read", { path: "sample.txt", offset: 2, limit: 1 }, new AbortController().signal, () => undefined);
 
-    expect(textOf(result)).toBe("     2\tbeta");
-    expect(result.details).toMatchObject({ path: join(cwd, "sample.txt"), startLine: 2, endLine: 2, totalLines: 3 });
+    expect(textOf(result)).toContain("     2\tbeta");
+    expect(textOf(result)).toContain("lines 2-2/3");
+    expect(result.details).toMatchObject({
+      path: join(cwd, "sample.txt"),
+      startLine: 2,
+      endLine: 2,
+      totalLines: 3,
+      truncated: true,
+      nextOffset: 3,
+      canWrite: false,
+    });
+  });
+
+  it("truncates long default reads but allows writes after partial reads cover the full current file", async () => {
+    const cwd = await tempRoot();
+    const path = join(cwd, "long.txt");
+    await writeFile(path, Array.from({ length: 2001 }, (_, index) => `line ${index + 1}`).join("\n"));
+    const tools = createCodingTools({ cwd, maxReadTokens: 100_000 });
+    const read = tools.find((tool) => tool.name === "Read")!;
+    const write = tools.find((tool) => tool.name === "Write")!;
+
+    const truncated = await read.execute("call_read", { file_path: "long.txt" }, new AbortController().signal, () => undefined);
+    expect(textOf(truncated)).toContain("lines 1-2000/2001");
+    expect(truncated.details).toMatchObject({
+      startLine: 1,
+      endLine: 2000,
+      totalLines: 2001,
+      truncated: true,
+      nextOffset: 2001,
+      canWrite: false,
+    });
+    await expect(
+      write.execute("call_write", { file_path: "long.txt", content: "unsafe\n" }, new AbortController().signal, () => undefined),
+    ).rejects.toThrow("complete file");
+
+    const rest = await read.execute("call_read", { file_path: "long.txt", offset: 2001, limit: 1 }, new AbortController().signal, () => undefined);
+    expect(rest.details).toMatchObject({
+      startLine: 2001,
+      endLine: 2001,
+      totalLines: 2001,
+      truncated: false,
+      nextOffset: null,
+      canWrite: true,
+    });
+    await write.execute("call_write", { file_path: "long.txt", content: "safe\n" }, new AbortController().signal, () => undefined);
+    await expect(readFile(path, "utf8")).resolves.toBe("safe\n");
+  });
+
+  it("applies Read token budgets by removing whole lines only", async () => {
+    const cwd = await tempRoot();
+    await writeFile(join(cwd, "budget.txt"), "12345678\nabcdefg\nlast\n");
+    const read = createCodingTools({ cwd, maxReadTokens: 6 }).find((tool) => tool.name === "Read")!;
+
+    const result = await read.execute("call_read", { file_path: "budget.txt" }, new AbortController().signal, () => undefined);
+
+    expect(textOf(result)).toContain("     1\t12345678");
+    expect(textOf(result)).not.toContain("abcdefg");
+    expect(result.details).toMatchObject({
+      startLine: 1,
+      endLine: 1,
+      totalLines: 3,
+      truncated: true,
+      nextOffset: 2,
+      canWrite: false,
+    });
+  });
+
+  it("rejects binary and document-like files instead of decoding them as text", async () => {
+    const cwd = await tempRoot();
+    await writeFile(join(cwd, "binary.bin"), Buffer.from([0, 1, 2, 3]));
+    await writeFile(join(cwd, "paper.pdf"), "%PDF-1.7\n");
+    const read = toolByName(cwd, "Read");
+
+    await expect(
+      read.execute("call_read", { file_path: "binary.bin" }, new AbortController().signal, () => undefined),
+    ).rejects.toThrow("binary");
+    await expect(
+      read.execute("call_read", { file_path: "paper.pdf" }, new AbortController().signal, () => undefined),
+    ).rejects.toThrow("document");
+  });
+
+  it("allows explicit full Read to unlock writes without paginating", async () => {
+    const cwd = await tempRoot();
+    const path = join(cwd, "full.txt");
+    await writeFile(path, Array.from({ length: 2001 }, (_, index) => `line ${index + 1}`).join("\n"));
+    const tools = createCodingTools({ cwd, maxReadTokens: 100_000 });
+    const read = tools.find((tool) => tool.name === "Read")!;
+    const edit = tools.find((tool) => tool.name === "Edit")!;
+
+    const full = await read.execute("call_read", { file_path: "full.txt", full: true }, new AbortController().signal, () => undefined);
+    expect(full.details).toMatchObject({
+      startLine: 1,
+      endLine: 2001,
+      totalLines: 2001,
+      truncated: false,
+      nextOffset: null,
+      canWrite: true,
+    });
+    await edit.execute(
+      "call_edit",
+      { file_path: "full.txt", old_string: "line 2001", new_string: "done" },
+      new AbortController().signal,
+      () => undefined,
+    );
+    await expect(readFile(path, "utf8")).resolves.toContain("done");
+  });
+
+  it("uses a larger token budget for explicit full reads", async () => {
+    const cwd = await tempRoot();
+    await writeFile(join(cwd, "budget-full.txt"), Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n"));
+    const read = createCodingTools({ cwd, contextWindow: 1_000 }).find((tool) => tool.name === "Read")!;
+
+    const normal = await read.execute("call_read", { file_path: "budget-full.txt" }, new AbortController().signal, () => undefined);
+    const full = await read.execute("call_read", { file_path: "budget-full.txt", full: true }, new AbortController().signal, () => undefined);
+
+    expect(normal.details).toMatchObject({ tokenBudget: 10, truncated: true, canWrite: false });
+    expect(full.details).toMatchObject({ tokenBudget: 100, truncated: false, canWrite: true });
   });
 
   it("requires existing files to be read before Write and rejects stale writes", async () => {
@@ -54,6 +169,45 @@ describe("coding tools", () => {
     ).rejects.toThrow("changed since last Read");
   });
 
+  it("allows Write to create files and treats fully covered partial reads as writable", async () => {
+    const cwd = await tempRoot();
+    const tools = createCodingTools({ cwd });
+    const read = tools.find((tool) => tool.name === "Read")!;
+    const write = tools.find((tool) => tool.name === "Write")!;
+    const edit = tools.find((tool) => tool.name === "Edit")!;
+
+    const created = await write.execute(
+      "call_write",
+      { file_path: "new.txt", content: "hello\n" },
+      new AbortController().signal,
+      () => undefined,
+    );
+    expect(textOf(created)).toContain("File created successfully");
+    await expect(readFile(join(cwd, "new.txt"), "utf8")).resolves.toBe("hello\n");
+
+    await read.execute("call_read", { file_path: "new.txt", offset: 1, limit: 1 }, new AbortController().signal, () => undefined);
+    await write.execute("call_write", { file_path: "new.txt", content: "covered\n" }, new AbortController().signal, () => undefined);
+    await read.execute("call_read", { file_path: "new.txt", offset: 1, limit: 1 }, new AbortController().signal, () => undefined);
+    await edit.execute(
+      "call_edit",
+      { file_path: "new.txt", old_string: "covered", new_string: "hello" },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    await read.execute("call_read", { file_path: "new.txt" }, new AbortController().signal, () => undefined);
+    const updated = await write.execute(
+      "call_write",
+      { file_path: "new.txt", content: "updated\n" },
+      new AbortController().signal,
+      () => undefined,
+    );
+    expect(textOf(updated)).toContain("updated successfully");
+    expect(updated.details).toMatchObject({ type: "update", bytes: 8 });
+    expect(updated.details).not.toHaveProperty("originalFile");
+    expect(updated.details).not.toHaveProperty("content");
+  });
+
   it("edits exact strings and rejects ambiguous matches", async () => {
     const cwd = await tempRoot();
     const path = join(cwd, "target.txt");
@@ -70,7 +224,7 @@ describe("coding tools", () => {
         new AbortController().signal,
         () => undefined,
       ),
-    ).rejects.toThrow("matched 2 times");
+    ).rejects.toThrow("Found 2 matches");
 
     const result = await edit.execute(
       "call_edit",
@@ -79,7 +233,10 @@ describe("coding tools", () => {
       () => undefined,
     );
 
-    expect(textOf(result)).toContain("edited");
+    expect(textOf(result)).toContain("updated successfully");
+    expect(result.details).toMatchObject({ filePath: path, replacements: 1, replaceAll: false });
+    expect(result.details).not.toHaveProperty("oldString");
+    expect(result.details).not.toHaveProperty("newString");
     await expect(readFile(path, "utf8")).resolves.toBe("one\ndos\none\n");
   });
 
@@ -113,16 +270,16 @@ describe("coding tools", () => {
 
     const result = await glob.execute(
       "call_glob",
-      { pattern: "src/*.ts", maxResults: 1 },
+      { pattern: "src/*.ts", head_limit: 1 },
       new AbortController().signal,
       () => undefined,
     );
 
-    expect(textOf(result)).toBe("src/a.ts\n[truncated: 2 matches > 1 limit]");
-    expect(result.details).toMatchObject({ matches: ["src/a.ts"], totalMatches: 2, truncated: true });
+    expect(textOf(result)).toBe("src/a.ts");
+    expect(result.details).toMatchObject({ filenames: ["src/a.ts"], totalFiles: 2, truncated: true, appliedLimit: 1 });
   });
 
-  it("searches file contents with Grep and structured limits", async () => {
+  it("searches file contents with ripgrep-backed Grep modes and pagination", async () => {
     const cwd = await tempRoot();
     await mkdir(join(cwd, "src"));
     await writeFile(join(cwd, "src", "a.ts"), "alpha\nbeta\n");
@@ -132,30 +289,58 @@ describe("coding tools", () => {
 
     const result = await grep.execute(
       "call_grep",
-      { pattern: "alpha", glob: "src/*.ts", outputMode: "content", maxResults: 1 },
+      { pattern: "alpha", glob: "src/*.ts", output_mode: "content", head_limit: 1 },
       new AbortController().signal,
       () => undefined,
     );
 
-    expect(textOf(result)).toBe("src/a.ts:1:alpha\n[truncated: 2 matches > 1 limit]");
+    expect(textOf(result)).toMatch(/src\/[ab]\.ts:1:alpha/);
+    expect(textOf(result)).toContain("pagination");
     expect(result.details).toMatchObject({
-      matches: [{ path: "src/a.ts", line: 1, text: "alpha" }],
-      totalMatches: 2,
-      truncated: true,
+      mode: "content",
+      numLines: 1,
+      appliedLimit: 1,
     });
+
+    const files = await grep.execute(
+      "call_grep",
+      { pattern: "alpha", glob: "src/*.ts" },
+      new AbortController().signal,
+      () => undefined,
+    );
+    expect(textOf(files)).toContain("Found 2 files");
+    expect(files.details).toMatchObject({ mode: "files_with_matches", numFiles: 2 });
+
+    const count = await grep.execute(
+      "call_grep",
+      { pattern: "alpha", glob: "src/*.ts", output_mode: "count" },
+      new AbortController().signal,
+      () => undefined,
+    );
+    expect(textOf(count)).toContain("src/a.ts:1");
+    expect(count.details).toMatchObject({ mode: "count", numFiles: 2, numMatches: 2 });
+
+    const context = await grep.execute(
+      "call_grep",
+      { pattern: "beta", glob: "src/a.ts", output_mode: "content", "-B": 1, "-n": true },
+      new AbortController().signal,
+      () => undefined,
+    );
+    expect(textOf(context)).toContain("src/a.ts-1-alpha");
+    expect(textOf(context)).toContain("src/a.ts:2:beta");
   });
 
-  it("maintains a structured Todo list with one in-progress item", async () => {
+  it("maintains a TodoWrite list with old/current state and clears all-completed lists", async () => {
     const cwd = await tempRoot();
-    const todo = toolByName(cwd, "Todo");
+    const todo = toolByName(cwd, "TodoWrite");
 
     await expect(
       todo.execute(
         "call_todo",
         {
           todos: [
-            { id: "1", content: "Read file", status: "in_progress" },
-            { id: "2", content: "Edit file", status: "in_progress" },
+            { content: "Read file", status: "in_progress", activeForm: "Reading file" },
+            { content: "Edit file", status: "in_progress", activeForm: "Editing file" },
           ],
         },
         new AbortController().signal,
@@ -167,20 +352,42 @@ describe("coding tools", () => {
       "call_todo",
       {
         todos: [
-          { id: "1", content: "Read file", status: "completed" },
-          { id: "2", content: "Edit file", status: "in_progress" },
+          { content: "Read file", status: "completed", activeForm: "Reading file" },
+          { content: "Edit file", status: "in_progress", activeForm: "Editing file" },
         ],
       },
       new AbortController().signal,
       () => undefined,
     );
 
-    expect(textOf(result)).toBe("[completed] 1 Read file\n[in_progress] 2 Edit file");
+    expect(textOf(result)).toContain("Todos have been modified successfully");
     expect(result.details).toMatchObject({
-      todos: [
-        { id: "1", content: "Read file", status: "completed" },
-        { id: "2", content: "Edit file", status: "in_progress" },
+      oldTodos: [],
+      currentTodos: [
+        { content: "Read file", status: "completed", activeForm: "Reading file" },
+        { content: "Edit file", status: "in_progress", activeForm: "Editing file" },
       ],
+    });
+
+    const cleared = await todo.execute(
+      "call_todo",
+      {
+        todos: [
+          { content: "Read file", status: "completed", activeForm: "Reading file" },
+          { content: "Edit file", status: "completed", activeForm: "Editing file" },
+        ],
+      },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(cleared)).toContain("todo list has been cleared");
+    expect(cleared.details).toMatchObject({
+      oldTodos: [
+        { content: "Read file", status: "completed", activeForm: "Reading file" },
+        { content: "Edit file", status: "in_progress", activeForm: "Editing file" },
+      ],
+      currentTodos: [],
     });
   });
 });

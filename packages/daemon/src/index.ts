@@ -58,13 +58,14 @@ export type EmbeddedDaemonOptions = {
 };
 
 export const createRealRuntime = (options: RuntimeFactoryOptions): ScorelRuntime => {
+  const model = resolvePiAiModel(options.config.model);
   const runtime = new ScorelRuntime({
     provider: createPiAiProvider({
-      model: resolvePiAiModel(options.config.model),
+      model,
       apiKey: options.config.model.apiKey,
     }),
   });
-  for (const tool of createCodingTools({ cwd: options.cwd })) {
+  for (const tool of createCodingTools({ cwd: options.cwd, contextWindow: model.contextWindow })) {
     runtime.registerTool(tool);
   }
   return runtime;

@@ -181,19 +181,19 @@ const toolParameters = (name: string): Tool["parameters"] => {
   switch (name) {
     case "Read":
       return Type.Object({
-        path: Type.String(),
+        file_path: Type.String(),
         offset: Type.Optional(Type.Number()),
         limit: Type.Optional(Type.Number()),
+        full: Type.Optional(Type.Boolean()),
       });
     case "Write":
       return Type.Object({
-        path: Type.String(),
+        file_path: Type.String(),
         content: Type.String(),
-        createParents: Type.Optional(Type.Boolean()),
       });
     case "Edit":
       return Type.Object({
-        path: Type.String(),
+        file_path: Type.String(),
         old_string: Type.String(),
         new_string: Type.String(),
         replace_all: Type.Optional(Type.Boolean()),
@@ -202,31 +202,41 @@ const toolParameters = (name: string): Tool["parameters"] => {
       return Type.Object({
         command: Type.String(),
         cwd: Type.Optional(Type.String()),
-        timeoutMs: Type.Optional(Type.Number()),
+        timeout: Type.Optional(Type.Number()),
+        description: Type.Optional(Type.String()),
         maxOutputBytes: Type.Optional(Type.Number()),
       });
     case "Glob":
       return Type.Object({
         pattern: Type.String(),
-        cwd: Type.Optional(Type.String()),
-        maxResults: Type.Optional(Type.Number()),
+        path: Type.Optional(Type.String()),
+        head_limit: Type.Optional(Type.Number()),
+        offset: Type.Optional(Type.Number()),
       });
     case "Grep":
       return Type.Object({
         pattern: Type.String(),
-        cwd: Type.Optional(Type.String()),
+        path: Type.Optional(Type.String()),
         glob: Type.Optional(Type.String()),
-        outputMode: Type.Optional(Type.Union([Type.Literal("files_with_matches"), Type.Literal("content"), Type.Literal("count")])),
-        maxResults: Type.Optional(Type.Number()),
-        maxOutputBytes: Type.Optional(Type.Number()),
+        output_mode: Type.Optional(Type.Union([Type.Literal("files_with_matches"), Type.Literal("content"), Type.Literal("count")])),
+        "-B": Type.Optional(Type.Number()),
+        "-A": Type.Optional(Type.Number()),
+        "-C": Type.Optional(Type.Number()),
+        context: Type.Optional(Type.Number()),
+        "-n": Type.Optional(Type.Boolean()),
+        "-i": Type.Optional(Type.Boolean()),
+        type: Type.Optional(Type.String()),
+        head_limit: Type.Optional(Type.Number()),
+        offset: Type.Optional(Type.Number()),
+        multiline: Type.Optional(Type.Boolean()),
       });
-    case "Todo":
+    case "TodoWrite":
       return Type.Object({
         todos: Type.Array(
           Type.Object({
-            id: Type.String(),
             content: Type.String(),
             status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")]),
+            activeForm: Type.Optional(Type.String()),
           }),
         ),
       });
