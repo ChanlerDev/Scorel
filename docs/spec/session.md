@@ -46,11 +46,14 @@ interface SessionHeader {
 
 interface SessionMeta {
   name?: string;
+  title?: string;
   model: string;
   thinkingLevel: "none" | "low" | "medium" | "high";
   [key: string]: unknown;  // 可扩展
 }
 ```
+
+`sessionId` 是随机稳定身份，不承担用户可读命名。产品 UI / CLI 应优先展示 `title`、时间、project、short index；short index 只允许作为本机选择辅助，不作为跨 daemon 协议 ID。测试和调试路径可以显式传入 `--session <id>`，但默认新建 session 应由 daemon 生成随机 ID。
 
 ### 2.3 示例文件
 
@@ -83,6 +86,20 @@ e01 (user: "解释 monads")                    ← parentId: null
 - `e04`（rewind）记录在树上但不影响 context building
 - `e05` 的 parentId 是 `e01`（rewind 的 target），不是 `e04`
 - `seq` 不连续（中间是 transient events 占的序号）
+
+### 2.5 Attach Client Cache
+
+Daemon-owned JSONL remains the authoritative session store. Attach clients may keep a local project-scoped persistent cache to speed up terminal recovery, but that cache is not a second writer.
+
+Cache scope is part of the identity:
+
+- local attach cache is scoped under a local project locator
+- remote attach cache is scoped under a remote endpoint/device locator
+- same `sessionId` under different scopes must not share cache files
+
+The cache may advance `persistentLastSeq` only after a persistent event has been durably written to the local cache. It must not advance persistent anchors from transient events. If metadata no longer matches the requested attach target, the client must ignore or isolate the cache and perform daemon reconciliation.
+
+If the cache stores transient stream state, it must be explicitly separate from persistent events. A cached transient may advance `streamLastSeq`, but it is provisional UI state only and must be discarded once the matching persistent assistant event is observed.
 
 ---
 

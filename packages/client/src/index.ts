@@ -66,7 +66,8 @@ export class DaemonClient {
   #unsubscribe: Unsubscribe | undefined;
   #state: "disconnected" | "connecting" | "connected" = "disconnected";
   #sessionId: SessionId | null = null;
-  #lastSeq: Seq = asSeq(0);
+  #persistentLastSeq: Seq = asSeq(0);
+  #streamLastSeq: Seq = asSeq(0);
   #requestCounter = 0;
 
   constructor(transport: DaemonTransport, options: DaemonClientOptions) {
@@ -89,7 +90,15 @@ export class DaemonClient {
   }
 
   get lastSeq(): Seq {
-    return this.#lastSeq;
+    return this.#streamLastSeq;
+  }
+
+  get persistentLastSeq(): Seq {
+    return this.#persistentLastSeq;
+  }
+
+  get streamLastSeq(): Seq {
+    return this.#streamLastSeq;
   }
 
   async connect(sessionId: SessionId): Promise<void> {
@@ -98,10 +107,11 @@ export class DaemonClient {
     const result = await this.#transport.connect({
       clientId: this.clientId,
       sessionId,
-      lastSeq: this.#lastSeq,
+      persistentLastSeq: this.#persistentLastSeq,
+      streamLastSeq: this.#streamLastSeq,
+      lastSeq: this.#streamLastSeq,
     });
     this.#sessionId = result.sessionId ?? sessionId;
-    this.#lastSeq = result.currentSeq ?? this.#lastSeq;
     this.#state = "connected";
   }
 
@@ -119,12 +129,13 @@ export class DaemonClient {
   }
 
   async loadSession(sessionId: SessionId): Promise<ClientRequestMap["load_session"]["response"]> {
-    const response = await this.#request("load_session", { sessionId, lastSeq: this.#lastSeq });
+    const response = await this.#request("load_session", { sessionId, lastSeq: this.#persistentLastSeq });
     this.#sessionId = response.sessionId;
-    this.#lastSeq = response.currentSeq;
     for (const event of response.events) {
       this.#recordEvent(event);
     }
+    this.#persistentLastSeq = maxSeq(this.#persistentLastSeq, response.currentSeq);
+    this.#streamLastSeq = maxSeq(this.#streamLastSeq, response.currentSeq);
     return response;
   }
 
@@ -138,15 +149,34 @@ export class DaemonClient {
     return this.#request("send_message", { sessionId: this.#sessionId, content, options });
   }
 
-  async resync(fromSeq?: Seq): Promise<void> {
+  async resync(anchors?: Seq | { persistentLastSeq?: Seq; streamLastSeq?: Seq }): Promise<ClientRequestMap["resync_events"]["response"]> {
     if (!this.#sessionId) {
       throw new Error("DaemonClient is not connected to a session");
     }
-    const response = await this.#request("resync_events", { sessionId: this.#sessionId, fromSeq });
+    const legacyFromSeq = typeof anchors === "number" ? anchors : undefined;
+    const response = await this.#request("resync_events", {
+      sessionId: this.#sessionId,
+      fromSeq: legacyFromSeq,
+      persistentLastSeq: typeof anchors === "object" ? anchors.persistentLastSeq : this.#persistentLastSeq,
+      streamLastSeq: typeof anchors === "object" ? anchors.streamLastSeq : legacyFromSeq ?? this.#streamLastSeq,
+    });
+    if (response.mode === "full_reload") {
+      this.#events.length = 0;
+      this.#persistentLastSeq = asSeq(0);
+    }
     for (const event of response.events) {
       this.#recordEvent(event);
+      for (const subscriber of this.#subscribers) {
+        subscriber(event);
+      }
     }
-    this.#lastSeq = response.throughSeq;
+    if (response.mode === "persistent_fallback" || response.mode === "full_reload") {
+      this.#persistentLastSeq = maxSeq(this.#persistentLastSeq, response.throughSeq);
+      this.#streamLastSeq = maxSeq(this.#streamLastSeq, response.throughSeq);
+    } else {
+      this.#streamLastSeq = maxSeq(this.#streamLastSeq, response.throughSeq);
+    }
+    return response;
   }
 
   subscribe(handler: (event: ScorelEvent) => void): Unsubscribe {
@@ -209,7 +239,6 @@ export class DaemonClient {
       }
       case "connected":
         this.#sessionId = message.sessionId ?? this.#sessionId;
-        this.#lastSeq = message.currentSeq ?? this.#lastSeq;
         break;
       case "disconnected":
         this.#state = "disconnected";
@@ -220,8 +249,9 @@ export class DaemonClient {
   }
 
   #recordEvent(event: ScorelEvent): void {
-    this.#lastSeq = event.seq;
+    this.#streamLastSeq = maxSeq(this.#streamLastSeq, event.seq);
     if ("id" in event) {
+      this.#persistentLastSeq = maxSeq(this.#persistentLastSeq, event.seq);
       const existingIndex = this.#events.findIndex((candidate) => candidate.id === event.id);
       if (existingIndex >= 0) {
         this.#events[existingIndex] = event;
@@ -231,6 +261,8 @@ export class DaemonClient {
     }
   }
 }
+
+const maxSeq = (left: Seq, right: Seq): Seq => asSeq(Math.max(Number(left), Number(right)));
 
 export class WsTransport implements DaemonTransport {
   readonly url: string;

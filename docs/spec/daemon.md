@@ -68,7 +68,8 @@ interface DaemonTransport {
 interface ConnectParams {
   auth?: AuthToken;
   device: DeviceInfo;
-  lastSeq?: number;   // 重连时提供，用于补发 missed events
+  persistentLastSeq?: number; // client 本地已持久确认的 persistent seq
+  streamLastSeq?: number;     // client 实际看见的最高 stream seq
 }
 
 interface ConnectResult {
@@ -99,10 +100,10 @@ interface ConnectResult {
 
 M4 的远端控制路径使用 daemon-owned WebSocket server primitive。远端 server 消费同一套 `ClientMessage` / `DaemonMessage` 线协议：
 
-- client 先发送 `connect` handshake，其中包含 `clientId`、可选 `sessionId`、可选 `lastSeq` 和 remote token。
+- client 先发送 `connect` handshake，其中包含 `clientId`、可选 `sessionId`、可选 dual-seq anchors 和 remote token。
 - daemon 校验 token；失败返回 `auth_failed` 并关闭连接。
 - 校验通过后，daemon 复用与 embedded/local socket 相同的 session ownership、event broadcast、request/response 和 resync 行为。
-- client 断线后以同一个 session 和 `lastSeq` 重新连接，再通过 `resync_events` 补发 missed events。
+- client 断线后以同一个 session 和 `persistentLastSeq` / `streamLastSeq` 重新连接，再通过 `resync_events` 补发 missed events。
 - remote endpoint 不负责持久保存 token；token 的生成、轮换、profile 存储不属于 M4。
 
 CLI 最小路径：
@@ -167,8 +168,11 @@ interface EventBroadcaster {
   /** 分配 seq 并广播给所有该 session 的 client */
   broadcast(sessionId: SessionId, event: Omit<ScorelEvent, "seq">): ScorelEvent;
 
-  /** 重连同步：返回 seq 之后的事件 */
-  getEventsAfter(sessionId: SessionId, afterSeq: Seq): ScorelEvent[];
+  /** 重连同步：按 dual-seq anchors 返回恢复模式和补偿事件 */
+  resyncEvents(sessionId: SessionId, anchors: {
+    persistentLastSeq?: Seq;
+    streamLastSeq?: Seq;
+  }): ResyncResult;
 
   /** 当前最新 seq */
   getCurrentSeq(sessionId: SessionId): Seq;
@@ -206,7 +210,7 @@ interface SessionLane {
 ```typescript
 type ClientMessage =
   // ─── 连接生命周期 ───
-  | { type: "connect"; sessionId: SessionId; clientId: ClientId; lastSeq?: Seq; token: string }
+  | { type: "connect"; sessionId: SessionId; clientId: ClientId; persistentLastSeq?: Seq; streamLastSeq?: Seq; token: string }
   | { type: "disconnect" }
   | { type: "ping" }
 
@@ -233,7 +237,7 @@ type ClientMessage =
   | { type: "get_status"; requestId: string }  // daemon 状态：runtime running、model、active clients
 
   // ─── 同步 ───
-  | { type: "resync"; requestId: string; fromSeq?: Seq };
+  | { type: "resync"; requestId: string; persistentLastSeq?: Seq; streamLastSeq?: Seq };
 ```
 
 **说明**：

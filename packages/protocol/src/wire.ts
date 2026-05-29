@@ -45,8 +45,14 @@ export type ClientRequestMap = {
     response: { currentSeq: Seq };
   };
   resync_events: {
-    request: { sessionId: SessionId; fromSeq?: Seq };
-    response: { events: ScorelEvent[]; throughSeq: Seq };
+    request: { sessionId: SessionId; persistentLastSeq?: Seq; streamLastSeq?: Seq; fromSeq?: Seq };
+    response: {
+      events: ScorelEvent[];
+      throughSeq: Seq;
+      mode: "stream_resume" | "persistent_fallback" | "full_reload";
+      gapFromSeq?: Seq;
+      gapToSeq?: Seq;
+    };
   };
 };
 

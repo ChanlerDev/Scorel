@@ -4,6 +4,8 @@ import type { ClientMessage, DaemonMessage } from "./wire.js";
 export type ConnectParams = {
   clientId: ClientId;
   sessionId?: SessionId;
+  persistentLastSeq?: Seq;
+  streamLastSeq?: Seq;
   lastSeq?: Seq;
 };
 

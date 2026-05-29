@@ -234,7 +234,93 @@ describe("daemon protocol boundary", () => {
         requestType: "resync_events",
         data: {
           events: expect.arrayContaining([expect.objectContaining({ type: "assistant_message" })]),
-          throughSeq: expect.any(Number),
+          throughSeq: 4,
+          mode: "persistent_fallback",
+        },
+      });
+
+      const seenBeforeLive = clientBMessages.length;
+      clientA.send({
+        type: "send_message",
+        requestId: asRequestId("req_send_after_fallback"),
+        sessionId: asSessionId("ses_resync"),
+        content: "after fallback",
+      });
+      await expect(
+        waitForDaemonMessage(
+          clientBMessages,
+          (message) =>
+            clientBMessages.indexOf(message) >= seenBeforeLive &&
+            message.type === "event" &&
+            Number(message.event.seq) > 4,
+        ),
+      ).resolves.toMatchObject({ type: "event" });
+    } finally {
+      clientA.close();
+      clientB.close();
+      await server.close();
+      await daemon.shutdown();
+    }
+  });
+
+  it("does not treat a non-contiguous persistent-only buffer as stream resume", async () => {
+    const daemon = createDaemon();
+    const socketPath = join(mkdtempSync(join(tmpdir(), "scorel-resync-gap-")), "daemon.sock");
+    const server = await startEmbeddedDaemonSocketServer({
+      daemon,
+      socketPath,
+      token: "local-secret",
+    });
+    await daemon.start();
+    const clientA = await connectTestSocket(socketPath, "local-secret", "client_a", "ses_gap");
+    const clientB = await connectTestSocket(socketPath, "local-secret", "client_b", "ses_gap");
+    const clientAMessages: DaemonMessage[] = [];
+    const clientBMessages: DaemonMessage[] = [];
+
+    try {
+      clientA.onMessage((message) => clientAMessages.push(message));
+      clientB.onMessage((message) => clientBMessages.push(message));
+      clientA.send({
+        type: "create_session",
+        requestId: asRequestId("req_create_gap"),
+        sessionId: asSessionId("ses_gap"),
+        meta: { model: "test-model" },
+      });
+      await waitForDaemonMessage(clientAMessages, (message) => "requestId" in message && message.requestId === "req_create_gap");
+      clientA.send({
+        type: "send_message",
+        requestId: asRequestId("req_send_gap"),
+        sessionId: asSessionId("ses_gap"),
+        content: "hello",
+      });
+      await waitForDaemonMessage(clientAMessages, (message) => message.type === "event" && message.event.type === "assistant_message");
+      daemon.releaseSessionEventBuffer(asSessionId("ses_gap"));
+
+      clientB.send({
+        type: "load_session",
+        requestId: asRequestId("req_load_gap"),
+        sessionId: asSessionId("ses_gap"),
+      });
+      await waitForDaemonMessage(clientBMessages, (message) => "requestId" in message && message.requestId === "req_load_gap");
+      clientB.send({
+        type: "resync_events",
+        requestId: asRequestId("req_resync_gap"),
+        sessionId: asSessionId("ses_gap"),
+        persistentLastSeq: asSeq(1),
+        streamLastSeq: asSeq(2),
+      });
+
+      await expect(
+        waitForDaemonMessage(clientBMessages, (message) => "requestId" in message && message.requestId === "req_resync_gap"),
+      ).resolves.toMatchObject({
+        type: "response",
+        requestType: "resync_events",
+        data: {
+          mode: "persistent_fallback",
+          throughSeq: 4,
+          gapFromSeq: 3,
+          gapToSeq: 5,
+          events: [expect.objectContaining({ type: "assistant_message", seq: 4 })],
         },
       });
     } finally {

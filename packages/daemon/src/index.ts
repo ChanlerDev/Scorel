@@ -42,6 +42,7 @@ import {
   type ScorelMessage,
   type TransientEvent,
   type Unsubscribe,
+  type ClientRequestMap,
 } from "@scorel/protocol";
 
 export const daemonPackageName = "@scorel/daemon" as const;
@@ -171,7 +172,7 @@ export const startLocalDaemonSocketServer = async (
           const result = options.onClientConnect?.(connection, message) ?? {
             clientId: message.clientId,
             sessionId: message.sessionId,
-            currentSeq: message.lastSeq ?? asSeq(0),
+            currentSeq: message.streamLastSeq ?? message.lastSeq ?? asSeq(0),
           };
           connection.send({
             type: "connected",
@@ -249,7 +250,7 @@ export const startRemoteDaemonWebSocketServer = async (
         const result = options.onClientConnect?.(connection, message) ?? {
           clientId: message.clientId,
           sessionId: message.sessionId,
-          currentSeq: message.lastSeq ?? asSeq(0),
+          currentSeq: message.streamLastSeq ?? message.lastSeq ?? asSeq(0),
         };
         connection.send({
           type: "connected",
@@ -466,6 +467,8 @@ type RuntimeEventState = {
   finalAssistantEventId: EventId;
 };
 
+type ResyncEventsResult = ClientRequestMap["resync_events"]["response"];
+
 export class EmbeddedDaemon {
   readonly #sessionsDir: string;
   readonly #deviceId: DeviceId;
@@ -526,10 +529,10 @@ export class EmbeddedDaemon {
         await this.#handleSendMessage(connection, message);
         break;
       case "resync_events":
-        this.#respond(connection, message, {
-          events: await this.#resyncEvents(message.sessionId, message.fromSeq),
-          throughSeq: asSeq(this.#seqs.get(message.sessionId) ?? 0),
-        });
+        this.#respond(connection, message, await this.#resyncEvents(message.sessionId, {
+          persistentLastSeq: message.persistentLastSeq ?? message.fromSeq,
+          streamLastSeq: message.streamLastSeq ?? message.fromSeq,
+        }));
         break;
       case "subscribe_events":
         connection.sessionId = message.sessionId;
@@ -788,14 +791,42 @@ export class EmbeddedDaemon {
     return (this.#events.get(sessionId) ?? []).filter((event) => Number(event.seq) > from);
   }
 
-  async #resyncEvents(sessionId: SessionId, fromSeq: Seq | undefined): Promise<ScorelEvent[]> {
-    const buffered = this.#eventsAfter(sessionId, fromSeq);
-    if (buffered.length > 0) {
-      return buffered;
+  async #resyncEvents(
+    sessionId: SessionId,
+    anchors: { persistentLastSeq?: Seq; streamLastSeq?: Seq },
+  ): Promise<ResyncEventsResult> {
+    const currentSeq = asSeq(this.#seqs.get(sessionId) ?? 0);
+    const persistentLastSeq = anchors.persistentLastSeq ?? asSeq(0);
+    const streamLastSeq = anchors.streamLastSeq ?? persistentLastSeq;
+
+    if (Number(streamLastSeq) >= Number(currentSeq)) {
+      return {
+        events: [],
+        throughSeq: currentSeq,
+        mode: "stream_resume",
+      };
     }
-    const from = Number(fromSeq ?? 0);
+
+    const buffered = this.#eventsAfter(sessionId, streamLastSeq);
+    if (hasContinuousCoverage(buffered, Number(streamLastSeq) + 1)) {
+      return {
+        events: buffered,
+        throughSeq: buffered.at(-1)?.seq ?? streamLastSeq,
+        mode: "stream_resume",
+      };
+    }
+
     const lane = await this.#getLane(sessionId);
-    return [...lane.session.tree].filter((event) => Number(event.seq) > from);
+    const events = [...lane.session.tree].filter((event) => Number(event.seq) > Number(persistentLastSeq));
+    const throughSeq = events.at(-1)?.seq ?? persistentLastSeq;
+    const mode = Number(persistentLastSeq) === 0 && Number(streamLastSeq) === 0 ? "full_reload" : "persistent_fallback";
+    return {
+      events,
+      throughSeq,
+      mode,
+      gapFromSeq: asSeq(Number(streamLastSeq) + 1),
+      gapToSeq: currentSeq,
+    };
   }
 
   async #getLane(sessionId: SessionId): Promise<SessionLane> {
@@ -913,3 +944,17 @@ export const createEmbeddedTransport = (daemon: EmbeddedDaemon): DaemonTransport
 
 const isNodeErrorCode = (cause: unknown, code: string): boolean =>
   cause instanceof Error && "code" in cause && cause.code === code;
+
+const hasContinuousCoverage = (events: ScorelEvent[], expectedFirstSeq: number): boolean => {
+  if (events.length === 0) {
+    return false;
+  }
+  let expected = expectedFirstSeq;
+  for (const event of events) {
+    if (Number(event.seq) !== expected) {
+      return false;
+    }
+    expected += 1;
+  }
+  return true;
+};

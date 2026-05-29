@@ -57,7 +57,7 @@ describe("@scorel/app-cli", () => {
             socket.write(`${JSON.stringify({ type: "response", requestType: "create_session", requestId: message.requestId, ok: true, data: { sessionId: "ses_attach" } })}\n`);
           }
           if (message.type === "resync_events") {
-            socket.write(`${JSON.stringify({ type: "response", requestType: "resync_events", requestId: message.requestId, ok: true, data: { events: [], throughSeq: 0 } })}\n`);
+            socket.write(`${JSON.stringify({ type: "response", requestType: "resync_events", requestId: message.requestId, ok: true, data: { events: [], throughSeq: 0, mode: "stream_resume" } })}\n`);
           }
         }
       });
@@ -112,7 +112,7 @@ describe("@scorel/app-cli", () => {
             requestType: "resync_events",
             requestId: message.requestId,
             ok: true,
-            data: { events: [], throughSeq: asSeq(0) },
+            data: { events: [], throughSeq: asSeq(0), mode: "stream_resume" as const },
           };
         }
         return undefined;
@@ -183,7 +183,7 @@ describe("@scorel/app-cli", () => {
             requestType: "resync_events",
             requestId: message.requestId,
             ok: true,
-            data: { events: [], throughSeq: asSeq(0) },
+            data: { events: [], throughSeq: asSeq(0), mode: "stream_resume" as const },
           };
         }
         return undefined;
@@ -283,7 +283,7 @@ describe("@scorel/app-cli", () => {
             requestType: "resync_events",
             requestId: message.requestId,
             ok: true,
-            data: { events: [], throughSeq: asSeq(2) },
+            data: { events: [], throughSeq: asSeq(2), mode: "stream_resume" as const },
           };
         }
         return undefined;
@@ -302,6 +302,280 @@ describe("@scorel/app-cli", () => {
       expect(result.stdout).toContain("[user] hello from terminal 2");
       expect(result.stdout).toContain("recovered assistant output\n");
     } finally {
+      await server.close();
+    }
+  });
+
+  it("does not duplicate persistent output when attach cache and daemon replay contain the same event", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-cache-dedupe-"));
+    const server = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "response",
+            requestType: "load_session",
+            requestId: message.requestId,
+            ok: true,
+            data: {
+              sessionId: asSessionId("ses_cache_dedupe"),
+              activeLeafId: asEventId("evt_cache_assistant"),
+              currentSeq: asSeq(2),
+              meta: {},
+              events: cachedAttachEvents("ses_cache_dedupe", "cached assistant output"),
+            },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(2), mode: "stream_resume" as const },
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await runCliWithInput(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_cache_dedupe"],
+        ".exit\n",
+        testConfig("http://127.0.0.1:1"),
+        stateDir,
+      );
+      const second = await runCliWithInput(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_cache_dedupe"],
+        ".exit\n",
+        testConfig("http://127.0.0.1:1"),
+        stateDir,
+      );
+
+      expect(second.code).toBe(0);
+      expect(second.stdout.match(/cached assistant output/g)).toHaveLength(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps attach cache separated by remote project scope even with the same session id", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-cache-scope-"));
+    const serverA = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "response",
+            requestType: "load_session",
+            requestId: message.requestId,
+            ok: true,
+            data: {
+              sessionId: asSessionId("ses_same"),
+              activeLeafId: asEventId("evt_scope_a_assistant"),
+              currentSeq: asSeq(2),
+              meta: {},
+              events: cachedAttachEvents("ses_same", "remote A cached text", "evt_scope_a"),
+            },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(2), mode: "stream_resume" as const },
+          };
+        }
+        return undefined;
+      },
+    });
+    const serverB = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "error",
+            requestId: message.requestId,
+            ok: false,
+            code: "session_not_found" as const,
+            message: "missing session",
+          };
+        }
+        if (message.type === "create_session") {
+          return {
+            type: "response",
+            requestType: "create_session",
+            requestId: message.requestId,
+            ok: true,
+            data: { sessionId: asSessionId("ses_same") },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(0), mode: "full_reload" as const },
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await runCliWithInput(
+        ["attach", "--remote", serverA.url, "--token", "remote-secret", "--session", "ses_same"],
+        ".exit\n",
+        testConfig("http://127.0.0.1:1"),
+        stateDir,
+      );
+      const scoped = await runCliWithInput(
+        ["attach", "--remote", serverB.url, "--token", "remote-secret", "--session", "ses_same"],
+        ".exit\n",
+        testConfig("http://127.0.0.1:1"),
+        stateDir,
+      );
+
+      expect(scoped.code).toBe(0);
+      expect(scoped.stdout).not.toContain("remote A cached text");
+    } finally {
+      await serverA.close();
+      await serverB.close();
+    }
+  });
+
+  it("restores cached transient assistant text and resumes from the cached stream seq", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-transient-cache-"));
+    const connections: RemoteDaemonWebSocketConnection[] = [];
+    const resyncRequests: Array<{ persistentLastSeq?: number; streamLastSeq?: number }> = [];
+    let resyncCount = 0;
+    const userEvent = {
+      type: "user_message" as const,
+      id: asEventId("evt_transient_user"),
+      parentId: null,
+      seq: asSeq(1),
+      sessionId: asSessionId("ses_transient_cache"),
+      clientId: asClientId("client_other"),
+      ts: 1,
+      message: { role: "user" as const, content: [{ type: "text" as const, text: "write story" }] },
+    };
+    const server = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientConnect: (connection, params) => {
+        connections.push(connection);
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(1) };
+      },
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "response",
+            requestType: "load_session",
+            requestId: message.requestId,
+            ok: true,
+            data: {
+              sessionId: asSessionId("ses_transient_cache"),
+              activeLeafId: asEventId("evt_transient_user"),
+              currentSeq: asSeq(1),
+              meta: {},
+              events: [userEvent],
+            },
+          };
+        }
+        if (message.type === "resync_events") {
+          resyncCount += 1;
+          resyncRequests.push({
+            persistentLastSeq: Number(message.persistentLastSeq),
+            streamLastSeq: Number(message.streamLastSeq),
+          });
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data:
+              resyncCount === 1
+                ? { events: [], throughSeq: asSeq(1), mode: "stream_resume" as const }
+                : {
+                    events: [
+                      {
+                        type: "text_delta" as const,
+                        seq: asSeq(3),
+                        sessionId: asSessionId("ses_transient_cache"),
+                        clientId: asClientId("client_other"),
+                        ts: 3,
+                        eventId: asEventId("evt_transient_assistant"),
+                        delta: " continuation",
+                      },
+                      {
+                        type: "assistant_message" as const,
+                        id: asEventId("evt_transient_assistant"),
+                        parentId: asEventId("evt_transient_user"),
+                        seq: asSeq(4),
+                        sessionId: asSessionId("ses_transient_cache"),
+                        clientId: asClientId("client_other"),
+                        ts: 4,
+                        message: { role: "assistant" as const, content: [{ type: "text" as const, text: "partial continuation" }] },
+                      },
+                    ],
+                    throughSeq: asSeq(4),
+                    mode: "stream_resume" as const,
+                  },
+          };
+        }
+        return undefined;
+      },
+    });
+    const firstInput = new PassThrough();
+
+    try {
+      const first = runCliWithStream(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_transient_cache"],
+        firstInput,
+        testConfig("http://127.0.0.1:1"),
+        stateDir,
+      );
+      await waitFor(() => connections.length >= 1);
+      connections[0].send({
+        type: "event",
+        event: {
+          type: "text_delta",
+          seq: asSeq(2),
+          sessionId: asSessionId("ses_transient_cache"),
+          clientId: asClientId("client_other"),
+          ts: 2,
+          eventId: asEventId("evt_transient_assistant"),
+          delta: "partial",
+        },
+      });
+      await waitFor(() => first.stdout.toString().includes("partial"));
+      firstInput.end(".exit\n");
+      await expect(first.result).resolves.toMatchObject({ code: 0 });
+
+      const second = await runCliWithInput(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_transient_cache"],
+        ".exit\n",
+        testConfig("http://127.0.0.1:1"),
+        stateDir,
+      );
+
+      expect(second.code).toBe(0);
+      expect(second.stdout).toContain("partial continuation\n");
+      expect(second.stdout.match(/partial continuation/g)).toHaveLength(1);
+      expect(resyncRequests.at(-1)).toEqual({ persistentLastSeq: 1, streamLastSeq: 2 });
+    } finally {
+      firstInput.destroy();
       await server.close();
     }
   });
@@ -341,7 +615,7 @@ describe("@scorel/app-cli", () => {
             requestType: "resync_events",
             requestId: message.requestId,
             ok: true,
-            data: { events: [], throughSeq: asSeq(0) },
+            data: { events: [], throughSeq: asSeq(0), mode: "stream_resume" as const },
           };
         }
         return undefined;
@@ -533,6 +807,29 @@ const runCliWithInput = async (
   }, { config, sessionsDir });
   return { code, stdout: stdout.toString(), stderr: stderr.toString() };
 };
+
+const cachedAttachEvents = (sessionId: string, assistantText: string, idPrefix = "evt_cache") => [
+  {
+    type: "user_message" as const,
+    id: asEventId(`${idPrefix}_user`),
+    parentId: null,
+    seq: asSeq(1),
+    sessionId: asSessionId(sessionId),
+    clientId: asClientId("client_other"),
+    ts: 1,
+    message: { role: "user" as const, content: [{ type: "text" as const, text: "cached user input" }] },
+  },
+  {
+    type: "assistant_message" as const,
+    id: asEventId(`${idPrefix}_assistant`),
+    parentId: asEventId(`${idPrefix}_user`),
+    seq: asSeq(2),
+    sessionId: asSessionId(sessionId),
+    clientId: asClientId("client_other"),
+    ts: 2,
+    message: { role: "assistant" as const, content: [{ type: "text" as const, text: assistantText }] },
+  },
+];
 
 const runCliWithStream = (
   argv: string[],

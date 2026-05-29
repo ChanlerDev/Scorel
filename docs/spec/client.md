@@ -8,7 +8,7 @@
 
 ## 0. 包边界
 
-DaemonClient 是 Entry 侧 SDK，不是 Daemon 的一部分。它负责连接、重连、request/response、`lastSeq` resync、transient buffer 和本地 UI state projection。
+DaemonClient 是 Entry 侧 SDK，不是 Daemon 的一部分。它负责连接、重连、request/response、dual-seq resync、transient buffer 和本地 UI state projection。
 
 `@scorel/client` 提供 platform-neutral `DaemonClient`、browser-safe `WsTransport`、Node socket transport（subpath export）。需要直接持有 Daemon 实例的 embedded adapter 由 `@scorel/daemon` 提供，因为它必须接触 Daemon 内部对象，不能放进 browser-safe client 包。
 
@@ -59,8 +59,14 @@ interface DaemonClient {
   ): Unsubscribe;
 
   // ─── 同步 ───
-  readonly lastSeq: Seq;
-  resync(fromSeq?: Seq): Promise<void>;
+  readonly persistentLastSeq: Seq;
+  readonly streamLastSeq: Seq;
+  resync(anchors?: { persistentLastSeq?: Seq; streamLastSeq?: Seq }): Promise<{
+    mode: "stream_resume" | "persistent_fallback" | "full_reload";
+    throughSeq: Seq;
+    gapFromSeq?: Seq;
+    gapToSeq?: Seq;
+  }>;
 
   // ─── 本地 UI 状态（从收到的事件投影）───
   getLocalState(): ClientSessionState;
@@ -143,6 +149,25 @@ DaemonClient 内部维护从收到的事件投影出的本地 UI 状态：
 
 DaemonClient 不实现 `buildContext`。LLM context 构建属于 `@scorel/core/session`，由 daemon 在执行 turn 前调用。Client 侧的 tree projection 只服务 UI 展示，不能成为调度、压缩或 rewind 判断的权威来源。
 
+### 4.1 Dual-Seq Recovery State
+
+Client keeps two reconnect anchors:
+
+- `persistentLastSeq`: highest persistent event seq that the client has durably recorded and can render after a process restart.
+- `streamLastSeq`: highest event seq the client has actually observed in the live stream.
+
+`streamLastSeq` may be ahead of `persistentLastSeq` while an assistant response is streaming. After a cold start, a client must not claim transient stream continuity from an old `streamLastSeq` unless it also has durable transient anchors such as `message_start.eventId`. Without those anchors, the safe reconnect request uses the durable persistent anchor for both values.
+
+Attach clients that do persist transient anchors may render the cached in-progress assistant prefix before resync and then ask daemon to resume from the cached `streamLastSeq`. Any transient events returned by `resync()` are emitted to subscribers just like live transport events; otherwise terminal renderers would silently miss the recovered delta range.
+
+`resync()` returns an explicit recovery mode:
+
+- `stream_resume`: daemon buffer continuously covers `streamLastSeq + 1`; returned events may include transient and persistent events.
+- `persistent_fallback`: daemon buffer cannot prove stream continuity; returned events contain only missing persistent events after `persistentLastSeq`, and any lost transient gap is explicit.
+- `full_reload`: client cache is unusable or incompatible; client must rebuild from daemon persistent state.
+
+For terminal clients, local cache pre-render is conservative: cache metadata must match the requested attach target before output is printed, and `full_reload` must be visibly separated from any already printed stale cache because stdout cannot be rolled back.
+
 ---
 
 ## 5. Transport 选择
@@ -174,14 +199,14 @@ const client = new DaemonClient(
 );
 
 await client.connect(sessionId);
-await client.resync(lastSeq);
+await client.resync({ persistentLastSeq, streamLastSeq });
 ```
 
 Rules:
 
 - Token auth is bearer-token style and belongs to the transport handshake.
 - `@scorel/client` does not persist tokens.
-- Reconnect keeps the client-side `lastSeq`; the client reconnects to the same session and calls `resync_events`.
+- Reconnect keeps client-side `persistentLastSeq` and `streamLastSeq`; the client reconnects to the same session and calls `resync_events`.
 - Auth failure is surfaced as a concise connection error.
 - The same `DaemonClient` API is used for embedded, local socket, and remote WebSocket modes.
 

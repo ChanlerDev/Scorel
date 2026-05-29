@@ -53,6 +53,19 @@
 
 **核心原则**：Session 属于 device（daemon 宿主机）。多个 client 连接到同一个 session，共享同一份数据。如果想把 session 搬到另一台机器，用 fork。
 
+### 3.1.1 ID 与序号规则
+
+随机稳定 ID 和单调序号分工明确：
+
+- `sessionId`：默认由 daemon 随机生成（UUID / ULID / nanoid 均可），用于协议和存储引用；用户可读名称放在 title / meta，不把手写名称当主 ID。
+- `event.id`：persistent event 的随机稳定 ID，不使用自增；tree、去重、transient finalization 都依赖它。
+- `deviceId`：每台 daemon 宿主持久生成一次，重启后保持稳定；remote mirror 用它判断 session 物理归属。
+- `clientId`：client 连接端 ID，可按 profile 持久或按连接生成；它用于审计/展示，不决定 session 权威。
+- `seq`：每个 session 内由 daemon 单调递增，persistent 和 transient 共享；它只表达顺序和 reconnect anchor，不作为全局身份。
+- UI 短号 / 本机 index：可以自增，但只服务本机选择和展示，不能进入协议身份。
+
+因此，`sessionId` 需要尽量全局不碰撞；`seq` 才是适合自增的 per-session 顺序号。
+
 ### 3.2 PersistentEvent 基础结构
 
 ```typescript

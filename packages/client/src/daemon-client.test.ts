@@ -107,8 +107,160 @@ describe("DaemonClient", () => {
     });
     expect(seen).toEqual(["text_delta", "assistant_message"]);
     expect(client.lastSeq).toBe(2);
+    expect(client.streamLastSeq).toBe(2);
+    expect(client.persistentLastSeq).toBe(2);
     expect(client.getEvents().map((event) => event.id)).toEqual(["evt_assistant"]);
     expect(client.getActiveLeaf()).toBe("evt_assistant");
+  });
+
+  it("separates durable persistent and observed stream anchors during resync", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+      createRequestId: () => asRequestId("req_resync"),
+    });
+
+    await client.connect(asSessionId("ses_1"));
+    transport.emit({
+      type: "event",
+      event: {
+        type: "assistant_message",
+        id: asEventId("evt_persistent"),
+        parentId: null,
+        seq: asSeq(2),
+        sessionId: asSessionId("ses_1"),
+        clientId: asClientId("client_test"),
+        ts: 2,
+        message: { role: "assistant", content: [{ type: "text", text: "persisted" }] },
+      },
+    });
+    transport.emit({
+      type: "event",
+      event: {
+        type: "text_delta",
+        seq: asSeq(5),
+        sessionId: asSessionId("ses_1"),
+        clientId: asClientId("client_test"),
+        ts: 5,
+        eventId: asEventId("evt_streaming"),
+        delta: "partial",
+      },
+    });
+
+    const pending = client.resync();
+    expect(transport.sent.at(-1)).toMatchObject({
+      type: "resync_events",
+      persistentLastSeq: asSeq(2),
+      streamLastSeq: asSeq(5),
+    });
+    transport.emit({
+      type: "response",
+      requestType: "resync_events",
+      requestId: asRequestId("req_resync"),
+      ok: true,
+      data: {
+        events: [],
+        throughSeq: asSeq(2),
+        mode: "persistent_fallback",
+        gapFromSeq: asSeq(3),
+        gapToSeq: asSeq(5),
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({ mode: "persistent_fallback" });
+    expect(client.persistentLastSeq).toBe(2);
+    expect(client.streamLastSeq).toBe(5);
+  });
+
+  it("rebuilds local persistent projection on full reload", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+      createRequestId: () => asRequestId("req_reload"),
+    });
+
+    await client.connect(asSessionId("ses_1"));
+    transport.emit({
+      type: "event",
+      event: {
+        type: "assistant_message",
+        id: asEventId("evt_stale"),
+        parentId: null,
+        seq: asSeq(2),
+        sessionId: asSessionId("ses_1"),
+        clientId: asClientId("client_test"),
+        ts: 2,
+        message: { role: "assistant", content: [{ type: "text", text: "stale" }] },
+      },
+    });
+
+    const pending = client.resync({ persistentLastSeq: asSeq(0), streamLastSeq: asSeq(0) });
+    transport.emit({
+      type: "response",
+      requestType: "resync_events",
+      requestId: asRequestId("req_reload"),
+      ok: true,
+      data: {
+        mode: "full_reload",
+        throughSeq: asSeq(1),
+        events: [
+          {
+            type: "user_message",
+            id: asEventId("evt_fresh"),
+            parentId: null,
+            seq: asSeq(1),
+            sessionId: asSessionId("ses_1"),
+            clientId: asClientId("client_test"),
+            ts: 1,
+            message: { role: "user", content: [{ type: "text", text: "fresh" }] },
+          },
+        ],
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({ mode: "full_reload" });
+    expect(client.getEvents().map((event) => event.id)).toEqual(["evt_fresh"]);
+  });
+
+  it("emits resynced transient events to subscribers", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+      createRequestId: () => asRequestId("req_resync_emit"),
+    });
+    const seen: string[] = [];
+
+    await client.connect(asSessionId("ses_1"));
+    client.subscribe((event) => {
+      if (event.type === "text_delta") {
+        seen.push(event.delta);
+      }
+    });
+    const pending = client.resync({ persistentLastSeq: asSeq(1), streamLastSeq: asSeq(2) });
+    transport.emit({
+      type: "response",
+      requestType: "resync_events",
+      requestId: asRequestId("req_resync_emit"),
+      ok: true,
+      data: {
+        mode: "stream_resume",
+        throughSeq: asSeq(3),
+        events: [
+          {
+            type: "text_delta",
+            seq: asSeq(3),
+            sessionId: asSessionId("ses_1"),
+            clientId: asClientId("client_test"),
+            ts: 3,
+            eventId: asEventId("evt_streaming"),
+            delta: "missed",
+          },
+        ],
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({ mode: "stream_resume" });
+    expect(seen).toEqual(["missed"]);
   });
 });
 

@@ -103,4 +103,25 @@ describe("@scorel/protocol", () => {
 
     expect(message.code).toBe("invalid_request");
   });
+
+  it("models resync with dual anchors and explicit recovery mode", () => {
+    const request = {
+      type: "resync_events",
+      requestId: asRequestId("req_resync"),
+      sessionId: asSessionId("ses_1"),
+      persistentLastSeq: asSeq(2),
+      streamLastSeq: asSeq(5),
+    } satisfies ClientRequest<"resync_events">;
+
+    const response = okResponse(request, {
+      events: [],
+      throughSeq: asSeq(2),
+      mode: "persistent_fallback",
+      gapFromSeq: asSeq(3),
+      gapToSeq: asSeq(5),
+    }) satisfies ResponseFor<typeof request>;
+
+    expect(response.data.mode).toBe("persistent_fallback");
+    expect(response.data.throughSeq).toBe(2);
+  });
 });

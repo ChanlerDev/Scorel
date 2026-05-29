@@ -1,9 +1,11 @@
 #!/usr/bin/env -S node --import tsx
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { Readable, Writable } from "node:stream";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { DaemonClient, WsTransport, clientPackageName } from "@scorel/client";
 import { NodeSocketTransport } from "@scorel/client/node";
@@ -113,29 +115,65 @@ const runAttach = async (
   try {
     await client.connect(options.sessionId);
     const renderer = new AttachEventRenderer(io.output, io.error);
-    const unsubscribe = client.subscribe((event) => renderer.renderLive(event));
+    const cacheScope = attachCacheScope(options, state?.socketPath);
+    const cacheSnapshot = await readAttachCache(io.stateDir, cacheScope, options.sessionId);
+    const persistCache = (): Promise<void> => writeAttachCache(io.stateDir, cacheScope, options.sessionId, cacheSnapshot);
+    const unsubscribe = client.subscribe((event) => {
+      renderer.renderLive(event);
+      updateAttachCacheSnapshot(cacheSnapshot, event);
+      void persistCache();
+    });
     const resumed = await loadOrCreateAttachedSession(client, options.sessionId);
     renderer.writeLine(`scorel attach ${resumed ? "resumed" : "created"} session ${options.sessionId}`);
-    await client.resync(asSeq(0));
+    renderer.renderBacklog(cacheSnapshot.events);
+    renderer.renderTransientBacklog(cacheSnapshot.transients);
+    const persistentLastSeq = highestSeq(cacheSnapshot.events);
+    const resync = await client.resync({
+      persistentLastSeq,
+      streamLastSeq: highestCachedStreamSeq(cacheSnapshot),
+    });
+    if (resync.mode === "full_reload" && cacheSnapshot.events.length > 0) {
+      renderer.writeLine("scorel attach authoritative reload follows cached history");
+    }
     renderer.renderBacklog(client.getEvents());
+    cacheSnapshot.events = mergePersistentEvents([...cacheSnapshot.events, ...client.getEvents()]);
+    cacheSnapshot.transients = removeCompletedTransients(cacheSnapshot.transients, cacheSnapshot.events);
+    await persistCache();
     renderer.promptIfInteractive();
     const rl = createInterface({ input: io.input as Readable, crlfDelay: Infinity });
+    const inputQueue = new AsyncInputQueue();
+    const inputWorker = (async () => {
+      for (;;) {
+        const line = await inputQueue.next();
+        if (line === null) {
+          return;
+        }
+        if (line === ".exit" || line === ".quit") {
+          return;
+        }
+        await client.sendMessage(line);
+        renderer.endLine();
+        renderer.promptIfInteractive();
+      }
+    })();
     try {
       for await (const rawLine of rl) {
         const line = rawLine.trim();
         if (line.length === 0) {
           continue;
         }
+        inputQueue.push(line);
         if (line === ".exit" || line === ".quit") {
           break;
         }
-        await client.sendMessage(line);
-        renderer.endLine();
-        renderer.promptIfInteractive();
       }
+      inputQueue.close();
+      await inputWorker;
     } finally {
+      inputQueue.close();
       unsubscribe();
       rl.close();
+      await persistCache();
     }
     client.disconnect();
     return 0;
@@ -144,6 +182,174 @@ const runAttach = async (
     return 1;
   }
 };
+
+type AttachCacheScope = {
+  kind: "local" | "remote";
+  locator: string;
+};
+
+type AttachCacheFile = {
+  version: 1;
+  scope: AttachCacheScope;
+  sessionId: string;
+  events: PersistentEvent[];
+  transients?: CachedTransientMessage[];
+};
+
+type CachedTransientMessage = {
+  eventId: string;
+  seq: number;
+  text: string;
+};
+
+type AttachCacheSnapshot = {
+  events: PersistentEvent[];
+  transients: CachedTransientMessage[];
+};
+
+const attachCacheScope = (options: AttachOptions, localSocketPath: string | undefined): AttachCacheScope =>
+  options.remoteUrl
+    ? { kind: "remote", locator: options.remoteUrl }
+    : { kind: "local", locator: localSocketPath ?? "local-daemon" };
+
+const attachCacheFilePath = (stateDir: string, scope: AttachCacheScope, sessionId: ReturnType<typeof asSessionId>): string => {
+  const scopeKey = createHash("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
+  return join(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
+};
+
+const readAttachCache = async (
+  stateDir: string,
+  scope: AttachCacheScope,
+  sessionId: ReturnType<typeof asSessionId>,
+): Promise<AttachCacheSnapshot> => {
+  try {
+    const raw = JSON.parse(await readFile(attachCacheFilePath(stateDir, scope, sessionId), "utf8")) as AttachCacheFile;
+    if (
+      raw.version !== 1 ||
+      raw.sessionId !== String(sessionId) ||
+      raw.scope.kind !== scope.kind ||
+      raw.scope.locator !== scope.locator ||
+      !Array.isArray(raw.events)
+    ) {
+      return emptyAttachCacheSnapshot();
+    }
+    const events = mergePersistentEvents(raw.events);
+    return {
+      events,
+      transients: removeCompletedTransients(
+        Array.isArray(raw.transients) ? raw.transients.filter(isCachedTransientMessage) : [],
+        events,
+      ),
+    };
+  } catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
+      return emptyAttachCacheSnapshot();
+    }
+    return emptyAttachCacheSnapshot();
+  }
+};
+
+const writeAttachCache = async (
+  stateDir: string,
+  scope: AttachCacheScope,
+  sessionId: ReturnType<typeof asSessionId>,
+  snapshot: AttachCacheSnapshot,
+): Promise<void> => {
+  const filePath = attachCacheFilePath(stateDir, scope, sessionId);
+  const uniqueEvents = mergePersistentEvents(snapshot.events);
+  const transients = removeCompletedTransients(snapshot.transients, uniqueEvents);
+  await mkdir(dirname(filePath), { recursive: true });
+  await writeFile(
+    filePath,
+    `${JSON.stringify({ version: 1, scope, sessionId: String(sessionId), events: uniqueEvents, transients } satisfies AttachCacheFile, null, 2)}\n`,
+  );
+};
+
+const emptyAttachCacheSnapshot = (): AttachCacheSnapshot => ({ events: [], transients: [] });
+
+const mergePersistentEvents = (events: PersistentEvent[]): PersistentEvent[] => {
+  const byId = new Map<string, PersistentEvent>();
+  for (const event of events) {
+    byId.set(String(event.id), event);
+  }
+  return [...byId.values()].sort((left, right) => Number(left.seq) - Number(right.seq));
+};
+
+const highestSeq = (events: PersistentEvent[]): ReturnType<typeof asSeq> =>
+  asSeq(events.reduce((max, event) => Math.max(max, Number(event.seq)), 0));
+
+const highestCachedStreamSeq = (snapshot: AttachCacheSnapshot): ReturnType<typeof asSeq> =>
+  asSeq(Math.max(Number(highestSeq(snapshot.events)), ...snapshot.transients.map((event) => event.seq), 0));
+
+const updateAttachCacheSnapshot = (snapshot: AttachCacheSnapshot, event: ScorelEvent): void => {
+  if ("id" in event) {
+    snapshot.events = mergePersistentEvents([...snapshot.events, event]);
+    snapshot.transients = removeCompletedTransients(snapshot.transients, snapshot.events);
+    return;
+  }
+  if (event.type !== "text_delta") {
+    return;
+  }
+  const existing = snapshot.transients.find((candidate) => candidate.eventId === String(event.eventId));
+  if (existing) {
+    existing.seq = Math.max(existing.seq, Number(event.seq));
+    existing.text += event.delta;
+  } else {
+    snapshot.transients.push({
+      eventId: String(event.eventId),
+      seq: Number(event.seq),
+      text: event.delta,
+    });
+  }
+};
+
+const removeCompletedTransients = (
+  transients: CachedTransientMessage[],
+  events: PersistentEvent[],
+): CachedTransientMessage[] => {
+  const persistentIds = new Set(events.map((event) => String(event.id)));
+  return transients.filter((transient) => !persistentIds.has(transient.eventId) && transient.text.length > 0);
+};
+
+const isCachedTransientMessage = (value: unknown): value is CachedTransientMessage =>
+  typeof value === "object" &&
+  value !== null &&
+  "eventId" in value &&
+  "seq" in value &&
+  "text" in value &&
+  typeof value.eventId === "string" &&
+  typeof value.seq === "number" &&
+  typeof value.text === "string";
+
+class AsyncInputQueue {
+  readonly #items: string[] = [];
+  #closed = false;
+  #notify: (() => void) | undefined;
+
+  push(line: string): void {
+    if (this.#closed) {
+      return;
+    }
+    this.#items.push(line);
+    this.#notify?.();
+    this.#notify = undefined;
+  }
+
+  close(): void {
+    this.#closed = true;
+    this.#notify?.();
+    this.#notify = undefined;
+  }
+
+  async next(): Promise<string | null> {
+    while (this.#items.length === 0 && !this.#closed) {
+      await new Promise<void>((resolve) => {
+        this.#notify = resolve;
+      });
+    }
+    return this.#items.shift() ?? null;
+  }
+}
 
 const loadOrCreateAttachedSession = async (client: DaemonClient, sessionId: ReturnType<typeof asSessionId>): Promise<boolean> => {
   try {
@@ -343,6 +549,13 @@ class AttachEventRenderer {
   renderBacklog(events: PersistentEvent[]): void {
     for (const event of events) {
       this.#render(event);
+    }
+  }
+
+  renderTransientBacklog(transients: CachedTransientMessage[]): void {
+    for (const transient of transients) {
+      this.#streamedMessageIds.add(transient.eventId);
+      this.#write(transient.text);
     }
   }
 
