@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
 
-import { DaemonClient, clientPackageName } from "@scorel/client";
+import { DaemonClient, WsTransport, clientPackageName } from "@scorel/client";
 import { NodeSocketTransport } from "@scorel/client/node";
 import {
   EmbeddedDaemon,
@@ -60,7 +60,17 @@ export const runCli = async (
     return runCliDaemon(rest, { stateDir: runOptions.sessionsDir ?? join(homedir(), ".scorel"), output: io.output, error: io.error });
   }
   if (command === "attach") {
-    return runAttach(parseAttachOptions(rest), { stateDir: runOptions.sessionsDir ?? join(homedir(), ".scorel"), output: io.output, error: io.error });
+    try {
+      return runAttach(parseAttachOptions(rest), {
+        stateDir: runOptions.sessionsDir ?? join(homedir(), ".scorel"),
+        input: io.input,
+        output: io.output,
+        error: io.error,
+      });
+    } catch (cause) {
+      io.error.write(`scorel attach error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+      return 1;
+    }
   }
   writeUsage(io.error);
   return command === "--help" || command === "-h" ? 0 : 1;
@@ -68,24 +78,62 @@ export const runCli = async (
 
 type AttachOptions = {
   sessionId: ReturnType<typeof asSessionId>;
+  remoteUrl?: string;
+  token?: string;
 };
 
 const runAttach = async (
   options: AttachOptions,
-  io: { stateDir: string; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
+  io: { stateDir: string; input: NodeJS.ReadableStream; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
 ): Promise<number> => {
   const state = await readLocalDaemonState({ stateDir: io.stateDir });
-  if (!state) {
+  if (!state && !options.remoteUrl) {
     io.error.write("scorel attach error: local daemon is not running\n");
     return 1;
   }
-  const client = new DaemonClient(new NodeSocketTransport({ path: state.socketPath, token: state.token }), {
+  if (options.remoteUrl && !options.token) {
+    io.error.write("scorel attach error: --token is required with --remote\n");
+    return 1;
+  }
+  const transport = options.remoteUrl
+    ? new WsTransport({ url: options.remoteUrl, token: options.token ?? "" })
+    : new NodeSocketTransport({ path: state!.socketPath, token: state!.token });
+  const client = new DaemonClient(transport, {
     clientId: asClientId("client_cli_attach"),
   });
   try {
     await client.connect(options.sessionId);
+    const resumed = await loadOrCreateAttachedSession(client, options.sessionId);
     await client.resync(asSeq(0));
-    io.output.write(`scorel attach connected session ${options.sessionId}\n`);
+    io.output.write(`scorel attach ${resumed ? "resumed" : "created"} session ${options.sessionId}\n`);
+    const rl = createInterface({ input: io.input as Readable, crlfDelay: Infinity });
+    for await (const rawLine of rl) {
+      const line = rawLine.trim();
+      if (line.length === 0) {
+        continue;
+      }
+      if (line === ".exit" || line === ".quit") {
+        break;
+      }
+      const unsubscribe = client.subscribe((event) => {
+        if (event.type === "text_delta") {
+          io.output.write(event.delta);
+        }
+        if (event.type === "tool_result") {
+          writeToolResult(io.output, event);
+        }
+        if (event.type === "error") {
+          writeEventError(io.error, event);
+        }
+      });
+      try {
+        await client.sendMessage(line);
+        io.output.write("\n");
+      } finally {
+        unsubscribe();
+      }
+    }
+    rl.close();
     client.disconnect();
     return 0;
   } catch (cause) {
@@ -94,8 +142,23 @@ const runAttach = async (
   }
 };
 
+const loadOrCreateAttachedSession = async (client: DaemonClient, sessionId: ReturnType<typeof asSessionId>): Promise<boolean> => {
+  try {
+    await client.loadSession(sessionId);
+    return true;
+  } catch {
+    await client.createSession({
+      sessionId,
+      meta: {},
+    });
+    return false;
+  }
+};
+
 const parseAttachOptions = (argv: string[]): AttachOptions => {
   let sessionId = asSessionId("ses_default");
+  let remoteUrl: string | undefined;
+  let token: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--session") {
@@ -103,9 +166,19 @@ const parseAttachOptions = (argv: string[]): AttachOptions => {
       index += 1;
       continue;
     }
+    if (arg === "--remote") {
+      remoteUrl = requireValue(argv, index, "--remote");
+      index += 1;
+      continue;
+    }
+    if (arg === "--token") {
+      token = requireValue(argv, index, "--token");
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown attach option: ${arg}`);
   }
-  return { sessionId };
+  return { sessionId, remoteUrl, token };
 };
 
 const runCliDaemon = async (
@@ -235,7 +308,7 @@ const promptIfInteractive = (output: NodeJS.WritableStream): void => {
 };
 
 const writeUsage = (output: NodeJS.WritableStream): void => {
-  output.write("Usage: scorel chat [--session <id>] [--cwd <dir>]\n");
+  output.write("Usage: scorel chat [--session <id>] [--cwd <dir>]\nUsage: scorel attach [--session <id>] [--remote <ws-url> --token <token>]\n");
 };
 
 const writeEventError = (output: NodeJS.WritableStream, event: ErrorEvent): void => {

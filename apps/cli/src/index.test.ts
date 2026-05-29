@@ -8,7 +8,8 @@ import { Readable, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
 import { cliAppName, cliClientDependency, cliDaemonDependency, runCli } from "@scorel/app-cli";
-import { createLocalDaemonState, type ScorelConfig } from "@scorel/daemon";
+import { createLocalDaemonState, startRemoteDaemonWebSocketServer, type ScorelConfig } from "@scorel/daemon";
+import { asSeq, asSessionId } from "@scorel/protocol";
 
 describe("@scorel/app-cli", () => {
   it("is an entrypoint shell over client/daemon", () => {
@@ -44,6 +45,12 @@ describe("@scorel/app-cli", () => {
           if (message.type === "connect") {
             socket.write(`${JSON.stringify({ type: "connected", clientId: message.clientId, sessionId: "ses_attach", currentSeq: 0 })}\n`);
           }
+          if (message.type === "load_session") {
+            socket.write(`${JSON.stringify({ type: "error", requestId: message.requestId, ok: false, code: "session_not_found", message: "missing session" })}\n`);
+          }
+          if (message.type === "create_session") {
+            socket.write(`${JSON.stringify({ type: "response", requestType: "create_session", requestId: message.requestId, ok: true, data: { sessionId: "ses_attach" } })}\n`);
+          }
           if (message.type === "resync_events") {
             socket.write(`${JSON.stringify({ type: "response", requestType: "resync_events", requestId: message.requestId, ok: true, data: { events: [], throughSeq: 0 } })}\n`);
           }
@@ -62,10 +69,78 @@ describe("@scorel/app-cli", () => {
     try {
       const result = await runCliWithInput(["attach", "--session", "ses_attach"], "", testConfig("http://127.0.0.1:1"), stateDir);
       expect(result.code).toBe(0);
-      expect(result.stdout).toContain("scorel attach connected session ses_attach");
+      expect(result.stdout).toContain("scorel attach created session ses_attach");
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
+  });
+
+  it("attaches to a remote daemon WebSocket endpoint with an explicit token", async () => {
+    const messages: string[] = [];
+    const server = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientMessage: (_connection, message) => {
+        messages.push(message.type);
+        if (message.type === "load_session") {
+          return {
+            type: "error",
+            requestId: message.requestId,
+            ok: false,
+            code: "session_not_found" as const,
+            message: "missing session",
+          };
+        }
+        if (message.type === "create_session") {
+          return {
+            type: "response",
+            requestType: "create_session",
+            requestId: message.requestId,
+            ok: true,
+            data: { sessionId: asSessionId("ses_remote_attach") },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(0) },
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const result = await runCliWithInput(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_remote_attach"],
+        ".exit\n",
+        testConfig("http://127.0.0.1:1"),
+        await mkdtemp(join(tmpdir(), "scorel-cli-remote-attach-")),
+      );
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("scorel attach created session ses_remote_attach");
+      expect(messages).toContain("resync_events");
+      expect(result.stdout).not.toContain("remote-secret");
+      expect(result.stderr).not.toContain("remote-secret");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("requires a token for remote attach", async () => {
+    const result = await runCliWithInput(
+      ["attach", "--remote", "ws://127.0.0.1:1", "--session", "ses_remote_attach"],
+      "",
+      testConfig("http://127.0.0.1:1"),
+      await mkdtemp(join(tmpdir(), "scorel-cli-remote-attach-")),
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("--token is required with --remote");
   });
 
   it("runs a real OpenAI-compatible coding loop through CLI, tools, persistence, and resume", async () => {
