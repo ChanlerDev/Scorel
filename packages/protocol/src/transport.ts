@@ -13,6 +13,11 @@ export type ConnectResult = {
   currentSeq?: Seq;
 };
 
+export type RemoteEndpoint = {
+  url: string;
+  token: string;
+};
+
 export type Unsubscribe = () => void;
 
 export interface DaemonTransport {

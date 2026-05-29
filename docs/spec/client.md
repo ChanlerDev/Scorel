@@ -10,7 +10,7 @@
 
 DaemonClient 是 Entry 侧 SDK，不是 Daemon 的一部分。它负责连接、重连、request/response、`lastSeq` resync、transient buffer 和本地 UI state projection。
 
-`@scorel/client` 提供 platform-neutral `DaemonClient`、WS transport、Node socket transport（subpath export）。需要直接持有 Daemon 实例的 embedded adapter 由 `@scorel/daemon` 提供，因为它必须接触 Daemon 内部对象，不能放进 browser-safe client 包。
+`@scorel/client` 提供 platform-neutral `DaemonClient`、browser-safe `WsTransport`、Node socket transport（subpath export）。需要直接持有 Daemon 实例的 embedded adapter 由 `@scorel/daemon` 提供，因为它必须接触 Daemon 内部对象，不能放进 browser-safe client 包。
 
 ---
 
@@ -155,13 +155,35 @@ const transport = createEmbeddedTransport(daemon);
 const transport = new SocketTransport("/tmp/scorel.sock");
 
 // Remote WebSocket（@scorel/client）
-const transport = new WsTransport("wss://vps:18789", { token: "sk-xxx" });
+const transport = new WsTransport({ url: "wss://vps:18789", token: "sk-xxx" });
 
 // 统一使用
 const client = new DaemonClient(transport, { clientId });
 ```
 
 DaemonClient 代码完全相同，transport 是唯一差异点。Transport 的具体实现可以来自 `@scorel/client` 或 `@scorel/daemon/embedded`，但都实现同一个 `DaemonTransport` protocol interface。
+
+### 5.1 Remote WebSocket
+
+Remote control uses the root `@scorel/client` export:
+
+```typescript
+const client = new DaemonClient(
+  new WsTransport({ url: "ws://remote-host:18789", token }),
+  { clientId }
+);
+
+await client.connect(sessionId);
+await client.resync(lastSeq);
+```
+
+Rules:
+
+- Token auth is bearer-token style and belongs to the transport handshake.
+- `@scorel/client` does not persist tokens.
+- Reconnect keeps the client-side `lastSeq`; the client reconnects to the same session and calls `resync_events`.
+- Auth failure is surfaced as a concise connection error.
+- The same `DaemonClient` API is used for embedded, local socket, and remote WebSocket modes.
 
 ---
 

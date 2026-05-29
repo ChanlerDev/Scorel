@@ -95,7 +95,26 @@ interface ConnectResult {
 - 重连策略不同（本地 = 简单重试，网络 = 指数退避）
 - 合并只是 URL scheme 分支，表面统一实际更复杂
 
-### 3.2 EmbeddedTransport（零开销模式）
+### 3.2 Remote WebSocket（M4）
+
+M4 的远端控制路径使用 daemon-owned WebSocket server primitive。远端 server 消费同一套 `ClientMessage` / `DaemonMessage` 线协议：
+
+- client 先发送 `connect` handshake，其中包含 `clientId`、可选 `sessionId`、可选 `lastSeq` 和 remote token。
+- daemon 校验 token；失败返回 `auth_failed` 并关闭连接。
+- 校验通过后，daemon 复用与 embedded/local socket 相同的 session ownership、event broadcast、request/response 和 resync 行为。
+- client 断线后以同一个 session 和 `lastSeq` 重新连接，再通过 `resync_events` 补发 missed events。
+- remote endpoint 不负责持久保存 token；token 的生成、轮换、profile 存储不属于 M4。
+
+CLI 最小路径：
+
+```bash
+scorel-daemon serve --host 127.0.0.1 --port 18789 --token "$SCOREL_REMOTE_TOKEN" --cwd /path/to/workspace
+scorel attach --remote ws://127.0.0.1:18789 --token "$SCOREL_REMOTE_TOKEN" --session ses_x
+```
+
+M4 不把 WebSocket endpoint 视为 hardened public service。TLS、账号系统、relay、NAT traversal、supervisor 和权限分级都属于后续阶段。
+
+### 3.3 EmbeddedTransport（零开销模式）
 
 ```typescript
 class EmbeddedTransport implements DaemonTransport {

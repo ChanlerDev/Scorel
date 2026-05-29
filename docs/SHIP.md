@@ -27,7 +27,14 @@
 pnpm typecheck && pnpm test
 ```
 
-涉及 `scorel chat` 真实产品路径的 spec，还必须补一条手工 smoke：用真实 LLM provider、真实临时工作区和真实 JSONL session 验证端到端行为。不能用 mock/fake provider 作为完成证明。
+默认验证原则：
+
+- 走真实、统一、通用的产品路径。
+- 不用 mock/fake provider 作为完成证明。
+- 不为测试添加隐藏分支、特殊协议、特殊 transport 或只在测试里存在的产品行为。
+- 临时目录、临时端口、真实本地进程、真实 JSONL session 属于可接受的真实资源；mock/fake 和为测试绕过产品路径不接受，除非用户明确要求。
+
+涉及 `scorel chat` 真实产品路径的 spec，还必须补一条手工端到端验证：用真实 LLM provider、真实临时工作区和真实 JSONL session 验证端到端行为。不能用 mock/fake provider 作为完成证明。
 
 后续可以收敛成 `pnpm check` 或 `node scripts/check.mjs`，但 SHIP 里记录的命令必须始终可直接执行。
 
