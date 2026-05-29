@@ -12,7 +12,10 @@
   },
   "dependencies": {
     "@scorel/core": "workspace:*",
-    "@scorel/protocol": "workspace:*"
+    "@scorel/protocol": "workspace:*",
+    "ws": "^8.21.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
+  }
 }

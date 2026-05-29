@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
+import { WebSocketServer, type WebSocket } from "ws";
 
 import {
   ScorelRuntime,
@@ -78,6 +79,27 @@ export type LocalDaemonSocketServerOptions = {
 
 export type LocalDaemonSocketServer = {
   socketPath: string;
+  close(): Promise<void>;
+};
+
+export type RemoteDaemonWebSocketConnection = {
+  clientId?: ClientId;
+  socket: WebSocket;
+  send(message: DaemonMessage): void;
+};
+
+export type RemoteDaemonWebSocketServerOptions = {
+  host: string;
+  port: number;
+  token: string;
+  onClientConnect?: (connection: RemoteDaemonWebSocketConnection, params: ConnectParams) => ConnectResult;
+  onClientMessage: (connection: RemoteDaemonWebSocketConnection, message: ClientMessage) => DaemonMessage | void;
+};
+
+export type RemoteDaemonWebSocketServer = {
+  host: string;
+  port: number;
+  url: string;
   close(): Promise<void>;
 };
 
@@ -184,6 +206,143 @@ export const startLocalDaemonSocketServer = async (
   };
 };
 
+export const startRemoteDaemonWebSocketServer = async (
+  options: RemoteDaemonWebSocketServerOptions,
+): Promise<RemoteDaemonWebSocketServer> => {
+  const server = new WebSocketServer({ host: options.host, port: options.port });
+  server.on("connection", (socket) => {
+    const connection: RemoteDaemonWebSocketConnection = {
+      socket,
+      send(message) {
+        if (socket.readyState === socket.OPEN) {
+          socket.send(JSON.stringify(message));
+        }
+      },
+    };
+
+    socket.on("message", (data) => {
+      let message: ClientMessage | ({ type: "connect"; token: string } & ConnectParams);
+      try {
+        message = JSON.parse(data.toString()) as ClientMessage | ({ type: "connect"; token: string } & ConnectParams);
+      } catch {
+        connection.send({
+          type: "error",
+          ok: false,
+          code: "invalid_request",
+          message: "invalid JSON message",
+        });
+        return;
+      }
+
+      if (message.type === "connect") {
+        if (message.token !== options.token) {
+          connection.send({
+            type: "error",
+            ok: false,
+            code: "auth_failed",
+            message: "invalid remote token",
+          });
+          socket.close();
+          return;
+        }
+        connection.clientId = message.clientId;
+        const result = options.onClientConnect?.(connection, message) ?? {
+          clientId: message.clientId,
+          sessionId: message.sessionId,
+          currentSeq: message.lastSeq ?? asSeq(0),
+        };
+        connection.send({
+          type: "connected",
+          clientId: result.clientId,
+          sessionId: result.sessionId,
+          currentSeq: result.currentSeq,
+        });
+        return;
+      }
+
+      const response = options.onClientMessage(connection, message);
+      if (response) {
+        connection.send(response);
+      }
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.once("listening", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    await closeWebSocketServer(server);
+    throw new Error("remote daemon WebSocket server did not expose a TCP address");
+  }
+  const host = options.host === "0.0.0.0" ? "127.0.0.1" : options.host;
+  return {
+    host: options.host,
+    port: address.port,
+    url: `ws://${host}:${address.port}`,
+    close: () => closeWebSocketServer(server),
+  };
+};
+
+export const startEmbeddedDaemonWebSocketServer = async (
+  options: { daemon: EmbeddedDaemon; host: string; port: number; token: string },
+): Promise<RemoteDaemonWebSocketServer> => {
+  const connections = new WeakMap<RemoteDaemonWebSocketConnection, Connection>();
+  const daemonConnectionFor = (webSocketConnection: RemoteDaemonWebSocketConnection, params?: ConnectParams): Connection => {
+    const existing = connections.get(webSocketConnection);
+    if (existing) {
+      return existing;
+    }
+    const connection: Connection = {
+      clientId: params?.clientId ?? asClientId("ws_unconnected"),
+      emit: (daemonMessage) => webSocketConnection.send(daemonMessage),
+    };
+    connections.set(webSocketConnection, connection);
+    webSocketConnection.socket.once("close", () => options.daemon.disconnect(connection));
+    return connection;
+  };
+
+  return startRemoteDaemonWebSocketServer({
+    host: options.host,
+    port: options.port,
+    token: options.token,
+    onClientConnect: (webSocketConnection, params) => {
+      const daemonConnection = daemonConnectionFor(webSocketConnection, params);
+      daemonConnection.clientId = params.clientId;
+      const result = options.daemon.connect(daemonConnection, params.sessionId);
+      return {
+        clientId: params.clientId,
+        sessionId: result.sessionId,
+        currentSeq: result.currentSeq,
+      };
+    },
+    onClientMessage: (webSocketConnection, message) => {
+      const daemonConnection = daemonConnectionFor(webSocketConnection);
+      if (!daemonConnection.clientId) {
+        return {
+          type: "error",
+          ok: false,
+          code: "invalid_request",
+          message: "websocket is not connected",
+        };
+      }
+      void options.daemon.handleMessage(daemonConnection, message).catch((cause) => {
+        webSocketConnection.send({
+          type: "error",
+          ok: false,
+          code: "internal_error",
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+      });
+      return undefined;
+    },
+  });
+};
+
 export const startEmbeddedDaemonSocketServer = async (
   options: { daemon: EmbeddedDaemon; socketPath: string; token: string },
 ): Promise<LocalDaemonSocketServer> => {
@@ -239,6 +398,14 @@ export const startEmbeddedDaemonSocketServer = async (
 
 const closeServer = (server: Server): Promise<void> =>
   new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+
+const closeWebSocketServer = (server: WebSocketServer): Promise<void> =>
+  new Promise((resolve, reject) => {
+    for (const client of server.clients) {
+      client.close();
+    }
     server.close((error) => (error ? reject(error) : resolve()));
   });
 

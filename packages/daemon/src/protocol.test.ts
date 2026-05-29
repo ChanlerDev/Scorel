@@ -16,6 +16,8 @@ import {
   removeLocalDaemonState,
   startLocalDaemonSocketServer,
   startEmbeddedDaemonSocketServer,
+  startEmbeddedDaemonWebSocketServer,
+  startRemoteDaemonWebSocketServer,
 } from "./index.js";
 
 const createDaemon = () =>
@@ -242,9 +244,103 @@ describe("daemon protocol boundary", () => {
       await daemon.shutdown();
     }
   });
+
+  it("starts a remote daemon WebSocket server and validates remote token", async () => {
+    const server = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientMessage: (_connection, message) => (message.type === "ping" ? { type: "pong", requestId: message.requestId } : undefined),
+    });
+    const invalid = await connectTestWebSocket(server.url, "wrong-secret", "client_bad", "ses_ws_bad");
+    const valid = await connectTestWebSocket(server.url, "remote-secret", "client_good", "ses_ws_good");
+    const invalidMessages: DaemonMessage[] = [];
+    const validMessages: DaemonMessage[] = [];
+
+    try {
+      invalid.onMessage((message) => invalidMessages.push(message));
+      valid.onMessage((message) => validMessages.push(message));
+
+      await expect(waitForDaemonMessage(invalidMessages, (message) => message.type === "error")).resolves.toMatchObject({
+        type: "error",
+        code: "auth_failed",
+        message: "invalid remote token",
+      });
+      await expect(waitForDaemonMessage(validMessages, (message) => message.type === "connected")).resolves.toMatchObject({
+        type: "connected",
+        clientId: "client_good",
+        sessionId: "ses_ws_good",
+      });
+
+      valid.send({ type: "ping", requestId: asRequestId("req_ws_ping") });
+      await expect(waitForDaemonMessage(validMessages, (message) => message.type === "pong")).resolves.toMatchObject({
+        type: "pong",
+        requestId: "req_ws_ping",
+      });
+    } finally {
+      invalid.close();
+      valid.close();
+      await server.close();
+    }
+  });
+
+  it("adapts embedded daemon protocol to a remote WebSocket transport", async () => {
+    const daemon = createDaemon();
+    const server = await startEmbeddedDaemonWebSocketServer({
+      daemon,
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+    });
+    await daemon.start();
+    const clientA = await connectTestWebSocket(server.url, "remote-secret", "client_a", "ses_remote");
+    const clientB = await connectTestWebSocket(server.url, "remote-secret", "client_b", "ses_remote");
+    const clientAMessages: DaemonMessage[] = [];
+    const clientBMessages: DaemonMessage[] = [];
+
+    try {
+      clientA.onMessage((message) => clientAMessages.push(message));
+      clientB.onMessage((message) => clientBMessages.push(message));
+      clientA.send({
+        type: "create_session",
+        requestId: asRequestId("req_create_remote"),
+        sessionId: asSessionId("ses_remote"),
+        meta: { model: "test-model" },
+      });
+      await waitForDaemonMessage(clientAMessages, (message) => "requestId" in message && message.requestId === "req_create_remote");
+      clientB.send({
+        type: "subscribe_events",
+        requestId: asRequestId("req_subscribe_remote"),
+        sessionId: asSessionId("ses_remote"),
+        lastSeq: asSeq(0),
+      });
+      clientA.send({
+        type: "send_message",
+        requestId: asRequestId("req_send_remote"),
+        sessionId: asSessionId("ses_remote"),
+        content: "hello",
+      });
+
+      await expect(waitForDaemonMessage(clientBMessages, (message) => message.type === "event")).resolves.toMatchObject({
+        type: "event",
+        event: { type: "user_message", sessionId: "ses_remote" },
+      });
+    } finally {
+      clientA.close();
+      clientB.close();
+      await server.close();
+      await daemon.shutdown();
+    }
+  });
 });
 
 type TestSocket = {
+  send(message: object): void;
+  onMessage(handler: (message: DaemonMessage) => void): void;
+  close(): void;
+};
+
+type TestWebSocket = {
   send(message: object): void;
   onMessage(handler: (message: DaemonMessage) => void): void;
   close(): void;
@@ -287,6 +383,40 @@ const connectTestSocket = async (
     close() {
       socket.end();
       socket.destroy();
+    },
+  };
+};
+
+const connectTestWebSocket = async (
+  url: string,
+  token: string,
+  clientId: string,
+  sessionId: string,
+): Promise<TestWebSocket> => {
+  const socket = new WebSocket(url);
+  const handlers = new Set<(message: DaemonMessage) => void>();
+  const buffered: DaemonMessage[] = [];
+  socket.addEventListener("message", (event) => {
+    const message = JSON.parse(String(event.data)) as DaemonMessage;
+    buffered.push(message);
+    for (const handler of handlers) {
+      handler(message);
+    }
+  });
+  await new Promise<void>((resolve) => socket.addEventListener("open", () => resolve(), { once: true }));
+  socket.send(JSON.stringify({ type: "connect", token, clientId, sessionId }));
+  return {
+    send(message) {
+      socket.send(JSON.stringify(message));
+    },
+    onMessage(handler) {
+      handlers.add(handler);
+      for (const message of buffered) {
+        handler(message);
+      }
+    },
+    close() {
+      socket.close();
     },
   };
 };
