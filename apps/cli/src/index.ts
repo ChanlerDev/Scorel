@@ -106,34 +106,34 @@ const runAttach = async (
     const resumed = await loadOrCreateAttachedSession(client, options.sessionId);
     await client.resync(asSeq(0));
     io.output.write(`scorel attach ${resumed ? "resumed" : "created"} session ${options.sessionId}\n`);
+    const unsubscribe = client.subscribe((event) => {
+      if (event.type === "text_delta") {
+        io.output.write(event.delta);
+      }
+      if (event.type === "tool_result") {
+        writeToolResult(io.output, event);
+      }
+      if (event.type === "error") {
+        writeEventError(io.error, event);
+      }
+    });
     const rl = createInterface({ input: io.input as Readable, crlfDelay: Infinity });
-    for await (const rawLine of rl) {
-      const line = rawLine.trim();
-      if (line.length === 0) {
-        continue;
-      }
-      if (line === ".exit" || line === ".quit") {
-        break;
-      }
-      const unsubscribe = client.subscribe((event) => {
-        if (event.type === "text_delta") {
-          io.output.write(event.delta);
+    try {
+      for await (const rawLine of rl) {
+        const line = rawLine.trim();
+        if (line.length === 0) {
+          continue;
         }
-        if (event.type === "tool_result") {
-          writeToolResult(io.output, event);
+        if (line === ".exit" || line === ".quit") {
+          break;
         }
-        if (event.type === "error") {
-          writeEventError(io.error, event);
-        }
-      });
-      try {
         await client.sendMessage(line);
         io.output.write("\n");
-      } finally {
-        unsubscribe();
       }
+    } finally {
+      unsubscribe();
+      rl.close();
     }
-    rl.close();
     client.disconnect();
     return 0;
   } catch (cause) {

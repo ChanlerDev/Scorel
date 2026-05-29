@@ -268,6 +268,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0021`](spec/ship/S0021-remote-websocket-client-transport.md) | 实现 client 侧 remote WebSocket transport | Done |
 | [`S0022`](spec/ship/S0022-remote-daemon-cli-lifecycle.md) | 暴露远端 daemon serve 和 CLI remote attach 入口 | Done |
 | [`S0023`](spec/ship/S0023-remote-control-e2e-validation.md) | 验证 M4 remote control 端到端产品路径 | Done |
+| [`S0024`](spec/ship/S0024-remote-attach-interactive-stream.md) | 修复 remote attach 交互订阅和多端事件流 | Done |
 
 ---
 

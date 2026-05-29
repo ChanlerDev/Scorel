@@ -3,13 +3,18 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Readable, Writable } from "node:stream";
+import { PassThrough, Readable, Writable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
 import { cliAppName, cliClientDependency, cliDaemonDependency, runCli } from "@scorel/app-cli";
-import { createLocalDaemonState, startRemoteDaemonWebSocketServer, type ScorelConfig } from "@scorel/daemon";
-import { asSeq, asSessionId } from "@scorel/protocol";
+import {
+  createLocalDaemonState,
+  startRemoteDaemonWebSocketServer,
+  type RemoteDaemonWebSocketConnection,
+  type ScorelConfig,
+} from "@scorel/daemon";
+import { asClientId, asEventId, asSeq, asSessionId } from "@scorel/protocol";
 
 describe("@scorel/app-cli", () => {
   it("is an entrypoint shell over client/daemon", () => {
@@ -143,6 +148,93 @@ describe("@scorel/app-cli", () => {
     expect(result.stderr).toContain("--token is required with --remote");
   });
 
+  it("keeps remote attach subscribed to future session events from other clients", async () => {
+    const connections: RemoteDaemonWebSocketConnection[] = [];
+    const server = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientConnect: (connection, params) => {
+        connections.push(connection);
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+      },
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "error",
+            requestId: message.requestId,
+            ok: false,
+            code: "session_not_found" as const,
+            message: "missing session",
+          };
+        }
+        if (message.type === "create_session") {
+          return {
+            type: "response",
+            requestType: "create_session",
+            requestId: message.requestId,
+            ok: true,
+            data: { sessionId: asSessionId("ses_remote_watch") },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(0) },
+          };
+        }
+        return undefined;
+      },
+    });
+    const inputA = new PassThrough();
+    const inputB = new PassThrough();
+
+    try {
+      const attachA = runCliWithStream(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_remote_watch"],
+        inputA,
+        testConfig("http://127.0.0.1:1"),
+        await mkdtemp(join(tmpdir(), "scorel-cli-remote-watch-")),
+      );
+      const attachB = runCliWithStream(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_remote_watch"],
+        inputB,
+        testConfig("http://127.0.0.1:1"),
+        await mkdtemp(join(tmpdir(), "scorel-cli-remote-watch-")),
+      );
+      await waitFor(() => connections.length >= 2);
+
+      for (const connection of connections) {
+        connection.send({
+          type: "event",
+          event: {
+            type: "text_delta",
+            seq: asSeq(1),
+            sessionId: asSessionId("ses_remote_watch"),
+            clientId: asClientId("client_remote_test"),
+            ts: 1,
+            eventId: asEventId("evt_remote_test"),
+            delta: "REMOTE_MULTI_CLIENT_OK",
+          },
+        });
+      }
+      await waitFor(() => attachA.stdout.toString().includes("REMOTE_MULTI_CLIENT_OK"));
+      await waitFor(() => attachB.stdout.toString().includes("REMOTE_MULTI_CLIENT_OK"));
+      inputA.end(".exit\n");
+      inputB.end(".exit\n");
+
+      await expect(attachA.result).resolves.toMatchObject({ code: 0 });
+      await expect(attachB.result).resolves.toMatchObject({ code: 0 });
+    } finally {
+      inputA.destroy();
+      inputB.destroy();
+      await server.close();
+    }
+  });
+
   it("runs a real OpenAI-compatible coding loop through CLI, tools, persistence, and resume", async () => {
     const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
     const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));
@@ -269,6 +361,41 @@ const runCliWithInput = async (
   }, { config, sessionsDir });
   return { code, stdout: stdout.toString(), stderr: stderr.toString() };
 };
+
+const runCliWithStream = (
+  argv: string[],
+  input: NodeJS.ReadableStream,
+  config: ScorelConfig,
+  sessionsDir: string,
+): { result: Promise<{ code: number; stdout: string; stderr: string }>; stdout: StringWritable; stderr: StringWritable } => {
+  const stdout = new StringWritable();
+  const stderr = new StringWritable();
+  return {
+    stdout,
+    stderr,
+    result: runCli(argv, { input, output: stdout, error: stderr }, { config, sessionsDir }).then((code) => ({
+      code,
+      stdout: stdout.toString(),
+      stderr: stderr.toString(),
+    })),
+  };
+};
+
+const waitFor = (predicate: () => boolean): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      if (predicate()) {
+        clearInterval(interval);
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt > 5000) {
+        clearInterval(interval);
+        reject(new Error("timed out waiting for condition"));
+      }
+    }, 5);
+  });
 
 class StringWritable extends Writable {
   #chunks: string[] = [];
