@@ -49,6 +49,9 @@ export class NodeSocketTransport implements DaemonTransport {
           clientId: message.clientId,
           sessionId: message.sessionId,
           currentSeq: message.currentSeq,
+          deviceId: message.deviceId,
+          deviceDisplayName: message.deviceDisplayName,
+          projectSlug: message.projectSlug,
         });
       });
       socket.once("connect", () => {

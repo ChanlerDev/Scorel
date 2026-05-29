@@ -271,7 +271,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0023`](spec/ship/S0023-remote-control-e2e-validation.md) | 验证 M4 remote control 端到端产品路径 | Done |
 | [`S0024`](spec/ship/S0024-remote-attach-interactive-stream.md) | 修复 remote attach 交互订阅和多端事件流 | Done |
 | [`S0025`](spec/ship/S0025-remote-attach-session-event-view.md) | 修复 remote attach session event view 一致性和重连补偿 | Done |
-| [`S0026`](spec/ship/S0026-attach-project-cache-and-dual-seq-reconnect.md) | 收敛 attach 的 project-scope session cache、dual-seq reconnect 与 fallback/live 语义 | In Progress |
+| [`S0026`](spec/ship/S0026-attach-project-cache-and-dual-seq-reconnect.md) | 收敛 attach 的 project-scope session cache、dual-seq reconnect 与 fallback/live 语义 | Done |
 
 ---
 

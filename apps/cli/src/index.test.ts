@@ -14,7 +14,7 @@ import {
   type RemoteDaemonWebSocketConnection,
   type ScorelConfig,
 } from "@scorel/daemon";
-import { asClientId, asEventId, asSeq, asSessionId } from "@scorel/protocol";
+import { asClientId, asDeviceId, asEventId, asSeq, asSessionId } from "@scorel/protocol";
 
 describe("@scorel/app-cli", () => {
   it("is an entrypoint shell over client/daemon", () => {
@@ -448,6 +448,122 @@ describe("@scorel/app-cli", () => {
 
       expect(scoped.code).toBe(0);
       expect(scoped.stdout).not.toContain("remote A cached text");
+    } finally {
+      await serverA.close();
+      await serverB.close();
+    }
+  });
+
+  it("reuses remote attach cache when the endpoint changes but device and project match", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-cache-device-project-"));
+    const serverA = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientConnect: (connection, params) => {
+        connection.send({
+          type: "connected",
+          clientId: params.clientId,
+          sessionId: params.sessionId,
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_tokyo"),
+          deviceDisplayName: "Tokyo VPS",
+          projectSlug: "scorel",
+        });
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+      },
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "response",
+            requestType: "load_session",
+            requestId: message.requestId,
+            ok: true,
+            data: {
+              sessionId: asSessionId("ses_same_remote_project"),
+              activeLeafId: asEventId("evt_device_project_assistant"),
+              currentSeq: asSeq(2),
+              meta: {},
+              events: cachedAttachEvents("ses_same_remote_project", "device scoped cached text", "evt_device_project"),
+            },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(2), mode: "stream_resume" as const },
+          };
+        }
+        return undefined;
+      },
+    });
+    const serverB = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientConnect: (connection, params) => {
+        connection.send({
+          type: "connected",
+          clientId: params.clientId,
+          sessionId: params.sessionId,
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_tokyo"),
+          deviceDisplayName: "Tokyo VPS",
+          projectSlug: "scorel",
+        });
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+      },
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "error",
+            requestId: message.requestId,
+            ok: false,
+            code: "session_not_found" as const,
+            message: "missing session",
+          };
+        }
+        if (message.type === "create_session") {
+          return {
+            type: "response",
+            requestType: "create_session",
+            requestId: message.requestId,
+            ok: true,
+            data: { sessionId: asSessionId("ses_same_remote_project") },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(2), mode: "stream_resume" as const },
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      await runCliWithInput(
+        ["attach", "--remote", serverA.url, "--token", "remote-secret", "--session", "ses_same_remote_project"],
+        ".exit\n",
+        testConfig("http://127.0.0.1:1"),
+        stateDir,
+      );
+      const changedEndpoint = await runCliWithInput(
+        ["attach", "--remote", serverB.url, "--token", "remote-secret", "--session", "ses_same_remote_project"],
+        ".exit\n",
+        testConfig("http://127.0.0.1:1"),
+        stateDir,
+      );
+
+      expect(changedEndpoint.code).toBe(0);
+      expect(changedEndpoint.stdout).toContain("device scoped cached text");
     } finally {
       await serverA.close();
       await serverB.close();

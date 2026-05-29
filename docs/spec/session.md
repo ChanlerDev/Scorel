@@ -94,8 +94,10 @@ Daemon-owned JSONL remains the authoritative session store. Attach clients may k
 Cache scope is part of the identity:
 
 - local attach cache is scoped under a local project locator
-- remote attach cache is scoped under a remote endpoint/device locator
+- remote attach cache is scoped under a remote `deviceId + projectSlug`
 - same `sessionId` under different scopes must not share cache files
+
+The remote endpoint URL is a connection locator, not stable identity. If a daemon reports the same `deviceId + projectSlug` after the URL changes, attach should reuse the same cache. A daemon may also provide a `deviceDisplayName` for UI labels, but display names are not identity.
 
 The cache may advance `persistentLastSeq` only after a persistent event has been durably written to the local cache. It must not advance persistent anchors from transient events. If metadata no longer matches the requested attach target, the client must ignore or isolate the cache and perform daemon reconciliation.
 

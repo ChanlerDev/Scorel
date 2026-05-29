@@ -13,6 +13,7 @@ import {
   type ContentBlock,
   type DaemonMessage,
   type DaemonTransport,
+  type DeviceId,
   type EventId,
   type PersistentEvent,
   type ScorelEvent,
@@ -51,6 +52,12 @@ export type DaemonClientOptions = {
   createRequestId?: () => ReturnType<typeof asRequestId>;
 };
 
+export type DaemonConnectionIdentity = {
+  deviceId?: DeviceId;
+  deviceDisplayName?: string;
+  projectSlug?: string;
+};
+
 type PendingRequest<TType extends ClientRequestType = ClientRequestType> = {
   resolve: (data: ClientRequestMap[TType]["response"]) => void;
   reject: (error: Error) => void;
@@ -68,6 +75,7 @@ export class DaemonClient {
   #sessionId: SessionId | null = null;
   #persistentLastSeq: Seq = asSeq(0);
   #streamLastSeq: Seq = asSeq(0);
+  #connectionIdentity: DaemonConnectionIdentity = {};
   #requestCounter = 0;
 
   constructor(transport: DaemonTransport, options: DaemonClientOptions) {
@@ -101,6 +109,10 @@ export class DaemonClient {
     return this.#streamLastSeq;
   }
 
+  get connectionIdentity(): DaemonConnectionIdentity {
+    return { ...this.#connectionIdentity };
+  }
+
   async connect(sessionId: SessionId): Promise<void> {
     this.#state = "connecting";
     this.#unsubscribe ??= this.#transport.onMessage((message) => this.#handleMessage(message));
@@ -112,6 +124,11 @@ export class DaemonClient {
       lastSeq: this.#streamLastSeq,
     });
     this.#sessionId = result.sessionId ?? sessionId;
+    this.#connectionIdentity = {
+      deviceId: result.deviceId,
+      deviceDisplayName: result.deviceDisplayName,
+      projectSlug: result.projectSlug,
+    };
     this.#state = "connected";
   }
 
@@ -239,6 +256,11 @@ export class DaemonClient {
       }
       case "connected":
         this.#sessionId = message.sessionId ?? this.#sessionId;
+        this.#connectionIdentity = {
+          deviceId: message.deviceId,
+          deviceDisplayName: message.deviceDisplayName,
+          projectSlug: message.projectSlug,
+        };
         break;
       case "disconnected":
         this.#state = "disconnected";
@@ -310,6 +332,9 @@ export class WsTransport implements DaemonTransport {
           clientId: message.clientId,
           sessionId: message.sessionId,
           currentSeq: message.currentSeq,
+          deviceId: message.deviceId,
+          deviceDisplayName: message.deviceDisplayName,
+          projectSlug: message.projectSlug,
         });
       });
       socket.addEventListener(

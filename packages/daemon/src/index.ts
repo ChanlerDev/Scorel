@@ -179,6 +179,9 @@ export const startLocalDaemonSocketServer = async (
             clientId: result.clientId,
             sessionId: result.sessionId,
             currentSeq: result.currentSeq,
+            deviceId: result.deviceId,
+            deviceDisplayName: result.deviceDisplayName,
+            projectSlug: result.projectSlug,
           });
           continue;
         }
@@ -257,6 +260,9 @@ export const startRemoteDaemonWebSocketServer = async (
           clientId: result.clientId,
           sessionId: result.sessionId,
           currentSeq: result.currentSeq,
+          deviceId: result.deviceId,
+          deviceDisplayName: result.deviceDisplayName,
+          projectSlug: result.projectSlug,
         });
         return;
       }
@@ -319,6 +325,9 @@ export const startEmbeddedDaemonWebSocketServer = async (
         clientId: params.clientId,
         sessionId: result.sessionId,
         currentSeq: result.currentSeq,
+        deviceId: result.deviceId,
+        deviceDisplayName: result.deviceDisplayName,
+        projectSlug: result.projectSlug,
       };
     },
     onClientMessage: (webSocketConnection, message) => {
@@ -372,6 +381,9 @@ export const startEmbeddedDaemonSocketServer = async (
         clientId: params.clientId,
         sessionId: result.sessionId,
         currentSeq: result.currentSeq,
+        deviceId: result.deviceId,
+        deviceDisplayName: result.deviceDisplayName,
+        projectSlug: result.projectSlug,
       };
     },
     onClientMessage: (socketConnection, message) => {
@@ -418,6 +430,8 @@ export type RuntimeFactoryOptions = {
 export type EmbeddedDaemonOptions = {
   sessionsDir: string;
   deviceId: DeviceId;
+  deviceDisplayName?: string;
+  projectSlug?: string;
   createRuntime: (sessionId: SessionId) => ScorelRuntime;
   now?: () => number;
   createId?: () => string;
@@ -472,6 +486,8 @@ type ResyncEventsResult = ClientRequestMap["resync_events"]["response"];
 export class EmbeddedDaemon {
   readonly #sessionsDir: string;
   readonly #deviceId: DeviceId;
+  readonly #deviceDisplayName: string | undefined;
+  readonly #projectSlug: string | undefined;
   readonly #createRuntime: (sessionId: SessionId) => ScorelRuntime;
   readonly #now: () => number;
   readonly #createId: () => string;
@@ -484,6 +500,8 @@ export class EmbeddedDaemon {
   constructor(options: EmbeddedDaemonOptions) {
     this.#sessionsDir = options.sessionsDir;
     this.#deviceId = options.deviceId;
+    this.#deviceDisplayName = options.deviceDisplayName;
+    this.#projectSlug = options.projectSlug;
     this.#createRuntime = options.createRuntime;
     this.#now = options.now ?? Date.now;
     this.#createId = options.createId ?? (() => crypto.randomUUID());
@@ -498,13 +516,17 @@ export class EmbeddedDaemon {
     this.#started = false;
   }
 
-  connect(connection: Connection, sessionId?: SessionId): { currentSeq: Seq; sessionId?: SessionId } {
+  connect(connection: Connection, sessionId?: SessionId): ConnectResult {
     this.#assertStarted();
     connection.sessionId = sessionId;
     this.#connections.add(connection);
     return {
+      clientId: connection.clientId,
       sessionId,
       currentSeq: asSeq(sessionId ? (this.#seqs.get(sessionId) ?? 0) : 0),
+      deviceId: this.#deviceId,
+      deviceDisplayName: this.#deviceDisplayName,
+      projectSlug: this.#projectSlug,
     };
   }
 
@@ -919,11 +941,17 @@ export const createEmbeddedTransport = (daemon: EmbeddedDaemon): DaemonTransport
         clientId: params.clientId,
         sessionId: result.sessionId,
         currentSeq: result.currentSeq,
+        deviceId: result.deviceId,
+        deviceDisplayName: result.deviceDisplayName,
+        projectSlug: result.projectSlug,
       });
       return {
         clientId: params.clientId,
         sessionId: result.sessionId,
         currentSeq: result.currentSeq,
+        deviceId: result.deviceId,
+        deviceDisplayName: result.deviceDisplayName,
+        projectSlug: result.projectSlug,
       };
     },
     send(message) {

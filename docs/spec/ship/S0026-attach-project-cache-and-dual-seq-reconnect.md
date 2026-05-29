@@ -12,6 +12,8 @@ This spec closes the gap left by S0024/S0025: reconnect must distinguish between
 - Define local and remote project identity at the same abstraction level:
   - local projects under a local scope
   - remote projects under a remote device scope
+- Remote attach cache identity is `deviceId + projectSlug + sessionId`. The connection URL is a transport endpoint and may be used only as a fallback before daemon identity is known.
+- Daemon connection metadata must expose a stable `deviceId`, optional user-facing `deviceDisplayName`, and a stable `projectSlug` for the served project.
 - Store client-visible persistent session backlog under the project scope so attach can render local persistent history before daemon reconciliation.
 - Store in-progress assistant transient text under the same project scope when the client has durable stream anchors, so a process restart can display the already-seen prefix before asking daemon to continue from `streamLastSeq`.
 - Define dual reconnect anchors:
@@ -41,7 +43,9 @@ This spec closes the gap left by S0024/S0025: reconnect must distinguish between
 ## Acceptance Criteria
 
 - A local attach client and a remote attach client both map their session persistence through a project-scoped directory instead of a flat global session file assumption.
-- Remote project sessions are separated from local project sessions by device scope and do not collide with same-path local workspaces.
+- Remote project sessions are separated from local project sessions by `deviceId + projectSlug` scope and do not collide with same-path local workspaces.
+- If the same remote daemon project is reached through a different URL, attach can still reuse cache when daemon reports the same `deviceId + projectSlug`.
+- `deviceDisplayName` is metadata for user-facing labels only; it must not replace stable `deviceId` in cache identity.
 - Reconnect protocol explicitly carries both `persistentLastSeq` and `streamLastSeq`.
 - If daemon buffer covers `streamLastSeq`, reconnect resumes the stream from `streamLastSeq + 1`.
 - If daemon buffer does not cover `streamLastSeq` but client has persistent cache, daemon falls back to replaying only missing persistent events after `persistentLastSeq`, then the connection continues receiving future live transient and persistent events.

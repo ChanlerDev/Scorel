@@ -25,6 +25,7 @@ import {
   asSeq,
   asSessionId,
   type ContentBlock,
+  type DeviceId,
   type ErrorEvent,
   type PersistentEvent,
   type ScorelEvent,
@@ -115,7 +116,7 @@ const runAttach = async (
   try {
     await client.connect(options.sessionId);
     const renderer = new AttachEventRenderer(io.output, io.error);
-    const cacheScope = attachCacheScope(options, state?.socketPath);
+    const cacheScope = attachCacheScope(options, state?.socketPath, client.connectionIdentity);
     const cacheSnapshot = await readAttachCache(io.stateDir, cacheScope, options.sessionId);
     const persistCache = (): Promise<void> => writeAttachCache(io.stateDir, cacheScope, options.sessionId, cacheSnapshot);
     const unsubscribe = client.subscribe((event) => {
@@ -186,6 +187,7 @@ const runAttach = async (
 type AttachCacheScope = {
   kind: "local" | "remote";
   locator: string;
+  displayName?: string;
 };
 
 type AttachCacheFile = {
@@ -207,10 +209,23 @@ type AttachCacheSnapshot = {
   transients: CachedTransientMessage[];
 };
 
-const attachCacheScope = (options: AttachOptions, localSocketPath: string | undefined): AttachCacheScope =>
-  options.remoteUrl
-    ? { kind: "remote", locator: options.remoteUrl }
-    : { kind: "local", locator: localSocketPath ?? "local-daemon" };
+const attachCacheScope = (
+  options: AttachOptions,
+  localSocketPath: string | undefined,
+  identity?: { deviceId?: DeviceId; deviceDisplayName?: string; projectSlug?: string },
+): AttachCacheScope => {
+  if (options.remoteUrl) {
+    if (identity?.deviceId && identity.projectSlug) {
+      return {
+        kind: "remote",
+        locator: `device:${identity.deviceId}/project:${identity.projectSlug}`,
+        displayName: identity.deviceDisplayName,
+      };
+    }
+    return { kind: "remote", locator: `endpoint:${options.remoteUrl}` };
+  }
+  return { kind: "local", locator: localSocketPath ?? "local-daemon" };
+};
 
 const attachCacheFilePath = (stateDir: string, scope: AttachCacheScope, sessionId: ReturnType<typeof asSessionId>): string => {
   const scopeKey = createHash("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);

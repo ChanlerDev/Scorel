@@ -1,4 +1,4 @@
-import type { ClientId, Seq, SessionId } from "./ids.js";
+import type { ClientId, DeviceId, Seq, SessionId } from "./ids.js";
 import type { ClientMessage, DaemonMessage } from "./wire.js";
 
 export type ConnectParams = {
@@ -13,6 +13,9 @@ export type ConnectResult = {
   clientId: ClientId;
   sessionId?: SessionId;
   currentSeq?: Seq;
+  deviceId?: DeviceId;
+  deviceDisplayName?: string;
+  projectSlug?: string;
 };
 
 export type RemoteEndpoint = {

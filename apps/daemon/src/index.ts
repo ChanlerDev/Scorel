@@ -7,7 +7,7 @@ import {
   startEmbeddedDaemonWebSocketServer,
 } from "@scorel/daemon";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState } from "@scorel/daemon";
@@ -98,6 +98,8 @@ const runServeCommand = async (argv: string[], options: DaemonCommandOptions): P
   const daemon = new EmbeddedDaemon({
     sessionsDir: options.sessionsDir ?? scorelSessionsDir(homedir()),
     deviceId: asDeviceId("device_remote"),
+    deviceDisplayName: "Remote daemon",
+    projectSlug: projectSlugFromCwd(serve.cwd),
     createRuntime: () => createRealRuntime({ cwd: serve.cwd, config }),
   });
   await daemon.start();
@@ -164,6 +166,8 @@ const requireValue = (argv: string[], index: number, flag: string): string => {
   }
   return value;
 };
+
+const projectSlugFromCwd = (cwd: string): string => basename(resolve(cwd)) || "project";
 
 const waitForServeStop = (signal: AbortSignal | undefined): Promise<void> => {
   if (signal?.aborted) {

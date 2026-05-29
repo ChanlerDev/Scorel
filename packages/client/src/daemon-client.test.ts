@@ -3,6 +3,7 @@ import { WebSocketServer } from "ws";
 
 import {
   asClientId,
+  asDeviceId,
   asEventId,
   asRequestId,
   asSeq,
@@ -111,6 +112,31 @@ describe("DaemonClient", () => {
     expect(client.persistentLastSeq).toBe(2);
     expect(client.getEvents().map((event) => event.id)).toEqual(["evt_assistant"]);
     expect(client.getActiveLeaf()).toBe("evt_assistant");
+  });
+
+  it("stores daemon connection identity returned by the transport", async () => {
+    class IdentityTransport extends MemoryTransport {
+      override async connect(_params: ConnectParams): Promise<ConnectResult> {
+        return {
+          clientId: asClientId("client_test"),
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_tokyo"),
+          deviceDisplayName: "Tokyo VPS",
+          projectSlug: "scorel",
+        };
+      }
+    }
+    const client = new DaemonClient(new IdentityTransport(), {
+      clientId: asClientId("client_test"),
+    });
+
+    await client.connect(asSessionId("ses_1"));
+
+    expect(client.connectionIdentity).toEqual({
+      deviceId: "device_tokyo",
+      deviceDisplayName: "Tokyo VPS",
+      projectSlug: "scorel",
+    });
   });
 
   it("separates durable persistent and observed stream anchors during resync", async () => {
@@ -277,7 +303,15 @@ describe("WsTransport", () => {
       socket.on("message", (data) => {
         const message = JSON.parse(data.toString()) as { type: string; clientId?: string; token?: string; requestId?: string };
         if (message.type === "connect" && message.token === "remote-secret") {
-          socket.send(JSON.stringify({ type: "connected", clientId: message.clientId, sessionId: "ses_ws", currentSeq: 0 }));
+          socket.send(JSON.stringify({
+            type: "connected",
+            clientId: message.clientId,
+            sessionId: "ses_ws",
+            currentSeq: 0,
+            deviceId: "device_tokyo",
+            deviceDisplayName: "Tokyo VPS",
+            projectSlug: "scorel",
+          }));
         }
         if (message.type === "ping") {
           socket.send(JSON.stringify({ type: "pong", requestId: message.requestId }));
@@ -288,10 +322,15 @@ describe("WsTransport", () => {
 
     try {
       transport.onMessage((message) => messages.push(message));
-      await transport.connect({ clientId: asClientId("client_ws"), sessionId: asSessionId("ses_ws") });
+      const connected = await transport.connect({ clientId: asClientId("client_ws"), sessionId: asSessionId("ses_ws") });
       const pong = waitForMessage(messages, (message) => message.type === "pong");
       transport.send({ type: "ping", requestId: asRequestId("req_ping") });
 
+      expect(connected).toMatchObject({
+        deviceId: "device_tokyo",
+        deviceDisplayName: "Tokyo VPS",
+        projectSlug: "scorel",
+      });
       await expect(pong).resolves.toEqual({ type: "pong", requestId: "req_ping" });
     } finally {
       transport.close();

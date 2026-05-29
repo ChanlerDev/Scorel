@@ -74,8 +74,10 @@ interface ConnectParams {
 
 interface ConnectResult {
   sessionId: string;
-  config: RuntimeInfo;
-  missedEvents?: DaemonEvent[];  // lastSeq 到当前的补发
+  currentSeq?: number;
+  deviceId?: DeviceId;
+  deviceDisplayName?: string; // UI label only, not identity
+  projectSlug?: string;       // daemon-served project cache namespace
 }
 ```
 
@@ -268,7 +270,14 @@ type ClientMessage =
 ```typescript
 type DaemonMessage =
   // ─── 连接响应 ───
-  | { type: "connected"; sessionId: SessionId; activeLeafId: EventId | null; currentSeq: Seq; meta: SessionMeta }
+  | {
+      type: "connected";
+      sessionId?: SessionId;
+      currentSeq?: Seq;
+      deviceId?: DeviceId;
+      deviceDisplayName?: string;
+      projectSlug?: string;
+    }
   | { type: "disconnected"; reason: string }
   | { type: "pong" }
   | { type: "auth_failed"; reason: string }

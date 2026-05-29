@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   asClientId,
+  asDeviceId,
   asEventId,
   asRequestId,
   asSeq,
@@ -123,5 +124,20 @@ describe("@scorel/protocol", () => {
 
     expect(response.data.mode).toBe("persistent_fallback");
     expect(response.data.throughSeq).toBe(2);
+  });
+
+  it("models daemon connection identity for remote project cache scope", () => {
+    const message = {
+      type: "connected",
+      clientId: asClientId("client_1"),
+      sessionId: asSessionId("ses_1"),
+      currentSeq: asSeq(0),
+      deviceId: asDeviceId("device_tokyo"),
+      deviceDisplayName: "Tokyo VPS",
+      projectSlug: "scorel",
+    } satisfies DaemonMessage;
+
+    expect(message.deviceId).toBe("device_tokyo");
+    expect(message.projectSlug).toBe("scorel");
   });
 });

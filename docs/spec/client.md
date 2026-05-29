@@ -168,6 +168,8 @@ Attach clients that do persist transient anchors may render the cached in-progre
 
 For terminal clients, local cache pre-render is conservative: cache metadata must match the requested attach target before output is printed, and `full_reload` must be visibly separated from any already printed stale cache because stdout cannot be rolled back.
 
+Remote attach cache identity comes from daemon connection metadata, not from the URL alone. The daemon reports a stable `deviceId`, optional `deviceDisplayName`, and project-level `projectSlug`; the attach cache key is `remote + deviceId + projectSlug + sessionId`. The URL remains the current endpoint and may change without invalidating cache for the same remote project.
+
 ---
 
 ## 5. Transport 选择

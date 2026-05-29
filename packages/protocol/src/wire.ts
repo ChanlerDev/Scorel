@@ -1,4 +1,4 @@
-import type { ClientId, EventId, RequestId, Seq, SessionId } from "./ids.js";
+import type { ClientId, DeviceId, EventId, RequestId, Seq, SessionId } from "./ids.js";
 import type {
   DaemonStatus,
   ErrorCode,
@@ -92,7 +92,15 @@ export type ErrorResponse = {
 };
 
 export type DaemonMessage =
-  | { type: "connected"; clientId: ClientId; sessionId?: SessionId; currentSeq?: Seq }
+  | {
+      type: "connected";
+      clientId: ClientId;
+      sessionId?: SessionId;
+      currentSeq?: Seq;
+      deviceId?: DeviceId;
+      deviceDisplayName?: string;
+      projectSlug?: string;
+    }
   | { type: "disconnected"; reason: string }
   | { type: "pong"; requestId?: RequestId }
   | { type: "event"; event: ScorelEvent }
