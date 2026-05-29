@@ -33,6 +33,56 @@ const assistantMessage = (text: string): ScorelMessage => ({
 });
 
 describe("embedded daemon + client", () => {
+  it("treats concurrent explicit create_session requests as the same session", async () => {
+    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-daemon-create-race-"));
+    const sessionId = asSessionId("ses_create_race");
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        return assistantMessage("ok");
+      },
+    };
+    const daemon = new EmbeddedDaemon({
+      sessionsDir,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: () => new ScorelRuntime({ provider }),
+      now: () => 1_000,
+    });
+    const transportA = createEmbeddedTransport(daemon);
+    const transportB = createEmbeddedTransport(daemon);
+
+    await daemon.start();
+    await transportA.connect({ clientId: asClientId("client_a"), sessionId });
+    await transportB.connect({ clientId: asClientId("client_b"), sessionId });
+
+    const createA = waitForResponse(transportA, "req_create_a");
+    const createB = waitForResponse(transportB, "req_create_b");
+    await Promise.all([
+      transportA.send({
+        type: "create_session",
+        requestId: asRequestId("req_create_a"),
+        sessionId,
+        meta: { model: "fake" },
+      }),
+      transportB.send({
+        type: "create_session",
+        requestId: asRequestId("req_create_b"),
+        sessionId,
+        meta: { model: "fake" },
+      }),
+    ]);
+
+    await expect(createA).resolves.toMatchObject({
+      type: "response",
+      requestType: "create_session",
+      data: { sessionId },
+    });
+    await expect(createB).resolves.toMatchObject({
+      type: "response",
+      requestType: "create_session",
+      data: { sessionId },
+    });
+  });
+
   it("persists a client message, runs runtime, and broadcasts ordered events to multiple clients", async () => {
     const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-daemon-"));
     const sessionId = asSessionId("ses_embedded");

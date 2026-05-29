@@ -565,10 +565,26 @@ export class EmbeddedDaemon {
 
   async #handleCreateSession(connection: Connection, request: ClientRequest<"create_session">): Promise<void> {
     const sessionId = request.sessionId ?? asSessionId(`ses_${this.#createId()}`);
-    const lane = await this.#createLane(sessionId, request.meta ?? {});
+    if (request.sessionId && (await this.#loadExistingLaneIfPresent(sessionId))) {
+      this.#respond(connection, request, { sessionId });
+      return;
+    }
+    let lane: SessionLane;
+    let created = true;
+    try {
+      lane = await this.#createLane(sessionId, request.meta ?? {});
+    } catch (cause) {
+      if (!request.sessionId || !isNodeErrorCode(cause, "EEXIST")) {
+        throw cause;
+      }
+      lane = await this.#getLane(sessionId);
+      created = false;
+    }
     this.#sessions.set(sessionId, lane);
-    this.#events.set(sessionId, []);
-    this.#seqs.set(sessionId, 0);
+    if (created) {
+      this.#events.set(sessionId, []);
+      this.#seqs.set(sessionId, 0);
+    }
     this.#respond(connection, request, { sessionId });
   }
 
@@ -798,6 +814,21 @@ export class EmbeddedDaemon {
     return lane;
   }
 
+  async #loadExistingLaneIfPresent(sessionId: SessionId): Promise<boolean> {
+    if (this.#sessions.has(sessionId)) {
+      return true;
+    }
+    try {
+      await this.#getLane(sessionId);
+      return true;
+    } catch (cause) {
+      if (isNodeErrorCode(cause, "ENOENT")) {
+        return false;
+      }
+      throw cause;
+    }
+  }
+
   async #createLane(sessionId: SessionId, meta: Partial<SessionMeta>): Promise<SessionLane> {
     const session = await createSession({
       sessionsDir: this.#sessionsDir,
@@ -879,3 +910,6 @@ export const createEmbeddedTransport = (daemon: EmbeddedDaemon): DaemonTransport
     },
   };
 };
+
+const isNodeErrorCode = (cause: unknown, code: string): boolean =>
+  cause instanceof Error && "code" in cause && cause.code === code;

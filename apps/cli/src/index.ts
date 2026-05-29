@@ -17,7 +17,16 @@ import {
   scorelSessionsDir,
   type ScorelConfig,
 } from "@scorel/daemon";
-import { asClientId, asDeviceId, asSeq, asSessionId, type ErrorEvent, type ScorelEvent } from "@scorel/protocol";
+import {
+  asClientId,
+  asDeviceId,
+  asSeq,
+  asSessionId,
+  type ContentBlock,
+  type ErrorEvent,
+  type PersistentEvent,
+  type ScorelEvent,
+} from "@scorel/protocol";
 
 export const cliAppName = "@scorel/app-cli" as const;
 export const cliClientDependency = clientPackageName;
@@ -103,20 +112,13 @@ const runAttach = async (
   });
   try {
     await client.connect(options.sessionId);
+    const renderer = new AttachEventRenderer(io.output, io.error);
+    const unsubscribe = client.subscribe((event) => renderer.renderLive(event));
     const resumed = await loadOrCreateAttachedSession(client, options.sessionId);
+    renderer.writeLine(`scorel attach ${resumed ? "resumed" : "created"} session ${options.sessionId}`);
     await client.resync(asSeq(0));
-    io.output.write(`scorel attach ${resumed ? "resumed" : "created"} session ${options.sessionId}\n`);
-    const unsubscribe = client.subscribe((event) => {
-      if (event.type === "text_delta") {
-        io.output.write(event.delta);
-      }
-      if (event.type === "tool_result") {
-        writeToolResult(io.output, event);
-      }
-      if (event.type === "error") {
-        writeEventError(io.error, event);
-      }
-    });
+    renderer.renderBacklog(client.getEvents());
+    renderer.promptIfInteractive();
     const rl = createInterface({ input: io.input as Readable, crlfDelay: Infinity });
     try {
       for await (const rawLine of rl) {
@@ -128,7 +130,8 @@ const runAttach = async (
           break;
         }
         await client.sendMessage(line);
-        io.output.write("\n");
+        renderer.endLine();
+        renderer.promptIfInteractive();
       }
     } finally {
       unsubscribe();
@@ -324,6 +327,103 @@ const writeToolResult = (output: NodeJS.WritableStream, event: Extract<ScorelEve
   const text = result.content?.find((candidate) => candidate.type === "text")?.text ?? "";
   output.write(`\n[tool:${block.toolName}]${block.isError ? " error" : ""}\n${text}\n`);
 };
+
+class AttachEventRenderer {
+  readonly #output: NodeJS.WritableStream;
+  readonly #error: NodeJS.WritableStream;
+  readonly #printedPersistentIds = new Set<string>();
+  readonly #streamedMessageIds = new Set<string>();
+  #atLineStart = true;
+
+  constructor(output: NodeJS.WritableStream, error: NodeJS.WritableStream) {
+    this.#output = output;
+    this.#error = error;
+  }
+
+  renderBacklog(events: PersistentEvent[]): void {
+    for (const event of events) {
+      this.#render(event);
+    }
+  }
+
+  renderLive(event: ScorelEvent): void {
+    this.#render(event);
+  }
+
+  endLine(): void {
+    if (!this.#atLineStart) {
+      this.#write("\n");
+    }
+  }
+
+  writeLine(text: string): void {
+    this.#ensureLineStart();
+    this.#write(`${text}\n`);
+  }
+
+  promptIfInteractive(): void {
+    if ((this.#output as Writable & { isTTY?: boolean }).isTTY) {
+      this.#write("> ");
+    }
+  }
+
+  #render(event: ScorelEvent): void {
+    if (event.type === "text_delta") {
+      this.#streamedMessageIds.add(String(event.eventId));
+      this.#write(event.delta);
+      return;
+    }
+    if (event.type === "error") {
+      this.endLine();
+      writeEventError(this.#error, event);
+      return;
+    }
+    if (!("id" in event) || this.#printedPersistentIds.has(String(event.id))) {
+      return;
+    }
+    this.#printedPersistentIds.add(String(event.id));
+
+    if (event.type === "user_message") {
+      this.#ensureLineStart();
+      this.#write(`[user] ${blocksToText(event.message.content)}\n`);
+      return;
+    }
+    if (event.type === "assistant_message") {
+      if (this.#streamedMessageIds.has(String(event.id))) {
+        this.endLine();
+        return;
+      }
+      const text = blocksToText(event.message.content);
+      if (text.length > 0) {
+        this.#ensureLineStart();
+        this.#write(`${text}\n`);
+      }
+      return;
+    }
+    if (event.type === "tool_result") {
+      this.#ensureLineStart();
+      writeToolResult(this.#output, event);
+      this.#atLineStart = true;
+    }
+  }
+
+  #ensureLineStart(): void {
+    if (!this.#atLineStart) {
+      this.#write("\n");
+    }
+  }
+
+  #write(text: string): void {
+    this.#output.write(text);
+    this.#atLineStart = text.endsWith("\n");
+  }
+}
+
+const blocksToText = (blocks: ContentBlock[]): string =>
+  blocks
+    .filter((block): block is Extract<ContentBlock, { type: "text" }> => block.type === "text")
+    .map((block) => block.text)
+    .join("");
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   runCli(process.argv.slice(2)).then((code) => {

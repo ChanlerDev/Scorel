@@ -200,6 +200,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | M4.3 | [`S0021`](spec/ship/S0021-remote-websocket-client-transport.md) | 在 client 侧实现 browser-safe WebSocket transport 和 remote resync。 | Done |
 | M4.4 | [`S0022`](spec/ship/S0022-remote-daemon-cli-lifecycle.md) | 暴露远端 daemon serve 与 CLI remote attach 用户入口。 | Done |
 | M4.5 | [`S0023`](spec/ship/S0023-remote-control-e2e-validation.md) | 端到端验证远端 daemon、本地控制、token auth、断线恢复和 coding flow。 | Done |
+| M4.6 | [`S0025`](spec/ship/S0025-remote-attach-session-event-view.md) | 修复 remote attach 的 session event view 一致性、重连持久事件补偿和终端行边界。 | Done |
 
 **Not in M4**:
 
@@ -269,6 +270,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0022`](spec/ship/S0022-remote-daemon-cli-lifecycle.md) | 暴露远端 daemon serve 和 CLI remote attach 入口 | Done |
 | [`S0023`](spec/ship/S0023-remote-control-e2e-validation.md) | 验证 M4 remote control 端到端产品路径 | Done |
 | [`S0024`](spec/ship/S0024-remote-attach-interactive-stream.md) | 修复 remote attach 交互订阅和多端事件流 | Done |
+| [`S0025`](spec/ship/S0025-remote-attach-session-event-view.md) | 修复 remote attach session event view 一致性和重连补偿 | Done |
 
 ---
 

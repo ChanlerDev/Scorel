@@ -235,6 +235,178 @@ describe("@scorel/app-cli", () => {
     }
   });
 
+  it("renders recovered persistent session events when remote attach resumes", async () => {
+    const server = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "response",
+            requestType: "load_session",
+            requestId: message.requestId,
+            ok: true,
+            data: {
+              sessionId: asSessionId("ses_remote_recovered"),
+              activeLeafId: asEventId("evt_assistant_recovered"),
+              currentSeq: asSeq(2),
+              meta: {},
+              events: [
+                {
+                  type: "user_message",
+                  id: asEventId("evt_user_recovered"),
+                  parentId: null,
+                  seq: asSeq(1),
+                  sessionId: asSessionId("ses_remote_recovered"),
+                  clientId: asClientId("client_other"),
+                  ts: 1,
+                  message: { role: "user", content: [{ type: "text", text: "hello from terminal 2" }] },
+                },
+                {
+                  type: "assistant_message",
+                  id: asEventId("evt_assistant_recovered"),
+                  parentId: asEventId("evt_user_recovered"),
+                  seq: asSeq(2),
+                  sessionId: asSessionId("ses_remote_recovered"),
+                  clientId: asClientId("client_other"),
+                  ts: 2,
+                  message: { role: "assistant", content: [{ type: "text", text: "recovered assistant output" }] },
+                },
+              ],
+            },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(2) },
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const result = await runCliWithInput(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_remote_recovered"],
+        ".exit\n",
+        testConfig("http://127.0.0.1:1"),
+        await mkdtemp(join(tmpdir(), "scorel-cli-remote-recovered-")),
+      );
+
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("[user] hello from terminal 2");
+      expect(result.stdout).toContain("recovered assistant output\n");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("renders live remote user events and ends streamed assistant output on a clean line", async () => {
+    const connections: RemoteDaemonWebSocketConnection[] = [];
+    const server = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientConnect: (connection, params) => {
+        connections.push(connection);
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+      },
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "error",
+            requestId: message.requestId,
+            ok: false,
+            code: "session_not_found" as const,
+            message: "missing session",
+          };
+        }
+        if (message.type === "create_session") {
+          return {
+            type: "response",
+            requestType: "create_session",
+            requestId: message.requestId,
+            ok: true,
+            data: { sessionId: asSessionId("ses_remote_format") },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(0) },
+          };
+        }
+        return undefined;
+      },
+    });
+    const input = new PassThrough();
+
+    try {
+      const attach = runCliWithStream(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_remote_format"],
+        input,
+        testConfig("http://127.0.0.1:1"),
+        await mkdtemp(join(tmpdir(), "scorel-cli-remote-format-")),
+      );
+      await waitFor(() => connections.length >= 1);
+      connections[0].send({
+        type: "event",
+        event: {
+          type: "user_message",
+          id: asEventId("evt_format_user"),
+          parentId: null,
+          seq: asSeq(1),
+          sessionId: asSessionId("ses_remote_format"),
+          clientId: asClientId("client_other"),
+          ts: 1,
+          message: { role: "user", content: [{ type: "text", text: "format check" }] },
+        },
+      });
+      connections[0].send({
+        type: "event",
+        event: {
+          type: "text_delta",
+          seq: asSeq(2),
+          sessionId: asSessionId("ses_remote_format"),
+          clientId: asClientId("client_other"),
+          ts: 2,
+          eventId: asEventId("evt_format_assistant"),
+          delta: "assistant stream",
+        },
+      });
+      connections[0].send({
+        type: "event",
+        event: {
+          type: "assistant_message",
+          id: asEventId("evt_format_assistant"),
+          parentId: asEventId("evt_format_user"),
+          seq: asSeq(3),
+          sessionId: asSessionId("ses_remote_format"),
+          clientId: asClientId("client_other"),
+          ts: 3,
+          message: { role: "assistant", content: [{ type: "text", text: "assistant stream" }] },
+        },
+      });
+      await waitFor(() => attach.stdout.toString().includes("assistant stream\n"));
+      input.end(".exit\n");
+
+      await expect(attach.result).resolves.toMatchObject({ code: 0 });
+      expect(attach.stdout.toString()).toContain("[user] format check\nassistant stream\n");
+      expect(attach.stdout.toString().match(/assistant stream/g)).toHaveLength(1);
+    } finally {
+      input.destroy();
+      await server.close();
+    }
+  });
+
   it("runs a real OpenAI-compatible coding loop through CLI, tools, persistence, and resume", async () => {
     const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-"));
     const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-"));
