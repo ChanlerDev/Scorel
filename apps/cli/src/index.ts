@@ -84,8 +84,45 @@ export const runCli = async (
       return 1;
     }
   }
+  if (command === "logs") {
+    try {
+      return runLogs(parseLogsOptions(rest), {
+        sessionsDir: runOptions.sessionsDir ?? defaultSessionsDir(),
+        output: io.output,
+        error: io.error,
+      });
+    } catch (cause) {
+      io.error.write(`scorel logs error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+      return 1;
+    }
+  }
   writeUsage(io.error);
   return command === "--help" || command === "-h" ? 0 : 1;
+};
+
+type LogsOptions = {
+  sessionId: ReturnType<typeof asSessionId>;
+  tail?: number;
+};
+
+const runLogs = async (
+  options: LogsOptions,
+  io: { sessionsDir: string; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
+): Promise<number> => {
+  const filePath = join(io.sessionsDir, `${options.sessionId}.log`);
+  let content: string;
+  try {
+    content = await readFile(filePath, "utf8");
+  } catch (cause) {
+    io.error.write(`scorel logs error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+    return 1;
+  }
+  const lines = content.split(/\r?\n/).filter((line) => line.length > 0);
+  const selected = options.tail === undefined ? lines : lines.slice(-options.tail);
+  if (selected.length > 0) {
+    io.output.write(`${selected.join("\n")}\n`);
+  }
+  return 0;
 };
 
 type AttachOptions = {
@@ -405,6 +442,32 @@ const parseAttachOptions = (argv: string[]): AttachOptions => {
   return { sessionId, remoteUrl, token };
 };
 
+const parseLogsOptions = (argv: string[]): LogsOptions => {
+  let sessionId: ReturnType<typeof asSessionId> | undefined;
+  let tail: number | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--session") {
+      sessionId = asSessionId(requireValue(argv, index, "--session"));
+      index += 1;
+      continue;
+    }
+    if (arg === "--tail") {
+      tail = Number(requireValue(argv, index, "--tail"));
+      if (!Number.isInteger(tail) || tail < 0) {
+        throw new Error("--tail must be a non-negative integer");
+      }
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown logs option: ${arg}`);
+  }
+  if (!sessionId) {
+    throw new Error("--session requires a value");
+  }
+  return { sessionId, tail };
+};
+
 const runCliDaemon = async (
   argv: string[],
   options: { stateDir: string; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
@@ -532,7 +595,7 @@ const promptIfInteractive = (output: NodeJS.WritableStream): void => {
 };
 
 const writeUsage = (output: NodeJS.WritableStream): void => {
-  output.write("Usage: scorel chat [--session <id>] [--cwd <dir>]\nUsage: scorel attach [--session <id>] [--remote <ws-url> --token <token>]\n");
+  output.write("Usage: scorel chat [--session <id>] [--cwd <dir>]\nUsage: scorel attach [--session <id>] [--remote <ws-url> --token <token>]\nUsage: scorel logs --session <id> [--tail <n>]\n");
 };
 
 const writeEventError = (output: NodeJS.WritableStream, event: ErrorEvent): void => {

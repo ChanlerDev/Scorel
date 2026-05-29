@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,11 +21,16 @@ import {
 } from "./index.js";
 
 const createDaemon = () =>
+  createDaemonWithSessionsDir(mkdtempSync(join(tmpdir(), "scorel-s0013-")));
+
+const createDaemonWithSessionsDir = (sessionsDir: string) =>
   {
     let nextId = 0;
     return new EmbeddedDaemon({
-      sessionsDir: mkdtempSync(join(tmpdir(), "scorel-s0013-")),
+      sessionsDir,
       deviceId: asDeviceId("device_test"),
+      deviceDisplayName: "Test Device",
+      projectSlug: "test-project",
       createRuntime: () => new ScorelRuntime({ provider: emptyProvider }),
       now: () => 1,
       createId: () => {
@@ -42,6 +47,43 @@ const emptyProvider: RuntimeProvider = {
 };
 
 describe("daemon protocol boundary", () => {
+  it("writes diagnostics beside the session file for send and resync", async () => {
+    const sessionsDir = mkdtempSync(join(tmpdir(), "scorel-diagnostics-"));
+    const daemon = createDaemonWithSessionsDir(sessionsDir);
+    const transport = createEmbeddedTransport(daemon);
+
+    await daemon.start();
+    await transport.connect({ clientId: asClientId("client_diag"), sessionId: asSessionId("ses_diag") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create_diag"),
+      sessionId: asSessionId("ses_diag"),
+      meta: { model: "test-model" },
+    });
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send_diag"),
+      sessionId: asSessionId("ses_diag"),
+      content: "hello",
+    });
+    await transport.send({
+      type: "resync_events",
+      requestId: asRequestId("req_resync_diag"),
+      sessionId: asSessionId("ses_diag"),
+      persistentLastSeq: asSeq(1),
+      streamLastSeq: asSeq(1),
+    });
+
+    const log = readFileSync(join(sessionsDir, "ses_diag.log"), "utf8");
+    expect(log).toContain("event=session_created");
+    expect(log).toContain("event=send_message_started");
+    expect(log).toContain("event=assistant_result");
+    expect(log).toContain("event=send_message_finished");
+    expect(log).toContain("event=resync_events");
+    expect(log).toContain("mode=stream_resume");
+    expect(log).toContain("clientId=client_diag");
+  });
+
   it("subscribes to a loaded session and resyncs per-session events after lastSeq", async () => {
     const daemon = createDaemon();
     const transport = createEmbeddedTransport(daemon);

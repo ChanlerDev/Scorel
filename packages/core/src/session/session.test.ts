@@ -14,7 +14,7 @@ import {
   type SessionMeta,
 } from "@scorel/protocol";
 
-import { buildContext, createSession, loadSession, SessionStoreError } from "./index.js";
+import { buildContext, createSession, loadSession, sessionLogFilePath, SessionStoreError } from "./index.js";
 
 const meta: SessionMeta = {
   model: "test-model",
@@ -55,6 +55,12 @@ const assistantEvent = (id: string, parentId: string, seq: number, content: stri
 const tempRoot = () => mkdtemp(join(tmpdir(), "scorel-session-"));
 
 describe("session core", () => {
+  it("derives diagnostics log path beside the session JSONL", async () => {
+    const sessionsDir = await tempRoot();
+
+    expect(sessionLogFilePath(sessionsDir, sessionId)).toBe(join(sessionsDir, "ses_test.log"));
+  });
+
   it("creates, appends, closes, reloads, and replays the same session tree", async () => {
     const sessionsDir = await tempRoot();
     const session = await createSession({

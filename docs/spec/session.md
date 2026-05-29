@@ -103,6 +103,26 @@ The cache may advance `persistentLastSeq` only after a persistent event has been
 
 If the cache stores transient stream state, it must be explicitly separate from persistent events. A cached transient may advance `streamLastSeq`, but it is provisional UI state only and must be discarded once the matching persistent assistant event is observed.
 
+### 2.6 Session Diagnostics Log
+
+Each daemon-owned session may also have a sibling plain-text diagnostics log:
+
+```text
+~/.scorel/sessions/{sessionId}.jsonl
+~/.scorel/sessions/{sessionId}.log
+```
+
+The `.log` file is append-only operational evidence, not replay state. It is written by the daemon that owns the session JSONL and stays on that machine. Remote attach must not copy daemon diagnostics into local attach cache.
+
+Each log line is human-readable and grep-friendly:
+
+```text
+ts=1716000000000 level=info event=send_message_started sessionId=ses_abc clientId=client_cli
+ts=1716000000100 level=error event=runtime_error sessionId=ses_abc message="stream closed before response.completed"
+```
+
+Diagnostics can record lifecycle, reconnect, runtime, provider result summaries, and errors. They must not record API keys, bearer tokens, full prompts, full tool results, or raw provider payloads by default.
+
 ---
 
 ## 3. SessionTree 与 Context 构建

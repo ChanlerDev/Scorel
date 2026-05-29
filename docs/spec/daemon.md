@@ -45,10 +45,13 @@ Daemon
   │     ├── RuntimeBridge[ses_def] → ScorelRuntime
   │     └── ...
   ├── SessionStore（JSONL 读写，唯一 writer）
+  ├── SessionDiagnostics（同目录 .log，daemon 调试证据）
   └── ExtensionRunner（扩展生命周期）
 ```
 
 **Runtime 模型**：一个 daemon 可运行多个 runtime，每个 runtime 服务一个 session（1:1）。多终端并发操作不同 session = 多个 runtime 同时在跑。同一 session 的多个 client 共享一个 runtime，通过 SessionLane 串行化写操作。
+
+**Diagnostics 模型**：daemon 为每个 session 写同目录 `<sessionId>.log`，记录 session lifecycle、client connect/disconnect、send/resync、assistant result summary 和 runtime/provider errors。Diagnostics log 是人读日志，不是协议事件，不参与 replay/context，也不进入 attach cache。
 
 ---
 

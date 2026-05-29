@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -13,6 +13,7 @@ import {
   loadScorelConfig,
   loadSession,
   resolvePiAiModel,
+  sessionLogFilePath,
   scorelSessionsDir,
   type ScorelConfig,
   type JsonlSession,
@@ -142,11 +143,14 @@ export const startLocalDaemonSocketServer = async (
     const connection: LocalDaemonSocketConnection = {
       socket,
       send(message) {
-        socket.write(`${JSON.stringify(message)}\n`);
+        if (!socket.destroyed && socket.writable) {
+          socket.write(`${JSON.stringify(message)}\n`);
+        }
       },
     };
 
     socket.setEncoding("utf8");
+    socket.on("error", () => undefined);
     socket.on("data", (chunk) => {
       buffer += chunk;
       while (buffer.includes("\n")) {
@@ -520,6 +524,14 @@ export class EmbeddedDaemon {
     this.#assertStarted();
     connection.sessionId = sessionId;
     this.#connections.add(connection);
+    if (sessionId) {
+      void this.#appendDiagnostic(sessionId, "client_connected", {
+        clientId: connection.clientId,
+        deviceId: this.#deviceId,
+        deviceDisplayName: this.#deviceDisplayName,
+        projectSlug: this.#projectSlug,
+      });
+    }
     return {
       clientId: connection.clientId,
       sessionId,
@@ -531,6 +543,11 @@ export class EmbeddedDaemon {
   }
 
   disconnect(connection: Connection): void {
+    if (connection.sessionId) {
+      void this.#appendDiagnostic(connection.sessionId, "client_disconnected", {
+        clientId: connection.clientId,
+      });
+    }
     this.#connections.delete(connection);
   }
 
@@ -591,6 +608,7 @@ export class EmbeddedDaemon {
   async #handleCreateSession(connection: Connection, request: ClientRequest<"create_session">): Promise<void> {
     const sessionId = request.sessionId ?? asSessionId(`ses_${this.#createId()}`);
     if (request.sessionId && (await this.#loadExistingLaneIfPresent(sessionId))) {
+      await this.#appendDiagnostic(sessionId, "session_loaded", { clientId: connection.clientId });
       this.#respond(connection, request, { sessionId });
       return;
     }
@@ -610,12 +628,17 @@ export class EmbeddedDaemon {
       this.#events.set(sessionId, []);
       this.#seqs.set(sessionId, 0);
     }
+    await this.#appendDiagnostic(sessionId, created ? "session_created" : "session_loaded", {
+      clientId: connection.clientId,
+      model: request.meta?.model,
+    });
     this.#respond(connection, request, { sessionId });
   }
 
   async #handleLoadSession(connection: Connection, request: ClientRequest<"load_session">): Promise<void> {
     try {
       const lane = await this.#getLane(request.sessionId);
+      await this.#appendDiagnostic(request.sessionId, "session_loaded", { clientId: connection.clientId });
       connection.sessionId = request.sessionId;
       const persistentEvents = [...lane.session.tree];
       const sessionEvents = this.#events.get(request.sessionId) ?? [];
@@ -643,6 +666,10 @@ export class EmbeddedDaemon {
   async #handleSendMessage(connection: Connection, request: ClientRequest<"send_message">): Promise<void> {
     const lane = await this.#getLane(request.sessionId);
     lane.queue = lane.queue.then(async () => {
+      await this.#appendDiagnostic(request.sessionId, "send_message_started", {
+        clientId: connection.clientId,
+        activeLeafId: lane.session.activeLeafId,
+      });
       const userEventId = asEventId(this.#createId());
       const content = typeof request.content === "string" ? [{ type: "text" as const, text: request.content }] : request.content;
       const userEvent = await this.#appendPersistent(lane, {
@@ -665,6 +692,11 @@ export class EmbeddedDaemon {
         await this.#handleRuntimeEvent(lane, connection.clientId, state, rawEvent);
       }
 
+      await this.#appendDiagnostic(request.sessionId, "send_message_finished", {
+        clientId: connection.clientId,
+        userEventId,
+        assistantEventId: state.finalAssistantEventId,
+      });
       this.#respond(connection, request, { userEventId, assistantEventId: state.finalAssistantEventId });
     });
 
@@ -709,6 +741,15 @@ export class EmbeddedDaemon {
         });
         break;
       case "message_end": {
+        await this.#appendDiagnostic(lane.session.header.sessionId, "assistant_result", {
+          clientId,
+          stopReason: rawEvent.message.stopReason,
+          textBlocks: countContentBlocks(rawEvent.message, "text"),
+          toolCalls: countContentBlocks(rawEvent.message, "tool_call"),
+          inputTokens: rawEvent.message.usage?.inputTokens,
+          outputTokens: rawEvent.message.usage?.outputTokens,
+          totalTokens: rawEvent.message.usage?.totalTokens,
+        });
         const appended = (
           await this.#appendPersistent(lane, {
             type: "assistant_message",
@@ -753,6 +794,10 @@ export class EmbeddedDaemon {
         break;
       }
       case "turn_end":
+        void this.#appendDiagnostic(lane.session.header.sessionId, "runtime_turn_end", {
+          clientId,
+          stopReason: rawEvent.stopReason,
+        });
         this.#broadcastTransient(lane.session.header.sessionId, {
           type: "turn_end",
           sessionId: lane.session.header.sessionId,
@@ -763,6 +808,11 @@ export class EmbeddedDaemon {
         });
         break;
       case "error":
+        void this.#appendDiagnostic(lane.session.header.sessionId, "runtime_error", {
+          clientId,
+          message: rawEvent.error.message,
+          stack: shortStack(rawEvent.error),
+        });
         this.#broadcastTransient(lane.session.header.sessionId, {
           type: "error",
           sessionId: lane.session.header.sessionId,
@@ -822,33 +872,60 @@ export class EmbeddedDaemon {
     const streamLastSeq = anchors.streamLastSeq ?? persistentLastSeq;
 
     if (Number(streamLastSeq) >= Number(currentSeq)) {
-      return {
+      const result: ResyncEventsResult = {
         events: [],
         throughSeq: currentSeq,
         mode: "stream_resume",
       };
+      await this.#appendDiagnostic(sessionId, "resync_events", {
+        mode: result.mode,
+        persistentLastSeq,
+        streamLastSeq,
+        throughSeq: result.throughSeq,
+        eventCount: result.events.length,
+      });
+      return result;
     }
 
     const buffered = this.#eventsAfter(sessionId, streamLastSeq);
     if (hasContinuousCoverage(buffered, Number(streamLastSeq) + 1)) {
-      return {
+      const result: ResyncEventsResult = {
         events: buffered,
         throughSeq: buffered.at(-1)?.seq ?? streamLastSeq,
         mode: "stream_resume",
       };
+      await this.#appendDiagnostic(sessionId, "resync_events", {
+        mode: result.mode,
+        persistentLastSeq,
+        streamLastSeq,
+        throughSeq: result.throughSeq,
+        eventCount: result.events.length,
+      });
+      return result;
     }
 
     const lane = await this.#getLane(sessionId);
     const events = [...lane.session.tree].filter((event) => Number(event.seq) > Number(persistentLastSeq));
     const throughSeq = events.at(-1)?.seq ?? persistentLastSeq;
-    const mode = Number(persistentLastSeq) === 0 && Number(streamLastSeq) === 0 ? "full_reload" : "persistent_fallback";
-    return {
+    const mode: ResyncEventsResult["mode"] =
+      Number(persistentLastSeq) === 0 && Number(streamLastSeq) === 0 ? "full_reload" : "persistent_fallback";
+    const result: ResyncEventsResult = {
       events,
       throughSeq,
       mode,
       gapFromSeq: asSeq(Number(streamLastSeq) + 1),
       gapToSeq: currentSeq,
     };
+    await this.#appendDiagnostic(sessionId, "resync_events", {
+      mode: result.mode,
+      persistentLastSeq,
+      streamLastSeq,
+      throughSeq: result.throughSeq,
+      eventCount: result.events.length,
+      gapFromSeq: result.gapFromSeq,
+      gapToSeq: result.gapToSeq,
+    });
+    return result;
   }
 
   async #getLane(sessionId: SessionId): Promise<SessionLane> {
@@ -919,6 +996,18 @@ export class EmbeddedDaemon {
       throw new Error("EmbeddedDaemon is not started");
     }
   }
+
+  async #appendDiagnostic(sessionId: SessionId, event: string, fields: Record<string, unknown> = {}): Promise<void> {
+    const line = formatDiagnosticLine({
+      ts: this.#now(),
+      level: event.endsWith("_error") || event.endsWith("_failed") ? "error" : "info",
+      event,
+      sessionId,
+      ...fields,
+    });
+    await mkdir(this.#sessionsDir, { recursive: true });
+    await appendFile(sessionLogFilePath(this.#sessionsDir, sessionId), `${line}\n`, "utf8");
+  }
 }
 
 export const createEmbeddedTransport = (daemon: EmbeddedDaemon): DaemonTransport => {
@@ -985,4 +1074,20 @@ const hasContinuousCoverage = (events: ScorelEvent[], expectedFirstSeq: number):
     expected += 1;
   }
   return true;
+};
+
+const countContentBlocks = (message: ScorelMessage, type: string): number =>
+  message.content.filter((block) => block.type === type).length;
+
+const shortStack = (error: Error): string | undefined => error.stack?.split("\n").slice(0, 3).join(" | ");
+
+const formatDiagnosticLine = (fields: Record<string, unknown>): string =>
+  Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => `${key}=${formatDiagnosticValue(value)}`)
+    .join(" ");
+
+const formatDiagnosticValue = (value: unknown): string => {
+  const text = typeof value === "string" ? value : String(value);
+  return /^[A-Za-z0-9_./:@+-]+$/.test(text) ? text : JSON.stringify(text);
 };

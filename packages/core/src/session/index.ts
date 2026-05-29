@@ -225,6 +225,9 @@ export class JsonlSession {
 export const sessionFilePath = (sessionsDir: string, sessionId: SessionId): string =>
   join(sessionsDir, `${sessionId}.jsonl`);
 
+export const sessionLogFilePath = (sessionsDir: string, sessionId: SessionId): string =>
+  join(sessionsDir, `${sessionId}.log`);
+
 export const createSession = async ({ sessionsDir, header }: CreateSessionOptions): Promise<JsonlSession> => {
   const validHeader = parseHeader(header);
   await mkdir(sessionsDir, { recursive: true });

@@ -39,6 +39,25 @@ describe("@scorel/app-cli", () => {
     expect(result.stderr).toContain("scorel attach error: local daemon is not running");
   });
 
+  it("prints a local session diagnostics log with tail support", async () => {
+    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-logs-"));
+    await writeFile(
+      join(sessionsDir, "ses_logs.log"),
+      [
+        "ts=1 level=info event=session_created sessionId=ses_logs",
+        "ts=2 level=info event=send_message_started sessionId=ses_logs",
+        "ts=3 level=error event=provider_request_failed sessionId=ses_logs message=\"boom\"",
+      ].join("\n") + "\n",
+    );
+
+    const result = await runCliWithInput(["logs", "--session", "ses_logs", "--tail", "2"], "", testConfig("http://127.0.0.1:1"), sessionsDir);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).not.toContain("session_created");
+    expect(result.stdout).toContain("send_message_started");
+    expect(result.stdout).toContain("provider_request_failed");
+  });
+
   it("attaches to a local daemon socket from daemon state", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-attach-"));
     const socketPath = join(stateDir, "daemon.sock");
