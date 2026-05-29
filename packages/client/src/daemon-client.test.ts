@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 
 import {
   asClientId,
@@ -14,6 +15,7 @@ import {
 } from "@scorel/protocol";
 
 import { DaemonClient } from "./index.js";
+import { WsTransport } from "./index.js";
 
 class MemoryTransport implements DaemonTransport {
   readonly sent: ClientMessage[] = [];
@@ -109,3 +111,54 @@ describe("DaemonClient", () => {
     expect(client.getActiveLeaf()).toBe("evt_assistant");
   });
 });
+
+describe("WsTransport", () => {
+  it("connects to a real WebSocket daemon endpoint and exchanges protocol messages", async () => {
+    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    const messages: DaemonMessage[] = [];
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("missing server address");
+    }
+    server.on("connection", (socket) => {
+      socket.on("message", (data) => {
+        const message = JSON.parse(data.toString()) as { type: string; clientId?: string; token?: string; requestId?: string };
+        if (message.type === "connect" && message.token === "remote-secret") {
+          socket.send(JSON.stringify({ type: "connected", clientId: message.clientId, sessionId: "ses_ws", currentSeq: 0 }));
+        }
+        if (message.type === "ping") {
+          socket.send(JSON.stringify({ type: "pong", requestId: message.requestId }));
+        }
+      });
+    });
+    const transport = new WsTransport({ url: `ws://127.0.0.1:${address.port}`, token: "remote-secret" });
+
+    try {
+      transport.onMessage((message) => messages.push(message));
+      await transport.connect({ clientId: asClientId("client_ws"), sessionId: asSessionId("ses_ws") });
+      const pong = waitForMessage(messages, (message) => message.type === "pong");
+      transport.send({ type: "ping", requestId: asRequestId("req_ping") });
+
+      await expect(pong).resolves.toEqual({ type: "pong", requestId: "req_ping" });
+    } finally {
+      transport.close();
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+  });
+});
+
+const waitForMessage = (
+  messages: DaemonMessage[],
+  predicate: (message: DaemonMessage) => boolean,
+): Promise<DaemonMessage> =>
+  new Promise((resolve) => {
+    const interval = setInterval(() => {
+      const message = messages.find(predicate);
+      if (!message) {
+        return;
+      }
+      clearInterval(interval);
+      resolve(message);
+    }, 1);
+  });

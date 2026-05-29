@@ -1,6 +1,9 @@
 import {
   asRequestId,
   asSeq,
+  type ClientMessage,
+  type ConnectParams,
+  type ConnectResult,
   protocolPackageName,
   protocolVersion,
   type ClientId,
@@ -23,6 +26,25 @@ export const clientPackageName = "@scorel/client" as const;
 export const clientProtocolDependency = protocolPackageName;
 export const clientProtocolVersion = protocolVersion;
 export type ClientDaemonTransport = DaemonTransport;
+
+export type WsTransportOptions = {
+  url: string;
+  token: string;
+  createWebSocket?: (url: string) => WebSocketLike;
+};
+
+type WebSocketLike = {
+  readyState: number;
+  send(data: string): void;
+  close(): void;
+  addEventListener(type: "open", listener: () => void, options?: { once?: boolean }): void;
+  addEventListener(type: "message", listener: (event: { data: unknown }) => void): void;
+  addEventListener(type: "error", listener: (event: unknown) => void, options?: { once?: boolean }): void;
+  addEventListener(type: "close", listener: () => void, options?: { once?: boolean }): void;
+  removeEventListener(type: "error", listener: (event: unknown) => void): void;
+};
+
+const websocketOpenState = 1;
 
 export type DaemonClientOptions = {
   clientId: ClientId;
@@ -206,6 +228,97 @@ export class DaemonClient {
       } else {
         this.#events.push(event);
       }
+    }
+  }
+}
+
+export class WsTransport implements DaemonTransport {
+  readonly url: string;
+  readonly #token: string;
+  readonly #createWebSocket: (url: string) => WebSocketLike;
+  readonly #handlers = new Set<(message: DaemonMessage) => void>();
+  #socket: WebSocketLike | undefined;
+
+  constructor(options: WsTransportOptions) {
+    this.url = options.url;
+    this.#token = options.token;
+    this.#createWebSocket =
+      options.createWebSocket ??
+      ((url) => {
+        if (typeof WebSocket === "undefined") {
+          throw new Error("WebSocket is not available in this runtime");
+        }
+        return new WebSocket(url);
+      });
+  }
+
+  connect(params: ConnectParams): Promise<ConnectResult> {
+    return new Promise((resolve, reject) => {
+      const socket = this.#createWebSocket(this.url);
+      this.#socket = socket;
+      const rejectOnError = (event: unknown) => {
+        socket.removeEventListener("error", rejectOnError);
+        reject(event instanceof Error ? event : new Error("WebSocket connection failed"));
+      };
+      socket.addEventListener("error", rejectOnError, { once: true });
+      socket.addEventListener("message", (event) => this.#handleMessageData(event.data));
+      const unsubscribe = this.onMessage((message) => {
+        if (message.type === "error") {
+          unsubscribe();
+          socket.removeEventListener("error", rejectOnError);
+          reject(new Error(message.message));
+          return;
+        }
+        if (message.type !== "connected") {
+          return;
+        }
+        unsubscribe();
+        socket.removeEventListener("error", rejectOnError);
+        resolve({
+          clientId: message.clientId,
+          sessionId: message.sessionId,
+          currentSeq: message.currentSeq,
+        });
+      });
+      socket.addEventListener(
+        "open",
+        () => {
+          this.#write({ type: "connect", ...params, token: this.#token });
+        },
+        { once: true },
+      );
+    });
+  }
+
+  send(message: ClientMessage): void {
+    this.#write(message);
+  }
+
+  onMessage(handler: (message: DaemonMessage) => void): Unsubscribe {
+    this.#handlers.add(handler);
+    return () => {
+      this.#handlers.delete(handler);
+    };
+  }
+
+  close(): void {
+    this.#socket?.close();
+    this.#socket = undefined;
+    this.#handlers.clear();
+  }
+
+  #write(message: ClientMessage | (ConnectParams & { type: "connect"; token: string })): void {
+    if (!this.#socket || this.#socket.readyState !== websocketOpenState) {
+      throw new Error("WsTransport is not connected");
+    }
+    this.#socket.send(JSON.stringify(message));
+  }
+
+  #handleMessageData(data: unknown): void {
+    const text = typeof data === "string" ? data : data instanceof ArrayBuffer ? new TextDecoder().decode(data) : String(data);
+    const message = JSON.parse(text) as DaemonMessage;
+    for (const handler of this.#handlers) {
+      handler(message);
     }
   }
 }
