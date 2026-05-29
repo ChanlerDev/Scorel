@@ -117,7 +117,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 - `Write` 创建新文件不需要 read，更新既有文件必须先读段覆盖完整当前文件且通过 stale check。
 - `Edit` 必须先读段覆盖完整当前文件，并保持精确匹配失败规则。
 - `Glob` / `Grep` 使用 ripgrep 路径，支持分页和结构化结果。
-- CLI smoke 仍覆盖搜索、读取、编辑、命令验证、TodoWrite、持久化和 resume。
+- CLI 端到端验证仍覆盖搜索、读取、编辑、命令验证、TodoWrite、持久化和 resume。
 
 **Steps**:
 
@@ -165,7 +165,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | M3.1 | [`S0013`](spec/ship/S0013-local-daemon-protocol.md) | 补齐本地 daemon 所需的协议、socket transport 合同和边界测试入口。 | Done |
 | M3.2 | [`S0014`](spec/ship/S0014-local-daemon-lifecycle.md) | 实现可独立启动/停止的本地 daemon 进程和连接发现状态。 | Done |
 | M3.3 | [`S0015`](spec/ship/S0015-local-attach-and-broadcast.md) | 暴露 `scorel attach` 并验证多个本地 client 共享同一 session 事件流。 | Done |
-| M3.4 | [`S0016`](spec/ship/S0016-local-daemon-resync-smoke.md) | 验证本地 client 断线重连后的 missed event 补发和真实产品 smoke。 | Done |
+| M3.4 | [`S0016`](spec/ship/S0016-local-daemon-resync-smoke.md) | 验证本地 client 断线重连后的 missed event 补发和真实产品端到端路径。 | Done |
 
 **Not in M3**:
 
@@ -188,8 +188,28 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 - WebSocket remote transport 可用。
 - Token auth 可用。
 - 远端断线恢复可用。
+- 本地 CLI 可以连接远端 daemon，发起 prompt，并接收同一 session 的事件流。
+- 远端路径通过真实 LLM provider、真实临时工作区和真实 JSONL session 的端到端验证；不使用 mock/fake provider，不为测试写特殊化产品路径。
 
-**Status**: Planned
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M4.1 | [`S0019`](spec/ship/S0019-remote-transport-contract.md) | 锁定 remote transport、token auth、连接 URL 和断线恢复语义。 | Done |
+| M4.2 | [`S0020`](spec/ship/S0020-remote-websocket-server.md) | 在 daemon 侧实现可测试的 WebSocket server primitive。 | Done |
+| M4.3 | [`S0021`](spec/ship/S0021-remote-websocket-client-transport.md) | 在 client 侧实现 browser-safe WebSocket transport 和 remote resync。 | Done |
+| M4.4 | [`S0022`](spec/ship/S0022-remote-daemon-cli-lifecycle.md) | 暴露远端 daemon serve 与 CLI remote attach 用户入口。 | Done |
+| M4.5 | [`S0023`](spec/ship/S0023-remote-control-e2e-validation.md) | 端到端验证远端 daemon、本地控制、token auth、断线恢复和 coding flow。 | Done |
+
+**Not in M4**:
+
+- WebUI / GUI / mobile UI。
+- TLS 自动签发、账号系统、OAuth、多人权限分级。
+- 公网 tunnel / relay service / NAT traversal。
+- Daemon supervisor、auto-restart、crash recovery beyond reconnectable remote state。
+- Permission approval UI、sandbox、checkpoint restore。
+
+**Status**: Done
 
 ---
 
@@ -240,9 +260,14 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0013`](spec/ship/S0013-local-daemon-protocol.md) | 补齐本地 daemon 协议与 socket transport 合同 | Done |
 | [`S0014`](spec/ship/S0014-local-daemon-lifecycle.md) | 实现本地 daemon 进程生命周期和连接发现 | Done |
 | [`S0015`](spec/ship/S0015-local-attach-and-broadcast.md) | 实现本地 attach 与多 client 广播 | Done |
-| [`S0016`](spec/ship/S0016-local-daemon-resync-smoke.md) | 验证本地 daemon 断线补发与端到端 smoke | Done |
+| [`S0016`](spec/ship/S0016-local-daemon-resync-smoke.md) | 验证本地 daemon 断线补发与端到端路径 | Done |
 | [`S0017`](spec/ship/S0017-grep-files-output-mode.md) | 简化 Grep 文件路径输出模式命名 | Done |
 | [`S0018`](spec/ship/S0018-daemon-entrypoint-smoke.md) | 修复 daemon app 开发态入口执行路径 | Done |
+| [`S0019`](spec/ship/S0019-remote-transport-contract.md) | 锁定 remote transport、token auth 和断线恢复合同 | Done |
+| [`S0020`](spec/ship/S0020-remote-websocket-server.md) | 实现 daemon 侧 remote WebSocket server primitive | Done |
+| [`S0021`](spec/ship/S0021-remote-websocket-client-transport.md) | 实现 client 侧 remote WebSocket transport | Done |
+| [`S0022`](spec/ship/S0022-remote-daemon-cli-lifecycle.md) | 暴露远端 daemon serve 和 CLI remote attach 入口 | Done |
+| [`S0023`](spec/ship/S0023-remote-control-e2e-validation.md) | 验证 M4 remote control 端到端产品路径 | Done |
 
 ---
 
