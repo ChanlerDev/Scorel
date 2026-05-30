@@ -4,7 +4,7 @@ import type { RemoteSessionState } from "./remote-session.js";
 import { createRemoteSessionController } from "./remote-session.js";
 import { renderEventStreamRows } from "./event-stream.js";
 import { createRemoteProfileStore, type RemoteProfile, type RemoteProfileStore } from "./remote-store.js";
-import { renderProjectList, renderSessionBrowser } from "./session-browser.js";
+import { renderDeviceTree, renderSessionBrowser } from "./session-browser.js";
 import { renderWebUiShell } from "./shell.js";
 
 const renderState = (
@@ -39,13 +39,19 @@ const renderState = (
   if (stream && state.status === "connected") {
     stream.innerHTML = renderEventStreamRows(state.events);
   }
-  const projectList = root.querySelector<HTMLElement>("[data-project-list]");
-  const sessionList = root.querySelector<HTMLElement>("[data-session-list]");
+  const deviceTree = root.querySelector<HTMLElement>("[data-device-tree]");
   const sessionTree = root.querySelector<HTMLElement>("[data-session-tree]");
-  if (projectList && sessionList && sessionTree && state.status === "connected") {
-    projectList.innerHTML = renderProjectList(state.sessionBrowser.projects, state.sessionBrowser.selectedProjectKey);
+  if (deviceTree && sessionTree && state.status === "connected") {
+    deviceTree.innerHTML = renderDeviceTree({
+      devices: [{
+        id: options.activeProfile?.id ?? state.syncIndex.remoteId,
+        name: options.activeProfile?.name ?? identityText(state),
+        projects: state.sessionBrowser.projects,
+      }],
+      selectedProjectKey: state.sessionBrowser.selectedProjectKey,
+      selectedSessionId: state.sessionBrowser.selectedSessionId,
+    });
     const rendered = renderSessionBrowser(state.sessionBrowser);
-    sessionList.innerHTML = rendered.sessions;
     sessionTree.innerHTML = rendered.tree;
     const projectKey = state.sessionBrowser.selectedProjectKey;
     if (options.activeProfile && projectKey && state.sessionId) {
@@ -64,12 +70,13 @@ export const mountWebUi = (root: HTMLElement): void => {
   const store = createRemoteProfileStore();
   let activeProfile = store.listProfiles()[0];
 
-  renderRemotes(root, store.listProfiles(), activeProfile?.id);
   if (activeProfile) {
     populateRemoteForm(root, activeProfile);
   }
 
-  const form = root.querySelector<HTMLFormElement>("[data-remote-settings-form]");
+  renderStoredDevices(root, store.listProfiles());
+
+  const form = root.querySelector<HTMLFormElement>("[data-device-settings-form]");
   form?.addEventListener("submit", (event) => {
     event.preventDefault();
     const data = new FormData(form);
@@ -79,7 +86,7 @@ export const mountWebUi = (root: HTMLElement): void => {
       endpoint: String(data.get("endpoint") ?? "").trim(),
       token: String(data.get("token") ?? ""),
     });
-    renderRemotes(root, store.listProfiles(), activeProfile.id);
+    renderStoredDevices(root, store.listProfiles());
     const url = activeProfile.endpoint;
     const token = String(data.get("token") ?? "");
     const sessionId = activeProfile.lastSelection?.sessionId;
@@ -91,15 +98,21 @@ export const mountWebUi = (root: HTMLElement): void => {
         sessionId,
         remoteId: activeProfile.id,
       })
-      .then((state) => renderState(root, state, { store, activeProfile }));
+      .then((state) => {
+        renderState(root, state, { store, activeProfile });
+        if (state.status === "connected") {
+          showPage(root, "chat");
+        }
+      });
   });
 
-  root.querySelector<HTMLElement>("[data-session-list]")?.addEventListener("click", (event) => {
+  root.querySelector<HTMLElement>("[data-device-tree]")?.addEventListener("click", (event) => {
     const button = (event.target as Element | null)?.closest<HTMLElement>("[data-session-id]");
     const sessionId = button?.dataset.sessionId;
     if (!sessionId) {
       return;
     }
+    showPage(root, "chat");
     void controller.loadSession(asSessionId(sessionId)).then((state) => renderState(root, state, { store, activeProfile }));
   });
 
@@ -118,38 +131,27 @@ export const mountWebUi = (root: HTMLElement): void => {
     void controller.cancel().then((state) => renderState(root, state, { store, activeProfile }));
   });
 
-  root.querySelector<HTMLElement>("[data-remote-list]")?.addEventListener("click", (event) => {
-    const button = (event.target as Element | null)?.closest<HTMLElement>("[data-remote-id]");
-    const profile = store.listProfiles().find((candidate) => candidate.id === button?.dataset.remoteId);
-    if (!profile) {
-      return;
-    }
-    activeProfile = profile;
-    populateRemoteForm(root, profile);
-    renderRemotes(root, store.listProfiles(), profile.id);
+  root.querySelector<HTMLElement>("[data-settings-button]")?.addEventListener("click", () => {
+    showPage(root, "settings");
   });
 };
 
-const renderRemotes = (root: HTMLElement, profiles: RemoteProfile[], activeId: string | undefined): void => {
-  const list = root.querySelector<HTMLElement>("[data-remote-list]");
-  if (!list) {
+const renderStoredDevices = (root: HTMLElement, profiles: RemoteProfile[]): void => {
+  const tree = root.querySelector<HTMLElement>("[data-device-tree]");
+  if (!tree) {
     return;
   }
-  list.innerHTML = profiles.length === 0
-    ? '<li><button class="remote-pill is-active" type="button" title="Remote settings">R</button></li>'
-    : profiles
-      .map((profile) => `
-        <li>
-          <button class="remote-pill${profile.id === activeId ? " is-active" : ""}" type="button" data-remote-id="${escapeHtml(profile.id)}" title="${escapeHtml(profile.name)}">
-            ${escapeHtml((profile.name || profile.endpoint).slice(0, 1).toUpperCase())}
-          </button>
-        </li>
-      `)
-      .join("");
+  tree.innerHTML = profiles.length === 0
+    ? '<li class="tree-empty"><span class="tree-icon">-</span><span>No devices configured</span></li>'
+    : renderDeviceTree({
+      devices: profiles.map((profile) => ({ id: profile.id, name: profile.name, projects: [] })),
+      selectedProjectKey: null,
+      selectedSessionId: null,
+    });
 };
 
 const populateRemoteForm = (root: HTMLElement, profile: RemoteProfile): void => {
-  const form = root.querySelector<HTMLFormElement>("[data-remote-settings-form]");
+  const form = root.querySelector<HTMLFormElement>("[data-device-settings-form]");
   if (!form) {
     return;
   }
@@ -164,6 +166,12 @@ const populateRemoteForm = (root: HTMLElement, profile: RemoteProfile): void => 
   }
   if (token) {
     token.value = profile.token;
+  }
+};
+
+const showPage = (root: HTMLElement, page: "chat" | "settings"): void => {
+  for (const element of Array.from(root.querySelectorAll<HTMLElement>("[data-page]"))) {
+    element.classList.toggle("is-visible", element.dataset.page === page);
   }
 };
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { asClientId, asEventId, asSeq, asSessionId, type PersistentEvent } from "@scorel/protocol";
 
-import { createSessionBrowser, projectSessionTree, renderSessionBrowser } from "./session-browser.js";
+import { createSessionBrowser, projectSessionTree, renderDeviceTree, renderSessionBrowser } from "./session-browser.js";
 
 const sessionId = asSessionId("ses_tree");
 const clientId = asClientId("client_tree");
@@ -113,5 +113,43 @@ describe("S0034 session browser", () => {
     expect(html.tree).toContain("data-tree-node-id=\"evt_assistant\"");
     expect(html.tree).toContain("active leaf");
     expect(html.tree).not.toContain("<script>");
+  });
+
+  it("renders a device -> project -> session hierarchy", () => {
+    const html = renderDeviceTree({
+      devices: [
+        {
+          id: "device_tokyo",
+          name: "Tokyo <device>",
+          projects: [
+            {
+              projectKey: "remote:device_tokyo:scorel",
+              displayName: "Scorel",
+              remoteLabel: "Tokyo",
+              sessions: [
+                {
+                  sessionId,
+                  title: "Fix <WebUI>",
+                  model: "test-model",
+                  updatedAt: 20,
+                  currentSeq: asSeq(2),
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      selectedProjectKey: "remote:device_tokyo:scorel",
+      selectedSessionId: sessionId,
+    });
+
+    expect(html).toContain('data-device-id="device_tokyo"');
+    expect(html).toContain("Tokyo &lt;device&gt;");
+    expect(html).toContain('data-project-key="remote:device_tokyo:scorel"');
+    expect(html).toContain("Scorel");
+    expect(html).toContain('data-session-id="ses_tree"');
+    expect(html).toContain("Fix &lt;WebUI&gt;");
+    expect(html).not.toContain("<device>");
+    expect(html).not.toContain("<WebUI>");
   });
 });

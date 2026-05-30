@@ -233,7 +233,8 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 - 中央主区域：chat/session event stream，按时间展示 user、assistant、tool call/result、状态事件。
 - 底部 composer：prompt 输入、附件/工具/模型等扩展入口、send/cancel 控制。
 - Web 只能作为 remote thin client：先配置并保存 Remote endpoint/token，再同步 Remote identity、Project index、Session list；Session 内容在用户选择后再加载。
-- 面向用户的组织方式是 Project -> Session。Remote 是连接来源，不是把 session 打平成全局列表的理由。
+- Remote 在 WebUI 中面向用户定义为 Device。Device 由 Name、Link、Token 组成，在 Settings 页面添加；主 sidebar 展示 Device -> Project -> Session 层级。
+- 面向用户的组织方式是 Device -> Project -> Session。Remote 是连接来源，不是把 session 打平成全局列表的理由。
 - 视觉基调：macOS 原生感、低噪声、浅色优先、圆角卡片、清晰层级；避免 IDE 式复杂面板和监控大盘风格。
 - GUI 阶段复用同一套信息架构；GUI main process 只负责本地 daemon 管理，renderer 仍应和 WebUI 保持同类 UI 与同一 client 路径。
 
@@ -248,6 +249,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | M5.5 | [`S0034`](spec/ship/S0034-webui-session-browser-tree.md) | Project/session browser：基于 daemon session lookup 选择 session，并展示第一版 session tree。 | Done |
 | M5.6 | [`S0035`](spec/ship/S0035-webui-prompt-control-smoke.md) | Prompt control and real WebUI smoke：WebUI 发 prompt/cancel，验证 CLI 与 WebUI 多端共享同一真实 remote daemon session。 | Done |
 | M5.7 | [`S0036`](spec/ship/S0036-webui-remote-project-chatbox.md) | Remote project chatbox correction：持久化 Remote 配置，按 Remote -> Project -> Session 同步索引，并把主界面收敛为 chatbox。 | Done |
+| M5.8 | [`S0037`](spec/ship/S0037-webui-device-settings-tree.md) | Device settings and tree correction：配置页添加 Device，主 sidebar 展示 Device -> Project -> Session，Session 打开后进入 chatbox。 | Done |
 
 **Not in M5**:
 
@@ -315,6 +317,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | [`S0034`](spec/ship/S0034-webui-session-browser-tree.md) | 实现 WebUI project/session browser 和 session tree 展示 | Done |
 | [`S0035`](spec/ship/S0035-webui-prompt-control-smoke.md) | 实现 WebUI prompt/cancel 控制并验证真实 remote daemon 共享 session | Done |
 | [`S0036`](spec/ship/S0036-webui-remote-project-chatbox.md) | 修正 M5 WebUI 为 Remote 配置持久化、Project/Session 同步和 chatbox 主界面 | Done |
+| [`S0037`](spec/ship/S0037-webui-device-settings-tree.md) | 修正 WebUI 为 Settings 添加 Device、Device/Project/Session 树和 Session chatbox | Done |
 
 ---
 

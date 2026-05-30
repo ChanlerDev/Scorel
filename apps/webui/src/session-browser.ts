@@ -31,6 +31,12 @@ export type SessionBrowser = {
   getState(): SessionBrowserState;
 };
 
+export type DeviceTreeDevice = {
+  id: string;
+  name: string;
+  projects: RemoteProject[];
+};
+
 export const createSessionBrowser = (options: {
   client: SessionBrowserClient;
   projectSlug?: string;
@@ -104,6 +110,75 @@ export const renderProjectList = (projects: RemoteProject[], selectedProjectKey:
         </button>
       </li>
     `)
+    .join("");
+};
+
+export const renderDeviceTree = (state: {
+  devices: DeviceTreeDevice[];
+  selectedProjectKey: string | null;
+  selectedSessionId: SessionId | null;
+}): string => {
+  if (state.devices.length === 0) {
+    return `<li class="tree-empty"><span class="tree-icon">-</span><span>No devices configured</span></li>`;
+  }
+
+  return state.devices
+    .map((device) => `
+      <li class="device-node" data-device-id="${escapeHtml(device.id)}">
+        <div class="tree-row device-row">
+          <span class="tree-icon">▣</span>
+          <span>${escapeHtml(device.name)}</span>
+        </div>
+        <ul class="project-branch">
+          ${renderDeviceProjects(device.projects, state)}
+        </ul>
+      </li>
+    `)
+    .join("");
+};
+
+const renderDeviceProjects = (
+  projects: RemoteProject[],
+  state: { selectedProjectKey: string | null; selectedSessionId: SessionId | null },
+): string => {
+  if (projects.length === 0) {
+    return `<li class="tree-empty tree-empty-nested"><span class="tree-icon">-</span><span>No projects synced</span></li>`;
+  }
+
+  return projects
+    .map((project) => `
+      <li class="project-node" data-project-key="${escapeHtml(project.projectKey)}">
+        <div class="tree-row project-row${project.projectKey === state.selectedProjectKey ? " is-active" : ""}">
+          <span class="tree-icon">▱</span>
+          <span>${escapeHtml(project.displayName)}</span>
+          <span class="tree-count">${project.sessions.length}</span>
+        </div>
+        <ul class="session-branch">
+          ${renderDeviceSessions(project.sessions, state.selectedSessionId)}
+        </ul>
+      </li>
+    `)
+    .join("");
+};
+
+const renderDeviceSessions = (sessions: SessionSummary[], selectedSessionId: SessionId | null): string => {
+  if (sessions.length === 0) {
+    return `<li class="tree-empty tree-empty-nested"><span class="tree-icon">-</span><span>No sessions synced</span></li>`;
+  }
+
+  return sessions
+    .map((session) => {
+      const title = session.title ?? session.sessionId;
+      return `
+        <li>
+          <button class="tree-row session-row${session.sessionId === selectedSessionId ? " is-active" : ""}" type="button" data-session-id="${escapeHtml(session.sessionId)}">
+            <span class="tree-icon">⌁</span>
+            <span>${escapeHtml(title)}</span>
+            <span class="tree-count">⌘</span>
+          </button>
+        </li>
+      `;
+    })
     .join("");
 };
 
