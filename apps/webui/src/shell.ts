@@ -477,6 +477,19 @@ export const webUiStyles = `
     color: #fff;
   }
 
+  .tool-chip:disabled,
+  .send-button:disabled,
+  .composer-input:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .composer-status {
+    margin: 8px 2px 0;
+    color: #7b838d;
+    font-size: 12px;
+  }
+
   @media (max-width: 760px) {
     .scorel-webui-shell {
       grid-template-columns: 1fr;
@@ -595,15 +608,16 @@ export const renderWebUiShell = (): string => `
       </section>
 
       <footer class="composer-wrap" data-region="composer" aria-label="Prompt composer">
-        <div class="composer-panel">
-          <textarea class="composer-input" placeholder="Ask Scorel to continue this session"></textarea>
+        <form class="composer-panel" data-composer-form>
+          <textarea class="composer-input" data-prompt-input placeholder="Ask Scorel to continue this session" disabled></textarea>
           <div class="composer-toolbar">
             <button class="tool-chip" type="button">Tools</button>
             <button class="tool-chip" type="button">Model</button>
-            <button class="tool-chip" type="button">Cancel</button>
-            <button class="send-button" type="button">Send</button>
+            <button class="tool-chip" data-cancel-button type="button" disabled>Cancel</button>
+            <button class="send-button" data-send-button type="submit" disabled>Send</button>
           </div>
-        </div>
+          <p class="composer-status" data-composer-status>Connect before sending prompts</p>
+        </form>
       </footer>
     </section>
   </main>

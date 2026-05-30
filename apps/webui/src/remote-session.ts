@@ -23,12 +23,18 @@ export type RemoteSessionState =
       resyncMode: "stream_resume" | "persistent_fallback" | "full_reload";
       events: EventStreamRow[];
       sessionBrowser: SessionBrowserState;
+      composer: ComposerState;
     }
   | { status: "error"; message: string };
 
+export type ComposerState = {
+  status: "idle" | "sending" | "sent" | "cancelling" | "cancelled" | "error";
+  message: string;
+};
+
 export type RemoteSessionClient = Pick<
   DaemonClient,
-  "sessionId" | "persistentLastSeq" | "streamLastSeq" | "resync" | "listSessions" | "loadSession"
+  "sessionId" | "persistentLastSeq" | "streamLastSeq" | "resync" | "listSessions" | "loadSession" | "sendMessage" | "cancel"
 > & {
   subscribe(handler: (event: ScorelEvent) => void): Unsubscribe;
 };
@@ -43,6 +49,8 @@ export type ConnectToRemoteSession = (input: {
 export type RemoteSessionController = {
   connect(input: RemoteSessionInput): Promise<RemoteSessionState>;
   loadSession(sessionId: SessionId): Promise<RemoteSessionState>;
+  sendPrompt(content: string): Promise<RemoteSessionState>;
+  cancel(): Promise<RemoteSessionState>;
   reconnect(): Promise<RemoteSessionState>;
   getState(): RemoteSessionState;
 };
@@ -57,6 +65,7 @@ export const createRemoteSessionController = (options?: {
   let lastInput: RemoteSessionInput | undefined;
   let unsubscribe: Unsubscribe | undefined;
   let sessionBrowser: SessionBrowser | undefined;
+  let activeClient: RemoteSessionClient | undefined;
 
   const runConnect = async (input: RemoteSessionInput): Promise<RemoteSessionState> => {
     lastInput = input;
@@ -69,6 +78,7 @@ export const createRemoteSessionController = (options?: {
         sessionId,
         clientId,
       });
+      activeClient = connection.client;
       const projection = createEventStreamProjection();
       const resync = await connection.client.resync();
       for (const event of resync.events) {
@@ -97,6 +107,7 @@ export const createRemoteSessionController = (options?: {
         resyncMode: resync.mode,
         events: projection.getRows(),
         sessionBrowser: selectedBrowserState,
+        composer: { status: "idle", message: "Ready" },
       };
       return state;
     } catch (error) {
@@ -118,6 +129,69 @@ export const createRemoteSessionController = (options?: {
         sessionBrowser: await sessionBrowser.load(sessionId),
       };
       return state;
+    },
+    sendPrompt: async (content) => {
+      const prompt = content.trim();
+      if (!activeClient || state.status !== "connected") {
+        state = { status: "error", message: "No connected remote session" };
+        return state;
+      }
+      if (!prompt) {
+        state = {
+          ...state,
+          composer: { status: "idle", message: "Prompt is empty" },
+        };
+        return state;
+      }
+      state = {
+        ...state,
+        composer: { status: "sending", message: "Sending prompt..." },
+      };
+      try {
+        await activeClient.sendMessage(prompt);
+        if (state.status === "connected") {
+          state = {
+            ...state,
+            composer: { status: "sent", message: "Prompt sent" },
+          };
+        }
+        return state;
+      } catch (error) {
+        state = {
+          ...state,
+          composer: { status: "error", message: errorMessage(error) },
+        };
+        return state;
+      }
+    },
+    cancel: async () => {
+      if (!activeClient || state.status !== "connected") {
+        state = { status: "error", message: "No connected remote session" };
+        return state;
+      }
+      state = {
+        ...state,
+        composer: { status: "cancelling", message: "Requesting cancel..." },
+      };
+      try {
+        const result = await activeClient.cancel();
+        if (state.status === "connected") {
+          state = {
+            ...state,
+            composer: {
+              status: result.cancelled ? "cancelled" : "idle",
+              message: result.cancelled ? "Cancel requested" : "No running turn to cancel",
+            },
+          };
+        }
+        return state;
+      } catch (error) {
+        state = {
+          ...state,
+          composer: { status: "error", message: errorMessage(error) },
+        };
+        return state;
+      }
     },
     reconnect: async () => {
       if (!lastInput) {

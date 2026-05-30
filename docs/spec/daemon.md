@@ -220,9 +220,9 @@ type ClientMessage =
   | { type: "ping" }
 
   // ─── 对话操作 ───
-  | { type: "send_message"; requestId: string; content: string | ContentBlock[]; options?: SendOptions }
+  | { type: "send_message"; requestId: string; sessionId: SessionId; content: string | ContentBlock[]; options?: SendOptions }
   | { type: "steer"; requestId: string; content: string }  // 运行中插话，不排队新 turn
-  | { type: "cancel"; requestId: string }
+  | { type: "cancel"; requestId: string; sessionId: SessionId }
 
   // ─── 树操作 ───
   | { type: "rewind"; requestId: string; targetEventId: EventId; expectedLeafId: EventId }
@@ -254,7 +254,7 @@ type ClientMessage =
 | `ping` | 心跳保活，daemon 回 `pong` |
 | `send_message` | 发送用户消息，触发新 turn |
 | `steer` | 运行中插话（注入 steeringQueue，不排队等当前 turn 完成） |
-| `cancel` | 中断当前生成 |
+| `cancel` | 中断指定 session 的当前生成，响应 `{ sessionId, cancelled }`；如果没有运行中的 turn，`cancelled` 为 `false` |
 | `rewind` | 回退到某个 event，带乐观锁 |
 | `branch` | 切换到已有分支的某个叶子 |
 | `compact` | 触发上下文压缩 |

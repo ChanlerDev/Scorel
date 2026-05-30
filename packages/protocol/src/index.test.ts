@@ -126,6 +126,22 @@ describe("@scorel/protocol", () => {
     expect(response.data.throughSeq).toBe(2);
   });
 
+  it("models session-scoped cancellation", () => {
+    const request = {
+      type: "cancel",
+      requestId: asRequestId("req_cancel"),
+      sessionId: asSessionId("ses_1"),
+    } satisfies ClientRequest<"cancel">;
+
+    const response = okResponse(request, {
+      sessionId: asSessionId("ses_1"),
+      cancelled: true,
+    }) satisfies ResponseFor<typeof request>;
+
+    expect(response.requestType).toBe("cancel");
+    expect(response.data.cancelled).toBe(true);
+  });
+
   it("models daemon connection identity for remote project cache scope", () => {
     const message = {
       type: "connected",

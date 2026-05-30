@@ -567,6 +567,9 @@ export class EmbeddedDaemon {
       case "send_message":
         await this.#handleSendMessage(connection, message);
         break;
+      case "cancel":
+        await this.#handleCancel(connection, message);
+        break;
       case "resync_events":
         this.#respond(connection, message, await this.#resyncEvents(message.sessionId, {
           persistentLastSeq: message.persistentLastSeq ?? message.fromSeq,
@@ -706,6 +709,30 @@ export class EmbeddedDaemon {
     });
 
     await lane.queue;
+  }
+
+  async #handleCancel(connection: Connection, request: ClientRequest<"cancel">): Promise<void> {
+    try {
+      const lane = await this.#getLane(request.sessionId);
+      const cancelled = lane.runtime.running;
+      lane.runtime.cancel();
+      await this.#appendDiagnostic(request.sessionId, "cancel_requested", {
+        clientId: connection.clientId,
+        cancelled,
+      });
+      this.#respond(connection, request, {
+        sessionId: request.sessionId,
+        cancelled,
+      });
+    } catch (cause) {
+      connection.emit({
+        type: "error",
+        requestId: request.requestId,
+        ok: false,
+        code: "session_not_found",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
   }
 
   async #handleRuntimeEvent(

@@ -36,6 +36,10 @@ export type ClientRequestMap = {
     request: { sessionId: SessionId; content: string | ContentBlock[]; options?: SendMessageOptions };
     response: { userEventId: EventId; assistantEventId: EventId };
   };
+  cancel: {
+    request: { sessionId: SessionId };
+    response: { sessionId: SessionId; cancelled: boolean };
+  };
   get_status: {
     request: { sessionId?: SessionId };
     response: DaemonStatus;

@@ -244,7 +244,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | M5.3 | [`S0032`](spec/ship/S0032-webui-remote-session-attach.md) | Remote session attach / reconnect：通过 endpoint/token/session 连接，展示 daemon identity，并处理断线、错误和刷新恢复。 | Done |
 | M5.4 | [`S0033`](spec/ship/S0033-webui-event-stream-viewer.md) | Event stream viewer：展示 user/assistant、streaming delta、tool call/result，并避免重连后重复渲染。 | Done |
 | M5.5 | [`S0034`](spec/ship/S0034-webui-session-browser-tree.md) | Project/session browser：基于 daemon session lookup 选择 session，并展示第一版 session tree。 | Done |
-| M5.6 | `S0035` | Prompt control and real WebUI smoke：WebUI 发 prompt/cancel，验证 CLI 与 WebUI 多端共享同一真实 remote daemon session。 | Planned |
+| M5.6 | [`S0035`](spec/ship/S0035-webui-prompt-control-smoke.md) | Prompt control and real WebUI smoke：WebUI 发 prompt/cancel，验证 CLI 与 WebUI 多端共享同一真实 remote daemon session。 | Done |
 
 **Not in M5**:
 
@@ -254,7 +254,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 - 公网 tunnel / relay service / NAT traversal。
 - IDE-style file explorer/editor、monitoring dashboard、checkpoint restore UI、完整 rewind/fork/compact 图形交互。
 
-**Status**: Active
+**Status**: Done
 
 ---
 

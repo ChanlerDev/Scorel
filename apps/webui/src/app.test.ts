@@ -17,6 +17,10 @@ describe("S0031 WebUI shell", () => {
     expect(html).toContain('data-region="composer"');
     expect(html).toContain("Ask Scorel to continue this session");
     expect(html).toContain("Tools");
+    expect(html).toContain('data-prompt-input');
+    expect(html).toContain('data-send-button');
+    expect(html).toContain('data-cancel-button');
+    expect(html).toContain('data-composer-status');
     expect(html).toContain("Send");
   });
 

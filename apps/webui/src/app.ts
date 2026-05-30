@@ -16,6 +16,20 @@ const renderState = (root: HTMLElement, state: RemoteSessionState): void => {
   setText(root, "[data-resync-mode]", state.status === "connected" ? state.resyncMode : "-");
   setText(root, "[data-persistent-seq]", state.status === "connected" ? String(state.persistentLastSeq) : "-");
   setText(root, "[data-stream-seq]", state.status === "connected" ? String(state.streamLastSeq) : "-");
+  setText(root, "[data-composer-status]", state.status === "connected" ? state.composer.message : "Connect before sending prompts");
+  const promptInput = root.querySelector<HTMLTextAreaElement>("[data-prompt-input]");
+  const sendButton = root.querySelector<HTMLButtonElement>("[data-send-button]");
+  const cancelButton = root.querySelector<HTMLButtonElement>("[data-cancel-button]");
+  const isConnected = state.status === "connected";
+  if (promptInput) {
+    promptInput.disabled = !isConnected;
+  }
+  if (sendButton) {
+    sendButton.disabled = !isConnected || state.status === "connected" && state.composer.status === "sending";
+  }
+  if (cancelButton) {
+    cancelButton.disabled = !isConnected || state.status === "connected" && state.composer.status === "cancelling";
+  }
   const stream = root.querySelector<HTMLElement>("[data-event-stream]");
   if (stream && state.status === "connected") {
     stream.innerHTML = renderEventStreamRows(state.events);
@@ -57,6 +71,21 @@ export const mountWebUi = (root: HTMLElement): void => {
       return;
     }
     void controller.loadSession(asSessionId(sessionId)).then((state) => renderState(root, state));
+  });
+
+  root.querySelector<HTMLFormElement>("[data-composer-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const input = root.querySelector<HTMLTextAreaElement>("[data-prompt-input]");
+    void controller.sendPrompt(input?.value ?? "").then((state) => {
+      if (state.status === "connected" && state.composer.status === "sent" && input) {
+        input.value = "";
+      }
+      renderState(root, state);
+    });
+  });
+
+  root.querySelector<HTMLButtonElement>("[data-cancel-button]")?.addEventListener("click", () => {
+    void controller.cancel().then((state) => renderState(root, state));
   });
 
   root.querySelector<HTMLButtonElement>("[data-reconnect-button]")?.addEventListener("click", () => {

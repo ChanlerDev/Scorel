@@ -191,6 +191,70 @@ describe("daemon protocol boundary", () => {
     });
   });
 
+  it("cancels an in-flight session turn", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* (turn) {
+        capturedSignal = turn.signal;
+        yield { type: "text_delta", delta: "partial" };
+        while (!turn.signal.aborted) {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+      },
+    };
+    const daemon = new EmbeddedDaemon({
+      sessionsDir: mkdtempSync(join(tmpdir(), "scorel-cancel-")),
+      deviceId: asDeviceId("device_test"),
+      createRuntime: () => new ScorelRuntime({ provider }),
+      now: () => 1,
+      createId: (() => {
+        const ids = ["evt_user_cancel", "evt_assistant_cancel"];
+        return () => ids.shift() ?? "evt_extra_cancel";
+      })(),
+    });
+    const transport = createEmbeddedTransport(daemon);
+    const messages: DaemonMessage[] = [];
+
+    await daemon.start();
+    transport.onMessage((message) => messages.push(message));
+    await transport.connect({ clientId: asClientId("client_cancel"), sessionId: asSessionId("ses_cancel") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create_cancel"),
+      sessionId: asSessionId("ses_cancel"),
+      meta: { model: "test-model" },
+    });
+    void transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send_cancel"),
+      sessionId: asSessionId("ses_cancel"),
+      content: "cancel me",
+    });
+
+    await waitForDaemonMessage(messages, (message) => message.type === "event" && message.event.type === "text_delta");
+    await transport.send({
+      type: "cancel",
+      requestId: asRequestId("req_cancel"),
+      sessionId: asSessionId("ses_cancel"),
+    });
+
+    await expect(waitForDaemonMessage(messages, (message) => "requestId" in message && message.requestId === "req_cancel")).resolves.toMatchObject({
+      type: "response",
+      requestType: "cancel",
+      data: {
+        sessionId: "ses_cancel",
+        cancelled: true,
+      },
+    });
+    expect(capturedSignal?.aborted).toBe(true);
+    await expect(
+      waitForDaemonMessage(
+        messages,
+        (message) => message.type === "event" && message.event.type === "turn_end" && message.event.stopReason === "cancelled",
+      ),
+    ).resolves.toMatchObject({ type: "event" });
+  });
+
   it("persists and removes local daemon connection state", async () => {
     const stateDir = mkdtempSync(join(tmpdir(), "scorel-state-"));
 

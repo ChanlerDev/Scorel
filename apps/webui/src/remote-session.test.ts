@@ -28,6 +28,14 @@ const createConnect =
           sessionId: input.sessionId,
           persistentLastSeq: asSeq(4),
           streamLastSeq: asSeq(7),
+          sendMessage: async (content) => ({
+            userEventId: asEventId(typeof content === "string" ? "evt_sent_user" : "evt_sent_blocks"),
+            assistantEventId: asEventId("evt_sent_assistant"),
+          }),
+          cancel: async () => ({
+            sessionId: input.sessionId,
+            cancelled: true,
+          }),
           listSessions: async () => [
             {
               sessionId: input.sessionId,
@@ -141,6 +149,10 @@ describe("createRemoteSessionController", () => {
           text: "Live response",
         }),
       ],
+      composer: {
+        status: "idle",
+        message: "Ready",
+      },
       sessionBrowser: {
         projectSlug: "scorel",
         sessions: [
@@ -194,6 +206,26 @@ describe("createRemoteSessionController", () => {
       token: "secret-token",
       sessionId: asSessionId("ses_webui"),
       clientId: testClientId,
+    });
+  });
+
+  it("sends prompts and cancels through the connected client", async () => {
+    const { connect } = createConnect();
+    const controller = createRemoteSessionController({ clientId: testClientId, connect });
+
+    await controller.connect({
+      url: "ws://127.0.0.1:5050",
+      token: "secret-token",
+      sessionId: "ses_webui",
+    });
+
+    await expect(controller.sendPrompt("Continue the task")).resolves.toMatchObject({
+      status: "connected",
+      composer: { status: "sent", message: "Prompt sent" },
+    });
+    await expect(controller.cancel()).resolves.toMatchObject({
+      status: "connected",
+      composer: { status: "cancelled", message: "Cancel requested" },
     });
   });
 });

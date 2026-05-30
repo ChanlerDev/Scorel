@@ -172,6 +172,13 @@ export class DaemonClient {
     return this.#request("send_message", { sessionId: this.#sessionId, content, options });
   }
 
+  async cancel(): Promise<ClientRequestMap["cancel"]["response"]> {
+    if (!this.#sessionId) {
+      throw new Error("DaemonClient is not connected to a session");
+    }
+    return this.#request("cancel", { sessionId: this.#sessionId });
+  }
+
   async resync(anchors?: Seq | { persistentLastSeq?: Seq; streamLastSeq?: Seq }): Promise<ClientRequestMap["resync_events"]["response"]> {
     if (!this.#sessionId) {
       throw new Error("DaemonClient is not connected to a session");

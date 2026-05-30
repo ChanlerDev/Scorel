@@ -182,6 +182,38 @@ describe("DaemonClient", () => {
     ]);
   });
 
+  it("cancels the connected session through the daemon protocol", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+      createRequestId: () => asRequestId("req_cancel"),
+    });
+
+    await client.connect(asSessionId("ses_1"));
+    const pending = client.cancel();
+
+    expect(transport.sent.at(-1)).toMatchObject({
+      type: "cancel",
+      requestId: "req_cancel",
+      sessionId: "ses_1",
+    });
+    transport.emit({
+      type: "response",
+      requestType: "cancel",
+      requestId: asRequestId("req_cancel"),
+      ok: true,
+      data: {
+        sessionId: asSessionId("ses_1"),
+        cancelled: true,
+      },
+    });
+
+    await expect(pending).resolves.toEqual({
+      sessionId: "ses_1",
+      cancelled: true,
+    });
+  });
+
   it("separates durable persistent and observed stream anchors during resync", async () => {
     const transport = new MemoryTransport();
     const client = new DaemonClient(transport, {
