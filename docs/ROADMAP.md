@@ -240,7 +240,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M5.4 | [`S0034`](spec/ship/S0034-webui-device-settings.md) | Device 域模型、BrowserStore 与 Settings CRUD | Done |
 | M5.5 | [`S0035`](spec/ship/S0035-webui-device-handshake.md) | DaemonClient 实例池、handshake、连接状态机与错误分类 | Done |
 | M5.6 | [`S0036`](spec/ship/S0036-webui-project-session-sync.md) | `list_projects` / `list_sessions` 同步与 sidebar 树渲染 | Done |
-| M5.7 | [`S0037`](spec/ship/S0037-webui-chatbox-v1.md) | Chatbox v1：attach-cache 渲染、dual-seq resync、event 投影、prompt 发送 | Planned |
+| M5.7 | [`S0037`](spec/ship/S0037-webui-chatbox-v1.md) | Chatbox v1：attach-cache 渲染、dual-seq resync、event 投影、prompt 发送 | Done |
 | M5.8 | [`S0038`](spec/ship/S0038-webui-cancel-multiclient.md) | Composer Cancel + WebUI/CLI 多端共享同一 session 真实手工 e2e | Planned |
 | M5.9 | [`S0039`](spec/ship/S0039-webui-e2e-newchat.md) | New Chat + 真实 daemon + 真实 LLM provider 端到端验证；M5 收口 | Planned |
 
@@ -311,7 +311,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0034`](spec/ship/S0034-webui-device-settings.md) | WebUI Device 域模型、BrowserStore、Settings CRUD | Done |
 | [`S0035`](spec/ship/S0035-webui-device-handshake.md) | WebUI DaemonClient 实例池与 Device 连接握手 | Done |
 | [`S0036`](spec/ship/S0036-webui-project-session-sync.md) | WebUI Project / Session 索引同步与 sidebar 树渲染 | Done |
-| [`S0037`](spec/ship/S0037-webui-chatbox-v1.md) | WebUI Chatbox v1：attach-cache 渲染、dual-seq resync、event 投影、prompt 发送 | Planned |
+| [`S0037`](spec/ship/S0037-webui-chatbox-v1.md) | WebUI Chatbox v1：attach-cache 渲染、dual-seq resync、event 投影、prompt 发送 | Done |
 | [`S0038`](spec/ship/S0038-webui-cancel-multiclient.md) | WebUI Composer Cancel 与多端共享真实 session 验证 | Planned |
 | [`S0039`](spec/ship/S0039-webui-e2e-newchat.md) | WebUI New Chat 与真实 daemon 端到端验证（M5 收口） | Planned |
 

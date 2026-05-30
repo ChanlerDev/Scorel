@@ -1,17 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Composer } from "../../../../../../../components/chatbox/composer";
+import { Transcript } from "../../../../../../../components/chatbox/transcript";
 import {
   useConnection,
   useSessionsSyncError,
 } from "../../../../../../../lib/connection/use-connection";
+import {
+  createSessionAttachController,
+  type SessionAttachController,
+  type SessionAttachSnapshot,
+} from "../../../../../../../lib/connection/session";
+import {
+  emptyProjectorState,
+  type ProjectorState,
+} from "../../../../../../../lib/events/projector";
+import { computeScopeKey } from "../../../../../../../lib/identity/scope-key";
+import { getSharedAttachCache } from "../../../../../../../lib/store";
 import { useDevices } from "../../../../../../../lib/store/use-devices";
 import type {
   Device,
   DeviceSessionSummary,
 } from "../../../../../../../lib/domain/devices";
+import { asSessionId } from "@scorel/protocol";
 
 type Params = { deviceId: string; projectSlug: string; sessionId: string };
 
@@ -53,23 +67,23 @@ function SessionView({
   projectSlug: string;
   sessionId: string;
 }) {
-  const { state, syncSessionsNow } = useConnection(device);
+  const { state: connState, managed, syncSessionsNow } = useConnection(device);
   const error = useSessionsSyncError(device.id, projectSlug);
   const project = device.projects?.find((p) => p.projectSlug === projectSlug);
   const session: DeviceSessionSummary | undefined =
     project?.sessions?.[sessionId];
 
-  // Deep-link entry point: if we don't yet have the session in cache, trigger
-  // a session sync so the header below has metadata. The chatbox attach
-  // itself lands in S0037.
+  // Pull session metadata if it's not already cached.
   useEffect(() => {
-    if (state.name !== "connected") return;
+    if (connState.name !== "connected") return;
     if (project?.sessions && session) return;
     void syncSessionsNow(projectSlug);
-  }, [state.name, project?.sessions, session, projectSlug, syncSessionsNow]);
+  }, [connState.name, project?.sessions, session, projectSlug, syncSessionsNow]);
+
+  const remoteDeviceId = device.remoteIdentity?.deviceId;
 
   return (
-    <div className="p-6 space-y-4 text-sm text-zinc-700">
+    <div className="flex h-full flex-col gap-3 p-6 text-sm text-zinc-700">
       <SessionHeader
         device={device}
         projectSlug={projectSlug}
@@ -83,12 +97,110 @@ function SessionView({
         </div>
       ) : null}
 
-      <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-center text-zinc-500">
-        Chatbox not implemented yet (S0037).
-      </div>
+      {!remoteDeviceId ? (
+        <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-center text-zinc-500">
+          Connecting to daemon… (waiting for device identity)
+        </div>
+      ) : (
+        <Chatbox
+          remoteDeviceId={remoteDeviceId}
+          projectSlug={projectSlug}
+          sessionId={sessionId}
+          managed={managed}
+        />
+      )}
     </div>
   );
 }
+
+function Chatbox({
+  remoteDeviceId,
+  projectSlug,
+  sessionId,
+  managed,
+}: {
+  remoteDeviceId: string;
+  projectSlug: string;
+  sessionId: string;
+  managed: ReturnType<typeof useConnection>["managed"];
+}): JSX.Element {
+  const [snapshot, setSnapshot] = useState<SessionAttachSnapshot>({
+    loading: true,
+    state: emptyProjectorState(),
+  });
+  const controllerRef = useRef<SessionAttachController | null>(null);
+
+  useEffect(() => {
+    if (!managed) return;
+    let cancelled = false;
+    let controller: SessionAttachController | undefined;
+
+    void (async () => {
+      const scopeKey = await computeScopeKey(remoteDeviceId, projectSlug);
+      if (cancelled) return;
+      const attachCache = getSharedAttachCache();
+      controller = createSessionAttachController({
+        client: managed.client,
+        scopeKey,
+        sessionId: asSessionId(sessionId),
+        attachCache,
+        onState: (next) => {
+          if (cancelled) return;
+          setSnapshot(next);
+        },
+      });
+      controllerRef.current = controller;
+      await controller.start();
+    })();
+
+    return () => {
+      cancelled = true;
+      controller?.stop();
+      controllerRef.current = null;
+    };
+  }, [managed, remoteDeviceId, projectSlug, sessionId]);
+
+  const send = useMemo(
+    () =>
+      async (content: string): Promise<void> => {
+        const controller = controllerRef.current;
+        if (!controller) return;
+        await controller.send(content);
+      },
+    [],
+  );
+
+  return (
+    <div className="flex h-[60vh] min-h-[400px] flex-col overflow-hidden rounded-md border border-zinc-200 bg-white">
+      <div className="flex-1 overflow-hidden">
+        {snapshot.loading && snapshot.state.turns.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-sm italic text-zinc-500">
+            Loading session…
+          </div>
+        ) : (
+          <ChatboxBody snapshot={snapshot} />
+        )}
+      </div>
+      <Composer onSend={send} disabled={!managed} />
+    </div>
+  );
+}
+
+function ChatboxBody({ snapshot }: { snapshot: SessionAttachSnapshot }): JSX.Element {
+  return (
+    <div className="flex h-full flex-col">
+      {snapshot.error ? (
+        <div className="border-b border-red-200 bg-red-50 px-3 py-1 text-xs text-red-900">
+          {snapshot.error.reason}: {snapshot.error.message}
+        </div>
+      ) : null}
+      <Transcript turns={snapshot.state.turns} />
+    </div>
+  );
+}
+
+// Type guard helper for ProjectorState if downstream consumers want it.
+export type { ProjectorState };
 
 function SessionHeader({
   device,

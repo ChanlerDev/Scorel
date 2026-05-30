@@ -1,3 +1,4 @@
+import { AttachCache } from "./attach-cache";
 import { BrowserStore } from "./browser-store";
 import { DevicesStore } from "./devices";
 
@@ -5,6 +6,13 @@ export { BrowserStore } from "./browser-store";
 export type { StorageLike, BrowserStoreOptions } from "./browser-store";
 export { DevicesStore, DEVICES_KEY } from "./devices";
 export type { CreateDeviceInput, UpdateDevicePatch } from "./devices";
+export { AttachCache } from "./attach-cache";
+export type {
+  AttachCacheFile,
+  AttachCacheKey,
+  AttachCacheScope,
+  AttachTransientCacheEntry,
+} from "./attach-cache";
 
 function quotaLogger(key: string, error: unknown): void {
   // eslint-disable-next-line no-console
@@ -45,5 +53,36 @@ export function __resetSharedDevicesStoreForTests(): void {
 
 export function __setSharedDevicesStoreForTests(store: DevicesStore): void {
   _sharedDevicesStore = store;
+}
+
+// Process-wide shared AttachCache singleton — same browser-store-backed
+// pattern as DevicesStore. Held here so the session attach controller and
+// any future ancillary readers (e.g. an inspector) see the same instance.
+let _sharedAttachCache: AttachCache | null = null;
+
+export function getSharedAttachCache(): AttachCache {
+  if (_sharedAttachCache === null) {
+    if (typeof window === "undefined") {
+      _sharedAttachCache = new AttachCache(
+        new BrowserStore({ storage: null, onQuotaExceeded: quotaLogger }),
+      );
+    } else {
+      _sharedAttachCache = new AttachCache(
+        new BrowserStore({
+          storage: window.localStorage,
+          onQuotaExceeded: quotaLogger,
+        }),
+      );
+    }
+  }
+  return _sharedAttachCache;
+}
+
+export function __resetSharedAttachCacheForTests(): void {
+  _sharedAttachCache = null;
+}
+
+export function __setSharedAttachCacheForTests(cache: AttachCache): void {
+  _sharedAttachCache = cache;
 }
 
