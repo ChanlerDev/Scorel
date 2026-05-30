@@ -238,7 +238,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M5.2 | [`S0032`](spec/ship/S0032-daemon-protocol-completion.md) | 重新加回 `cancel`、实现 `list_sessions` + `projectSlug` 过滤、新增 `list_projects` | Done |
 | M5.3 | [`S0033`](spec/ship/S0033-webui-skeleton-routing.md) | 建立 Next.js 14 App Router + Tailwind 4 应用骨架与路由 | Done |
 | M5.4 | [`S0034`](spec/ship/S0034-webui-device-settings.md) | Device 域模型、BrowserStore 与 Settings CRUD | Done |
-| M5.5 | [`S0035`](spec/ship/S0035-webui-device-handshake.md) | DaemonClient 实例池、handshake、连接状态机与错误分类 | Planned |
+| M5.5 | [`S0035`](spec/ship/S0035-webui-device-handshake.md) | DaemonClient 实例池、handshake、连接状态机与错误分类 | Done |
 | M5.6 | [`S0036`](spec/ship/S0036-webui-project-session-sync.md) | `list_projects` / `list_sessions` 同步与 sidebar 树渲染 | Planned |
 | M5.7 | [`S0037`](spec/ship/S0037-webui-chatbox-v1.md) | Chatbox v1：attach-cache 渲染、dual-seq resync、event 投影、prompt 发送 | Planned |
 | M5.8 | [`S0038`](spec/ship/S0038-webui-cancel-multiclient.md) | Composer Cancel + WebUI/CLI 多端共享同一 session 真实手工 e2e | Planned |
@@ -309,7 +309,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0032`](spec/ship/S0032-daemon-protocol-completion.md) | 重新加回 `cancel`，实现 `list_sessions` + `projectSlug` 过滤，新增 `list_projects` | Done |
 | [`S0033`](spec/ship/S0033-webui-skeleton-routing.md) | Next.js 14 App Router + Tailwind 4 应用骨架与路由 | Done |
 | [`S0034`](spec/ship/S0034-webui-device-settings.md) | WebUI Device 域模型、BrowserStore、Settings CRUD | Done |
-| [`S0035`](spec/ship/S0035-webui-device-handshake.md) | WebUI DaemonClient 实例池与 Device 连接握手 | Planned |
+| [`S0035`](spec/ship/S0035-webui-device-handshake.md) | WebUI DaemonClient 实例池与 Device 连接握手 | Done |
 | [`S0036`](spec/ship/S0036-webui-project-session-sync.md) | WebUI Project / Session 索引同步与 sidebar 树渲染 | Planned |
 | [`S0037`](spec/ship/S0037-webui-chatbox-v1.md) | WebUI Chatbox v1：attach-cache 渲染、dual-seq resync、event 投影、prompt 发送 | Planned |
 | [`S0038`](spec/ship/S0038-webui-cancel-multiclient.md) | WebUI Composer Cancel 与多端共享真实 session 验证 | Planned |

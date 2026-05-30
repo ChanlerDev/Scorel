@@ -1,7 +1,34 @@
 "use client";
 
 import Link from "next/link";
+import { useSyncExternalStore } from "react";
+
+import type { Device } from "../../lib/domain/devices";
 import { useDevices } from "../../lib/store/use-devices";
+import { getConnectionPool } from "../../lib/connection/use-connection";
+import { IDLE, type ConnectionState } from "../../lib/connection/state";
+import { DeviceStatus } from "./device-status";
+
+function DeviceRow({ device }: { device: Device }): JSX.Element {
+  const pool = getConnectionPool();
+  const state = useSyncExternalStore<ConnectionState>(
+    (listener) => pool.subscribe(device.id, listener),
+    () => pool.state(device.id),
+    () => IDLE,
+  );
+
+  return (
+    <li>
+      <Link
+        href={`/devices/${device.id}`}
+        className="flex items-center justify-between gap-2 rounded-md px-2 py-2 hover:bg-zinc-100"
+      >
+        <span className="truncate font-medium text-zinc-800">{device.name}</span>
+        <DeviceStatus state={state} className="shrink-0" />
+      </Link>
+    </li>
+  );
+}
 
 export function Sidebar() {
   const { devices } = useDevices();
@@ -35,17 +62,7 @@ export function Sidebar() {
         ) : (
           <ul className="space-y-1">
             {devices.map((device) => (
-              <li key={device.id}>
-                <Link
-                  href={`/devices/${device.id}`}
-                  className="flex items-center justify-between gap-2 rounded-md px-2 py-2 hover:bg-zinc-100"
-                >
-                  <span className="truncate font-medium text-zinc-800">{device.name}</span>
-                  <span className="shrink-0 rounded-full border border-zinc-200 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
-                    not connected
-                  </span>
-                </Link>
-              </li>
+              <DeviceRow key={device.id} device={device} />
             ))}
           </ul>
         )}

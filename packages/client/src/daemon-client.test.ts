@@ -316,6 +316,34 @@ describe("DaemonClient", () => {
     await expect(pending).resolves.toEqual({ sessionId: "ses_cancel", cancelled: true });
   });
 
+  it("connects without a session id and captures identity from the daemon handshake", async () => {
+    class IdentityTransport extends MemoryTransport {
+      lastParams: ConnectParams | undefined;
+      override async connect(params: ConnectParams): Promise<ConnectResult> {
+        this.lastParams = params;
+        return {
+          clientId: asClientId("client_test"),
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_tokyo"),
+          deviceDisplayName: "Tokyo VPS",
+        };
+      }
+    }
+    const transport = new IdentityTransport();
+    const client = new DaemonClient(transport, { clientId: asClientId("client_test") });
+
+    await client.connect();
+
+    expect(transport.lastParams?.sessionId).toBeUndefined();
+    expect(client.state).toBe("connected");
+    expect(client.sessionId).toBeNull();
+    expect(client.connectionIdentity).toEqual({
+      deviceId: "device_tokyo",
+      deviceDisplayName: "Tokyo VPS",
+      projectSlug: undefined,
+    });
+  });
+
   it("rejects cancel when no session is bound to the client", async () => {
     const transport = new MemoryTransport();
     const client = new DaemonClient(transport, { clientId: asClientId("client_test") });

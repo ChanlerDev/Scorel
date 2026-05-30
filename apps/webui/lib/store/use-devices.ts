@@ -24,3 +24,9 @@ export function useDevices(): { devices: Device[]; store: DevicesStore } {
   );
   return { devices, store };
 }
+
+// Test seam: reset the module-scoped singleton so a subsequent useDevices()
+// call re-reads localStorage.
+export function __resetDevicesStoreForTests(): void {
+  _store = null;
+}

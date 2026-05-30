@@ -19,7 +19,7 @@ DaemonClient 是 Entry 侧 SDK，不是 Daemon 的一部分。它负责连接、
 ```typescript
 interface DaemonClient {
   // ─── 连接 ───
-  connect(sessionId: SessionId): Promise<void>;
+  connect(sessionId?: SessionId): Promise<void>;
   disconnect(): void;
   readonly state: "disconnected" | "connecting" | "connected" | "reconnecting";
   readonly sessionId: SessionId | null;
@@ -134,6 +134,8 @@ disconnected → connecting → connected ⇄ reconnecting
 - `connected`：正常工作状态
 - `reconnecting`：transport 断开后自动重试中（lastSeq 保留用于补发）
 - `disconnected`：显式 disconnect 或重试耗尽
+
+`connect()` 也可不带 `sessionId`（daemon-only handshake）：transport 仍走 `connect` 帧但 `sessionId` 缺省，daemon 回的 `connected` 消息带 `deviceId / deviceDisplayName / projectSlug` 落进 `connectionIdentity`。这种连接只用于 `listProjects` / `listSessions` 等不绑定 session 的请求；`sendMessage` / `cancel` / `resync` 仍需先绑定 session。
 
 ---
 

@@ -150,4 +150,33 @@ describe("DevicesStore", () => {
     devices.remove(d.id);
     expect(listener).toHaveBeenCalledTimes(3);
   });
+
+  it("markIdentity stores remoteIdentity and ignores empty deviceId", () => {
+    const { devices } = freshStore();
+    const d = devices.create({ name: "A", link: "wss://h", token: "t" });
+    expect(devices.markIdentity(d.id, { deviceId: "device_a", deviceDisplayName: "Alpha" }))
+      .toMatchObject({ remoteIdentity: { deviceId: "device_a", deviceDisplayName: "Alpha" } });
+    expect(devices.get(d.id)?.remoteIdentity).toEqual({
+      deviceId: "device_a",
+      deviceDisplayName: "Alpha",
+    });
+    // missing deviceId leaves prior identity unchanged
+    devices.markIdentity(d.id, { deviceId: undefined, deviceDisplayName: "B" });
+    expect(devices.get(d.id)?.remoteIdentity).toEqual({
+      deviceId: "device_a",
+      deviceDisplayName: "Alpha",
+    });
+  });
+
+  it("markIdentity returns undefined for unknown device", () => {
+    const { devices } = freshStore();
+    expect(devices.markIdentity("missing", { deviceId: "x" })).toBeUndefined();
+  });
+
+  it("markConnectedAt stores timestamp", () => {
+    const { devices } = freshStore();
+    const d = devices.create({ name: "A", link: "wss://h", token: "t" });
+    expect(devices.markConnectedAt(d.id, 12345)?.lastConnectedAt).toBe(12345);
+    expect(devices.get(d.id)?.lastConnectedAt).toBe(12345);
+  });
 });

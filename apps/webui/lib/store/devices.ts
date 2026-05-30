@@ -112,6 +112,26 @@ export class DevicesStore {
     this.#commit(next);
   }
 
+  markIdentity(
+    id: string,
+    remoteIdentity: { deviceId?: string; deviceDisplayName?: string },
+  ): Device | undefined {
+    const current = this.get(id);
+    if (!current) return undefined;
+    if (!remoteIdentity.deviceId) return current;
+    const merged: { deviceId: string; deviceDisplayName?: string } = {
+      deviceId: remoteIdentity.deviceId,
+    };
+    if (remoteIdentity.deviceDisplayName !== undefined) {
+      merged.deviceDisplayName = remoteIdentity.deviceDisplayName;
+    }
+    return this.update(id, { remoteIdentity: merged });
+  }
+
+  markConnectedAt(id: string, ts: number): Device | undefined {
+    return this.update(id, { lastConnectedAt: ts });
+  }
+
   subscribe(listener: () => void): () => void {
     return this.#store.subscribe(DEVICES_KEY, () => {
       // Cross-tab updates also reach here; invalidate the snapshot first.
