@@ -183,6 +183,25 @@ This log records what the client observed and did: connection lifecycle, resolve
 
 Attach diagnostics are not authoritative replay state and are not a copy of daemon-side session diagnostics. They are local client evidence for debugging connection, cache, and rendering behavior. They may include rich event summaries, but must not record bearer tokens, API keys, local daemon tokens, or other secrets.
 
+### 4.3 Project Index
+
+Clients maintain a lightweight project index at:
+
+```text
+~/.scorel/project-index.json
+```
+
+The index is a lookup and UI organization file. It does not replace session JSONL, daemon diagnostics, attach cache, or attach diagnostics, and those existing files are not moved into project directories.
+
+Project is the user-facing organization unit:
+
+- local project identity is the canonical CLI `workDir`
+- remote project identity is the remote daemon `projectSlug`
+- `deviceId` disambiguates remote devices that serve the same `projectSlug`
+- `deviceDisplayName`, project display name, and remote URL are UI/connection metadata, not identity
+
+Remote project keys therefore include both pieces needed for stable storage, for example `remote:<deviceId>:<projectSlug>`, but product surfaces should still present the project slug as the project and the device as disambiguating context. The latest remote URL is stored only so a later CLI lookup such as `scorel logs --attach --remote <url>` can resolve the local attach diagnostics path.
+
 ---
 
 ## 5. Transport 选择

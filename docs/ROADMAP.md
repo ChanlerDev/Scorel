@@ -274,6 +274,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0026`](spec/ship/S0026-attach-project-cache-and-dual-seq-reconnect.md) | 收敛 attach 的 project-scope session cache、dual-seq reconnect 与 fallback/live 语义 | Done |
 | [`S0027`](spec/ship/S0027-session-diagnostics-log.md) | 为每个 session 增加同目录 diagnostics `.log`，暴露 provider/runtime/daemon 调试信息 | Done |
 | [`S0028`](spec/ship/S0028-client-attach-diagnostics-log.md) | 为本地 attach cache 增加同级 diagnostics `.log`，暴露 remote/local attach 客户端侧调试信息 | Done |
+| [`S0029`](spec/ship/S0029-project-index-for-session-lookup.md) | 增加轻量 project index，用 project 视角索引 local/remote sessions 与 attach logs | Done |
 
 ---
 

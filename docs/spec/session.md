@@ -132,6 +132,23 @@ Attach clients have their own client-side diagnostics under the attach cache tre
 
 That attach `.log` is local client evidence for connection, cache, resync, rendering, and outbound send behavior. It is intentionally separate from the daemon-owned session `.log`; remote attach should not mix remote daemon runtime/provider diagnostics into the local attach cache.
 
+### 2.7 Project Index
+
+Scorel may also maintain a lightweight project index:
+
+```text
+~/.scorel/project-index.json
+```
+
+This file organizes existing session assets by project for CLI lookup and future GUI display. It is not replay state and is not the authority for session contents.
+
+The index points to existing paths:
+
+- local session JSONL and daemon diagnostics under `sessions/`
+- attach cache and attach diagnostics under `attach-cache/`
+
+No session, cache, or log file is moved because of the index. For local projects, identity is the canonical `workDir`. For remote projects, `projectSlug` identifies the remote project path namespace, while `deviceId` only disambiguates devices that expose the same slug.
+
 ---
 
 ## 3. SessionTree 与 Context 构建

@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
@@ -56,6 +56,44 @@ describe("@scorel/app-cli", () => {
     expect(result.stdout).not.toContain("session_created");
     expect(result.stdout).toContain("send_message_started");
     expect(result.stdout).toContain("provider_request_failed");
+  });
+
+  it("indexes local chat sessions by canonical project workdir", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-project-index-"));
+    const sessionsDir = join(stateDir, "sessions");
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-index-"));
+    const server = await startChatServer([{ content: "Indexed local project.", tool_calls: [] }]);
+
+    try {
+      const result = await runCliWithInput(
+        ["chat", "--session", "ses_local_project_index", "--cwd", workspaceDir],
+        "index this project\n.exit\n",
+        testConfig(server.baseURL),
+        sessionsDir,
+      );
+
+      expect(result.code).toBe(0);
+      const canonicalWorkDir = await realpath(workspaceDir);
+      const index = JSON.parse(await readFile(join(stateDir, "project-index.json"), "utf8")) as ProjectIndexFile;
+      expect(index.version).toBe(1);
+      expect(index.projects).toHaveLength(1);
+      expect(index.projects[0]).toMatchObject({
+        projectKey: `local:${canonicalWorkDir}`,
+        kind: "local",
+        workDir: canonicalWorkDir,
+        displayName: basename(canonicalWorkDir),
+        sessions: {
+          ses_local_project_index: {
+            sessionId: "ses_local_project_index",
+            source: "local-session",
+            sessionPath: "sessions/ses_local_project_index.jsonl",
+            logPath: "sessions/ses_local_project_index.log",
+          },
+        },
+      });
+    } finally {
+      await server.close();
+    }
   });
 
   it("attaches to a local daemon socket from daemon state", async () => {
@@ -688,6 +726,99 @@ describe("@scorel/app-cli", () => {
     }
   });
 
+  it("indexes remote attach sessions by project slug and resolves logs through the index", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-remote-project-index-"));
+    const sessionsDir = join(stateDir, "sessions");
+    const server = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientConnect: (connection, params) => {
+        connection.send({
+          type: "connected",
+          clientId: params.clientId,
+          sessionId: params.sessionId,
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_remote_index"),
+          deviceDisplayName: "Remote Index Device",
+          projectSlug: "scorel-project",
+        });
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+      },
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "error",
+            requestId: message.requestId,
+            ok: false,
+            code: "session_not_found" as const,
+            message: "missing session",
+          };
+        }
+        if (message.type === "create_session") {
+          return {
+            type: "response",
+            requestType: "create_session",
+            requestId: message.requestId,
+            ok: true,
+            data: { sessionId: asSessionId("ses_remote_project_index") },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(0), mode: "stream_resume" as const },
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const result = await runCliWithInput(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_remote_project_index"],
+        ".exit\n",
+        testConfig("http://127.0.0.1:1"),
+        sessionsDir,
+      );
+      expect(result.code).toBe(0);
+
+      const index = JSON.parse(await readFile(join(stateDir, "project-index.json"), "utf8")) as ProjectIndexFile;
+      expect(index.projects).toHaveLength(1);
+      const project = index.projects[0];
+      expect(project).toMatchObject({
+        projectKey: "remote:device_remote_index:scorel-project",
+        kind: "remote",
+        deviceId: "device_remote_index",
+        deviceDisplayName: "Remote Index Device",
+        projectSlug: "scorel-project",
+        displayName: "scorel-project",
+        lastRemoteUrl: server.url,
+      });
+      const session = project.sessions.ses_remote_project_index;
+      expect(session).toMatchObject({
+        sessionId: "ses_remote_project_index",
+        source: "attach-cache",
+      });
+      expect(session.cachePath).toMatch(/^attach-cache\/[a-f0-9]{24}\/ses_remote_project_index\.json$/);
+      expect(session.logPath).toMatch(/^attach-cache\/[a-f0-9]{24}\/ses_remote_project_index\.log$/);
+
+      const printed = await runCliWithInput(
+        ["logs", "--attach", "--session", "ses_remote_project_index", "--remote", server.url, "--tail", "2"],
+        "",
+        testConfig("http://127.0.0.1:1"),
+        sessionsDir,
+      );
+      expect(printed.code).toBe(0);
+      expect(printed.stdout).toContain("attach_disconnected");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("restores cached transient assistant text and resumes from the cached stream seq", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-transient-cache-"));
     const connections: RemoteDaemonWebSocketConnection[] = [];
@@ -780,7 +911,8 @@ describe("@scorel/app-cli", () => {
         testConfig("http://127.0.0.1:1"),
         stateDir,
       );
-      await waitFor(() => connections.length >= 1);
+      await waitFor(() => connections.length >= 1, "transient attach connection");
+      await waitFor(() => first.stdout.toString().includes("scorel attach resumed session ses_transient_cache"), "transient attach ready");
       connections[0].send({
         type: "event",
         event: {
@@ -793,7 +925,7 @@ describe("@scorel/app-cli", () => {
           delta: "partial",
         },
       });
-      await waitFor(() => first.stdout.toString().includes("partial"));
+      await waitFor(() => first.stdout.toString().includes("partial"), "cached transient rendered");
       firstInput.end(".exit\n");
       await expect(first.result).resolves.toMatchObject({ code: 0 });
 
@@ -812,7 +944,7 @@ describe("@scorel/app-cli", () => {
       firstInput.destroy();
       await server.close();
     }
-  });
+  }, 10_000);
 
   it("renders live remote user events and ends streamed assistant output on a clean line", async () => {
     const connections: RemoteDaemonWebSocketConnection[] = [];
@@ -1131,6 +1263,30 @@ class StringWritable extends Writable {
 type AssistantResponse = {
   content: string | null;
   tool_calls: Array<ReturnType<typeof toolCall>>;
+};
+
+type ProjectIndexFile = {
+  version: 1;
+  projects: Array<{
+    projectKey: string;
+    kind: "local" | "remote";
+    workDir?: string;
+    deviceId?: string;
+    deviceDisplayName?: string;
+    projectSlug?: string;
+    displayName: string;
+    lastRemoteUrl?: string;
+    sessions: Record<
+      string,
+      {
+        sessionId: string;
+        source: "local-session" | "attach-cache";
+        sessionPath?: string;
+        cachePath?: string;
+        logPath?: string;
+      }
+    >;
+  }>;
 };
 
 const startChatServer = async (responses: AssistantResponse[]) => {
