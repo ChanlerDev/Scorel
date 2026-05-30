@@ -30,6 +30,16 @@ describe("S0031 WebUI shell", () => {
     expect(html).toContain('data-status data-state="idle"');
   });
 
+  it("renders remote identity, resync, anchor, and reconnect regions", () => {
+    const html = renderWebUiShell();
+
+    expect(html).toContain('data-identity');
+    expect(html).toContain('data-resync-mode');
+    expect(html).toContain('data-persistent-seq');
+    expect(html).toContain('data-stream-seq');
+    expect(html).toContain('data-reconnect-button');
+  });
+
   it("ships the shell styling with responsive layout rules", () => {
     expect(webUiStyles).toContain(".scorel-webui-shell");
     expect(webUiStyles).toContain(".webui-sidebar");

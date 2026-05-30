@@ -1,23 +1,22 @@
-import { asClientId, asSessionId } from "@scorel/protocol";
-
-import { connectToRemoteSession } from "./connection.js";
+import type { RemoteSessionState } from "./remote-session.js";
+import { createRemoteSessionController } from "./remote-session.js";
 import { renderWebUiShell } from "./shell.js";
 
-type WebUiState = {
-  status: "idle" | "connecting" | "connected" | "error";
-  message: string;
-};
-
-const setState = (root: HTMLElement, state: WebUiState): void => {
+const renderState = (root: HTMLElement, state: RemoteSessionState): void => {
   const status = root.querySelector<HTMLElement>("[data-status]");
   if (status) {
     status.dataset.state = state.status;
-    status.textContent = state.message;
+    status.textContent = statusText(state);
   }
+  setText(root, "[data-identity]", identityText(state));
+  setText(root, "[data-resync-mode]", state.status === "connected" ? state.resyncMode : "-");
+  setText(root, "[data-persistent-seq]", state.status === "connected" ? String(state.persistentLastSeq) : "-");
+  setText(root, "[data-stream-seq]", state.status === "connected" ? String(state.streamLastSeq) : "-");
 };
 
 export const mountWebUi = (root: HTMLElement): void => {
   root.innerHTML = renderWebUiShell();
+  const controller = createRemoteSessionController();
 
   const form = root.querySelector<HTMLFormElement>("[data-connect-form]");
   form?.addEventListener("submit", (event) => {
@@ -27,22 +26,44 @@ export const mountWebUi = (root: HTMLElement): void => {
     const token = String(data.get("token") ?? "");
     const sessionId = String(data.get("sessionId") ?? "").trim();
 
-    setState(root, { status: "connecting", message: "Connecting..." });
-    void connectToRemoteSession({
+    void controller
+      .connect({
       url,
       token,
-      sessionId: asSessionId(sessionId),
-      clientId: asClientId(`webui_${crypto.randomUUID()}`),
+        sessionId,
     })
-      .then(({ identity }) => {
-        const label = identity.deviceDisplayName ?? identity.deviceId ?? "remote daemon";
-        setState(root, { status: "connected", message: `Connected to ${label}` });
-      })
-      .catch((error: unknown) => {
-        setState(root, {
-          status: "error",
-          message: error instanceof Error ? error.message : "Connection failed",
-        });
-      });
+      .then((state) => renderState(root, state));
   });
+
+  root.querySelector<HTMLButtonElement>("[data-reconnect-button]")?.addEventListener("click", () => {
+    void controller.reconnect().then((state) => renderState(root, state));
+  });
+};
+
+const setText = (root: HTMLElement, selector: string, text: string): void => {
+  const element = root.querySelector<HTMLElement>(selector);
+  if (element) {
+    element.textContent = text;
+  }
+};
+
+const statusText = (state: RemoteSessionState): string => {
+  switch (state.status) {
+    case "disconnected":
+      return "Disconnected";
+    case "connecting":
+      return `Connecting to ${state.sessionId}...`;
+    case "connected":
+      return `Connected to ${state.sessionId}`;
+    case "error":
+      return state.message;
+  }
+};
+
+const identityText = (state: RemoteSessionState): string => {
+  if (state.status !== "connected") {
+    return "Not connected";
+  }
+  const display = state.identity.deviceDisplayName ?? state.identity.deviceId ?? "remote daemon";
+  return state.identity.projectSlug ? `${display} · ${state.identity.projectSlug}` : display;
 };

@@ -205,6 +205,37 @@ export const webUiStyles = `
     font-size: 12px;
   }
 
+  .connection-facts {
+    display: grid;
+    gap: 6px;
+    margin-top: 10px;
+    color: #69727e;
+    font-size: 11px;
+  }
+
+  .connection-facts div {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .connection-facts span:last-child {
+    color: #25282d;
+    font-weight: 650;
+    text-align: right;
+  }
+
+  .reconnect-button {
+    width: 100%;
+    height: 32px;
+    margin-top: 10px;
+    border: 1px solid #dfe3e8;
+    border-radius: 12px;
+    background: #fff;
+    color: #5d6673;
+    font-weight: 650;
+  }
+
   .webui-main {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
@@ -437,6 +468,13 @@ export const renderWebUiShell = (): string => `
           <button class="connect-button" type="submit">Connect</button>
         </form>
         <p class="connection-status" data-status data-state="idle">Disconnected</p>
+        <div class="connection-facts" aria-label="Remote connection details">
+          <div><span>Identity</span><span data-identity>Not connected</span></div>
+          <div><span>Resync</span><span data-resync-mode>-</span></div>
+          <div><span>Persistent seq</span><span data-persistent-seq>-</span></div>
+          <div><span>Stream seq</span><span data-stream-seq>-</span></div>
+        </div>
+        <button class="reconnect-button" data-reconnect-button type="button">Reconnect</button>
       </section>
     </aside>
 
