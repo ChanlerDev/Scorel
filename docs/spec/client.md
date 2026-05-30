@@ -170,6 +170,19 @@ For terminal clients, local cache pre-render is conservative: cache metadata mus
 
 Remote attach cache identity comes from daemon connection metadata, not from the URL alone. The daemon reports a stable `deviceId`, optional `deviceDisplayName`, and project-level `projectSlug`; the attach cache key is `remote + deviceId + projectSlug + sessionId`. The URL remains the current endpoint and may change without invalidating cache for the same remote project.
 
+### 4.2 Attach Diagnostics
+
+Attach clients also write a client-owned diagnostics log beside their local attach cache:
+
+```text
+~/.scorel/attach-cache/{scopeKey}/{sessionId}.json
+~/.scorel/attach-cache/{scopeKey}/{sessionId}.log
+```
+
+This log records what the client observed and did: connection lifecycle, resolved cache scope, daemon identity, cache read/write summaries, resync anchors and mode, rendered inbound events, outbound sends, and disconnect. For remote attach, the log uses the same stable scope as the cache: `deviceId + projectSlug` after daemon identity is known, with URL only as a transport locator before identity resolution.
+
+Attach diagnostics are not authoritative replay state and are not a copy of daemon-side session diagnostics. They are local client evidence for debugging connection, cache, and rendering behavior. They may include rich event summaries, but must not record bearer tokens, API keys, local daemon tokens, or other secrets.
+
 ---
 
 ## 5. Transport 选择

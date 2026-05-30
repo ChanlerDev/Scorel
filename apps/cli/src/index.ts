@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --import tsx
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -88,6 +88,7 @@ export const runCli = async (
     try {
       return runLogs(parseLogsOptions(rest), {
         sessionsDir: runOptions.sessionsDir ?? defaultSessionsDir(),
+        stateDir: runOptions.sessionsDir ?? join(homedir(), ".scorel"),
         output: io.output,
         error: io.error,
       });
@@ -103,13 +104,17 @@ export const runCli = async (
 type LogsOptions = {
   sessionId: ReturnType<typeof asSessionId>;
   tail?: number;
+  attach: boolean;
+  remoteUrl?: string;
 };
 
 const runLogs = async (
   options: LogsOptions,
-  io: { sessionsDir: string; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
+  io: { sessionsDir: string; stateDir: string; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
 ): Promise<number> => {
-  const filePath = join(io.sessionsDir, `${options.sessionId}.log`);
+  const filePath = options.attach
+    ? await findAttachDiagnosticsFilePath(io.stateDir, options.sessionId, options.remoteUrl)
+    : join(io.sessionsDir, `${options.sessionId}.log`);
   let content: string;
   try {
     content = await readFile(filePath, "utf8");
@@ -150,18 +155,51 @@ const runAttach = async (
   const client = new DaemonClient(transport, {
     clientId: asClientId("client_cli_attach"),
   });
+  const diagnostics = new AttachDiagnostics(io.stateDir, options.sessionId);
   try {
+    diagnostics.record("attach_connect_started", {
+      remote: Boolean(options.remoteUrl),
+      remoteUrl: options.remoteUrl,
+    });
     await client.connect(options.sessionId);
     const renderer = new AttachEventRenderer(io.output, io.error);
     const cacheScope = attachCacheScope(options, state?.socketPath, client.connectionIdentity);
+    diagnostics.setScope(cacheScope);
+    diagnostics.record("attach_connect_succeeded", {
+      scopeKind: cacheScope.kind,
+      scopeLocator: cacheScope.locator,
+      deviceId: client.connectionIdentity?.deviceId,
+      deviceDisplayName: client.connectionIdentity?.deviceDisplayName,
+      projectSlug: client.connectionIdentity?.projectSlug,
+    });
+    diagnostics.record("attach_cache_scope_resolved", {
+      scopeKind: cacheScope.kind,
+      scopeLocator: cacheScope.locator,
+      displayName: cacheScope.displayName,
+    });
     const cacheSnapshot = await readAttachCache(io.stateDir, cacheScope, options.sessionId);
-    const persistCache = (): Promise<void> => writeAttachCache(io.stateDir, cacheScope, options.sessionId, cacheSnapshot);
+    diagnostics.record("attach_cache_read", {
+      persistentEvents: cacheSnapshot.events.length,
+      transients: cacheSnapshot.transients.length,
+    });
+    const persistCache = async (): Promise<void> => {
+      await writeAttachCache(io.stateDir, cacheScope, options.sessionId, cacheSnapshot);
+      diagnostics.record("attach_cache_written", {
+        persistentEvents: cacheSnapshot.events.length,
+        transients: cacheSnapshot.transients.length,
+      });
+    };
     const unsubscribe = client.subscribe((event) => {
       renderer.renderLive(event);
       updateAttachCacheSnapshot(cacheSnapshot, event);
+      diagnostics.record("attach_event_rendered", {
+        type: event.type,
+        seq: "seq" in event ? event.seq : undefined,
+      });
       void persistCache();
     });
     const resumed = await loadOrCreateAttachedSession(client, options.sessionId);
+    diagnostics.record(resumed ? "attach_session_loaded" : "attach_session_created");
     renderer.writeLine(`scorel attach ${resumed ? "resumed" : "created"} session ${options.sessionId}`);
     renderer.renderBacklog(cacheSnapshot.events);
     renderer.renderTransientBacklog(cacheSnapshot.transients);
@@ -169,6 +207,13 @@ const runAttach = async (
     const resync = await client.resync({
       persistentLastSeq,
       streamLastSeq: highestCachedStreamSeq(cacheSnapshot),
+    });
+    diagnostics.record("attach_resync_finished", {
+      mode: resync.mode,
+      throughSeq: resync.throughSeq,
+      persistentLastSeq,
+      streamLastSeq: highestCachedStreamSeq(cacheSnapshot),
+      receivedEvents: client.getEvents().length,
     });
     if (resync.mode === "full_reload" && cacheSnapshot.events.length > 0) {
       renderer.writeLine("scorel attach authoritative reload follows cached history");
@@ -189,7 +234,16 @@ const runAttach = async (
         if (line === ".exit" || line === ".quit") {
           return;
         }
-        await client.sendMessage(line);
+        diagnostics.record("attach_send_message_started", { contentLength: line.length });
+        try {
+          await client.sendMessage(line);
+          diagnostics.record("attach_send_message_finished", { contentLength: line.length });
+        } catch (cause) {
+          diagnostics.record("attach_send_message_error", {
+            message: cause instanceof Error ? cause.message : String(cause),
+          });
+          throw cause;
+        }
         renderer.endLine();
         renderer.promptIfInteractive();
       }
@@ -213,9 +267,14 @@ const runAttach = async (
       rl.close();
       await persistCache();
     }
+    diagnostics.record("attach_disconnected");
+    await diagnostics.flush();
     client.disconnect();
     return 0;
   } catch (cause) {
+    diagnostics.ensureScope(attachCacheScope(options, state?.socketPath));
+    diagnostics.record("attach_failed", { message: cause instanceof Error ? cause.message : String(cause) });
+    await diagnostics.flush();
     io.error.write(`scorel attach error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
     return 1;
   }
@@ -268,6 +327,95 @@ const attachCacheFilePath = (stateDir: string, scope: AttachCacheScope, sessionI
   const scopeKey = createHash("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
   return join(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
 };
+
+const attachDiagnosticsFilePath = (
+  stateDir: string,
+  scope: AttachCacheScope,
+  sessionId: ReturnType<typeof asSessionId>,
+): string => {
+  const scopeKey = createHash("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
+  return join(stateDir, "attach-cache", scopeKey, `${sessionId}.log`);
+};
+
+const findAttachDiagnosticsFilePath = async (
+  stateDir: string,
+  sessionId: ReturnType<typeof asSessionId>,
+  _remoteUrl?: string,
+): Promise<string> => {
+  const root = join(stateDir, "attach-cache");
+  const scopes = await readdir(root);
+  for (const scope of scopes) {
+    const candidate = join(root, scope, `${sessionId}.log`);
+    try {
+      await readFile(candidate, "utf8");
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+  return join(root, "__missing__", `${sessionId}.log`);
+};
+
+class AttachDiagnostics {
+  readonly #stateDir: string;
+  readonly #sessionId: ReturnType<typeof asSessionId>;
+  readonly #pendingLines: string[] = [];
+  readonly #writes: Array<Promise<void>> = [];
+  #scope: AttachCacheScope | undefined;
+
+  constructor(stateDir: string, sessionId: ReturnType<typeof asSessionId>) {
+    this.#stateDir = stateDir;
+    this.#sessionId = sessionId;
+  }
+
+  setScope(scope: AttachCacheScope): void {
+    this.#scope = scope;
+    for (const line of this.#pendingLines.splice(0)) {
+      this.#append(line);
+    }
+  }
+
+  ensureScope(scope: AttachCacheScope): void {
+    if (!this.#scope) {
+      this.setScope(scope);
+    }
+  }
+
+  record(event: string, fields: Record<string, unknown> = {}): void {
+    const line = formatDiagnosticLine({
+      ts: Date.now(),
+      level: event.endsWith("_error") || event.endsWith("_failed") ? "error" : "info",
+      event,
+      sessionId: this.#sessionId,
+      ...redactDiagnosticFields(fields),
+    });
+    if (!this.#scope) {
+      this.#pendingLines.push(line);
+      return;
+    }
+    this.#append(line);
+  }
+
+  async flush(): Promise<void> {
+    if (this.#scope) {
+      for (const line of this.#pendingLines.splice(0)) {
+        this.#append(line);
+      }
+    }
+    await Promise.allSettled(this.#writes);
+  }
+
+  #append(line: string): void {
+    if (!this.#scope) {
+      this.#pendingLines.push(line);
+      return;
+    }
+    const filePath = attachDiagnosticsFilePath(this.#stateDir, this.#scope, this.#sessionId);
+    this.#writes.push(
+      mkdir(dirname(filePath), { recursive: true }).then(() => appendFile(filePath, `${line}\n`, "utf8")),
+    );
+  }
+}
 
 const readAttachCache = async (
   stateDir: string,
@@ -445,8 +593,19 @@ const parseAttachOptions = (argv: string[]): AttachOptions => {
 const parseLogsOptions = (argv: string[]): LogsOptions => {
   let sessionId: ReturnType<typeof asSessionId> | undefined;
   let tail: number | undefined;
+  let attach = false;
+  let remoteUrl: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
+    if (arg === "--attach") {
+      attach = true;
+      continue;
+    }
+    if (arg === "--remote") {
+      remoteUrl = requireValue(argv, index, "--remote");
+      index += 1;
+      continue;
+    }
     if (arg === "--session") {
       sessionId = asSessionId(requireValue(argv, index, "--session"));
       index += 1;
@@ -465,7 +624,7 @@ const parseLogsOptions = (argv: string[]): LogsOptions => {
   if (!sessionId) {
     throw new Error("--session requires a value");
   }
-  return { sessionId, tail };
+  return { sessionId, tail, attach, remoteUrl };
 };
 
 const runCliDaemon = async (
@@ -595,7 +754,7 @@ const promptIfInteractive = (output: NodeJS.WritableStream): void => {
 };
 
 const writeUsage = (output: NodeJS.WritableStream): void => {
-  output.write("Usage: scorel chat [--session <id>] [--cwd <dir>]\nUsage: scorel attach [--session <id>] [--remote <ws-url> --token <token>]\nUsage: scorel logs --session <id> [--tail <n>]\n");
+  output.write("Usage: scorel chat [--session <id>] [--cwd <dir>]\nUsage: scorel attach [--session <id>] [--remote <ws-url> --token <token>]\nUsage: scorel logs [--attach] --session <id> [--remote <ws-url>] [--tail <n>]\n");
 };
 
 const writeEventError = (output: NodeJS.WritableStream, event: ErrorEvent): void => {
@@ -610,6 +769,25 @@ const writeToolResult = (output: NodeJS.WritableStream, event: Extract<ScorelEve
   const result = block.result as { content?: Array<{ type: string; text?: string }> };
   const text = result.content?.find((candidate) => candidate.type === "text")?.text ?? "";
   output.write(`\n[tool:${block.toolName}]${block.isError ? " error" : ""}\n${text}\n`);
+};
+
+const redactDiagnosticFields = (fields: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(fields).map(([key, value]) => [
+      key,
+      /token|secret|api[-_]?key|authorization/i.test(key) ? "[redacted]" : value,
+    ]),
+  );
+
+const formatDiagnosticLine = (fields: Record<string, unknown>): string =>
+  Object.entries(fields)
+    .filter(([, value]) => value !== undefined && value !== null)
+    .map(([key, value]) => `${key}=${formatDiagnosticValue(value)}`)
+    .join(" ");
+
+const formatDiagnosticValue = (value: unknown): string => {
+  const text = typeof value === "string" ? value : String(value);
+  return /^[A-Za-z0-9_./:@+-]+$/.test(text) ? text : JSON.stringify(text);
 };
 
 class AttachEventRenderer {

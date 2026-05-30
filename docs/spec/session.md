@@ -123,6 +123,15 @@ ts=1716000000100 level=error event=runtime_error sessionId=ses_abc message="stre
 
 Diagnostics can record lifecycle, reconnect, runtime, provider result summaries, and errors. They must not record API keys, bearer tokens, full prompts, full tool results, or raw provider payloads by default.
 
+Attach clients have their own client-side diagnostics under the attach cache tree, not under daemon session storage:
+
+```text
+~/.scorel/attach-cache/{scopeKey}/{sessionId}.json
+~/.scorel/attach-cache/{scopeKey}/{sessionId}.log
+```
+
+That attach `.log` is local client evidence for connection, cache, resync, rendering, and outbound send behavior. It is intentionally separate from the daemon-owned session `.log`; remote attach should not mix remote daemon runtime/provider diagnostics into the local attach cache.
+
 ---
 
 ## 3. SessionTree 与 Context 构建

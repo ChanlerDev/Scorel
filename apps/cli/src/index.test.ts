@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -94,6 +94,9 @@ describe("@scorel/app-cli", () => {
       const result = await runCliWithInput(["attach", "--session", "ses_attach"], "", testConfig("http://127.0.0.1:1"), stateDir);
       expect(result.code).toBe(0);
       expect(result.stdout).toContain("scorel attach created session ses_attach");
+      const log = await readFile(await findAttachLogPath(stateDir, "ses_attach"), "utf8");
+      expect(log).toContain("event=attach_connect_succeeded");
+      expect(log).toContain("scopeKind=local");
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
@@ -224,7 +227,9 @@ describe("@scorel/app-cli", () => {
         testConfig("http://127.0.0.1:1"),
         await mkdtemp(join(tmpdir(), "scorel-cli-remote-watch-")),
       );
-      await waitFor(() => connections.length >= 2);
+      await waitFor(() => connections.length >= 2, "two remote attach connections");
+      await waitFor(() => attachA.stdout.toString().includes("scorel attach created session ses_remote_watch"), "attach A ready");
+      await waitFor(() => attachB.stdout.toString().includes("scorel attach created session ses_remote_watch"), "attach B ready");
 
       for (const connection of connections) {
         connection.send({
@@ -240,8 +245,8 @@ describe("@scorel/app-cli", () => {
           },
         });
       }
-      await waitFor(() => attachA.stdout.toString().includes("REMOTE_MULTI_CLIENT_OK"));
-      await waitFor(() => attachB.stdout.toString().includes("REMOTE_MULTI_CLIENT_OK"));
+      await waitFor(() => attachA.stdout.toString().includes("REMOTE_MULTI_CLIENT_OK"), "attach A rendered remote event");
+      await waitFor(() => attachB.stdout.toString().includes("REMOTE_MULTI_CLIENT_OK"), "attach B rendered remote event");
       inputA.end(".exit\n");
       inputB.end(".exit\n");
 
@@ -252,7 +257,7 @@ describe("@scorel/app-cli", () => {
       inputB.destroy();
       await server.close();
     }
-  });
+  }, 10_000);
 
   it("renders recovered persistent session events when remote attach resumes", async () => {
     const server = await startRemoteDaemonWebSocketServer({
@@ -586,6 +591,100 @@ describe("@scorel/app-cli", () => {
     } finally {
       await serverA.close();
       await serverB.close();
+    }
+  });
+
+  it("writes remote attach diagnostics beside the cache and redacts tokens", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-attach-log-"));
+    const server = await startRemoteDaemonWebSocketServer({
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
+      onClientConnect: (connection, params) => {
+        connection.send({
+          type: "connected",
+          clientId: params.clientId,
+          sessionId: params.sessionId,
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_log"),
+          deviceDisplayName: "Log Device",
+          projectSlug: "log-project",
+        });
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+      },
+      onClientMessage: (_connection, message) => {
+        if (message.type === "load_session") {
+          return {
+            type: "error",
+            requestId: message.requestId,
+            ok: false,
+            code: "session_not_found" as const,
+            message: "missing session",
+          };
+        }
+        if (message.type === "create_session") {
+          return {
+            type: "response",
+            requestType: "create_session",
+            requestId: message.requestId,
+            ok: true,
+            data: { sessionId: asSessionId("ses_attach_log") },
+          };
+        }
+        if (message.type === "resync_events") {
+          return {
+            type: "response",
+            requestType: "resync_events",
+            requestId: message.requestId,
+            ok: true,
+            data: { events: [], throughSeq: asSeq(0), mode: "stream_resume" as const },
+          };
+        }
+        if (message.type === "send_message") {
+          return {
+            type: "response",
+            requestType: "send_message",
+            requestId: message.requestId,
+            ok: true,
+            data: { userEventId: asEventId("evt_log_user"), assistantEventId: asEventId("evt_log_assistant") },
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const result = await runCliWithInput(
+        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_attach_log"],
+        "hello from attach log\n.exit\n",
+        testConfig("http://127.0.0.1:1"),
+        stateDir,
+      );
+      expect(result.code).toBe(0);
+      const logPath = await findAttachLogPath(stateDir, "ses_attach_log");
+      const log = await readFile(logPath, "utf8");
+      expect(log).toContain("event=attach_connect_started");
+      expect(log).toContain("event=attach_connect_succeeded");
+      expect(log).toContain("deviceId=device_log");
+      expect(log).toContain("projectSlug=log-project");
+      expect(log).toContain("event=attach_resync_finished");
+      expect(log).toContain("mode=stream_resume");
+      expect(log).toContain("event=attach_send_message_started");
+      expect(log).toContain("event=attach_send_message_finished");
+      expect(log).toContain("event=attach_disconnected");
+      expect(log).not.toContain("remote-secret");
+
+      const printed = await runCliWithInput(
+        ["logs", "--attach", "--session", "ses_attach_log", "--remote", server.url, "--tail", "3"],
+        "",
+        testConfig("http://127.0.0.1:1"),
+        stateDir,
+      );
+      expect(printed.code).toBe(0);
+      expect(printed.stdout).toContain("attach_send_message_finished");
+      expect(printed.stdout).toContain("attach_disconnected");
+    } finally {
+      await server.close();
     }
   });
 
@@ -985,7 +1084,22 @@ const runCliWithStream = (
   };
 };
 
-const waitFor = (predicate: () => boolean): Promise<void> =>
+const findAttachLogPath = async (stateDir: string, sessionId: string): Promise<string> => {
+  const root = join(stateDir, "attach-cache");
+  const scopes = await readdir(root);
+  for (const scope of scopes) {
+    const candidate = join(root, scope, `${sessionId}.log`);
+    try {
+      await readFile(candidate, "utf8");
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(`attach log not found for ${sessionId}`);
+};
+
+const waitFor = (predicate: () => boolean, label = "condition"): Promise<void> =>
   new Promise((resolve, reject) => {
     const startedAt = Date.now();
     const interval = setInterval(() => {
@@ -996,7 +1110,7 @@ const waitFor = (predicate: () => boolean): Promise<void> =>
       }
       if (Date.now() - startedAt > 5000) {
         clearInterval(interval);
-        reject(new Error("timed out waiting for condition"));
+        reject(new Error(`timed out waiting for ${label}`));
       }
     }, 5);
   });
