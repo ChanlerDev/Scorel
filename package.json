@@ -7,7 +7,9 @@
   "scripts": {
     "check": "pnpm typecheck && pnpm test",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "scorel": "node --import tsx apps/cli/src/index.ts",
+    "scorel-daemon": "node --import tsx apps/daemon/src/index.ts"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

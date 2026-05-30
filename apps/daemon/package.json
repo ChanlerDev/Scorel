@@ -10,6 +10,7 @@
     "scorel-daemon": "./src/index.ts"
   },
   "scripts": {
+    "start": "node --import tsx ./src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

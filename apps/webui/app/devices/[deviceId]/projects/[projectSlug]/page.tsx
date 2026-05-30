@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect } from "react";
 
+import { NewChatButton } from "../../../../../components/shell/new-chat-button";
 import {
   useConnection,
   useSessionsSyncError,
@@ -71,6 +72,12 @@ function ProjectView({
         ) : null}
       </header>
 
+      <NewChatButton
+        deviceId={device.id}
+        projectSlug={projectSlug}
+        variant="page"
+      />
+
       {error ? (
         <div className="flex items-center justify-between gap-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
           <span>Failed to load sessions: {error}</span>
@@ -95,7 +102,7 @@ function ProjectView({
         </p>
       ) : sessions.length === 0 ? (
         <p className="text-xs italic text-zinc-500">
-          No sessions yet — start a New Chat (coming soon).
+          No sessions yet — click + New Chat above to start one.
         </p>
       ) : (
         <ul className="space-y-1">

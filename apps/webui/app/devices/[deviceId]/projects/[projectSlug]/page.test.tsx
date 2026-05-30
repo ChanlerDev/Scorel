@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+
+const _push = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: _push, replace: vi.fn(), back: vi.fn() }),
+  useParams: () => ({}),
+  usePathname: () => "/",
+}));
 
 import ProjectPage from "./page";
 import { ConnectionPool } from "../../../../../lib/connection/pool";
@@ -27,6 +34,13 @@ import { asClientId, asDeviceId, asSeq, asSessionId } from "@scorel/protocol";
 let listSessionsImpl: () => Promise<SessionSummary[]> = async () => [];
 let listSessionsCalls = 0;
 let listProjectsImpl: () => Promise<unknown[]> = async () => [];
+let createSessionImpl: () => Promise<{ sessionId: string }> = async () => ({
+  sessionId: "session_new",
+});
+let createSessionCalls = 0;
+let createSessionLastMeta:
+  | { projectSlug?: string; title?: string; model?: string }
+  | undefined;
 
 class FakeTransport implements DaemonTransport {
   closed = false;
@@ -78,6 +92,34 @@ class FakeTransport implements DaemonTransport {
         for (const h of this.#handlers) h(response);
       });
     }
+    if ((message as { type: string }).type === "create_session") {
+      createSessionCalls += 1;
+      const m = message as {
+        requestId: string;
+        meta?: { projectSlug?: string; title?: string; model?: string };
+      };
+      createSessionLastMeta = m.meta;
+      const requestId = m.requestId;
+      void createSessionImpl().then(
+        ({ sessionId }) => {
+          const response: DaemonMessage = {
+            type: "response",
+            requestId: requestId as never,
+            data: { sessionId },
+          } as unknown as DaemonMessage;
+          for (const h of this.#handlers) h(response);
+        },
+        (err: Error) => {
+          const response: DaemonMessage = {
+            type: "error",
+            requestId: requestId as never,
+            message: err.message,
+            errorCode: "internal_error",
+          } as unknown as DaemonMessage;
+          for (const h of this.#handlers) h(response);
+        },
+      );
+    }
   }
 
   onMessage(handler: (message: DaemonMessage) => void): Unsubscribe {
@@ -127,6 +169,7 @@ function installPool(store: DevicesStore): ConnectionPool {
 }
 
 beforeEach(() => {
+  _push.mockReset();
   listSessionsCalls = 0;
   listSessionsImpl = async () => [];
   listProjectsImpl = async () => [
@@ -137,6 +180,9 @@ beforeEach(() => {
       lastSeenAt: 0,
     },
   ];
+  createSessionCalls = 0;
+  createSessionLastMeta = undefined;
+  createSessionImpl = async () => ({ sessionId: "session_new" });
   __resetConnectionForTests();
   __resetDevicesStoreForTests();
   if (typeof window !== "undefined") window.localStorage.clear();
@@ -227,5 +273,71 @@ describe("ProjectPage", () => {
     });
     expect(screen.getByText(/Failed to load sessions/)).toBeTruthy();
     expect(screen.getByText("Retry")).toBeTruthy();
+  });
+
+  it("New Chat creates a session via daemon and navigates", async () => {
+    const { device, store } = seedDevice();
+    store.setProjects(device.id, [
+      { projectSlug: "alpha", displayName: "Alpha" },
+    ]);
+    installPool(store);
+
+    render(
+      <ProjectPage params={{ deviceId: device.id, projectSlug: "alpha" }} />,
+    );
+    // Wait for connect + initial sync to settle so peekClient returns connected.
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+
+    const btn = screen.getByRole("button", { name: /New Chat/ });
+    expect(btn.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(btn);
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+
+    expect(createSessionCalls).toBe(1);
+    expect(createSessionLastMeta?.projectSlug).toBe("alpha");
+    expect(createSessionLastMeta?.title).toBe("New chat");
+    expect(_push).toHaveBeenCalledWith(
+      `/devices/${encodeURIComponent(device.id)}/projects/alpha/sessions/session_new`,
+    );
+    // Optimistic prepend to local cache.
+    const project = store
+      .get(device.id)
+      ?.projects?.find((p) => p.projectSlug === "alpha");
+    expect(project?.sessions?.session_new).toBeTruthy();
+  });
+
+  it("shows banner and stays on page when daemon rejects create_session", async () => {
+    const { device, store } = seedDevice();
+    store.setProjects(device.id, [
+      { projectSlug: "alpha", displayName: "Alpha" },
+    ]);
+    createSessionImpl = async () => {
+      throw new Error("create boom");
+    };
+    installPool(store);
+
+    render(
+      <ProjectPage params={{ deviceId: device.id, projectSlug: "alpha" }} />,
+    );
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+
+    const btn = screen.getByRole("button", { name: /New Chat/ });
+    fireEvent.click(btn);
+    await act(async () => {
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    });
+    expect(_push).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe("create boom");
+    // Cache untouched — no `session_new` row appeared.
+    const project = store
+      .get(device.id)
+      ?.projects?.find((p) => p.projectSlug === "alpha");
+    expect(project?.sessions?.session_new).toBeUndefined();
   });
 });

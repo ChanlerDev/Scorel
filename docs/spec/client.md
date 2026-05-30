@@ -211,6 +211,8 @@ Remote project keys therefore include both pieces needed for stable storage, for
 
 `listSessions(filter?)` and `listProjects()` only require an active daemon connection (no session). `listSessions` accepts `{ projectSlug?, limit? }`; daemon enforces the default/max limits and stable ordering. `listProjects` returns `DaemonProjectSummary[]` aggregated from the daemon's sessions directory; the result includes `displayName` and `workDirHint` for UI use only.
 
+`createSession({ meta?: Partial<SessionMeta> })` only requires an active daemon connection (no session). The daemon mints a fresh `sessionId`, persists meta (including `projectSlug`, `title`, `model`) into the new session header on first message, and returns the id so the caller can navigate to / attach to it. The WebUI's `+ New Chat` button (S0039) is the canonical caller of this surface today; `cwd` defaults to the daemon's startup `cwd` and is not user-overridable in v1.
+
 ---
 
 ## 5. Transport 选择

@@ -13,6 +13,7 @@ import {
 import { IDLE, type ConnectionState } from "../../lib/connection/state";
 import { syncSessions } from "../../lib/sync/sessions";
 import { DeviceStatus } from "./device-status";
+import { NewChatButton } from "./new-chat-button";
 import { ProjectNode } from "./project-node";
 
 function isOffline(state: ConnectionState): boolean {
@@ -128,13 +129,11 @@ export function Sidebar() {
   return (
     <aside className="w-[280px] shrink-0 border-r border-zinc-200 bg-white flex flex-col">
       <div className="p-3 space-y-2">
-        <button
-          type="button"
-          disabled
-          className="w-full text-left rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-500 cursor-not-allowed"
-        >
-          + New Chat
-        </button>
+        <NewChatButton
+          deviceId={activeDeviceId}
+          projectSlug={activeProjectSlug}
+          variant="sidebar"
+        />
         <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-400">
           Search…
         </div>

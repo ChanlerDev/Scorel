@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 // Mock next/navigation hooks: jsdom can't run the real Next router. We
-// re-export the same hook surface we use (useParams) and let each test
-// reset the value via the exposed setter.
+// re-export the same hook surface we use (useParams + useRouter) and let
+// each test reset the value via the exposed setters.
 let _params: Record<string, string | string[]> = {};
+const _push = vi.fn();
 vi.mock("next/navigation", () => ({
   useParams: () => _params,
   usePathname: () => "/",
+  useRouter: () => ({ push: _push, replace: vi.fn(), back: vi.fn() }),
 }));
 function setParams(p: Record<string, string | string[]>): void {
   _params = p;
@@ -54,6 +56,7 @@ function freshPool(): { pool: ConnectionPool; store: DevicesStore } {
 
 beforeEach(() => {
   setParams({});
+  _push.mockReset();
   __resetConnectionForTests();
   __resetDevicesStoreForTests();
   if (typeof window !== "undefined") window.localStorage.clear();
@@ -128,5 +131,29 @@ describe("Sidebar", () => {
     expect(screen.getByText("offline")).toBeTruthy();
     // Cached project is still rendered.
     expect(screen.getByText("Alpha")).toBeTruthy();
+  });
+
+  it("disables New Chat when no project route is active", () => {
+    freshPool();
+    render(<Sidebar />);
+    const btn = screen.getByRole("button", { name: /New Chat/ });
+    expect(btn.hasAttribute("disabled")).toBe(true);
+    expect(btn.getAttribute("title")).toBe("Select a project first");
+  });
+
+  it("enables New Chat when route includes a project slug", () => {
+    const { store } = freshPool();
+    const device = store.create({
+      name: "Tokyo",
+      link: "wss://h",
+      token: "t",
+    });
+    store.setProjects(device.id, [
+      { projectSlug: "alpha", displayName: "Alpha" },
+    ]);
+    setParams({ deviceId: device.id, projectSlug: "alpha" });
+    render(<Sidebar />);
+    const btn = screen.getByRole("button", { name: /New Chat/ });
+    expect(btn.hasAttribute("disabled")).toBe(false);
   });
 });
