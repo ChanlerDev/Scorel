@@ -90,7 +90,8 @@ export const webUiStyles = `
   }
 
   .project-list,
-  .session-list {
+  .session-list,
+  .session-tree-list {
     display: grid;
     gap: 4px;
     margin: 0;
@@ -108,6 +109,17 @@ export const webUiStyles = `
     border-radius: 12px;
     color: #4b515a;
     font-size: 14px;
+  }
+
+  .session-button {
+    width: 100%;
+    border: 0;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .nav-row-empty {
+    color: #8a93a0;
   }
 
   .nav-row.is-active {
@@ -360,6 +372,56 @@ export const webUiStyles = `
     font-size: 17px;
   }
 
+  .session-tree-card {
+    margin-bottom: 14px;
+    padding: 18px 20px;
+    border: 1px solid #eceef1;
+    border-radius: 22px;
+    background: #fff;
+    box-shadow: 0 16px 50px rgba(33, 37, 43, 0.05);
+  }
+
+  .session-tree-list {
+    gap: 8px;
+  }
+
+  .session-tree-node {
+    display: grid;
+    gap: 4px;
+    padding: 10px 12px;
+    margin-left: calc(var(--depth, 0) * 18px);
+    border: 1px solid #eceef1;
+    border-radius: 14px;
+    background: #fbfbfc;
+  }
+
+  .session-tree-node.is-active {
+    border-color: #cbd6e4;
+    background: #f7fbff;
+  }
+
+  .tree-node-title {
+    color: #57616d;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .tree-node-text {
+    color: #25282d;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .tree-node-badge {
+    width: fit-content;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #e7edf6;
+    color: #526172;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
   .event-card p {
     margin: 0;
     color: #5d6673;
@@ -467,9 +529,8 @@ export const renderWebUiShell = (): string => `
 
       <nav aria-label="Sessions">
         <p class="section-label">Sessions</p>
-        <ul class="session-list">
-          <li class="nav-row is-active"><span class="glyph">1</span><span>S0031 WebUI information architecture</span><span class="badge">now</span></li>
-          <li class="nav-row"><span class="glyph">2</span><span>S0030 WebUI baseline</span><span class="badge">done</span></li>
+        <ul class="session-list" data-session-list>
+          <li class="nav-row nav-row-empty"><span class="glyph">-</span><span>No sessions loaded</span><span class="badge">0</span></li>
         </ul>
       </nav>
 
@@ -522,6 +583,13 @@ export const renderWebUiShell = (): string => `
             <h3>Ready for daemon events</h3>
             <p>User messages, assistant output, tool calls, and status events will appear here in the same shared session observed by CLI attach.</p>
           </article>
+          </div>
+          <div data-session-tree>
+            <article class="event-card session-tree-empty">
+              <p class="event-kicker">Session tree</p>
+              <h3>No session loaded</h3>
+              <p>Select a session from the sidebar to inspect its persistent event tree.</p>
+            </article>
           </div>
         </div>
       </section>

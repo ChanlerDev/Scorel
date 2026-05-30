@@ -20,6 +20,7 @@ import {
   type Seq,
   type SessionId,
   type SessionMeta,
+  type SessionSummary,
   type Unsubscribe,
 } from "@scorel/protocol";
 
@@ -154,6 +155,11 @@ export class DaemonClient {
     this.#persistentLastSeq = maxSeq(this.#persistentLastSeq, response.currentSeq);
     this.#streamLastSeq = maxSeq(this.#streamLastSeq, response.currentSeq);
     return response;
+  }
+
+  async listSessions(): Promise<SessionSummary[]> {
+    const response = await this.#request("list_sessions", {});
+    return response.sessions;
   }
 
   async sendMessage(

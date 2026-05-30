@@ -139,6 +139,49 @@ describe("DaemonClient", () => {
     });
   });
 
+  it("lists sessions through the daemon protocol", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+      createRequestId: () => asRequestId("req_list"),
+    });
+
+    await client.connect(asSessionId("ses_1"));
+    const pending = client.listSessions();
+
+    expect(transport.sent.at(-1)).toMatchObject({
+      type: "list_sessions",
+      requestId: "req_list",
+    });
+    transport.emit({
+      type: "response",
+      requestType: "list_sessions",
+      requestId: asRequestId("req_list"),
+      ok: true,
+      data: {
+        sessions: [
+          {
+            sessionId: asSessionId("ses_a"),
+            title: "Alpha session",
+            model: "test-model",
+            updatedAt: 20,
+            currentSeq: asSeq(4),
+          },
+        ],
+      },
+    });
+
+    await expect(pending).resolves.toEqual([
+      {
+        sessionId: "ses_a",
+        title: "Alpha session",
+        model: "test-model",
+        updatedAt: 20,
+        currentSeq: 4,
+      },
+    ]);
+  });
+
   it("separates durable persistent and observed stream anchors during resync", async () => {
     const transport = new MemoryTransport();
     const client = new DaemonClient(transport, {

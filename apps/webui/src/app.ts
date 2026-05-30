@@ -1,6 +1,9 @@
+import { asSessionId } from "@scorel/protocol";
+
 import type { RemoteSessionState } from "./remote-session.js";
 import { createRemoteSessionController } from "./remote-session.js";
 import { renderEventStreamRows } from "./event-stream.js";
+import { renderSessionBrowser } from "./session-browser.js";
 import { renderWebUiShell } from "./shell.js";
 
 const renderState = (root: HTMLElement, state: RemoteSessionState): void => {
@@ -16,6 +19,13 @@ const renderState = (root: HTMLElement, state: RemoteSessionState): void => {
   const stream = root.querySelector<HTMLElement>("[data-event-stream]");
   if (stream && state.status === "connected") {
     stream.innerHTML = renderEventStreamRows(state.events);
+  }
+  const sessionList = root.querySelector<HTMLElement>("[data-session-list]");
+  const sessionTree = root.querySelector<HTMLElement>("[data-session-tree]");
+  if (sessionList && sessionTree && state.status === "connected") {
+    const rendered = renderSessionBrowser(state.sessionBrowser);
+    sessionList.innerHTML = rendered.sessions;
+    sessionTree.innerHTML = rendered.tree;
   }
 };
 
@@ -38,6 +48,15 @@ export const mountWebUi = (root: HTMLElement): void => {
         sessionId,
     })
       .then((state) => renderState(root, state));
+  });
+
+  root.querySelector<HTMLElement>("[data-session-list]")?.addEventListener("click", (event) => {
+    const button = (event.target as Element | null)?.closest<HTMLElement>("[data-session-id]");
+    const sessionId = button?.dataset.sessionId;
+    if (!sessionId) {
+      return;
+    }
+    void controller.loadSession(asSessionId(sessionId)).then((state) => renderState(root, state));
   });
 
   root.querySelector<HTMLButtonElement>("[data-reconnect-button]")?.addEventListener("click", () => {

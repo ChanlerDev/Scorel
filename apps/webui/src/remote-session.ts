@@ -3,6 +3,7 @@ import { asClientId, asSessionId, type ClientId, type ScorelEvent, type Seq, typ
 
 import { connectToRemoteSession } from "./connection.js";
 import { createEventStreamProjection, type EventStreamRow } from "./event-stream.js";
+import { createSessionBrowser, type SessionBrowser, type SessionBrowserState } from "./session-browser.js";
 
 export type RemoteSessionInput = {
   url: string;
@@ -21,10 +22,14 @@ export type RemoteSessionState =
       streamLastSeq: Seq;
       resyncMode: "stream_resume" | "persistent_fallback" | "full_reload";
       events: EventStreamRow[];
+      sessionBrowser: SessionBrowserState;
     }
   | { status: "error"; message: string };
 
-export type RemoteSessionClient = Pick<DaemonClient, "sessionId" | "persistentLastSeq" | "streamLastSeq" | "resync"> & {
+export type RemoteSessionClient = Pick<
+  DaemonClient,
+  "sessionId" | "persistentLastSeq" | "streamLastSeq" | "resync" | "listSessions" | "loadSession"
+> & {
   subscribe(handler: (event: ScorelEvent) => void): Unsubscribe;
 };
 
@@ -37,6 +42,7 @@ export type ConnectToRemoteSession = (input: {
 
 export type RemoteSessionController = {
   connect(input: RemoteSessionInput): Promise<RemoteSessionState>;
+  loadSession(sessionId: SessionId): Promise<RemoteSessionState>;
   reconnect(): Promise<RemoteSessionState>;
   getState(): RemoteSessionState;
 };
@@ -50,6 +56,7 @@ export const createRemoteSessionController = (options?: {
   let state: RemoteSessionState = { status: "disconnected" };
   let lastInput: RemoteSessionInput | undefined;
   let unsubscribe: Unsubscribe | undefined;
+  let sessionBrowser: SessionBrowser | undefined;
 
   const runConnect = async (input: RemoteSessionInput): Promise<RemoteSessionState> => {
     lastInput = input;
@@ -67,6 +74,13 @@ export const createRemoteSessionController = (options?: {
       for (const event of resync.events) {
         projection.apply(event);
       }
+      sessionBrowser = createSessionBrowser({
+        client: connection.client,
+        projectSlug: connection.identity.projectSlug,
+      });
+      const browserState = await sessionBrowser.refresh();
+      const selectedBrowserState =
+        connection.client.sessionId !== null ? await sessionBrowser.load(connection.client.sessionId) : browserState;
       unsubscribe?.();
       unsubscribe = connection.client.subscribe((event) => {
         projection.apply(event);
@@ -82,6 +96,7 @@ export const createRemoteSessionController = (options?: {
         streamLastSeq: connection.client.streamLastSeq,
         resyncMode: resync.mode,
         events: projection.getRows(),
+        sessionBrowser: selectedBrowserState,
       };
       return state;
     } catch (error) {
@@ -92,6 +107,18 @@ export const createRemoteSessionController = (options?: {
 
   return {
     connect: runConnect,
+    loadSession: async (sessionId) => {
+      if (!sessionBrowser || state.status !== "connected") {
+        state = { status: "error", message: "No connected remote session" };
+        return state;
+      }
+      state = {
+        ...state,
+        sessionId,
+        sessionBrowser: await sessionBrowser.load(sessionId),
+      };
+      return state;
+    },
     reconnect: async () => {
       if (!lastInput) {
         state = { status: "error", message: "No previous remote session connection" };

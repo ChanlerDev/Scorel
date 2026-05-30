@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { asClientId, asDeviceId, asEventId, asSeq, asSessionId, type ClientId, type ScorelEvent, type SessionId } from "@scorel/protocol";
+import {
+  asClientId,
+  asDeviceId,
+  asEventId,
+  asSeq,
+  asSessionId,
+  type ClientId,
+  type ScorelEvent,
+  type SessionId,
+} from "@scorel/protocol";
 
 import { createRemoteSessionController, type ConnectToRemoteSession } from "./remote-session.js";
 
@@ -19,6 +28,33 @@ const createConnect =
           sessionId: input.sessionId,
           persistentLastSeq: asSeq(4),
           streamLastSeq: asSeq(7),
+          listSessions: async () => [
+            {
+              sessionId: input.sessionId,
+              title: "Remote web session",
+              model: "test-model",
+              updatedAt: 7,
+              currentSeq: asSeq(7),
+            },
+          ],
+          loadSession: async (sessionId) => ({
+            sessionId,
+            activeLeafId: asEventId("evt_resynced"),
+            currentSeq: asSeq(6),
+            events: [
+              {
+                type: "user_message",
+                id: asEventId("evt_resynced"),
+                parentId: null,
+                seq: asSeq(6),
+                sessionId,
+                clientId: input.clientId,
+                ts: 6,
+                message: { role: "user", content: [{ type: "text", text: "Recovered prompt" }] },
+              },
+            ],
+            meta: { title: "Remote web session", model: "test-model" },
+          }),
           resync: async () => ({
             mode: options?.resyncMode ?? "stream_resume",
             throughSeq: asSeq(7),
@@ -105,6 +141,23 @@ describe("createRemoteSessionController", () => {
           text: "Live response",
         }),
       ],
+      sessionBrowser: {
+        projectSlug: "scorel",
+        sessions: [
+          expect.objectContaining({
+            sessionId: asSessionId("ses_webui"),
+            title: "Remote web session",
+          }),
+        ],
+        selectedSessionId: asSessionId("ses_webui"),
+        tree: [
+          expect.objectContaining({
+            id: "evt_resynced",
+            text: "Recovered prompt",
+            isActiveLeaf: true,
+          }),
+        ],
+      },
     });
   });
 

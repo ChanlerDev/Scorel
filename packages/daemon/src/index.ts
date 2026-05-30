@@ -594,12 +594,17 @@ export class EmbeddedDaemon {
         this.disconnect(connection);
         break;
       case "list_sessions":
-        connection.emit({
-          type: "error",
-          requestId: message.requestId,
-          ok: false,
-          code: "invalid_request",
-          message: `${message.type} is not implemented in embedded M1`,
+        this.#respond(connection, message, {
+          sessions: [...this.#sessions.values()].map((lane) => {
+            const meta = lane.session.header.meta;
+            return {
+              sessionId: lane.session.header.sessionId,
+              title: meta.title,
+              model: meta.model,
+              updatedAt: meta.updatedAt ?? meta.createdAt ?? lane.session.header.createdAt,
+              currentSeq: lane.session.currentSeq,
+            };
+          }),
         });
         break;
     }

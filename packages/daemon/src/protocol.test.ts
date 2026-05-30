@@ -141,6 +141,56 @@ describe("daemon protocol boundary", () => {
     });
   });
 
+  it("lists loaded sessions with stable summaries", async () => {
+    const daemon = createDaemon();
+    const transport = createEmbeddedTransport(daemon);
+    const messages: DaemonMessage[] = [];
+
+    await daemon.start();
+    transport.onMessage((message) => messages.push(message));
+    await transport.connect({ clientId: asClientId("client_list") });
+
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create_list_a"),
+      sessionId: asSessionId("ses_list_a"),
+      meta: { title: "Alpha session", model: "test-model", createdAt: 10, updatedAt: 20 },
+    });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create_list_b"),
+      sessionId: asSessionId("ses_list_b"),
+      meta: { title: "Beta session", model: "test-model", createdAt: 30 },
+    });
+    await transport.send({
+      type: "list_sessions",
+      requestId: asRequestId("req_list_sessions"),
+    });
+
+    expect(messages.find((message) => message.type === "response" && message.requestId === "req_list_sessions")).toMatchObject({
+      type: "response",
+      requestType: "list_sessions",
+      data: {
+        sessions: [
+          {
+            sessionId: "ses_list_a",
+            title: "Alpha session",
+            model: "test-model",
+            updatedAt: 20,
+            currentSeq: 0,
+          },
+          {
+            sessionId: "ses_list_b",
+            title: "Beta session",
+            model: "test-model",
+            updatedAt: 30,
+            currentSeq: 0,
+          },
+        ],
+      },
+    });
+  });
+
   it("persists and removes local daemon connection state", async () => {
     const stateDir = mkdtempSync(join(tmpdir(), "scorel-state-"));
 

@@ -9,7 +9,7 @@ describe("S0031 WebUI shell", () => {
     expect(html).toContain('data-region="sidebar"');
     expect(html).toContain("Projects");
     expect(html).toContain("Scorel");
-    expect(html).toContain("S0031 WebUI information architecture");
+    expect(html).toContain("No sessions loaded");
     expect(html).toContain('data-region="session-stream"');
     expect(html).toContain('data-event-stream');
     expect(html).toContain("Session stream");
@@ -39,6 +39,15 @@ describe("S0031 WebUI shell", () => {
     expect(html).toContain('data-persistent-seq');
     expect(html).toContain('data-stream-seq');
     expect(html).toContain('data-reconnect-button');
+  });
+
+  it("renders session browser and tree regions", () => {
+    const html = renderWebUiShell();
+
+    expect(html).toContain('data-session-list');
+    expect(html).toContain('data-session-tree');
+    expect(html).toContain("No sessions loaded");
+    expect(html).toContain("Session tree");
   });
 
   it("ships the shell styling with responsive layout rules", () => {
