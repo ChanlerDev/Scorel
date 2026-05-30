@@ -259,7 +259,8 @@ type ClientMessage =
 
   // ─── Session 管理 ───
   | { type: "create_session"; requestId: string; meta: Partial<SessionMeta> }
-  | { type: "list_sessions"; requestId: string }
+  | { type: "list_sessions"; requestId: string; projectSlug?: string; limit?: number }
+  | { type: "list_projects"; requestId: string }
   | { type: "delete_session"; requestId: string; sessionId: SessionId }
   | { type: "switch_session"; requestId: string; sessionId: SessionId; lastSeq?: Seq }
   | { type: "clone_session"; requestId: string; fromEventId: EventId; meta?: Partial<SessionMeta> }
@@ -282,12 +283,13 @@ type ClientMessage =
 | `ping` | 心跳保活，daemon 回 `pong` |
 | `send_message` | 发送用户消息，触发新 turn |
 | `steer` | 运行中插话（注入 steeringQueue，不排队等当前 turn 完成） |
-| `cancel` | 中断当前生成 |
+| `cancel` | 中断当前生成。返回 `{ sessionId, cancelled }`：runtime 在跑时 `cancelled=true`，否则 `false`；daemon 写 `cancel_requested` diagnostic |
 | `rewind` | 回退到某个 event，带乐观锁 |
 | `branch` | 切换到已有分支的某个叶子 |
 | `compact` | 触发上下文压缩 |
 | `create_session` | 创建新 session |
-| `list_sessions` | 列出 daemon 上所有 sessions |
+| `list_sessions` | 列出 daemon 上的 sessions。可选 `projectSlug` 过滤、`limit` 截断（默认 200，最大 1000）；按 `updatedAt` 降序、`sessionId` 升序稳定排序；返回项含 `projectSlug` |
+| `list_projects` | 列出 daemon 已知的所有 project（聚合 JSONL header 的 slug；无 header 字段时回退到 `toProjectSlug(workDir)`），返回 `DaemonProjectSummary[]`：`{ projectSlug, displayName, workDirHint?, sessionCount, lastSeenAt }` |
 | `delete_session` | 删除 session |
 | `switch_session` | 切换到另一个 session（同一 daemon 上） |
 | `clone_session` | 从某个 event clone 出新 session（跨 device 复制时产生独立 session） |

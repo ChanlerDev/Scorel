@@ -880,6 +880,15 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
   });
 
   await daemon.start();
+  let inFlight = false;
+  let rlClose = (): void => undefined;
+  const sigintHandler = createSigintHandler({
+    isInFlight: () => inFlight,
+    cancel: () => client.cancel().then(() => undefined).catch(() => undefined),
+    output: io.output,
+    exit: () => rlClose(),
+  });
+  process.on("SIGINT", sigintHandler);
   try {
     await client.connect(options.sessionId);
     const resumed = await loadOrCreateSession(client, options, config);
@@ -890,6 +899,7 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
     io.error.write(`scorel chat ${resumed ? "resumed" : "created"} session ${options.sessionId}\n`);
 
     const rl = createInterface({ input: io.input as Readable, crlfDelay: Infinity });
+    rlClose = () => rl.close();
     promptIfInteractive(io.output);
     for await (const rawLine of rl) {
       const line = rawLine.trim();
@@ -912,10 +922,12 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
           writeEventError(io.error, event);
         }
       });
+      inFlight = true;
       try {
         await client.sendMessage(line);
         io.output.write("\n");
       } finally {
+        inFlight = false;
         unsubscribe();
       }
       promptIfInteractive(io.output);
@@ -926,9 +938,37 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
     io.error.write(`scorel chat error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
     return 1;
   } finally {
+    process.off("SIGINT", sigintHandler);
     client.disconnect();
     await daemon.shutdown();
   }
+};
+
+export type SigintHandlerOptions = {
+  /** Returns true when a chat turn is mid-flight; daemon should be cancelled. */
+  isInFlight: () => boolean;
+  /** Best-effort daemon cancel (no rejection surfaces). */
+  cancel: () => Promise<void>;
+  /** Stream to write the cancellation marker to. */
+  output: NodeJS.WritableStream;
+  /** Called when the handler decides to exit the REPL (idle Ctrl-C). */
+  exit: () => void;
+};
+
+/**
+ * Build a SIGINT handler that cancels in-flight turns without exiting; a
+ * subsequent SIGINT during idle exits via `exit`. Factored out so unit tests
+ * can drive it without poking real process signals.
+ */
+export const createSigintHandler = (options: SigintHandlerOptions): () => void => {
+  return () => {
+    if (options.isInFlight()) {
+      options.output.write("\n[cancelled]\n");
+      void options.cancel().catch(() => undefined);
+      return;
+    }
+    options.exit();
+  };
 };
 
 const loadOrCreateSession = async (client: DaemonClient, options: ChatOptions, config: ScorelConfig): Promise<boolean> => {

@@ -228,7 +228,21 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 
 **Product Intent**:
 
-M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-intent.md)。该文档只锁定方向，不代表实现已经完成。
+M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-intent.md)。详细设计讨论在 [`self/discussions/2026-05-30-webui-rebuild-brainstorm.md`](../self/discussions/2026-05-30-webui-rebuild-brainstorm.md)。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M5.1 | [`S0031`](spec/ship/S0031-daemon-projectslug-rule.md) | 锁定 daemon 侧 codebuddy 风格 `projectSlug` 生成规则 | Planned |
+| M5.2 | [`S0032`](spec/ship/S0032-daemon-protocol-completion.md) | 重新加回 `cancel`、实现 `list_sessions` + `projectSlug` 过滤、新增 `list_projects` | Done |
+| M5.3 | [`S0033`](spec/ship/S0033-webui-skeleton-routing.md) | 建立 Next.js 14 App Router + Tailwind 4 应用骨架与路由 | Planned |
+| M5.4 | [`S0034`](spec/ship/S0034-webui-device-settings.md) | Device 域模型、BrowserStore 与 Settings CRUD | Planned |
+| M5.5 | [`S0035`](spec/ship/S0035-webui-device-handshake.md) | DaemonClient 实例池、handshake、连接状态机与错误分类 | Planned |
+| M5.6 | [`S0036`](spec/ship/S0036-webui-project-session-sync.md) | `list_projects` / `list_sessions` 同步与 sidebar 树渲染 | Planned |
+| M5.7 | [`S0037`](spec/ship/S0037-webui-chatbox-v1.md) | Chatbox v1：attach-cache 渲染、dual-seq resync、event 投影、prompt 发送 | Planned |
+| M5.8 | [`S0038`](spec/ship/S0038-webui-cancel-multiclient.md) | Composer Cancel + WebUI/CLI 多端共享同一 session 真实手工 e2e | Planned |
+| M5.9 | [`S0039`](spec/ship/S0039-webui-e2e-newchat.md) | New Chat + 真实 daemon + 真实 LLM provider 端到端验证；M5 收口 | Planned |
 
 **Not in M5**:
 
@@ -237,6 +251,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - OAuth、账号系统、TLS 自动签发。
 - 公网 tunnel / relay service / NAT traversal。
 - IDE-style file explorer/editor、monitoring dashboard、checkpoint restore UI、完整 rewind/fork/compact 图形交互。
+- WebUI 内 Skills / Plugins / Automations 入口（v1 不出现，后续阶段再加）。
 
 **Status**: Planned
 
@@ -290,6 +305,15 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0028`](spec/ship/S0028-client-attach-diagnostics-log.md) | 为本地 attach cache 增加同级 diagnostics `.log`，暴露 remote/local attach 客户端侧调试信息 | Done |
 | [`S0029`](spec/ship/S0029-project-index-for-session-lookup.md) | 增加轻量 project index，用 project 视角索引 local/remote sessions 与 attach logs | Done |
 | [`S0030`](spec/ship/S0030-webui-product-intent.md) | 记录 M5 WebUI 产品方向：Device -> Project -> Session -> Chatbox，作为下一轮实现前置共识 | Planned |
+| [`S0031`](spec/ship/S0031-daemon-projectslug-rule.md) | 锁定 daemon 侧 codebuddy 风格 `projectSlug` 生成规则 | Planned |
+| [`S0032`](spec/ship/S0032-daemon-protocol-completion.md) | 重新加回 `cancel`，实现 `list_sessions` + `projectSlug` 过滤，新增 `list_projects` | Done |
+| [`S0033`](spec/ship/S0033-webui-skeleton-routing.md) | Next.js 14 App Router + Tailwind 4 应用骨架与路由 | Planned |
+| [`S0034`](spec/ship/S0034-webui-device-settings.md) | WebUI Device 域模型、BrowserStore、Settings CRUD | Planned |
+| [`S0035`](spec/ship/S0035-webui-device-handshake.md) | WebUI DaemonClient 实例池与 Device 连接握手 | Planned |
+| [`S0036`](spec/ship/S0036-webui-project-session-sync.md) | WebUI Project / Session 索引同步与 sidebar 树渲染 | Planned |
+| [`S0037`](spec/ship/S0037-webui-chatbox-v1.md) | WebUI Chatbox v1：attach-cache 渲染、dual-seq resync、event 投影、prompt 发送 | Planned |
+| [`S0038`](spec/ship/S0038-webui-cancel-multiclient.md) | WebUI Composer Cancel 与多端共享真实 session 验证 | Planned |
+| [`S0039`](spec/ship/S0039-webui-e2e-newchat.md) | WebUI New Chat 与真实 daemon 端到端验证（M5 收口） | Planned |
 
 ---
 

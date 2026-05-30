@@ -32,7 +32,7 @@ interface DaemonClient {
   }>;
   steer(content: string): void;   // 运行中插话，fire-and-forget
   followUp(content: string): void; // 追加任务（agent 停下后消费）
-  cancel(): Promise<void>;
+  cancel(): Promise<{ sessionId: SessionId; cancelled: boolean }>;
 
   // ─── 树操作 ───
   rewind(targetEventId: EventId): Promise<EventId>;
@@ -41,7 +41,8 @@ interface DaemonClient {
 
   // ─── Session 管理 ───
   createSession(meta: Partial<SessionMeta>): Promise<SessionId>;
-  listSessions(): Promise<SessionSummary[]>;
+  listSessions(filter?: { projectSlug?: string; limit?: number }): Promise<SessionSummary[]>;
+  listProjects(): Promise<DaemonProjectSummary[]>;
   deleteSession(sessionId: SessionId): Promise<void>;
   switchSession(sessionId: SessionId): Promise<void>;
   cloneSession(fromEventId: EventId, meta?: Partial<SessionMeta>): Promise<SessionId>;
@@ -201,6 +202,12 @@ Project is the user-facing organization unit:
 - `deviceDisplayName`, project display name, and remote URL are UI/connection metadata, not identity
 
 Remote project keys therefore include both pieces needed for stable storage, for example `remote:<deviceId>:<projectSlug>`, but product surfaces should still present the project slug as the project and the device as disambiguating context. The latest remote URL is stored only so a later CLI lookup such as `scorel logs --attach --remote <url>` can resolve the local attach diagnostics path.
+
+### 4.4 Cancel, ListSessions, ListProjects
+
+`cancel()` requires a session-bound client; it returns `{ sessionId, cancelled }`. `cancelled` is `false` when no turn is running on that session. The daemon writes a `cancel_requested` diagnostic regardless.
+
+`listSessions(filter?)` and `listProjects()` only require an active daemon connection (no session). `listSessions` accepts `{ projectSlug?, limit? }`; daemon enforces the default/max limits and stable ordering. `listProjects` returns `DaemonProjectSummary[]` aggregated from the daemon's sessions directory; the result includes `displayName` and `workDirHint` for UI use only.
 
 ---
 

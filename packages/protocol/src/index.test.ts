@@ -12,8 +12,10 @@ import {
   protocolVersion,
   type ClientRequest,
   type DaemonMessage,
+  type DaemonProjectSummary,
   type ResponseFor,
   type ScorelEvent,
+  type SessionSummary,
 } from "@scorel/protocol";
 
 describe("@scorel/protocol", () => {
@@ -139,5 +141,65 @@ describe("@scorel/protocol", () => {
 
     expect(message.deviceId).toBe("device_tokyo");
     expect(message.projectSlug).toBe("scorel");
+  });
+
+  it("round-trips cancel request and response", () => {
+    const request = {
+      type: "cancel",
+      requestId: asRequestId("req_cancel"),
+      sessionId: asSessionId("ses_cancel"),
+    } satisfies ClientRequest<"cancel">;
+
+    const response = okResponse(request, {
+      sessionId: asSessionId("ses_cancel"),
+      cancelled: true,
+    }) satisfies ResponseFor<typeof request>;
+
+    expect(response.requestType).toBe("cancel");
+    expect(response.data.cancelled).toBe(true);
+    expect(response.data.sessionId).toBe("ses_cancel");
+  });
+
+  it("round-trips list_sessions with projectSlug filter and limit clamp", () => {
+    const request = {
+      type: "list_sessions",
+      requestId: asRequestId("req_list_sessions"),
+      projectSlug: "Users-test-repo",
+      limit: 50,
+    } satisfies ClientRequest<"list_sessions">;
+
+    const summary: SessionSummary = {
+      sessionId: asSessionId("ses_alpha"),
+      title: "Alpha",
+      model: "test-model",
+      updatedAt: 5,
+      currentSeq: asSeq(7),
+      projectSlug: "Users-test-repo",
+    };
+    const response = okResponse(request, { sessions: [summary] }) satisfies ResponseFor<typeof request>;
+
+    expect(response.requestType).toBe("list_sessions");
+    expect(response.data.sessions[0].projectSlug).toBe("Users-test-repo");
+    expect(request.limit).toBe(50);
+  });
+
+  it("round-trips list_projects with DaemonProjectSummary entries", () => {
+    const request = {
+      type: "list_projects",
+      requestId: asRequestId("req_list_projects"),
+    } satisfies ClientRequest<"list_projects">;
+
+    const project: DaemonProjectSummary = {
+      projectSlug: "Users-test-repo",
+      displayName: "repo",
+      workDirHint: "/Users/test/repo",
+      sessionCount: 3,
+      lastSeenAt: 99,
+    };
+    const response = okResponse(request, { projects: [project] }) satisfies ResponseFor<typeof request>;
+
+    expect(response.requestType).toBe("list_projects");
+    expect(response.data.projects[0].displayName).toBe("repo");
+    expect(response.data.projects[0].sessionCount).toBe(3);
   });
 });

@@ -288,6 +288,135 @@ describe("DaemonClient", () => {
     await expect(pending).resolves.toMatchObject({ mode: "stream_resume" });
     expect(seen).toEqual(["missed"]);
   });
+
+  it("sends cancel for the active session and resolves with daemon response", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+      createRequestId: () => asRequestId("req_cancel"),
+    });
+
+    await client.connect(asSessionId("ses_cancel"));
+    const pending = client.cancel();
+
+    expect(transport.sent.at(-1)).toMatchObject({
+      type: "cancel",
+      requestId: "req_cancel",
+      sessionId: "ses_cancel",
+    });
+
+    transport.emit({
+      type: "response",
+      requestType: "cancel",
+      requestId: asRequestId("req_cancel"),
+      ok: true,
+      data: { sessionId: asSessionId("ses_cancel"), cancelled: true },
+    });
+
+    await expect(pending).resolves.toEqual({ sessionId: "ses_cancel", cancelled: true });
+  });
+
+  it("rejects cancel when no session is bound to the client", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, { clientId: asClientId("client_test") });
+
+    await expect(client.cancel()).rejects.toThrow(/not connected to a session/);
+  });
+
+  it("forwards listSessions filter and surfaces SessionSummary entries", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+      createRequestId: () => asRequestId("req_list_sessions"),
+    });
+
+    await client.connect(asSessionId("ses_listing"));
+    const pending = client.listSessions({ projectSlug: "Users-test-repo", limit: 25 });
+
+    expect(transport.sent.at(-1)).toMatchObject({
+      type: "list_sessions",
+      requestId: "req_list_sessions",
+      projectSlug: "Users-test-repo",
+      limit: 25,
+    });
+
+    transport.emit({
+      type: "response",
+      requestType: "list_sessions",
+      requestId: asRequestId("req_list_sessions"),
+      ok: true,
+      data: {
+        sessions: [
+          {
+            sessionId: asSessionId("ses_alpha"),
+            updatedAt: 5,
+            currentSeq: asSeq(3),
+            projectSlug: "Users-test-repo",
+          },
+        ],
+      },
+    });
+
+    await expect(pending).resolves.toEqual([
+      {
+        sessionId: "ses_alpha",
+        updatedAt: 5,
+        currentSeq: 3,
+        projectSlug: "Users-test-repo",
+      },
+    ]);
+  });
+
+  it("returns DaemonProjectSummary list from listProjects", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+      createRequestId: () => asRequestId("req_list_projects"),
+    });
+
+    await client.connect(asSessionId("ses_listing"));
+    const pending = client.listProjects();
+    expect(transport.sent.at(-1)).toMatchObject({
+      type: "list_projects",
+      requestId: "req_list_projects",
+    });
+
+    transport.emit({
+      type: "response",
+      requestType: "list_projects",
+      requestId: asRequestId("req_list_projects"),
+      ok: true,
+      data: {
+        projects: [
+          {
+            projectSlug: "Users-test-repo",
+            displayName: "repo",
+            workDirHint: "/Users/test/repo",
+            sessionCount: 4,
+            lastSeenAt: 17,
+          },
+        ],
+      },
+    });
+
+    await expect(pending).resolves.toEqual([
+      {
+        projectSlug: "Users-test-repo",
+        displayName: "repo",
+        workDirHint: "/Users/test/repo",
+        sessionCount: 4,
+        lastSeenAt: 17,
+      },
+    ]);
+  });
+
+  it("rejects listSessions / listProjects when not connected to a daemon", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, { clientId: asClientId("client_test") });
+
+    await expect(client.listSessions()).rejects.toThrow(/not connected to a daemon/);
+    await expect(client.listProjects()).rejects.toThrow(/not connected to a daemon/);
+  });
 });
 
 describe("WsTransport", () => {

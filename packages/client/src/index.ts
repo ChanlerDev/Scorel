@@ -12,6 +12,7 @@ import {
   type ClientRequestType,
   type ContentBlock,
   type DaemonMessage,
+  type DaemonProjectSummary,
   type DaemonTransport,
   type DeviceId,
   type EventId,
@@ -20,6 +21,7 @@ import {
   type Seq,
   type SessionId,
   type SessionMeta,
+  type SessionSummary,
   type Unsubscribe,
 } from "@scorel/protocol";
 
@@ -166,6 +168,34 @@ export class DaemonClient {
     return this.#request("send_message", { sessionId: this.#sessionId, content, options });
   }
 
+  async cancel(): Promise<{ sessionId: SessionId; cancelled: boolean }> {
+    if (!this.#sessionId) {
+      throw new Error("DaemonClient is not connected to a session");
+    }
+    return this.#request("cancel", { sessionId: this.#sessionId });
+  }
+
+  async listSessions(filter?: { projectSlug?: string; limit?: number }): Promise<SessionSummary[]> {
+    this.#assertDaemonConnected();
+    const response = await this.#request("list_sessions", {
+      projectSlug: filter?.projectSlug,
+      limit: filter?.limit,
+    });
+    return response.sessions;
+  }
+
+  async listProjects(): Promise<DaemonProjectSummary[]> {
+    this.#assertDaemonConnected();
+    const response = await this.#request("list_projects", {});
+    return response.projects;
+  }
+
+  #assertDaemonConnected(): void {
+    if (this.#state !== "connected") {
+      throw new Error("DaemonClient is not connected to a daemon");
+    }
+  }
+
   async resync(anchors?: Seq | { persistentLastSeq?: Seq; streamLastSeq?: Seq }): Promise<ClientRequestMap["resync_events"]["response"]> {
     if (!this.#sessionId) {
       throw new Error("DaemonClient is not connected to a session");
@@ -256,10 +286,14 @@ export class DaemonClient {
       }
       case "connected":
         this.#sessionId = message.sessionId ?? this.#sessionId;
+        // Merge: a follow-up `connected` (e.g. duplicate ack from a server that
+        // sends one manually plus the default) must not blank out identity
+        // fields the first message established.
         this.#connectionIdentity = {
-          deviceId: message.deviceId,
-          deviceDisplayName: message.deviceDisplayName,
-          projectSlug: message.projectSlug,
+          deviceId: message.deviceId ?? this.#connectionIdentity.deviceId,
+          deviceDisplayName:
+            message.deviceDisplayName ?? this.#connectionIdentity.deviceDisplayName,
+          projectSlug: message.projectSlug ?? this.#connectionIdentity.projectSlug,
         };
         break;
       case "disconnected":

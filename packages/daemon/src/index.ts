@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { toProjectSlug } from "./projects/slug.js";
+import { ProjectAggregator } from "./projects/aggregator.js";
 
 import {
   ScorelRuntime,
@@ -500,6 +501,7 @@ export class EmbeddedDaemon {
   readonly #sessionsDir: string;
   readonly #deviceId: DeviceId;
   readonly #deviceDisplayName: string | undefined;
+  readonly #workDir: string;
   readonly #projectSlug: string;
   readonly #createRuntime: (sessionId: SessionId) => ScorelRuntime;
   readonly #now: () => number;
@@ -508,16 +510,23 @@ export class EmbeddedDaemon {
   readonly #connections = new Set<Connection>();
   readonly #events = new Map<SessionId, ScorelEvent[]>();
   readonly #seqs = new Map<SessionId, number>();
+  readonly #aggregator: ProjectAggregator;
   #started = false;
 
   constructor(options: EmbeddedDaemonOptions) {
     this.#sessionsDir = options.sessionsDir;
     this.#deviceId = options.deviceId;
     this.#deviceDisplayName = options.deviceDisplayName;
+    this.#workDir = options.workDir;
     this.#projectSlug = toProjectSlug(options.workDir);
     this.#createRuntime = options.createRuntime;
     this.#now = options.now ?? Date.now;
     this.#createId = options.createId ?? (() => crypto.randomUUID());
+    this.#aggregator = new ProjectAggregator({
+      sessionsDir: this.#sessionsDir,
+      fallbackProjectSlug: this.#projectSlug,
+      fallbackWorkDirHint: this.#workDir,
+    });
   }
 
   async start(): Promise<void> {
@@ -602,14 +611,21 @@ export class EmbeddedDaemon {
       case "disconnect":
         this.disconnect(connection);
         break;
-      case "list_sessions":
-        connection.emit({
-          type: "error",
-          requestId: message.requestId,
-          ok: false,
-          code: "invalid_request",
-          message: `${message.type} is not implemented in embedded M1`,
-        });
+      case "list_sessions": {
+        const sessions = await this.#aggregator.listSessions(
+          { projectSlug: message.projectSlug, limit: message.limit },
+          this.#aggregatorOverrides(),
+        );
+        this.#respond(connection, message, { sessions });
+        break;
+      }
+      case "list_projects": {
+        const projects = await this.#aggregator.listProjects(this.#aggregatorOverrides());
+        this.#respond(connection, message, { projects });
+        break;
+      }
+      case "cancel":
+        await this.#handleCancel(connection, message);
         break;
     }
   }
@@ -710,6 +726,44 @@ export class EmbeddedDaemon {
     });
 
     await lane.queue;
+  }
+
+  async #handleCancel(connection: Connection, request: ClientRequest<"cancel">): Promise<void> {
+    try {
+      const lane = await this.#getLane(request.sessionId);
+      const cancelled = lane.runtime.running;
+      lane.runtime.cancel();
+      await this.#appendDiagnostic(request.sessionId, "cancel_requested", {
+        clientId: connection.clientId,
+        cancelled,
+      });
+      this.#respond(connection, request, {
+        sessionId: request.sessionId,
+        cancelled,
+      });
+    } catch (cause) {
+      connection.emit({
+        type: "error",
+        requestId: request.requestId,
+        ok: false,
+        code: "session_not_found",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  }
+
+  /**
+   * Build a per-sessionId override map from in-memory state. Live lanes have
+   * the most up-to-date `currentSeq` (and implicitly `updatedAt` ≈ now). The
+   * aggregator's disk scan returns header-time data; overrides bring it
+   * forward without reading every JSONL tail.
+   */
+  #aggregatorOverrides(): Map<string, { currentSeq?: number; updatedAt?: number }> {
+    const overrides = new Map<string, { currentSeq?: number; updatedAt?: number }>();
+    for (const [sessionId, currentSeq] of this.#seqs.entries()) {
+      overrides.set(String(sessionId), { currentSeq });
+    }
+    return overrides;
   }
 
   async #handleRuntimeEvent(
@@ -840,6 +894,7 @@ export class EmbeddedDaemon {
   ): Promise<PersistentEvent> {
     const withSeq = { ...event, seq: this.#nextSeq(lane.session.header.sessionId) } as PersistentEvent;
     await lane.session.append(withSeq);
+    this.#aggregator.invalidate();
     this.#recordAndBroadcast(lane.session.header.sessionId, withSeq);
     return withSeq;
   }
@@ -976,9 +1031,14 @@ export class EmbeddedDaemon {
         sessionId,
         deviceId: this.#deviceId,
         createdAt: this.#now(),
-        meta,
+        meta: {
+          ...meta,
+          projectSlug: meta.projectSlug ?? this.#projectSlug,
+          workDirHint: meta.workDirHint ?? this.#workDir,
+        },
       },
     });
+    this.#aggregator.invalidate();
     return {
       session,
       runtime: this.#createRuntime(sessionId),

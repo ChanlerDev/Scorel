@@ -7,7 +7,7 @@ import { PassThrough, Readable, Writable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
-import { cliAppName, cliClientDependency, cliDaemonDependency, runCli } from "@scorel/app-cli";
+import { cliAppName, cliClientDependency, cliDaemonDependency, createSigintHandler, runCli } from "@scorel/app-cli";
 import {
   createLocalDaemonState,
   startRemoteDaemonWebSocketServer,
@@ -21,6 +21,53 @@ describe("@scorel/app-cli", () => {
     expect(cliAppName).toBe("@scorel/app-cli");
     expect(cliClientDependency).toBe("@scorel/client");
     expect(cliDaemonDependency).toBe("@scorel/daemon");
+  });
+
+  it("cancels on SIGINT during an in-flight turn and exits on idle SIGINT", async () => {
+    const output = new StringWritable();
+    let inFlight = true;
+    let cancelCalls = 0;
+    let exitCalls = 0;
+    const handler = createSigintHandler({
+      isInFlight: () => inFlight,
+      cancel: async () => {
+        cancelCalls += 1;
+      },
+      output,
+      exit: () => {
+        exitCalls += 1;
+      },
+    });
+
+    handler();
+    expect(cancelCalls).toBe(1);
+    expect(exitCalls).toBe(0);
+    expect(output.toString()).toContain("[cancelled]");
+
+    inFlight = false;
+    handler();
+    expect(cancelCalls).toBe(1);
+    expect(exitCalls).toBe(1);
+  });
+
+  it("swallows cancel rejections so SIGINT never crashes the REPL", async () => {
+    const output = new StringWritable();
+    let exitCalls = 0;
+    const handler = createSigintHandler({
+      isInFlight: () => true,
+      cancel: () => Promise.reject(new Error("daemon disconnected")),
+      output,
+      exit: () => {
+        exitCalls += 1;
+      },
+    });
+
+    handler();
+    // Allow any microtasks to settle without throwing.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(exitCalls).toBe(0);
+    expect(output.toString()).toContain("[cancelled]");
   });
 
   it("routes daemon status to local daemon discovery", async () => {

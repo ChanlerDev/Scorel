@@ -7,6 +7,20 @@ export type SessionMeta = {
   deviceId?: DeviceId;
   createdAt?: number;
   updatedAt?: number;
+  /**
+   * Daemon-owned project slug pinned at session creation. Persisted into the
+   * JSONL header so list_projects/list_sessions stay deterministic across
+   * daemon restarts. Optional for back-compat with sessions written before
+   * S0032 — readers fall back to `toProjectSlug(daemon.workDir)`.
+   */
+  projectSlug?: string;
+  /**
+   * Absolute workdir of the daemon that created this session. Optional and
+   * additive: only used to populate `DaemonProjectSummary.workDirHint` and
+   * pretty-print `displayName` (basename). Never reverse-engineered from the
+   * slug — slug is lossy by design (see `projects/slug.ts`).
+   */
+  workDirHint?: string;
 };
 
 export type PersistentEventBase = {
@@ -124,4 +138,22 @@ export type SessionSummary = {
   model?: string;
   updatedAt: number;
   currentSeq: Seq;
+  /** Daemon-owned project slug — required so callers can group across daemons. */
+  projectSlug: string;
+};
+
+/**
+ * Aggregate view of a single project served by a daemon. Returned by
+ * `list_projects`. Built from the union of session JSONL headers in the
+ * daemon's sessions directory — see `packages/daemon/src/projects/aggregator.ts`.
+ */
+export type DaemonProjectSummary = {
+  projectSlug: string;
+  /** Human-readable name. `basename(workDirHint)` when known, else `projectSlug`. */
+  displayName: string;
+  /** Absolute path the daemon last saw for this slug. Lossy reverse of slug. */
+  workDirHint?: string;
+  sessionCount: number;
+  /** Max(updatedAt, createdAt) across the project's sessions. */
+  lastSeenAt: number;
 };

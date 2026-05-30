@@ -6,7 +6,15 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ScorelRuntime, type RuntimeProvider } from "@scorel/core";
-import { asClientId, asDeviceId, asRequestId, asSeq, asSessionId, type DaemonMessage } from "@scorel/protocol";
+import {
+  asClientId,
+  asDeviceId,
+  asRequestId,
+  asSeq,
+  asSessionId,
+  type ClientResponse,
+  type DaemonMessage,
+} from "@scorel/protocol";
 
 import {
   EmbeddedDaemon,
@@ -459,6 +467,265 @@ describe("daemon protocol boundary", () => {
       await server.close();
       await daemon.shutdown();
     }
+  });
+
+  it("cancels a running turn and emits a cancel_requested diagnostic", async () => {
+    const sessionsDir = mkdtempSync(join(tmpdir(), "scorel-cancel-running-"));
+    let nextId = 0;
+    const slowProvider: RuntimeProvider = {
+      streamTurn: async function* (input) {
+        yield { type: "text_delta", delta: "first" };
+        for (let step = 0; step < 100; step += 1) {
+          if (input.signal.aborted) {
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      },
+    };
+    const daemon = new EmbeddedDaemon({
+      sessionsDir,
+      deviceId: asDeviceId("device_test"),
+      workDir: "/test-project",
+      createRuntime: () => new ScorelRuntime({ provider: slowProvider }),
+      now: () => 1,
+      createId: () => {
+        nextId += 1;
+        return `evt_cancel_${nextId}`;
+      },
+    });
+    const transport = createEmbeddedTransport(daemon);
+    const messages: DaemonMessage[] = [];
+
+    await daemon.start();
+    transport.onMessage((message) => messages.push(message));
+    await transport.connect({ clientId: asClientId("client_cancel"), sessionId: asSessionId("ses_cancel") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create_cancel"),
+      sessionId: asSessionId("ses_cancel"),
+      meta: { model: "test-model" },
+    });
+
+    const sendPromise = transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send_cancel"),
+      sessionId: asSessionId("ses_cancel"),
+      content: "long running",
+    });
+    await waitForDaemonMessage(
+      messages,
+      (message) => message.type === "event" && message.event.type === "text_delta",
+    );
+    await transport.send({
+      type: "cancel",
+      requestId: asRequestId("req_cancel_active"),
+      sessionId: asSessionId("ses_cancel"),
+    });
+    await sendPromise;
+
+    const cancelResponse = messages.find(
+      (message) => message.type === "response" && message.requestId === "req_cancel_active",
+    ) as ClientResponse<"cancel"> | undefined;
+    expect(cancelResponse).toBeDefined();
+    expect(cancelResponse).toMatchObject({
+      type: "response",
+      requestType: "cancel",
+      data: { sessionId: "ses_cancel", cancelled: true },
+    });
+    const log = readFileSync(join(sessionsDir, "ses_cancel.log"), "utf8");
+    expect(log).toContain("event=cancel_requested");
+    expect(log).toContain("cancelled=true");
+    await daemon.shutdown();
+  });
+
+  it("returns cancelled=false when there is no running turn", async () => {
+    const daemon = createDaemon();
+    const transport = createEmbeddedTransport(daemon);
+    const messages: DaemonMessage[] = [];
+
+    await daemon.start();
+    transport.onMessage((message) => messages.push(message));
+    await transport.connect({ clientId: asClientId("client_idle"), sessionId: asSessionId("ses_idle") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create_idle"),
+      sessionId: asSessionId("ses_idle"),
+      meta: {},
+    });
+
+    await transport.send({
+      type: "cancel",
+      requestId: asRequestId("req_cancel_idle"),
+      sessionId: asSessionId("ses_idle"),
+    });
+
+    const response = messages.find(
+      (message) => message.type === "response" && message.requestId === "req_cancel_idle",
+    );
+    expect(response).toMatchObject({
+      type: "response",
+      requestType: "cancel",
+      data: { sessionId: "ses_idle", cancelled: false },
+    });
+    await daemon.shutdown();
+  });
+
+  it("lists all sessions, filters by projectSlug, and clamps with limit", async () => {
+    const sessionsDir = mkdtempSync(join(tmpdir(), "scorel-list-sessions-"));
+    let nextId = 0;
+    const daemon = new EmbeddedDaemon({
+      sessionsDir,
+      deviceId: asDeviceId("device_test"),
+      workDir: "/Users/test/repo-alpha",
+      createRuntime: () => new ScorelRuntime({ provider: emptyProvider }),
+      now: () => 100 + nextId,
+      createId: () => {
+        nextId += 1;
+        return `evt_list_${nextId}`;
+      },
+    });
+    const transport = createEmbeddedTransport(daemon);
+    const messages: DaemonMessage[] = [];
+
+    await daemon.start();
+    transport.onMessage((message) => messages.push(message));
+    await transport.connect({ clientId: asClientId("client_list") });
+
+    for (const sessionId of ["ses_alpha_1", "ses_alpha_2", "ses_alpha_3"]) {
+      await transport.send({
+        type: "create_session",
+        requestId: asRequestId(`req_create_${sessionId}`),
+        sessionId: asSessionId(sessionId),
+        meta: { model: "test-model" },
+      });
+    }
+
+    await transport.send({
+      type: "list_sessions",
+      requestId: asRequestId("req_list_all"),
+    });
+    const allResponse = messages.find(
+      (message) => message.type === "response" && message.requestId === "req_list_all",
+    ) as ClientResponse<"list_sessions"> | undefined;
+    expect(allResponse?.data.sessions.map((session) => String(session.sessionId)).sort()).toEqual([
+      "ses_alpha_1",
+      "ses_alpha_2",
+      "ses_alpha_3",
+    ]);
+    expect(allResponse?.data.sessions.every((session) => session.projectSlug === "Users-test-repo-alpha")).toBe(true);
+
+    await transport.send({
+      type: "list_sessions",
+      requestId: asRequestId("req_list_filter_match"),
+      projectSlug: "Users-test-repo-alpha",
+    });
+    const filtered = messages.find(
+      (message) => message.type === "response" && message.requestId === "req_list_filter_match",
+    ) as ClientResponse<"list_sessions"> | undefined;
+    expect(filtered?.data.sessions).toHaveLength(3);
+
+    await transport.send({
+      type: "list_sessions",
+      requestId: asRequestId("req_list_filter_miss"),
+      projectSlug: "non-existent-slug",
+    });
+    const empty = messages.find(
+      (message) => message.type === "response" && message.requestId === "req_list_filter_miss",
+    ) as ClientResponse<"list_sessions"> | undefined;
+    expect(empty?.data.sessions).toEqual([]);
+
+    await transport.send({
+      type: "list_sessions",
+      requestId: asRequestId("req_list_limit"),
+      limit: 2,
+    });
+    const limited = messages.find(
+      (message) => message.type === "response" && message.requestId === "req_list_limit",
+    ) as ClientResponse<"list_sessions"> | undefined;
+    expect(limited?.data.sessions).toHaveLength(2);
+    await daemon.shutdown();
+  });
+
+  it("aggregates DaemonProjectSummary across daemon's sessions", async () => {
+    const sessionsDir = mkdtempSync(join(tmpdir(), "scorel-list-projects-"));
+    // Pre-populate with a session header from a different slug so aggregator
+    // sees a second project even though daemon's own workDir is alpha.
+    const otherJsonl = join(sessionsDir, "ses_beta.jsonl");
+    const headerLine = JSON.stringify({
+      version: 1,
+      sessionId: "ses_beta",
+      deviceId: "device_test",
+      createdAt: 50,
+      meta: {
+        projectSlug: "Users-test-repo-beta",
+        workDirHint: "/Users/test/repo-beta",
+        updatedAt: 75,
+      },
+    });
+    const eventLine = JSON.stringify({
+      type: "user_message",
+      id: "evt_beta_1",
+      parentId: null,
+      seq: 1,
+      sessionId: "ses_beta",
+      clientId: "client_seed",
+      ts: 51,
+      message: { role: "user", content: [{ type: "text", text: "hi" }] },
+    });
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(otherJsonl, `${headerLine}\n${eventLine}\n`, "utf8");
+
+    let nextId = 0;
+    const daemon = new EmbeddedDaemon({
+      sessionsDir,
+      deviceId: asDeviceId("device_test"),
+      workDir: "/Users/test/repo-alpha",
+      createRuntime: () => new ScorelRuntime({ provider: emptyProvider }),
+      now: () => 200,
+      createId: () => {
+        nextId += 1;
+        return `evt_proj_${nextId}`;
+      },
+    });
+    const transport = createEmbeddedTransport(daemon);
+    const messages: DaemonMessage[] = [];
+
+    await daemon.start();
+    transport.onMessage((message) => messages.push(message));
+    await transport.connect({ clientId: asClientId("client_proj") });
+
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create_alpha"),
+      sessionId: asSessionId("ses_alpha"),
+      meta: { model: "test-model" },
+    });
+
+    await transport.send({
+      type: "list_projects",
+      requestId: asRequestId("req_list_projects"),
+    });
+    const response = messages.find(
+      (message) => message.type === "response" && message.requestId === "req_list_projects",
+    ) as ClientResponse<"list_projects"> | undefined;
+    expect(response).toBeDefined();
+    const projects = response!.data.projects;
+    const slugs = projects.map((project) => project.projectSlug).sort();
+    expect(slugs).toEqual(["Users-test-repo-alpha", "Users-test-repo-beta"]);
+    const alpha = projects.find((project) => project.projectSlug === "Users-test-repo-alpha");
+    const beta = projects.find((project) => project.projectSlug === "Users-test-repo-beta");
+    expect(alpha).toMatchObject({
+      displayName: "repo-alpha",
+      workDirHint: "/Users/test/repo-alpha",
+      sessionCount: 1,
+    });
+    expect(beta).toMatchObject({
+      displayName: "repo-beta",
+      workDirHint: "/Users/test/repo-beta",
+      sessionCount: 1,
+    });
+    await daemon.shutdown();
   });
 });
 

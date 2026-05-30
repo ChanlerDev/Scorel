@@ -1,5 +1,6 @@
 import type { ClientId, DeviceId, EventId, RequestId, Seq, SessionId } from "./ids.js";
 import type {
+  DaemonProjectSummary,
   DaemonStatus,
   ErrorCode,
   PersistentEvent,
@@ -29,8 +30,16 @@ export type ClientRequestMap = {
     };
   };
   list_sessions: {
-    request: Record<never, never>;
+    request: { projectSlug?: string; limit?: number };
     response: { sessions: SessionSummary[] };
+  };
+  list_projects: {
+    request: Record<never, never>;
+    response: { projects: DaemonProjectSummary[] };
+  };
+  cancel: {
+    request: { sessionId: SessionId };
+    response: { sessionId: SessionId; cancelled: boolean };
   };
   send_message: {
     request: { sessionId: SessionId; content: string | ContentBlock[]; options?: SendMessageOptions };
