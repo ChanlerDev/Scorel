@@ -81,6 +81,10 @@ function isForbidden(spec: string): boolean {
   return false;
 }
 
+function isTestFile(rel: string): boolean {
+  return rel.endsWith(".test.ts") || rel.endsWith(".test.tsx");
+}
+
 describe("apps/webui package boundaries", () => {
   it("only imports from approved externals (react, next, @scorel/protocol|client)", async () => {
     const files: string[] = [];
@@ -94,13 +98,13 @@ describe("apps/webui package boundaries", () => {
       const rel = path.relative(appRoot, file);
       // Skip the test files themselves — they intentionally reference forbidden
       // module names as data, and routes.test.ts walks the app/ tree.
-      if (rel.endsWith(".test.ts")) continue;
+      if (isTestFile(rel)) continue;
 
       const text = await fs.readFile(file, "utf8");
       IMPORT_RE.lastIndex = 0;
       let match: RegExpExecArray | null;
       while ((match = IMPORT_RE.exec(text)) !== null) {
-        const spec = match[1];
+        const spec = match[1] as string;
         if (!isAllowed(spec) || isForbidden(spec)) {
           violations.push(`${rel}: ${spec}`);
         }
@@ -108,5 +112,28 @@ describe("apps/webui package boundaries", () => {
     }
 
     expect(violations, `Forbidden imports:\n${violations.join("\n")}`).toEqual([]);
+  });
+
+  it("localStorage references stay inside lib/store/", async () => {
+    const files: string[] = [];
+    for (const sub of SCAN_DIRS) {
+      files.push(...(await walk(path.join(appRoot, sub))));
+    }
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const rel = path.relative(appRoot, file);
+      if (isTestFile(rel)) continue;
+      const norm = rel.split(path.sep).join("/");
+      if (norm.startsWith("lib/store/")) continue;
+      const text = await fs.readFile(file, "utf8");
+      if (text.includes("localStorage")) {
+        offenders.push(rel);
+      }
+    }
+    expect(
+      offenders,
+      `localStorage must only be referenced under lib/store/.\nOffenders:\n${offenders.join("\n")}`
+    ).toEqual([]);
   });
 });

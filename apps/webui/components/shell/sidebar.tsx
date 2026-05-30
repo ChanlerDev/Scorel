@@ -1,6 +1,11 @@
+"use client";
+
 import Link from "next/link";
+import { useDevices } from "../../lib/store/use-devices";
 
 export function Sidebar() {
+  const { devices } = useDevices();
+
   return (
     <aside className="w-[280px] shrink-0 border-r border-zinc-200 bg-white flex flex-col">
       <div className="p-3 space-y-2">
@@ -19,8 +24,31 @@ export function Sidebar() {
       <div className="px-3 pt-2 pb-1 text-xs uppercase tracking-wide text-zinc-500">
         Projects
       </div>
-      <div className="flex-1 overflow-auto px-3 pb-3 text-sm text-zinc-500">
-        <div className="px-2 py-3 italic">No devices yet.</div>
+      <div className="flex-1 overflow-auto px-3 pb-3 text-sm text-zinc-600">
+        {devices.length === 0 ? (
+          <div className="px-2 py-3 italic text-zinc-500">
+            No devices configured.{" "}
+            <Link href="/settings" className="not-italic text-zinc-700 underline hover:text-zinc-900">
+              Add a device in Settings
+            </Link>
+          </div>
+        ) : (
+          <ul className="space-y-1">
+            {devices.map((device) => (
+              <li key={device.id}>
+                <Link
+                  href={`/devices/${device.id}`}
+                  className="flex items-center justify-between gap-2 rounded-md px-2 py-2 hover:bg-zinc-100"
+                >
+                  <span className="truncate font-medium text-zinc-800">{device.name}</span>
+                  <span className="shrink-0 rounded-full border border-zinc-200 px-2 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
+                    not connected
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="border-t border-zinc-200 p-3">
