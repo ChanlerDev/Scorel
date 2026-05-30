@@ -86,7 +86,7 @@ This spec exists separately from M5.4+ because the previous M5 attempt lumped fr
 ## Risks And Boundaries
 
 - **ESM in monorepo with Next**: Next 14 handles workspace TS via `transpilePackages`. If `@scorel/client` ships dual ESM/CJS later, this list must include both. Spec keeps `transpilePackages` and avoids introducing build steps for protocol/client.
-- **Tailwind 4** is current at the time of writing; if API drift forces Tailwind 3, swap before merge — do not block M5 on Tailwind 4 specifics.
+- **Tailwind 4** is current at the time of writing; if API drift forces Tailwind 3, swap before merge — do not block M5 on Tailwind 4 specifics. *Implementation note (2026-05-31)*: Tailwind 4.3.0 stable + `@tailwindcss/postcss` 4.3.0 installed cleanly with Next 14.2.35; no fallback to Tailwind 3 was needed.
 - **App Router strictness**: server components are default; any state hook needs `"use client"`. Skeleton stays mostly server-rendered.
 - **Bundle size** is irrelevant v1; we run `next dev` locally and `next build` for verification, not production deploy.
 - Do not pull in extra UI libs until S0034 actually needs them; this spec stays minimal so feature commits don't fight framework decisions.

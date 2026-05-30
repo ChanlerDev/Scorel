@@ -144,7 +144,7 @@ packages/
 apps/
 ├── cli/                           ← scorel chat / attach / daemon
 ├── daemon/                        ← standalone daemon service / Docker / systemd
-├── webui/                         ← browser UI，只依赖 protocol + client
+├── webui/                         ← Next.js 14 App Router 浏览器入口（仅依赖 protocol + client）
 ├── gui/                           ← main 管 daemon，renderer 用 client
 └── im/                            ← IM bot / channel runner（后期）
 ```

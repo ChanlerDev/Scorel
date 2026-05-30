@@ -236,7 +236,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 |---|---|---|---|
 | M5.1 | [`S0031`](spec/ship/S0031-daemon-projectslug-rule.md) | 锁定 daemon 侧 codebuddy 风格 `projectSlug` 生成规则 | Planned |
 | M5.2 | [`S0032`](spec/ship/S0032-daemon-protocol-completion.md) | 重新加回 `cancel`、实现 `list_sessions` + `projectSlug` 过滤、新增 `list_projects` | Done |
-| M5.3 | [`S0033`](spec/ship/S0033-webui-skeleton-routing.md) | 建立 Next.js 14 App Router + Tailwind 4 应用骨架与路由 | Planned |
+| M5.3 | [`S0033`](spec/ship/S0033-webui-skeleton-routing.md) | 建立 Next.js 14 App Router + Tailwind 4 应用骨架与路由 | Done |
 | M5.4 | [`S0034`](spec/ship/S0034-webui-device-settings.md) | Device 域模型、BrowserStore 与 Settings CRUD | Planned |
 | M5.5 | [`S0035`](spec/ship/S0035-webui-device-handshake.md) | DaemonClient 实例池、handshake、连接状态机与错误分类 | Planned |
 | M5.6 | [`S0036`](spec/ship/S0036-webui-project-session-sync.md) | `list_projects` / `list_sessions` 同步与 sidebar 树渲染 | Planned |
@@ -307,7 +307,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0030`](spec/ship/S0030-webui-product-intent.md) | 记录 M5 WebUI 产品方向：Device -> Project -> Session -> Chatbox，作为下一轮实现前置共识 | Planned |
 | [`S0031`](spec/ship/S0031-daemon-projectslug-rule.md) | 锁定 daemon 侧 codebuddy 风格 `projectSlug` 生成规则 | Planned |
 | [`S0032`](spec/ship/S0032-daemon-protocol-completion.md) | 重新加回 `cancel`，实现 `list_sessions` + `projectSlug` 过滤，新增 `list_projects` | Done |
-| [`S0033`](spec/ship/S0033-webui-skeleton-routing.md) | Next.js 14 App Router + Tailwind 4 应用骨架与路由 | Planned |
+| [`S0033`](spec/ship/S0033-webui-skeleton-routing.md) | Next.js 14 App Router + Tailwind 4 应用骨架与路由 | Done |
 | [`S0034`](spec/ship/S0034-webui-device-settings.md) | WebUI Device 域模型、BrowserStore、Settings CRUD | Planned |
 | [`S0035`](spec/ship/S0035-webui-device-handshake.md) | WebUI DaemonClient 实例池与 Device 连接握手 | Planned |
 | [`S0036`](spec/ship/S0036-webui-project-session-sync.md) | WebUI Project / Session 索引同步与 sidebar 树渲染 | Planned |
