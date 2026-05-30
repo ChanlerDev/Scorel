@@ -139,6 +139,40 @@ describe("DaemonClient", () => {
     });
   });
 
+  it("can connect to daemon identity without binding a session", async () => {
+    class IdentityOnlyTransport extends MemoryTransport {
+      readonly connectCalls: ConnectParams[] = [];
+
+      override async connect(params: ConnectParams): Promise<ConnectResult> {
+        this.connectCalls.push(params);
+        return {
+          clientId: asClientId("client_test"),
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_tokyo"),
+          projectSlug: "scorel",
+        };
+      }
+    }
+    const transport = new IdentityOnlyTransport();
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+    });
+
+    await client.connect();
+
+    expect(transport.connectCalls[0]).toMatchObject({
+      clientId: asClientId("client_test"),
+      persistentLastSeq: asSeq(0),
+      streamLastSeq: asSeq(0),
+    });
+    expect(transport.connectCalls[0]?.sessionId).toBeUndefined();
+    expect(client.sessionId).toBeNull();
+    expect(client.connectionIdentity).toMatchObject({
+      deviceId: "device_tokyo",
+      projectSlug: "scorel",
+    });
+  });
+
   it("lists sessions through the daemon protocol", async () => {
     const transport = new MemoryTransport();
     const client = new DaemonClient(transport, {

@@ -3,25 +3,28 @@ import { asClientId, asSessionId, type ClientId, type ScorelEvent, type Seq, typ
 
 import { connectToRemoteSession } from "./connection.js";
 import { createEventStreamProjection, type EventStreamRow } from "./event-stream.js";
+import { createRemoteSyncIndex, type RemoteSyncIndex } from "./remote-sync.js";
 import { createSessionBrowser, type SessionBrowser, type SessionBrowserState } from "./session-browser.js";
 
 export type RemoteSessionInput = {
   url: string;
   token: string;
-  sessionId: string;
+  sessionId?: string;
+  remoteId?: string;
 };
 
 export type RemoteSessionState =
   | { status: "disconnected" }
-  | { status: "connecting"; sessionId: SessionId }
+  | { status: "connecting"; sessionId: SessionId | null }
   | {
       status: "connected";
-      sessionId: SessionId;
+      sessionId: SessionId | null;
       identity: DaemonConnectionIdentity;
       persistentLastSeq: Seq;
       streamLastSeq: Seq;
       resyncMode: "stream_resume" | "persistent_fallback" | "full_reload";
       events: EventStreamRow[];
+      syncIndex: RemoteSyncIndex;
       sessionBrowser: SessionBrowserState;
       composer: ComposerState;
     }
@@ -42,7 +45,7 @@ export type RemoteSessionClient = Pick<
 export type ConnectToRemoteSession = (input: {
   url: string;
   token: string;
-  sessionId: SessionId;
+  sessionId?: SessionId;
   clientId: ClientId;
 }) => Promise<{ client: RemoteSessionClient; identity: DaemonConnectionIdentity }>;
 
@@ -69,8 +72,8 @@ export const createRemoteSessionController = (options?: {
 
   const runConnect = async (input: RemoteSessionInput): Promise<RemoteSessionState> => {
     lastInput = input;
-    const sessionId = asSessionId(input.sessionId.trim());
-    state = { status: "connecting", sessionId };
+    const sessionId = input.sessionId?.trim() ? asSessionId(input.sessionId.trim()) : undefined;
+    state = { status: "connecting", sessionId: sessionId ?? null };
     try {
       const connection = await connect({
         url: input.url.trim(),
@@ -80,17 +83,26 @@ export const createRemoteSessionController = (options?: {
       });
       activeClient = connection.client;
       const projection = createEventStreamProjection();
-      const resync = await connection.client.resync();
-      for (const event of resync.events) {
-        projection.apply(event);
-      }
+      const sessions = await connection.client.listSessions();
+      const syncIndex = createRemoteSyncIndex({
+        remoteId: input.remoteId ?? "remote",
+        identity: connection.identity,
+        sessions,
+      });
+      const selectedSessionId = connection.client.sessionId;
       sessionBrowser = createSessionBrowser({
         client: connection.client,
         projectSlug: connection.identity.projectSlug,
+        projects: syncIndex.projects,
       });
       const browserState = await sessionBrowser.refresh();
-      const selectedBrowserState =
-        connection.client.sessionId !== null ? await sessionBrowser.load(connection.client.sessionId) : browserState;
+      const selectedBrowserState = selectedSessionId ? await sessionBrowser.load(selectedSessionId) : browserState;
+      const resync = selectedSessionId
+        ? await connection.client.resync()
+        : { mode: "stream_resume" as const, throughSeq: connection.client.streamLastSeq, events: [] };
+      for (const event of resync.events) {
+        projection.apply(event);
+      }
       unsubscribe?.();
       unsubscribe = connection.client.subscribe((event) => {
         projection.apply(event);
@@ -100,12 +112,13 @@ export const createRemoteSessionController = (options?: {
       });
       state = {
         status: "connected",
-        sessionId: connection.client.sessionId ?? sessionId,
+        sessionId: connection.client.sessionId,
         identity: connection.identity,
         persistentLastSeq: connection.client.persistentLastSeq,
         streamLastSeq: connection.client.streamLastSeq,
         resyncMode: resync.mode,
         events: projection.getRows(),
+        syncIndex,
         sessionBrowser: selectedBrowserState,
         composer: { status: "idle", message: "Ready" },
       };

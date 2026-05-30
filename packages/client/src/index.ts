@@ -114,7 +114,7 @@ export class DaemonClient {
     return { ...this.#connectionIdentity };
   }
 
-  async connect(sessionId: SessionId): Promise<void> {
+  async connect(sessionId?: SessionId): Promise<void> {
     this.#state = "connecting";
     this.#unsubscribe ??= this.#transport.onMessage((message) => this.#handleMessage(message));
     const result = await this.#transport.connect({
@@ -124,7 +124,7 @@ export class DaemonClient {
       streamLastSeq: this.#streamLastSeq,
       lastSeq: this.#streamLastSeq,
     });
-    this.#sessionId = result.sessionId ?? sessionId;
+    this.#sessionId = result.sessionId ?? sessionId ?? null;
     this.#connectionIdentity = {
       deviceId: result.deviceId,
       deviceDisplayName: result.deviceDisplayName,

@@ -232,6 +232,8 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 - 左侧 sidebar：project 列表、session/thread 列表、连接状态和基础入口。
 - 中央主区域：chat/session event stream，按时间展示 user、assistant、tool call/result、状态事件。
 - 底部 composer：prompt 输入、附件/工具/模型等扩展入口、send/cancel 控制。
+- Web 只能作为 remote thin client：先配置并保存 Remote endpoint/token，再同步 Remote identity、Project index、Session list；Session 内容在用户选择后再加载。
+- 面向用户的组织方式是 Project -> Session。Remote 是连接来源，不是把 session 打平成全局列表的理由。
 - 视觉基调：macOS 原生感、低噪声、浅色优先、圆角卡片、清晰层级；避免 IDE 式复杂面板和监控大盘风格。
 - GUI 阶段复用同一套信息架构；GUI main process 只负责本地 daemon 管理，renderer 仍应和 WebUI 保持同类 UI 与同一 client 路径。
 
@@ -245,6 +247,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | M5.4 | [`S0033`](spec/ship/S0033-webui-event-stream-viewer.md) | Event stream viewer：展示 user/assistant、streaming delta、tool call/result，并避免重连后重复渲染。 | Done |
 | M5.5 | [`S0034`](spec/ship/S0034-webui-session-browser-tree.md) | Project/session browser：基于 daemon session lookup 选择 session，并展示第一版 session tree。 | Done |
 | M5.6 | [`S0035`](spec/ship/S0035-webui-prompt-control-smoke.md) | Prompt control and real WebUI smoke：WebUI 发 prompt/cancel，验证 CLI 与 WebUI 多端共享同一真实 remote daemon session。 | Done |
+| M5.7 | [`S0036`](spec/ship/S0036-webui-remote-project-chatbox.md) | Remote project chatbox correction：持久化 Remote 配置，按 Remote -> Project -> Session 同步索引，并把主界面收敛为 chatbox。 | Done |
 
 **Not in M5**:
 
@@ -309,6 +312,9 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | [`S0031`](spec/ship/S0031-webui-information-architecture.md) | 建立 Codex App / Alma 风格的 WebUI 信息架构和视觉骨架 | Done |
 | [`S0032`](spec/ship/S0032-webui-remote-session-attach.md) | 实现 WebUI remote session attach、手动 reconnect 和 resync 状态展示 | Done |
 | [`S0033`](spec/ship/S0033-webui-event-stream-viewer.md) | 实现 WebUI session event stream projection 和 streaming/final 去重渲染 | Done |
+| [`S0034`](spec/ship/S0034-webui-session-browser-tree.md) | 实现 WebUI project/session browser 和 session tree 展示 | Done |
+| [`S0035`](spec/ship/S0035-webui-prompt-control-smoke.md) | 实现 WebUI prompt/cancel 控制并验证真实 remote daemon 共享 session | Done |
+| [`S0036`](spec/ship/S0036-webui-remote-project-chatbox.md) | 修正 M5 WebUI 为 Remote 配置持久化、Project/Session 同步和 chatbox 主界面 | Done |
 
 ---
 

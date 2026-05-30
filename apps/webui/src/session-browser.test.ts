@@ -93,6 +93,8 @@ describe("S0034 session browser", () => {
   it("renders escaped sessions and tree nodes", () => {
     const html = renderSessionBrowser({
       projectSlug: "scorel",
+      projects: [],
+      selectedProjectKey: null,
       sessions: [
         {
           sessionId,

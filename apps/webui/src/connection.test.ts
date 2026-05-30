@@ -16,7 +16,7 @@ class TestWebSocket {
 
   send(data: string): void {
     TestWebSocket.sentMessages.push(data);
-    const message = JSON.parse(data) as { type: string; clientId: string; sessionId: string };
+    const message = JSON.parse(data) as { type: string; clientId: string; sessionId?: string };
     if (message.type === "connect") {
       queueMicrotask(() =>
         this.#emit("message", {
@@ -85,5 +85,29 @@ describe("connectToRemoteSession", () => {
       persistentLastSeq: 0,
       streamLastSeq: 0,
     });
+  });
+
+  it("can connect to remote identity before a session is selected", async () => {
+    const result = await connectToRemoteSession({
+      url: "ws://127.0.0.1:5050",
+      token: "secret-token",
+      clientId: asClientId("client_webui"),
+      createWebSocket: (url) => new TestWebSocket(url),
+    });
+
+    expect(result.client.state).toBe("connected");
+    expect(result.client.sessionId).toBeNull();
+    expect(result.identity).toMatchObject({
+      deviceId: "device_webui_test",
+      projectSlug: "scorel",
+    });
+    expect(JSON.parse(TestWebSocket.sentMessages[0] ?? "{}")).toMatchObject({
+      type: "connect",
+      token: "secret-token",
+      clientId: "client_webui",
+      persistentLastSeq: 0,
+      streamLastSeq: 0,
+    });
+    expect(JSON.parse(TestWebSocket.sentMessages[0] ?? "{}").sessionId).toBeUndefined();
   });
 });

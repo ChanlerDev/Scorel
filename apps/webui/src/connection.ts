@@ -4,7 +4,7 @@ import type { ClientId, SessionId } from "@scorel/protocol";
 export type RemoteSessionConnectionInput = {
   url: string;
   token: string;
-  sessionId: SessionId;
+  sessionId?: SessionId;
   clientId: ClientId;
   createWebSocket?: WsTransportOptions["createWebSocket"];
 };

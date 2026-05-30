@@ -1,6 +1,8 @@
 import type { DaemonClient } from "@scorel/client";
 import type { ContentBlock, EventId, PersistentEvent, Seq, SessionId, SessionSummary } from "@scorel/protocol";
 
+import type { RemoteProject } from "./remote-sync.js";
+
 export type SessionBrowserClient = Pick<DaemonClient, "listSessions" | "loadSession">;
 
 export type SessionTreeNode = {
@@ -16,6 +18,8 @@ export type SessionTreeNode = {
 
 export type SessionBrowserState = {
   projectSlug: string;
+  projects: RemoteProject[];
+  selectedProjectKey: string | null;
   sessions: SessionSummary[];
   selectedSessionId: SessionId | null;
   tree: SessionTreeNode[];
@@ -30,9 +34,12 @@ export type SessionBrowser = {
 export const createSessionBrowser = (options: {
   client: SessionBrowserClient;
   projectSlug?: string;
+  projects?: RemoteProject[];
 }): SessionBrowser => {
   let state: SessionBrowserState = {
     projectSlug: options.projectSlug ?? "Remote daemon",
+    projects: options.projects ?? [],
+    selectedProjectKey: options.projects?.[0]?.projectKey ?? null,
     sessions: [],
     selectedSessionId: null,
     tree: [],
@@ -78,13 +85,42 @@ export const projectSessionTree = (
 };
 
 export const renderSessionBrowser = (state: SessionBrowserState): { sessions: string; tree: string } => ({
-  sessions: renderSessionList(state),
+  sessions: renderProjectSessionList(state),
   tree: renderSessionTree(state.tree),
 });
 
+export const renderProjectList = (projects: RemoteProject[], selectedProjectKey: string | null): string => {
+  if (projects.length === 0) {
+    return `<li class="nav-row nav-row-empty"><span class="glyph">-</span><span>No remote connected</span><span class="badge">0</span></li>`;
+  }
+
+  return projects
+    .map((project) => `
+      <li>
+        <button class="nav-row project-button${project.projectKey === selectedProjectKey ? " is-active" : ""}" type="button" data-project-key="${escapeHtml(project.projectKey)}">
+          <span class="glyph">${escapeHtml(project.displayName.slice(0, 1).toUpperCase())}</span>
+          <span>${escapeHtml(project.displayName)}</span>
+          <span class="badge">${project.sessions.length}</span>
+        </button>
+      </li>
+    `)
+    .join("");
+};
+
+const renderProjectSessionList = (state: SessionBrowserState): string => {
+  if (state.projects.length > 0) {
+    const project = state.projects.find((candidate) => candidate.projectKey === state.selectedProjectKey) ?? state.projects[0];
+    return renderSessionList({
+      ...state,
+      sessions: project?.sessions ?? [],
+    });
+  }
+  return renderSessionList(state);
+};
+
 const renderSessionList = (state: SessionBrowserState): string => {
   if (state.sessions.length === 0) {
-    return `<li class="nav-row nav-row-empty"><span class="glyph">-</span><span>No sessions loaded</span><span class="badge">0</span></li>`;
+    return `<li class="nav-row nav-row-empty"><span class="glyph">-</span><span>No sessions synced</span><span class="badge">0</span></li>`;
   }
 
   return state.sessions
@@ -188,6 +224,7 @@ const contentText = (blocks: ContentBlock[]): string =>
 
 const copyState = (state: SessionBrowserState): SessionBrowserState => ({
   ...state,
+  projects: state.projects.map((project) => ({ ...project, sessions: [...project.sessions] })),
   sessions: [...state.sessions],
   tree: [...state.tree],
 });
