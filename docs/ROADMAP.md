@@ -242,7 +242,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | M5.1 | [`S0030`](spec/ship/S0030-webui-baseline.md) | 建立 browser-safe WebUI app shell，并通过 `DaemonClient + WsTransport` 连接 remote daemon session。 | Done |
 | M5.2 | [`S0031`](spec/ship/S0031-webui-information-architecture.md) | WebUI 信息架构和视觉基线：落地 Codex App / Alma 风格的 sidebar、主会话区、底部 composer 骨架。 | Done |
 | M5.3 | [`S0032`](spec/ship/S0032-webui-remote-session-attach.md) | Remote session attach / reconnect：通过 endpoint/token/session 连接，展示 daemon identity，并处理断线、错误和刷新恢复。 | Done |
-| M5.4 | `S0033` | Event stream viewer：展示 user/assistant、streaming delta、tool call/result，并避免重连后重复渲染。 | Planned |
+| M5.4 | [`S0033`](spec/ship/S0033-webui-event-stream-viewer.md) | Event stream viewer：展示 user/assistant、streaming delta、tool call/result，并避免重连后重复渲染。 | Done |
 | M5.5 | `S0034` | Project/session browser：基于 project index/session lookup 选择 session，并展示第一版 session tree。 | Planned |
 | M5.6 | `S0035` | Prompt control and real WebUI smoke：WebUI 发 prompt/cancel，验证 CLI 与 WebUI 多端共享同一真实 remote daemon session。 | Planned |
 
@@ -308,6 +308,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | [`S0030`](spec/ship/S0030-webui-baseline.md) | 建立 M5 WebUI baseline 和 browser-safe remote connect wiring | Done |
 | [`S0031`](spec/ship/S0031-webui-information-architecture.md) | 建立 Codex App / Alma 风格的 WebUI 信息架构和视觉骨架 | Done |
 | [`S0032`](spec/ship/S0032-webui-remote-session-attach.md) | 实现 WebUI remote session attach、手动 reconnect 和 resync 状态展示 | Done |
+| [`S0033`](spec/ship/S0033-webui-event-stream-viewer.md) | 实现 WebUI session event stream projection 和 streaming/final 去重渲染 | Done |
 
 ---
 

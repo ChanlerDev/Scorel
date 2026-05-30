@@ -11,6 +11,7 @@ describe("S0031 WebUI shell", () => {
     expect(html).toContain("Scorel");
     expect(html).toContain("S0031 WebUI information architecture");
     expect(html).toContain('data-region="session-stream"');
+    expect(html).toContain('data-event-stream');
     expect(html).toContain("Session stream");
     expect(html).toContain("Connect to a remote daemon to watch the shared session.");
     expect(html).toContain('data-region="composer"');

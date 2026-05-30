@@ -1,5 +1,6 @@
 import type { RemoteSessionState } from "./remote-session.js";
 import { createRemoteSessionController } from "./remote-session.js";
+import { renderEventStreamRows } from "./event-stream.js";
 import { renderWebUiShell } from "./shell.js";
 
 const renderState = (root: HTMLElement, state: RemoteSessionState): void => {
@@ -12,6 +13,10 @@ const renderState = (root: HTMLElement, state: RemoteSessionState): void => {
   setText(root, "[data-resync-mode]", state.status === "connected" ? state.resyncMode : "-");
   setText(root, "[data-persistent-seq]", state.status === "connected" ? String(state.persistentLastSeq) : "-");
   setText(root, "[data-stream-seq]", state.status === "connected" ? String(state.streamLastSeq) : "-");
+  const stream = root.querySelector<HTMLElement>("[data-event-stream]");
+  if (stream && state.status === "connected") {
+    stream.innerHTML = renderEventStreamRows(state.events);
+  }
 };
 
 export const mountWebUi = (root: HTMLElement): void => {

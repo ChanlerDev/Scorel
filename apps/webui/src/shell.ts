@@ -322,6 +322,30 @@ export const webUiStyles = `
     margin-top: 14px;
   }
 
+  .event-card-user {
+    border-color: #dce6f5;
+    background: #fbfdff;
+  }
+
+  .event-card-assistant {
+    border-color: #eceef1;
+  }
+
+  .event-card-tool {
+    border-color: #e5e8df;
+    background: #fcfdf9;
+  }
+
+  .event-card-status,
+  .event-card-error {
+    box-shadow: none;
+  }
+
+  .event-card-error {
+    border-color: #f1d6d6;
+    background: #fffafa;
+  }
+
   .event-kicker {
     margin: 0 0 8px;
     color: #8b94a2;
@@ -492,11 +516,13 @@ export const renderWebUiShell = (): string => `
             <p>Connect to a remote daemon to watch the shared session.</p>
           </div>
 
+          <div data-event-stream>
           <article class="event-card">
             <p class="event-kicker">Session stream</p>
             <h3>Ready for daemon events</h3>
             <p>User messages, assistant output, tool calls, and status events will appear here in the same shared session observed by CLI attach.</p>
           </article>
+          </div>
         </div>
       </section>
 

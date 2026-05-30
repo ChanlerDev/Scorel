@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asClientId, asDeviceId, asSeq, asSessionId, type ClientId, type SessionId } from "@scorel/protocol";
+import { asClientId, asDeviceId, asEventId, asSeq, asSessionId, type ClientId, type ScorelEvent, type SessionId } from "@scorel/protocol";
 
 import { createRemoteSessionController, type ConnectToRemoteSession } from "./remote-session.js";
 
@@ -22,8 +22,32 @@ const createConnect =
           resync: async () => ({
             mode: options?.resyncMode ?? "stream_resume",
             throughSeq: asSeq(7),
-            events: [],
+            events: [
+              {
+                type: "user_message",
+                id: asEventId("evt_resynced"),
+                parentId: null,
+                seq: asSeq(6),
+                sessionId: input.sessionId,
+                clientId: input.clientId,
+                ts: 6,
+                message: { role: "user", content: [{ type: "text", text: "Recovered prompt" }] },
+              },
+            ],
           }),
+          subscribe: (handler: (event: ScorelEvent) => void) => {
+            handler({
+              type: "assistant_message",
+              id: asEventId("evt_live"),
+              parentId: asEventId("evt_resynced"),
+              seq: asSeq(7),
+              sessionId: input.sessionId,
+              clientId: input.clientId,
+              ts: 7,
+              message: { role: "assistant", content: [{ type: "text", text: "Live response" }] },
+            });
+            return () => undefined;
+          },
         },
         identity: {
           deviceId: asDeviceId("device_tokyo"),
@@ -71,6 +95,16 @@ describe("createRemoteSessionController", () => {
       persistentLastSeq: asSeq(4),
       streamLastSeq: asSeq(7),
       resyncMode: "persistent_fallback",
+      events: [
+        expect.objectContaining({
+          id: "evt_resynced",
+          text: "Recovered prompt",
+        }),
+        expect.objectContaining({
+          id: "evt_live",
+          text: "Live response",
+        }),
+      ],
     });
   });
 

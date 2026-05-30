@@ -1,7 +1,8 @@
 import type { DaemonClient, DaemonConnectionIdentity } from "@scorel/client";
-import { asClientId, asSessionId, type ClientId, type Seq, type SessionId } from "@scorel/protocol";
+import { asClientId, asSessionId, type ClientId, type ScorelEvent, type Seq, type SessionId, type Unsubscribe } from "@scorel/protocol";
 
 import { connectToRemoteSession } from "./connection.js";
+import { createEventStreamProjection, type EventStreamRow } from "./event-stream.js";
 
 export type RemoteSessionInput = {
   url: string;
@@ -19,10 +20,13 @@ export type RemoteSessionState =
       persistentLastSeq: Seq;
       streamLastSeq: Seq;
       resyncMode: "stream_resume" | "persistent_fallback" | "full_reload";
+      events: EventStreamRow[];
     }
   | { status: "error"; message: string };
 
-export type RemoteSessionClient = Pick<DaemonClient, "sessionId" | "persistentLastSeq" | "streamLastSeq" | "resync">;
+export type RemoteSessionClient = Pick<DaemonClient, "sessionId" | "persistentLastSeq" | "streamLastSeq" | "resync"> & {
+  subscribe(handler: (event: ScorelEvent) => void): Unsubscribe;
+};
 
 export type ConnectToRemoteSession = (input: {
   url: string;
@@ -45,6 +49,7 @@ export const createRemoteSessionController = (options?: {
   const connect = options?.connect ?? connectToRemoteSession;
   let state: RemoteSessionState = { status: "disconnected" };
   let lastInput: RemoteSessionInput | undefined;
+  let unsubscribe: Unsubscribe | undefined;
 
   const runConnect = async (input: RemoteSessionInput): Promise<RemoteSessionState> => {
     lastInput = input;
@@ -57,7 +62,18 @@ export const createRemoteSessionController = (options?: {
         sessionId,
         clientId,
       });
+      const projection = createEventStreamProjection();
       const resync = await connection.client.resync();
+      for (const event of resync.events) {
+        projection.apply(event);
+      }
+      unsubscribe?.();
+      unsubscribe = connection.client.subscribe((event) => {
+        projection.apply(event);
+        if (state.status === "connected") {
+          state = { ...state, events: projection.getRows() };
+        }
+      });
       state = {
         status: "connected",
         sessionId: connection.client.sessionId ?? sessionId,
@@ -65,6 +81,7 @@ export const createRemoteSessionController = (options?: {
         persistentLastSeq: connection.client.persistentLastSeq,
         streamLastSeq: connection.client.streamLastSeq,
         resyncMode: resync.mode,
+        events: projection.getRows(),
       };
       return state;
     } catch (error) {
