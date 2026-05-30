@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Composer } from "../../../../../../../components/chatbox/composer";
+import { DebugPanel } from "../../../../../../../components/chatbox/debug-panel";
 import { Transcript } from "../../../../../../../components/chatbox/transcript";
 import {
   useConnection,
@@ -18,6 +20,7 @@ import {
   emptyProjectorState,
   type ProjectorState,
 } from "../../../../../../../lib/events/projector";
+import { buildConnectionSummary } from "../../../../../../../lib/diagnostics/connection-summary";
 import { computeScopeKey } from "../../../../../../../lib/identity/scope-key";
 import { getSharedAttachCache } from "../../../../../../../lib/store";
 import { useDevices } from "../../../../../../../lib/store/use-devices";
@@ -72,6 +75,8 @@ function SessionView({
   const project = device.projects?.find((p) => p.projectSlug === projectSlug);
   const session: DeviceSessionSummary | undefined =
     project?.sessions?.[sessionId];
+  const searchParams = useSearchParams();
+  const debugEnabled = searchParams?.get("debug") === "1";
 
   // Pull session metadata if it's not already cached.
   useEffect(() => {
@@ -103,10 +108,13 @@ function SessionView({
         </div>
       ) : (
         <Chatbox
+          device={device}
           remoteDeviceId={remoteDeviceId}
           projectSlug={projectSlug}
           sessionId={sessionId}
           managed={managed}
+          connectionState={connState}
+          debugEnabled={debugEnabled}
         />
       )}
     </div>
@@ -114,19 +122,30 @@ function SessionView({
 }
 
 function Chatbox({
+  device,
   remoteDeviceId,
   projectSlug,
   sessionId,
   managed,
+  connectionState,
+  debugEnabled,
 }: {
+  device: Device;
   remoteDeviceId: string;
   projectSlug: string;
   sessionId: string;
   managed: ReturnType<typeof useConnection>["managed"];
+  connectionState: ReturnType<typeof useConnection>["state"];
+  debugEnabled: boolean;
 }): JSX.Element {
   const [snapshot, setSnapshot] = useState<SessionAttachSnapshot>({
     loading: true,
     state: emptyProjectorState(),
+    inFlight: false,
+    cancelling: false,
+    persistentLastSeq: 0,
+    streamLastSeq: 0,
+    sessionId,
   });
   const controllerRef = useRef<SessionAttachController | null>(null);
 
@@ -170,6 +189,24 @@ function Chatbox({
     [],
   );
 
+  const onCancel = useMemo(
+    () => (): void => {
+      const controller = controllerRef.current;
+      if (!controller) return;
+      void controller.cancel();
+    },
+    [],
+  );
+
+  const errorBanner =
+    snapshot.error?.reason === "cancel_failed"
+      ? `${snapshot.error.reason}: ${snapshot.error.message}`
+      : undefined;
+
+  const debugSummary = debugEnabled
+    ? buildConnectionSummary({ device, connectionState, snapshot })
+    : null;
+
   return (
     <div className="flex h-[60vh] min-h-[400px] flex-col overflow-hidden rounded-md border border-zinc-200 bg-white">
       <div className="flex-1 overflow-hidden">
@@ -181,7 +218,15 @@ function Chatbox({
           <ChatboxBody snapshot={snapshot} />
         )}
       </div>
-      <Composer onSend={send} disabled={!managed} />
+      <Composer
+        onSend={send}
+        onCancel={onCancel}
+        inFlight={snapshot.inFlight}
+        cancelling={snapshot.cancelling}
+        errorBanner={errorBanner}
+        disabled={!managed}
+      />
+      {debugSummary ? <DebugPanel summary={debugSummary} /> : null}
     </div>
   );
 }

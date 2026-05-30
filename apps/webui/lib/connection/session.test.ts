@@ -4,6 +4,7 @@ import {
   asEventId,
   asSeq,
   asSessionId,
+  type ClientId,
   type ContentBlock,
   type EventId,
   type PersistentEvent,
@@ -12,7 +13,7 @@ import {
   type SessionId,
   type Unsubscribe,
 } from "@scorel/protocol";
-import type { DaemonClient } from "@scorel/client";
+import type { DaemonClient, DaemonConnectionIdentity } from "@scorel/client";
 
 import { BrowserStore, type StorageLike } from "../store/browser-store";
 import { AttachCache } from "../store/attach-cache";
@@ -54,6 +55,12 @@ class FakeDaemonClient {
   connectCalls = 0;
   resyncCalls: Array<{ persistentLastSeq?: Seq; streamLastSeq?: Seq }> = [];
   sentMessages: string[] = [];
+  cancelCalls = 0;
+  cancelImpl: () => Promise<{ sessionId: SessionId; cancelled: boolean }> = async () => ({
+    sessionId: this.sessionId ?? SESSION_ID,
+    cancelled: true,
+  });
+  connectionIdentity: DaemonConnectionIdentity = {};
   readonly subscribers = new Set<(event: ScorelEvent) => void>();
   resyncResult: ResyncResponse = {
     events: [],
@@ -101,8 +108,13 @@ class FakeDaemonClient {
     };
   }
 
+  async cancel(): Promise<{ sessionId: SessionId; cancelled: boolean }> {
+    this.cancelCalls += 1;
+    return this.cancelImpl();
+  }
+
   // The real client surface includes more methods; the controller only uses
-  // the four above plus `sessionId`.
+  // the five above plus `sessionId` and `connectionIdentity`.
   asClient(): DaemonClient {
     return this as unknown as DaemonClient;
   }
@@ -141,6 +153,28 @@ function assistantMessage(id: string, seq: number, text: string): PersistentEven
 function makeAttachCache(): AttachCache {
   const browser = new BrowserStore({ storage: new FakeStorage() });
   return new AttachCache(browser);
+}
+
+function turnStart(seq: number, turnIndex = 1, clientId: ClientId = CLIENT_ID): ScorelEvent {
+  return {
+    type: "turn_start",
+    seq: asSeq(seq),
+    sessionId: SESSION_ID,
+    clientId,
+    ts: 0,
+    turnIndex,
+  };
+}
+
+function turnEnd(seq: number, turnIndex = 1, clientId: ClientId = CLIENT_ID): ScorelEvent {
+  return {
+    type: "turn_end",
+    seq: asSeq(seq),
+    sessionId: SESSION_ID,
+    clientId,
+    ts: 0,
+    turnIndex,
+  };
 }
 
 describe("createSessionAttachController", () => {
@@ -315,5 +349,99 @@ describe("createSessionAttachController", () => {
     const last = snapshots.at(-1)!;
     expect(last.error?.reason).toBe("resync_failed");
     expect(last.error?.message).toBe("boom");
+  });
+
+  it("turn_start flips inFlight true; turn_end flips it false", async () => {
+    const fake = new FakeDaemonClient();
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      attachCache: makeAttachCache(),
+      onState: (s) => snapshots.push(s),
+    });
+    await controller.start();
+    expect(snapshots.at(-1)!.inFlight).toBe(false);
+    for (const sub of fake.subscribers) sub(turnStart(10));
+    expect(snapshots.at(-1)!.inFlight).toBe(true);
+    expect(snapshots.at(-1)!.cancelling).toBe(false);
+    for (const sub of fake.subscribers) sub(turnEnd(11));
+    expect(snapshots.at(-1)!.inFlight).toBe(false);
+    expect(snapshots.at(-1)!.cancelling).toBe(false);
+  });
+
+  it("controller.cancel sets cancelling; subsequent turn_end clears it", async () => {
+    const fake = new FakeDaemonClient();
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      attachCache: makeAttachCache(),
+      onState: (s) => snapshots.push(s),
+    });
+    await controller.start();
+    for (const sub of fake.subscribers) sub(turnStart(10));
+    expect(snapshots.at(-1)!.inFlight).toBe(true);
+    await controller.cancel();
+    expect(fake.cancelCalls).toBe(1);
+    expect(snapshots.at(-1)!.cancelling).toBe(true);
+    expect(snapshots.at(-1)!.inFlight).toBe(true);
+    // Late turn_end clears both flags cleanly (race-condition test).
+    for (const sub of fake.subscribers) sub(turnEnd(11));
+    const final = snapshots.at(-1)!;
+    expect(final.inFlight).toBe(false);
+    expect(final.cancelling).toBe(false);
+  });
+
+  it("cancel client error captured into snapshot.error and clears cancelling", async () => {
+    const fake = new FakeDaemonClient();
+    fake.cancelImpl = async () => {
+      throw new Error("cancel boom");
+    };
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      attachCache: makeAttachCache(),
+      onState: (s) => snapshots.push(s),
+    });
+    await controller.start();
+    for (const sub of fake.subscribers) sub(turnStart(10));
+    await controller.cancel();
+    const final = snapshots.at(-1)!;
+    expect(final.cancelling).toBe(false);
+    expect(final.error?.reason).toBe("cancel_failed");
+    expect(final.error?.message).toBe("cancel boom");
+  });
+
+  it("snapshot exposes diagnostics: persistent/stream seq + identity + sessionId", async () => {
+    const fake = new FakeDaemonClient();
+    fake.connectionIdentity = {
+      deviceId: "remote-device-x" as unknown as DaemonConnectionIdentity["deviceId"],
+      projectSlug: "Users-foo-bar",
+    };
+    fake.resyncResult = {
+      mode: "full_reload",
+      throughSeq: asSeq(2),
+      events: [userMessage("evt_u_1", 1, "hi"), assistantMessage("evt_a_1", 2, "hello")],
+    };
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      attachCache: makeAttachCache(),
+      onState: (s) => snapshots.push(s),
+    });
+    await controller.start();
+    const last = snapshots.at(-1)!;
+    expect(last.sessionId).toBe(String(SESSION_ID));
+    expect(last.remoteDeviceId).toBe("remote-device-x");
+    expect(last.projectSlug).toBe("Users-foo-bar");
+    expect(last.persistentLastSeq).toBe(2);
+    expect(last.streamLastSeq).toBe(2);
   });
 });

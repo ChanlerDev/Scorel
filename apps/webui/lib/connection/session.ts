@@ -32,6 +32,9 @@ import {
  *   send()   — call client.sendMessage; insert an optimistic local user turn
  *              keyed by a placeholder id that is replaced when the daemon
  *              echoes the persistent user_message back.
+ *   cancel() — best-effort dispatch of `client.cancel()`; sets
+ *              `cancelling=true` until the next `turn_end` (or daemon error)
+ *              so the composer can render an optimistic "Cancelling…" state.
  *
  * Snapshot lifecycle: callers receive a `SessionAttachSnapshot` via
  * `onState()` after every applied event. The snapshot is immutable from the
@@ -51,12 +54,31 @@ export type SessionAttachSnapshot = {
   state: ProjectorState;
   resyncMode?: "stream_resume" | "persistent_fallback" | "full_reload";
   error?: { reason: string; message: string };
+  /** True between `turn_start` and `turn_end` for the current session. */
+  inFlight: boolean;
+  /**
+   * True between a user-issued `cancel()` call and the subsequent `turn_end`
+   * (regardless of stopReason). Cleared on daemon error response so the user
+   * can retry.
+   */
+  cancelling: boolean;
+  /** Highest persistent seq applied so far (diagnostic). */
+  persistentLastSeq: number;
+  /** Highest stream seq applied so far (diagnostic). */
+  streamLastSeq: number;
+  /** Identity of the daemon we're attached to (diagnostic). */
+  remoteDeviceId?: string;
+  /** Project this session belongs to (diagnostic). */
+  projectSlug?: string;
+  /** Session id this controller is attached to. */
+  sessionId: string;
 };
 
 export type SessionAttachController = {
   start(): Promise<void>;
   stop(): void;
   send(content: string): Promise<void>;
+  cancel(): Promise<void>;
 };
 
 const PENDING_USER_PREFIX = "pending_user_";
@@ -77,6 +99,10 @@ export function createSessionAttachController(
   let stopped = false;
   let resyncMode: SessionAttachSnapshot["resyncMode"];
   let error: SessionAttachSnapshot["error"];
+  let inFlight = false;
+  let cancelling = false;
+  let persistentLastSeq = 0;
+  let streamLastSeq = 0;
   // Until `start()` returns we suppress the live-subscribe handler from
   // emitting (resync's dispatched events will pass through here, but we
   // want a single batched emit at the end of start() rather than one per
@@ -88,13 +114,32 @@ export function createSessionAttachController(
     sessionId: String(sessionId),
   };
 
+  function readClientIdentity(): {
+    remoteDeviceId?: string;
+    projectSlug?: string;
+  } {
+    const identity = client.connectionIdentity;
+    return {
+      ...(identity.deviceId ? { remoteDeviceId: String(identity.deviceId) } : {}),
+      ...(identity.projectSlug ? { projectSlug: identity.projectSlug } : {}),
+    };
+  }
+
   function emit(loading: boolean): void {
     if (stopped) return;
+    const identity = readClientIdentity();
     onState({
       loading,
       state,
       ...(resyncMode ? { resyncMode } : {}),
       ...(error ? { error } : {}),
+      inFlight,
+      cancelling,
+      persistentLastSeq,
+      streamLastSeq,
+      ...(identity.remoteDeviceId ? { remoteDeviceId: identity.remoteDeviceId } : {}),
+      ...(identity.projectSlug ? { projectSlug: identity.projectSlug } : {}),
+      sessionId: String(sessionId),
     });
   }
 
@@ -146,9 +191,33 @@ export function createSessionAttachController(
     }
   }
 
+  function trackInFlight(event: ScorelEvent): void {
+    if (event.type === "turn_start") {
+      inFlight = true;
+      cancelling = false;
+      return;
+    }
+    if (event.type === "turn_end") {
+      inFlight = false;
+      cancelling = false;
+    }
+  }
+
+  function trackSeq(event: ScorelEvent): void {
+    const n = Number(event.seq);
+    if (Number.isFinite(n) && n > streamLastSeq) {
+      streamLastSeq = n;
+    }
+    if ("id" in event && Number.isFinite(n) && n > persistentLastSeq) {
+      persistentLastSeq = n;
+    }
+  }
+
   function applyEvent(event: ScorelEvent): void {
     state = projectEvent(state, event);
     persistEvent(event);
+    trackInFlight(event);
+    trackSeq(event);
     if (!initializing) emit(false);
   }
 
@@ -160,16 +229,19 @@ export function createSessionAttachController(
     const cached = readCache();
     if (cached) {
       state = projectEvents(emptyProjectorState(), cached.events);
+      const cachedHigh = Number(highestSeq(cached.events));
+      persistentLastSeq = cachedHigh;
+      streamLastSeq = cachedHigh;
     } else {
       ensureCacheFile();
     }
     emit(true);
 
     // 2. Compute resync anchors.
-    const persistentLastSeq = highestSeq(cached?.events ?? []);
+    const persistentAnchor = highestSeq(cached?.events ?? []);
     // Per spec: cached transients before the boundary are not authoritative;
     // use persistent boundary as stream anchor for v1 simplicity.
-    const streamLastSeq = persistentLastSeq;
+    const streamAnchor = persistentAnchor;
 
     // 3. Subscribe BEFORE resync so resync-dispatched events flow through
     //    the same projection path as live events. The handler is gated by
@@ -183,7 +255,10 @@ export function createSessionAttachController(
       if (client.sessionId !== sessionId) {
         await client.connect(sessionId);
       }
-      const resync = await client.resync({ persistentLastSeq, streamLastSeq });
+      const resync = await client.resync({
+        persistentLastSeq: persistentAnchor,
+        streamLastSeq: streamAnchor,
+      });
       resyncMode = resync.mode;
 
       if (resync.mode === "full_reload") {
@@ -246,7 +321,28 @@ export function createSessionAttachController(
     }
   }
 
-  return { start, stop, send };
+  async function cancel(): Promise<void> {
+    if (stopped) return;
+    // Optimistic UI: surface "Cancelling…" immediately. Final clear comes from
+    // the daemon's `turn_end` (any stopReason). On daemon-side error response,
+    // we capture it into `snapshot.error` and clear `cancelling` so the user
+    // can re-issue cancel or send a new prompt.
+    cancelling = true;
+    error = undefined;
+    emit(false);
+    try {
+      await client.cancel();
+    } catch (cause) {
+      cancelling = false;
+      error = {
+        reason: "cancel_failed",
+        message: cause instanceof Error ? cause.message : String(cause),
+      };
+      emit(false);
+    }
+  }
+
+  return { start, stop, send, cancel };
 }
 
 function highestSeq(events: PersistentEvent[]): Seq {
