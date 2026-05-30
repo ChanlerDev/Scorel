@@ -11,7 +11,7 @@ Scorel 是一个 **可回放、可恢复、可远程控制的 AI Agent 工作台
 推进顺序：
 
 ```text
-Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Control → Web/GUI → Ecosystem
+Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Control → WebUI → GUI → Ecosystem
 ```
 
 ---
@@ -221,14 +221,30 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 **Done when**:
 
 - WebUI 能通过已有 WebSocket remote transport 连接 daemon。
-- 能展示 session tree、事件流和工具调用。
-- 能发 prompt / cancel。
+- 能以 project/session 视角选择或 attach session。
+- 能展示 session tree、事件流、流式输出和工具调用。
+- 能发 prompt / cancel，并和 CLI attach 共享同一 session 事件流。
+
+**UI Direction**:
+
+M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传统后台 dashboard：
+
+- 左侧 sidebar：project 列表、session/thread 列表、连接状态和基础入口。
+- 中央主区域：chat/session event stream，按时间展示 user、assistant、tool call/result、状态事件。
+- 底部 composer：prompt 输入、附件/工具/模型等扩展入口、send/cancel 控制。
+- 视觉基调：macOS 原生感、低噪声、浅色优先、圆角卡片、清晰层级；避免 IDE 式复杂面板和监控大盘风格。
+- GUI 阶段复用同一套信息架构；GUI main process 只负责本地 daemon 管理，renderer 仍应和 WebUI 保持同类 UI 与同一 client 路径。
 
 **Steps**:
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
 | M5.1 | [`S0030`](spec/ship/S0030-webui-baseline.md) | 建立 browser-safe WebUI app shell，并通过 `DaemonClient + WsTransport` 连接 remote daemon session。 | Done |
+| M5.2 | `S0031` | WebUI 信息架构和视觉基线：落地 Codex App / Alma 风格的 sidebar、主会话区、底部 composer 骨架。 | Planned |
+| M5.3 | `S0032` | Remote session attach / reconnect：通过 endpoint/token/session 连接，展示 daemon identity，并处理断线、错误和刷新恢复。 | Planned |
+| M5.4 | `S0033` | Event stream viewer：展示 user/assistant、streaming delta、tool call/result，并避免重连后重复渲染。 | Planned |
+| M5.5 | `S0034` | Project/session browser：基于 project index/session lookup 选择 session，并展示第一版 session tree。 | Planned |
+| M5.6 | `S0035` | Prompt control and real WebUI smoke：WebUI 发 prompt/cancel，验证 CLI 与 WebUI 多端共享同一真实 remote daemon session。 | Planned |
 
 **Not in M5**:
 
@@ -236,7 +252,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 - Local daemon process manager。
 - OAuth、账号系统、TLS 自动签发。
 - 公网 tunnel / relay service / NAT traversal。
-- IDE-style file explorer/editor、checkpoint restore UI、完整 rewind/fork/compact 图形交互。
+- IDE-style file explorer/editor、monitoring dashboard、checkpoint restore UI、完整 rewind/fork/compact 图形交互。
 
 **Status**: Active
 
@@ -289,6 +305,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 | [`S0027`](spec/ship/S0027-session-diagnostics-log.md) | 为每个 session 增加同目录 diagnostics `.log`，暴露 provider/runtime/daemon 调试信息 | Done |
 | [`S0028`](spec/ship/S0028-client-attach-diagnostics-log.md) | 为本地 attach cache 增加同级 diagnostics `.log`，暴露 remote/local attach 客户端侧调试信息 | Done |
 | [`S0029`](spec/ship/S0029-project-index-for-session-lookup.md) | 增加轻量 project index，用 project 视角索引 local/remote sessions 与 attach logs | Done |
+| [`S0030`](spec/ship/S0030-webui-baseline.md) | 建立 M5 WebUI baseline 和 browser-safe remote connect wiring | Done |
 
 ---
 
