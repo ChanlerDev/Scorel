@@ -1,6 +1,10 @@
 import { BrowserStore } from "./browser-store";
 import { normalizeLink } from "../domain/link";
-import type { Device } from "../domain/devices";
+import type {
+  Device,
+  DeviceProject,
+  DeviceSessionSummary,
+} from "../domain/devices";
 
 export const DEVICES_KEY = "devices";
 
@@ -130,6 +134,61 @@ export class DevicesStore {
 
   markConnectedAt(id: string, ts: number): Device | undefined {
     return this.update(id, { lastConnectedAt: ts });
+  }
+
+  /**
+   * Replace the project list for a device with a fresh snapshot from
+   * `list_projects`. Per S0036: the array itself is overwritten wholesale, but
+   * for project slugs that survive the snapshot we preserve any cached
+   * `sessions`/`sessionsFetchedAt` so a reconnect doesn't blow away the
+   * lazily-loaded session list. Stamps `projectsFetchedAt` to `Date.now()`.
+   */
+  setProjects(id: string, projects: DeviceProject[]): Device | undefined {
+    const current = this.get(id);
+    if (!current) return undefined;
+    const previousByslug = new Map<string, DeviceProject>();
+    for (const prev of current.projects ?? []) {
+      previousByslug.set(prev.projectSlug, prev);
+    }
+    const merged = projects.map<DeviceProject>((next) => {
+      const prev = previousByslug.get(next.projectSlug);
+      if (!prev) return { ...next };
+      const carry: Partial<DeviceProject> = {};
+      if (prev.sessions !== undefined) carry.sessions = prev.sessions;
+      if (prev.sessionsFetchedAt !== undefined) {
+        carry.sessionsFetchedAt = prev.sessionsFetchedAt;
+      }
+      return { ...next, ...carry };
+    });
+    return this.update(id, {
+      projects: merged,
+      projectsFetchedAt: Date.now(),
+    });
+  }
+
+  /**
+   * Replace the cached session map under a single (device, projectSlug). No-op
+   * if the device or project slug is unknown — the caller is expected to have
+   * synced projects first.
+   */
+  setProjectSessions(
+    id: string,
+    projectSlug: string,
+    sessions: Record<string, DeviceSessionSummary>,
+  ): Device | undefined {
+    const current = this.get(id);
+    if (!current) return undefined;
+    const list = current.projects ?? [];
+    const idx = list.findIndex((p) => p.projectSlug === projectSlug);
+    if (idx < 0) return current;
+    const updated: DeviceProject = {
+      ...(list[idx] as DeviceProject),
+      sessions,
+      sessionsFetchedAt: Date.now(),
+    };
+    const nextProjects = [...list];
+    nextProjects[idx] = updated;
+    return this.update(id, { projects: nextProjects });
   }
 
   subscribe(listener: () => void): () => void {

@@ -179,4 +179,92 @@ describe("DevicesStore", () => {
     expect(devices.markConnectedAt(d.id, 12345)?.lastConnectedAt).toBe(12345);
     expect(devices.get(d.id)?.lastConnectedAt).toBe(12345);
   });
+
+  it("setProjects writes the snapshot and stamps fetchedAt", () => {
+    const { devices } = freshStore();
+    const d = devices.create({ name: "A", link: "wss://h", token: "t" });
+    const before = Date.now();
+    const updated = devices.setProjects(d.id, [
+      { projectSlug: "alpha", displayName: "Alpha", sessionCount: 3 },
+      { projectSlug: "beta", displayName: "Beta", sessionCount: 1 },
+    ]);
+    expect(updated?.projects).toHaveLength(2);
+    expect(updated?.projects?.[0]?.projectSlug).toBe("alpha");
+    expect(updated?.projectsFetchedAt).toBeGreaterThanOrEqual(before);
+  });
+
+  it("setProjects preserves cached sessions for surviving slugs", () => {
+    const { devices } = freshStore();
+    const d = devices.create({ name: "A", link: "wss://h", token: "t" });
+    devices.setProjects(d.id, [{ projectSlug: "alpha", displayName: "Alpha" }]);
+    devices.setProjectSessions(d.id, "alpha", {
+      session_1: {
+        sessionId: "session_1",
+        title: "Stored",
+        updatedAt: 1000,
+      },
+    });
+    // New snapshot still includes alpha but adds beta and drops gone-slug.
+    devices.setProjects(d.id, [
+      { projectSlug: "alpha", displayName: "Alpha v2" },
+      { projectSlug: "beta", displayName: "Beta" },
+    ]);
+    const next = devices.get(d.id);
+    const alpha = next?.projects?.find((p) => p.projectSlug === "alpha");
+    const beta = next?.projects?.find((p) => p.projectSlug === "beta");
+    expect(alpha?.displayName).toBe("Alpha v2");
+    expect(alpha?.sessions?.session_1?.title).toBe("Stored");
+    expect(alpha?.sessionsFetchedAt).toBeTypeOf("number");
+    expect(beta?.sessions).toBeUndefined();
+    expect(beta?.sessionsFetchedAt).toBeUndefined();
+  });
+
+  it("setProjects returns undefined for unknown device", () => {
+    const { devices } = freshStore();
+    expect(devices.setProjects("missing", [])).toBeUndefined();
+  });
+
+  it("setProjectSessions overwrites the session map and stamps fetchedAt", () => {
+    const { devices } = freshStore();
+    const d = devices.create({ name: "A", link: "wss://h", token: "t" });
+    devices.setProjects(d.id, [{ projectSlug: "alpha", displayName: "Alpha" }]);
+    const before = Date.now();
+    devices.setProjectSessions(d.id, "alpha", {
+      session_1: { sessionId: "session_1", title: "First", updatedAt: 1 },
+      session_2: { sessionId: "session_2", title: "Second", updatedAt: 2 },
+    });
+    const project = devices
+      .get(d.id)
+      ?.projects?.find((p) => p.projectSlug === "alpha");
+    expect(Object.keys(project?.sessions ?? {})).toEqual([
+      "session_1",
+      "session_2",
+    ]);
+    expect(project?.sessionsFetchedAt).toBeGreaterThanOrEqual(before);
+
+    // A second call replaces wholesale.
+    devices.setProjectSessions(d.id, "alpha", {
+      session_3: { sessionId: "session_3", title: "Third", updatedAt: 3 },
+    });
+    expect(
+      Object.keys(
+        devices
+          .get(d.id)
+          ?.projects?.find((p) => p.projectSlug === "alpha")?.sessions ?? {},
+      ),
+    ).toEqual(["session_3"]);
+  });
+
+  it("setProjectSessions is a no-op for unknown device or unknown slug", () => {
+    const { devices } = freshStore();
+    expect(devices.setProjectSessions("missing", "slug", {})).toBeUndefined();
+    const d = devices.create({ name: "A", link: "wss://h", token: "t" });
+    devices.setProjects(d.id, [{ projectSlug: "alpha" }]);
+    // Unknown slug returns the device unchanged (no projects mutation).
+    const before = devices.get(d.id);
+    const after = devices.setProjectSessions(d.id, "ghost", {
+      session_1: { sessionId: "session_1", updatedAt: 1 },
+    });
+    expect(after).toEqual(before);
+  });
 });

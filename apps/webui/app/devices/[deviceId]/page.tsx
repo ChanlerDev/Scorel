@@ -2,9 +2,12 @@
 
 import Link from "next/link";
 
-import { useConnection } from "../../../lib/connection/use-connection";
+import {
+  useConnection,
+  useProjectsSyncError,
+} from "../../../lib/connection/use-connection";
 import { useDevices } from "../../../lib/store/use-devices";
-import type { Device } from "../../../lib/domain/devices";
+import type { Device, DeviceProject } from "../../../lib/domain/devices";
 import type { ConnectionState } from "../../../lib/connection/state";
 
 type Params = { deviceId: string };
@@ -30,7 +33,8 @@ export default function DevicePage({ params }: { params: Params }) {
 }
 
 function DeviceConnected({ device }: { device: Device }) {
-  const { state, reconnect, disconnect } = useConnection(device);
+  const { state, reconnect, disconnect, syncProjectsNow } = useConnection(device);
+  const projectsError = useProjectsSyncError(device.id);
 
   return (
     <div className="p-6 space-y-4 text-sm text-zinc-700">
@@ -41,9 +45,112 @@ function DeviceConnected({ device }: { device: Device }) {
 
       <Banner device={device} state={state} onReconnect={reconnect} onDisconnect={disconnect} />
 
-      <p className="text-xs text-zinc-500">No projects synced yet (project listing arrives in the next milestone).</p>
+      <ProjectListSection
+        device={device}
+        state={state}
+        error={projectsError}
+        onRetry={() => {
+          void syncProjectsNow();
+        }}
+      />
     </div>
   );
+}
+
+function ProjectListSection({
+  device,
+  state,
+  error,
+  onRetry,
+}: {
+  device: Device;
+  state: ConnectionState;
+  error?: string;
+  onRetry: () => void;
+}) {
+  const projects = device.projects ?? [];
+  return (
+    <section className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xs uppercase tracking-wide text-zinc-500">Projects</h2>
+        {device.projectsFetchedAt ? (
+          <span className="text-[10px] text-zinc-400">
+            synced {formatTimestamp(device.projectsFetchedAt)}
+          </span>
+        ) : null}
+      </div>
+      {error ? (
+        <div className="flex items-center justify-between gap-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <span>Failed to load projects: {error}</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            disabled={state.name !== "connected"}
+            className="rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
+      {projects.length === 0 ? (
+        <p className="text-xs italic text-zinc-500">
+          {state.name === "connected"
+            ? "No projects yet — try sending a message from the CLI to populate this list."
+            : device.lastConnectedAt
+            ? "No projects cached from previous connections."
+            : "Not connected yet."}
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {projects.map((project) => (
+            <ProjectRow key={project.projectSlug} deviceId={device.id} project={project} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function ProjectRow({
+  deviceId,
+  project,
+}: {
+  deviceId: string;
+  project: DeviceProject;
+}) {
+  const href = `/devices/${encodeURIComponent(deviceId)}/projects/${encodeURIComponent(
+    project.projectSlug,
+  )}`;
+  return (
+    <li>
+      <Link
+        href={href}
+        className="flex items-center justify-between rounded-md border border-zinc-200 px-3 py-2 hover:bg-zinc-50"
+      >
+        <div className="min-w-0">
+          <p className="truncate font-medium text-zinc-900">
+            {project.displayName ?? project.projectSlug}
+          </p>
+          {project.workDirHint ? (
+            <p className="truncate text-xs text-zinc-500">{project.workDirHint}</p>
+          ) : null}
+        </div>
+        {project.sessionCount !== undefined ? (
+          <span className="ml-3 shrink-0 text-xs text-zinc-500">
+            {project.sessionCount} session{project.sessionCount === 1 ? "" : "s"}
+          </span>
+        ) : null}
+      </Link>
+    </li>
+  );
+}
+
+function formatTimestamp(ms: number): string {
+  try {
+    return new Date(ms).toLocaleTimeString();
+  } catch {
+    return "—";
+  }
 }
 
 function hostnameOf(link: string): string {

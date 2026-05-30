@@ -24,3 +24,26 @@ export function createDevicesStore(): DevicesStore {
     })
   );
 }
+
+// Process-wide shared singleton. Both `useDevices` (UI rendering) and
+// `useConnection` (sync helpers) must hold the SAME instance — otherwise
+// mutations made from sync land on a separate listener set and the UI
+// doesn't re-render. Keep this here and let everyone import via this
+// helper.
+let _sharedDevicesStore: DevicesStore | null = null;
+
+export function getSharedDevicesStore(): DevicesStore {
+  if (_sharedDevicesStore === null) {
+    _sharedDevicesStore = createDevicesStore();
+  }
+  return _sharedDevicesStore;
+}
+
+export function __resetSharedDevicesStoreForTests(): void {
+  _sharedDevicesStore = null;
+}
+
+export function __setSharedDevicesStoreForTests(store: DevicesStore): void {
+  _sharedDevicesStore = store;
+}
+

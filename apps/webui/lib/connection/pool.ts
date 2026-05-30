@@ -175,6 +175,19 @@ export class ConnectionPool {
     return this.#entries.get(deviceId)?.state ?? IDLE;
   }
 
+  /**
+   * Return the active DaemonClient for a device IF the pool already holds an
+   * entry. Returns `null` when no entry exists (caller would have to call
+   * `acquire()` first). Used by the sidebar to fire `syncSessions` on a
+   * project click without taking out a fresh acquire reference.
+   */
+  peekClient(deviceId: string): DaemonClient | null {
+    const entry = this.#entries.get(deviceId);
+    if (!entry) return null;
+    if (entry.state.name !== "connected") return null;
+    return entry.client;
+  }
+
   shutdown(): void {
     this.#shutdown = true;
     for (const entry of this.#entries.values()) {

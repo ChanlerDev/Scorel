@@ -1,17 +1,70 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import type { Device } from "../domain/devices";
-import { createDevicesStore, type DevicesStore } from "../store";
+import { syncProjects } from "../sync/projects";
+import { syncSessions } from "../sync/sessions";
+import {
+  __setSharedDevicesStoreForTests,
+  getSharedDevicesStore,
+  type DevicesStore,
+} from "../store";
 import { ConnectionPool, type ManagedConnection } from "./pool";
 import type { ConnectionIdentity, ConnectionState } from "./state";
 import { IDLE } from "./state";
 
 // Module-scoped singletons. HMR may re-init this module in dev; v1 accepts
-// that fast-refresh reset.
+// that fast-refresh reset. The DevicesStore is shared with `useDevices`
+// via `getSharedDevicesStore()` so mutations from sync helpers are
+// observed by every consumer in the same render tree.
 let _pool: ConnectionPool | null = null;
-let _devicesStore: DevicesStore | null = null;
+
+// Per-device sync error tracking. Updated by `useConnection` after a
+// `syncProjects` call resolves; consumed by `useProjectsSyncError` so the
+// device page can render a retry banner without reaching into the sync
+// module's internals.
+const _projectsSyncError = new Map<string, string | undefined>();
+const _projectsSyncListeners = new Map<string, Set<() => void>>();
+
+// Per (deviceId, projectSlug) sync error tracking — same model.
+const _sessionsSyncError = new Map<string, string | undefined>();
+const _sessionsSyncListeners = new Map<string, Set<() => void>>();
+
+function sessionsKey(deviceId: string, projectSlug: string): string {
+  return `${deviceId} ${projectSlug}`;
+}
+
+function setSessionsSyncError(
+  deviceId: string,
+  projectSlug: string,
+  message: string | undefined,
+): void {
+  const key = sessionsKey(deviceId, projectSlug);
+  if (message === undefined) {
+    if (!_sessionsSyncError.has(key)) return;
+    _sessionsSyncError.delete(key);
+  } else {
+    if (_sessionsSyncError.get(key) === message) return;
+    _sessionsSyncError.set(key, message);
+  }
+  const set = _sessionsSyncListeners.get(key);
+  if (!set) return;
+  for (const listener of set) listener();
+}
+
+function setProjectsSyncError(deviceId: string, message: string | undefined): void {
+  if (message === undefined) {
+    if (!_projectsSyncError.has(deviceId)) return;
+    _projectsSyncError.delete(deviceId);
+  } else {
+    if (_projectsSyncError.get(deviceId) === message) return;
+    _projectsSyncError.set(deviceId, message);
+  }
+  const set = _projectsSyncListeners.get(deviceId);
+  if (!set) return;
+  for (const listener of set) listener();
+}
 
 function getPool(): ConnectionPool {
   if (_pool === null) {
@@ -27,10 +80,13 @@ export function getConnectionPool(): ConnectionPool {
 }
 
 function getDevicesStore(): DevicesStore {
-  if (_devicesStore === null) {
-    _devicesStore = createDevicesStore();
-  }
-  return _devicesStore;
+  return getSharedDevicesStore();
+}
+
+/** Public accessor for the singleton DevicesStore — used by routes that
+ * trigger sync operations outside of `useConnection`. */
+export function getDevicesStoreInstance(): DevicesStore {
+  return getDevicesStore();
 }
 
 export type UseConnectionResult = {
@@ -38,6 +94,13 @@ export type UseConnectionResult = {
   reconnect(): void;
   disconnect(): void;
   managed: ManagedConnection | null;
+  /** Re-run `list_projects` against the current managed client. No-op when
+   * the device is not currently connected. */
+  syncProjectsNow(): Promise<void>;
+  /** Re-run `list_sessions({projectSlug})` against the current managed
+   * client. No-op when not connected. Updates the per-project error map
+   * consumed by `useSessionsSyncError`. */
+  syncSessionsNow(projectSlug: string): Promise<void>;
 };
 
 export function useConnection(device: Device): UseConnectionResult {
@@ -56,7 +119,41 @@ export function useConnection(device: Device): UseConnectionResult {
       store.markConnectedAt(device.id, Date.now());
     });
     setManaged(managedConn);
+    // Subscribe to state transitions so we can fire syncProjects exactly when
+    // we enter `connected`. We track the previous state name and only sync on
+    // the transition edge to avoid duplicate calls during a steady-state.
+    let prevName: ConnectionState["name"] = managedConn.state.name;
+    const unsubscribeState = pool.subscribe(device.id, (state) => {
+      if (state.name === "connected" && prevName !== "connected") {
+        setProjectsSyncError(device.id, undefined);
+        void syncProjects({
+          client: managedConn.client,
+          store,
+          deviceId: device.id,
+        }).catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          setProjectsSyncError(device.id, message);
+        });
+      }
+      prevName = state.name;
+    });
+    // Handle the case where `acquire()` already returned in `connected`
+    // synchronously (rare; the pool kicks off connect asynchronously, but
+    // tests may seed state). The subscribe above won't fire for an already-
+    // current state, so dispatch an initial sync here.
+    if (managedConn.state.name === "connected") {
+      setProjectsSyncError(device.id, undefined);
+      void syncProjects({
+        client: managedConn.client,
+        store,
+        deviceId: device.id,
+      }).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        setProjectsSyncError(device.id, message);
+      });
+    }
     return () => {
+      unsubscribeState();
       pool.release(device.id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -68,14 +165,103 @@ export function useConnection(device: Device): UseConnectionResult {
     () => IDLE,
   );
 
+  const syncProjectsNow = useCallback(async (): Promise<void> => {
+    if (!managed) return;
+    if (managed.state.name !== "connected") return;
+    setProjectsSyncError(device.id, undefined);
+    try {
+      await syncProjects({ client: managed.client, store, deviceId: device.id });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setProjectsSyncError(device.id, message);
+    }
+  }, [device.id, managed, store]);
+
+  const syncSessionsNow = useCallback(
+    async (projectSlug: string): Promise<void> => {
+      if (!managed) return;
+      if (managed.state.name !== "connected") return;
+      setSessionsSyncError(device.id, projectSlug, undefined);
+      try {
+        await syncSessions({
+          client: managed.client,
+          store,
+          deviceId: device.id,
+          projectSlug,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        setSessionsSyncError(device.id, projectSlug, message);
+      }
+    },
+    [device.id, managed, store],
+  );
+
   return useMemo<UseConnectionResult>(
     () => ({
       state,
       reconnect: () => managed?.reconnect(),
       disconnect: () => managed?.disconnect(),
       managed,
+      syncProjectsNow,
+      syncSessionsNow,
     }),
-    [state, managed],
+    [state, managed, syncProjectsNow, syncSessionsNow],
+  );
+}
+
+/** Hook: subscribe to the most recent `syncProjects` error for a device, or
+ * `undefined` when no error is outstanding (including immediately after a
+ * successful sync clears it). */
+export function useProjectsSyncError(deviceId: string): string | undefined {
+  return useSyncExternalStore<string | undefined>(
+    (listener) => {
+      let set = _projectsSyncListeners.get(deviceId);
+      if (!set) {
+        set = new Set();
+        _projectsSyncListeners.set(deviceId, set);
+      }
+      set.add(listener);
+      return () => {
+        const s = _projectsSyncListeners.get(deviceId);
+        if (!s) return;
+        s.delete(listener);
+        if (s.size === 0) _projectsSyncListeners.delete(deviceId);
+      };
+    },
+    () => _projectsSyncError.get(deviceId),
+    () => undefined,
+  );
+}
+
+/** Hook: subscribe to the most recent `syncSessions` error for a (device,
+ * projectSlug). Pass `undefined` projectSlug to short-circuit. */
+export function useSessionsSyncError(
+  deviceId: string,
+  projectSlug: string | undefined,
+): string | undefined {
+  return useSyncExternalStore<string | undefined>(
+    (listener) => {
+      if (!projectSlug) return () => {};
+      const key = sessionsKey(deviceId, projectSlug);
+      let set = _sessionsSyncListeners.get(key);
+      if (!set) {
+        set = new Set();
+        _sessionsSyncListeners.set(key, set);
+      }
+      set.add(listener);
+      return () => {
+        const s = _sessionsSyncListeners.get(key);
+        if (!s) return;
+        s.delete(listener);
+        if (s.size === 0) _sessionsSyncListeners.delete(key);
+      };
+    },
+    () =>
+      projectSlug
+        ? _sessionsSyncError.get(sessionsKey(deviceId, projectSlug))
+        : undefined,
+    () => undefined,
   );
 }
 
@@ -83,12 +269,20 @@ export function useConnection(device: Device): UseConnectionResult {
 export function __resetConnectionForTests(): void {
   if (_pool) _pool.shutdown();
   _pool = null;
-  _devicesStore = null;
+  _projectsSyncError.clear();
+  _projectsSyncListeners.clear();
+  _sessionsSyncError.clear();
+  _sessionsSyncListeners.clear();
 }
 
 // Test seam: inject a custom pool/store. Production code does not call this.
 export function __setConnectionPoolForTests(pool: ConnectionPool, store?: DevicesStore): void {
   if (_pool && _pool !== pool) _pool.shutdown();
   _pool = pool;
-  if (store) _devicesStore = store;
+  if (store) {
+    // Share the same DevicesStore instance with `useDevices`; otherwise
+    // mutations from the pool's identity callback (and sync helpers) are
+    // invisible to the page's render path.
+    __setSharedDevicesStoreForTests(store);
+  }
 }
