@@ -220,37 +220,15 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 
 **Done when**:
 
-- WebUI 能通过已有 WebSocket remote transport 连接 daemon。
-- 能以 project/session 视角选择或 attach session。
-- 能展示 session tree、事件流、流式输出和工具调用。
-- 能发 prompt / cancel，并和 CLI attach 共享同一 session 事件流。
+- WebUI 能添加并持久化 Device（Name / Link / Token）。
+- WebUI 能通过已有 WebSocket remote transport 连接 remote daemon。
+- WebUI 能按 Device -> Project -> Session 层级同步和展示远端索引。
+- WebUI 能在用户打开 Session 后懒加载内容，并以 chatbox 形态展示事件流和工具调用。
+- WebUI 能发 prompt / cancel，并和 CLI attach 共享同一 remote daemon session。
 
-**UI Direction**:
+**Product Intent**:
 
-M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传统后台 dashboard：
-
-- 左侧 sidebar：project 列表、session/thread 列表、连接状态和基础入口。
-- 中央主区域：chat/session event stream，按时间展示 user、assistant、tool call/result、状态事件。
-- 底部 composer：prompt 输入、附件/工具/模型等扩展入口、send/cancel 控制。
-- Web 只能作为 remote thin client：先配置并保存 Remote endpoint/token，再同步 Remote identity、Project index、Session list；Session 内容在用户选择后再加载。
-- Remote 在 WebUI 中面向用户定义为 Device。Device 由 Name、Link、Token 组成，在 Settings 页面添加；主 sidebar 展示 Device -> Project -> Session 层级。
-- 面向用户的组织方式是 Device -> Project -> Session。Remote 是连接来源，不是把 session 打平成全局列表的理由。
-- 视觉基调：macOS 原生感、低噪声、浅色优先、圆角卡片、清晰层级；避免 IDE 式复杂面板和监控大盘风格。
-- GUI 阶段复用同一套信息架构；GUI main process 只负责本地 daemon 管理，renderer 仍应和 WebUI 保持同类 UI 与同一 client 路径。
-
-**Steps**:
-
-| Step | Spec | Goal | Status |
-|---|---|---|---|
-| M5.1 | [`S0030`](spec/ship/S0030-webui-baseline.md) | 建立 browser-safe WebUI app shell，并通过 `DaemonClient + WsTransport` 连接 remote daemon session。 | Done |
-| M5.2 | [`S0031`](spec/ship/S0031-webui-information-architecture.md) | WebUI 信息架构和视觉基线：落地 Codex App / Alma 风格的 sidebar、主会话区、底部 composer 骨架。 | Done |
-| M5.3 | [`S0032`](spec/ship/S0032-webui-remote-session-attach.md) | Remote session attach / reconnect：通过 endpoint/token/session 连接，展示 daemon identity，并处理断线、错误和刷新恢复。 | Done |
-| M5.4 | [`S0033`](spec/ship/S0033-webui-event-stream-viewer.md) | Event stream viewer：展示 user/assistant、streaming delta、tool call/result，并避免重连后重复渲染。 | Done |
-| M5.5 | [`S0034`](spec/ship/S0034-webui-session-browser-tree.md) | Project/session browser：基于 daemon session lookup 选择 session，并展示第一版 session tree。 | Done |
-| M5.6 | [`S0035`](spec/ship/S0035-webui-prompt-control-smoke.md) | Prompt control and real WebUI smoke：WebUI 发 prompt/cancel，验证 CLI 与 WebUI 多端共享同一真实 remote daemon session。 | Done |
-| M5.7 | [`S0036`](spec/ship/S0036-webui-remote-project-chatbox.md) | Remote project chatbox correction：持久化 Remote 配置，按 Remote -> Project -> Session 同步索引，并把主界面收敛为 chatbox。 | Done |
-| M5.8 | [`S0037`](spec/ship/S0037-webui-device-settings-tree.md) | Device settings and tree correction：配置页添加 Device，主 sidebar 展示 Device -> Project -> Session，Session 打开后进入 chatbox。 | Done |
-| M5.9 | [`S0038`](spec/ship/S0038-webui-device-connect-smoke.md) | Device connect smoke：归一化 Device Link，明确连接错误，并用真实 daemon 验证 WebUI 设备连接路径。 | Done |
+M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-intent.md)。该文档只锁定方向，不代表实现已经完成。
 
 **Not in M5**:
 
@@ -260,7 +238,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 - 公网 tunnel / relay service / NAT traversal。
 - IDE-style file explorer/editor、monitoring dashboard、checkpoint restore UI、完整 rewind/fork/compact 图形交互。
 
-**Status**: Done
+**Status**: Planned
 
 ---
 
@@ -311,15 +289,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | [`S0027`](spec/ship/S0027-session-diagnostics-log.md) | 为每个 session 增加同目录 diagnostics `.log`，暴露 provider/runtime/daemon 调试信息 | Done |
 | [`S0028`](spec/ship/S0028-client-attach-diagnostics-log.md) | 为本地 attach cache 增加同级 diagnostics `.log`，暴露 remote/local attach 客户端侧调试信息 | Done |
 | [`S0029`](spec/ship/S0029-project-index-for-session-lookup.md) | 增加轻量 project index，用 project 视角索引 local/remote sessions 与 attach logs | Done |
-| [`S0030`](spec/ship/S0030-webui-baseline.md) | 建立 M5 WebUI baseline 和 browser-safe remote connect wiring | Done |
-| [`S0031`](spec/ship/S0031-webui-information-architecture.md) | 建立 Codex App / Alma 风格的 WebUI 信息架构和视觉骨架 | Done |
-| [`S0032`](spec/ship/S0032-webui-remote-session-attach.md) | 实现 WebUI remote session attach、手动 reconnect 和 resync 状态展示 | Done |
-| [`S0033`](spec/ship/S0033-webui-event-stream-viewer.md) | 实现 WebUI session event stream projection 和 streaming/final 去重渲染 | Done |
-| [`S0034`](spec/ship/S0034-webui-session-browser-tree.md) | 实现 WebUI project/session browser 和 session tree 展示 | Done |
-| [`S0035`](spec/ship/S0035-webui-prompt-control-smoke.md) | 实现 WebUI prompt/cancel 控制并验证真实 remote daemon 共享 session | Done |
-| [`S0036`](spec/ship/S0036-webui-remote-project-chatbox.md) | 修正 M5 WebUI 为 Remote 配置持久化、Project/Session 同步和 chatbox 主界面 | Done |
-| [`S0037`](spec/ship/S0037-webui-device-settings-tree.md) | 修正 WebUI 为 Settings 添加 Device、Device/Project/Session 树和 Session chatbox | Done |
-| [`S0038`](spec/ship/S0038-webui-device-connect-smoke.md) | 修正 WebUI Device Link 归一化和真实 daemon 连接 smoke | Done |
+| [`S0030`](spec/ship/S0030-webui-product-intent.md) | 记录 M5 WebUI 产品方向：Device -> Project -> Session -> Chatbox，作为下一轮实现前置共识 | Planned |
 
 ---
 

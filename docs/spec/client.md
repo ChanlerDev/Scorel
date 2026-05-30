@@ -32,7 +32,7 @@ interface DaemonClient {
   }>;
   steer(content: string): void;   // 运行中插话，fire-and-forget
   followUp(content: string): void; // 追加任务（agent 停下后消费）
-  cancel(): Promise<{ sessionId: SessionId; cancelled: boolean }>;
+  cancel(): Promise<void>;
 
   // ─── 树操作 ───
   rewind(targetEventId: EventId): Promise<EventId>;

@@ -20,7 +20,6 @@ import {
   type Seq,
   type SessionId,
   type SessionMeta,
-  type SessionSummary,
   type Unsubscribe,
 } from "@scorel/protocol";
 
@@ -114,7 +113,7 @@ export class DaemonClient {
     return { ...this.#connectionIdentity };
   }
 
-  async connect(sessionId?: SessionId): Promise<void> {
+  async connect(sessionId: SessionId): Promise<void> {
     this.#state = "connecting";
     this.#unsubscribe ??= this.#transport.onMessage((message) => this.#handleMessage(message));
     const result = await this.#transport.connect({
@@ -124,7 +123,7 @@ export class DaemonClient {
       streamLastSeq: this.#streamLastSeq,
       lastSeq: this.#streamLastSeq,
     });
-    this.#sessionId = result.sessionId ?? sessionId ?? null;
+    this.#sessionId = result.sessionId ?? sessionId;
     this.#connectionIdentity = {
       deviceId: result.deviceId,
       deviceDisplayName: result.deviceDisplayName,
@@ -157,11 +156,6 @@ export class DaemonClient {
     return response;
   }
 
-  async listSessions(): Promise<SessionSummary[]> {
-    const response = await this.#request("list_sessions", {});
-    return response.sessions;
-  }
-
   async sendMessage(
     content: string | ContentBlock[],
     options?: { parentId?: EventId | null },
@@ -170,13 +164,6 @@ export class DaemonClient {
       throw new Error("DaemonClient is not connected to a session");
     }
     return this.#request("send_message", { sessionId: this.#sessionId, content, options });
-  }
-
-  async cancel(): Promise<ClientRequestMap["cancel"]["response"]> {
-    if (!this.#sessionId) {
-      throw new Error("DaemonClient is not connected to a session");
-    }
-    return this.#request("cancel", { sessionId: this.#sessionId });
   }
 
   async resync(anchors?: Seq | { persistentLastSeq?: Seq; streamLastSeq?: Seq }): Promise<ClientRequestMap["resync_events"]["response"]> {
