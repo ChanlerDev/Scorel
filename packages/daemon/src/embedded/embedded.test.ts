@@ -44,6 +44,7 @@ describe("embedded daemon + client", () => {
     const daemon = new EmbeddedDaemon({
       sessionsDir,
       deviceId: asDeviceId("device_test"),
+      workDir: sessionsDir,
       createRuntime: () => new ScorelRuntime({ provider }),
       now: () => 1_000,
     });
@@ -97,6 +98,7 @@ describe("embedded daemon + client", () => {
     const daemon = new EmbeddedDaemon({
       sessionsDir,
       deviceId: asDeviceId("device_test"),
+      workDir: sessionsDir,
       createRuntime: () => new ScorelRuntime({ provider }),
       now: () => 1_000,
       createId: (() => {

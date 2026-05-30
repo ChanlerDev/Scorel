@@ -30,7 +30,7 @@ const createDaemonWithSessionsDir = (sessionsDir: string) =>
       sessionsDir,
       deviceId: asDeviceId("device_test"),
       deviceDisplayName: "Test Device",
-      projectSlug: "test-project",
+      workDir: "/test-project",
       createRuntime: () => new ScorelRuntime({ provider: emptyProvider }),
       now: () => 1,
       createId: () => {

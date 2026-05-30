@@ -84,6 +84,34 @@ interface ConnectResult {
 }
 ```
 
+### 3.0.1 ProjectSlug 生成规则（codebuddy 风格）
+
+`projectSlug` 由 daemon 自决,不接受调用方透传。规则在 `packages/daemon/src/projects/slug.ts` 的 `toProjectSlug(workDir)` 实现:
+
+1. 把输入解析为绝对 POSIX 路径(`path.resolve` + `\` 归一为 `/`)。
+2. 去前导 `/` 与重复 `/`,再去尾部 `/`。
+3. 把剩余的 `/` 全部替换为 `-`。
+4. 文件系统根 `/` 映射为字符串 `root`。
+5. 空字符串 / 非 string / 纯空白 → 抛异常。
+6. Windows 走 best-effort:盘符 `C:` 丢弃,`\` 与 `/` 同等当分隔符。
+
+示例:
+
+| workDir | projectSlug |
+|---|---|
+| `/Users/chanler/personal/Scorel` | `Users-chanler-personal-Scorel` |
+| `/home/alice/repo` | `home-alice-repo` |
+| `/` | `root` |
+| `C:\Users\X\repo` | `Users-X-repo` |
+
+约束:
+
+- `EmbeddedDaemon` 构造参数为 `workDir: string`(必填),不再接受 `projectSlug`;CLI / remote daemon host / 未来 GUI host 都喂 workDir,不构造 slug。
+- `fromProjectSlug` 仅做"无 `-` 段"路径的最佳还原;`-` 撞段(`/pi-mono` vs `/pi/mono`)接受语义损失,需要精确反查时 daemon 自存 `workDirHint`。
+- 不哈希、不 URL-encode、不截断。slug 落入 URL 路径段直接可用。
+- Session JSONL 落盘结构不随 slug 变(S0029 锁定 flat 结构)。
+```
+
 ### 3.1 三种实现
 
 | Transport | 实现 | 安全模型 | 适用场景 |

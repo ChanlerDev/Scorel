@@ -872,6 +872,7 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
   const daemon = new EmbeddedDaemon({
     sessionsDir: options.sessionsDir,
     deviceId: asDeviceId("device_local"),
+    workDir: options.cwd,
     createRuntime: () => createRealRuntime({ cwd: options.cwd, config }),
   });
   const client = new DaemonClient(createEmbeddedTransport(daemon), {

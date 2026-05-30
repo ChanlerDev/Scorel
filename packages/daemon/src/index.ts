@@ -3,6 +3,8 @@ import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
+import { toProjectSlug } from "./projects/slug.js";
+
 import {
   ScorelRuntime,
   buildContext,
@@ -435,7 +437,14 @@ export type EmbeddedDaemonOptions = {
   sessionsDir: string;
   deviceId: DeviceId;
   deviceDisplayName?: string;
-  projectSlug?: string;
+  /**
+   * Daemon working directory. Drives the codebuddy-style `projectSlug`
+   * exposed to clients via handshake / event metadata / diagnostics. Must be
+   * an absolute path; relative inputs are resolved per `path.resolve`.
+   *
+   * See `packages/daemon/src/projects/slug.ts` for the rule.
+   */
+  workDir: string;
   createRuntime: (sessionId: SessionId) => ScorelRuntime;
   now?: () => number;
   createId?: () => string;
@@ -491,7 +500,7 @@ export class EmbeddedDaemon {
   readonly #sessionsDir: string;
   readonly #deviceId: DeviceId;
   readonly #deviceDisplayName: string | undefined;
-  readonly #projectSlug: string | undefined;
+  readonly #projectSlug: string;
   readonly #createRuntime: (sessionId: SessionId) => ScorelRuntime;
   readonly #now: () => number;
   readonly #createId: () => string;
@@ -505,7 +514,7 @@ export class EmbeddedDaemon {
     this.#sessionsDir = options.sessionsDir;
     this.#deviceId = options.deviceId;
     this.#deviceDisplayName = options.deviceDisplayName;
-    this.#projectSlug = options.projectSlug;
+    this.#projectSlug = toProjectSlug(options.workDir);
     this.#createRuntime = options.createRuntime;
     this.#now = options.now ?? Date.now;
     this.#createId = options.createId ?? (() => crypto.randomUUID());
