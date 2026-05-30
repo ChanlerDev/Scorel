@@ -250,6 +250,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | M5.6 | [`S0035`](spec/ship/S0035-webui-prompt-control-smoke.md) | Prompt control and real WebUI smoke：WebUI 发 prompt/cancel，验证 CLI 与 WebUI 多端共享同一真实 remote daemon session。 | Done |
 | M5.7 | [`S0036`](spec/ship/S0036-webui-remote-project-chatbox.md) | Remote project chatbox correction：持久化 Remote 配置，按 Remote -> Project -> Session 同步索引，并把主界面收敛为 chatbox。 | Done |
 | M5.8 | [`S0037`](spec/ship/S0037-webui-device-settings-tree.md) | Device settings and tree correction：配置页添加 Device，主 sidebar 展示 Device -> Project -> Session，Session 打开后进入 chatbox。 | Done |
+| M5.9 | [`S0038`](spec/ship/S0038-webui-device-connect-smoke.md) | Device connect smoke：归一化 Device Link，明确连接错误，并用真实 daemon 验证 WebUI 设备连接路径。 | Done |
 
 **Not in M5**:
 
@@ -318,6 +319,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | [`S0035`](spec/ship/S0035-webui-prompt-control-smoke.md) | 实现 WebUI prompt/cancel 控制并验证真实 remote daemon 共享 session | Done |
 | [`S0036`](spec/ship/S0036-webui-remote-project-chatbox.md) | 修正 M5 WebUI 为 Remote 配置持久化、Project/Session 同步和 chatbox 主界面 | Done |
 | [`S0037`](spec/ship/S0037-webui-device-settings-tree.md) | 修正 WebUI 为 Settings 添加 Device、Device/Project/Session 树和 Session chatbox | Done |
+| [`S0038`](spec/ship/S0038-webui-device-connect-smoke.md) | 修正 WebUI Device Link 归一化和真实 daemon 连接 smoke | Done |
 
 ---
 

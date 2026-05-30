@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { asClientId, asSessionId } from "@scorel/protocol";
 
-import { connectToRemoteSession } from "./connection.js";
+import { connectToRemoteSession, normalizeDeviceLink } from "./connection.js";
 
 class TestWebSocket {
   static readonly sentMessages: string[] = [];
@@ -61,6 +61,20 @@ class TestWebSocket {
 }
 
 describe("connectToRemoteSession", () => {
+  it("normalizes device links into browser WebSocket URLs", () => {
+    expect(normalizeDeviceLink("127.0.0.1:18789")).toBe("ws://127.0.0.1:18789");
+    expect(normalizeDeviceLink("localhost:18789")).toBe("ws://localhost:18789");
+    expect(normalizeDeviceLink("http://127.0.0.1:18789")).toBe("ws://127.0.0.1:18789");
+    expect(normalizeDeviceLink("https://example.com/scorel")).toBe("wss://example.com/scorel");
+    expect(normalizeDeviceLink("ws://127.0.0.1:18789")).toBe("ws://127.0.0.1:18789");
+    expect(normalizeDeviceLink("wss://example.com/scorel")).toBe("wss://example.com/scorel");
+  });
+
+  it("rejects empty or non-websocket device links with product copy", () => {
+    expect(() => normalizeDeviceLink("")).toThrow("Device Link is required");
+    expect(() => normalizeDeviceLink("ftp://127.0.0.1:18789")).toThrow("Device Link must be a ws:// or wss:// endpoint");
+  });
+
   it("connects through the browser-safe WsTransport and records daemon identity", async () => {
     const result = await connectToRemoteSession({
       url: "ws://127.0.0.1:5050",
@@ -109,5 +123,22 @@ describe("connectToRemoteSession", () => {
       streamLastSeq: 0,
     });
     expect(JSON.parse(TestWebSocket.sentMessages[0] ?? "{}").sessionId).toBeUndefined();
+  });
+
+  it("uses the normalized device link when connecting", async () => {
+    let openedUrl = "";
+    const result = await connectToRemoteSession({
+      url: "127.0.0.1:5050",
+      token: "secret-token",
+      clientId: asClientId("client_webui"),
+      createWebSocket: (url) => {
+        openedUrl = url;
+        return new TestWebSocket(url);
+      },
+    });
+
+    expect(result.client.state).toBe("connected");
+    expect(openedUrl).toBe("ws://127.0.0.1:5050");
+    expect(TestWebSocket.sentMessages).toHaveLength(1);
   });
 });

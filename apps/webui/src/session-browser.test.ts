@@ -152,4 +152,29 @@ describe("S0034 session browser", () => {
     expect(html).not.toContain("<device>");
     expect(html).not.toContain("<WebUI>");
   });
+
+  it("keeps connected devices useful when a project has no sessions yet", () => {
+    const html = renderDeviceTree({
+      devices: [
+        {
+          id: "device_remote",
+          name: "Remote daemon",
+          projects: [
+            {
+              projectKey: "remote:device_remote:scorel",
+              displayName: "scorel",
+              remoteLabel: "Remote daemon",
+              sessions: [],
+            },
+          ],
+        },
+      ],
+      selectedProjectKey: "remote:device_remote:scorel",
+      selectedSessionId: null,
+    });
+
+    expect(html).toContain('data-device-id="device_remote"');
+    expect(html).toContain('data-project-key="remote:device_remote:scorel"');
+    expect(html).toContain("No sessions synced");
+  });
 });
