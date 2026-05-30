@@ -214,17 +214,31 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 
 ---
 
-## M5: Web / GUI
+## M5: WebUI
 
-**Goal**: 用户可以通过图形界面观察和控制 daemon session。
+**Goal**: 用户可以通过浏览器 WebUI 观察和控制 remote daemon session。M5 只做 Web；GUI / Tauri / Electron 放到后续阶段。
 
 **Done when**:
 
-- WebUI 或 GUI 能连接 daemon。
+- WebUI 能通过已有 WebSocket remote transport 连接 daemon。
 - 能展示 session tree、事件流和工具调用。
 - 能发 prompt / cancel。
 
-**Status**: Planned
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M5.1 | [`S0030`](spec/ship/S0030-webui-baseline.md) | 建立 browser-safe WebUI app shell，并通过 `DaemonClient + WsTransport` 连接 remote daemon session。 | Done |
+
+**Not in M5**:
+
+- GUI / Tauri / Electron / native desktop packaging。
+- Local daemon process manager。
+- OAuth、账号系统、TLS 自动签发。
+- 公网 tunnel / relay service / NAT traversal。
+- IDE-style file explorer/editor、checkpoint restore UI、完整 rewind/fork/compact 图形交互。
+
+**Status**: Active
 
 ---
 

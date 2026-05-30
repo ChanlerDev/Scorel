@@ -45,6 +45,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/protocol
 
+  apps/webui:
+    dependencies:
+      '@scorel/client':
+        specifier: workspace:*
+        version: link:../../packages/client
+      '@scorel/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+
   packages/client:
     dependencies:
       '@scorel/protocol':
