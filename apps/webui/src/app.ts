@@ -1,6 +1,7 @@
 import { asClientId, asSessionId } from "@scorel/protocol";
 
 import { connectToRemoteSession } from "./connection.js";
+import { renderWebUiShell } from "./shell.js";
 
 type WebUiState = {
   status: "idle" | "connecting" | "connected" | "error";
@@ -16,31 +17,7 @@ const setState = (root: HTMLElement, state: WebUiState): void => {
 };
 
 export const mountWebUi = (root: HTMLElement): void => {
-  root.innerHTML = `
-    <main class="scorel-webui-shell">
-      <section>
-        <p class="eyebrow">Scorel M5 WebUI</p>
-        <h1>Connect to a remote daemon session</h1>
-        <p>Use the existing WebSocket daemon transport. Tokens stay in memory for this page session.</p>
-      </section>
-      <form data-connect-form>
-        <label>
-          WebSocket endpoint
-          <input name="url" autocomplete="off" placeholder="ws://127.0.0.1:5050" required />
-        </label>
-        <label>
-          Token
-          <input name="token" autocomplete="off" type="password" required />
-        </label>
-        <label>
-          Session id
-          <input name="sessionId" autocomplete="off" placeholder="ses_..." required />
-        </label>
-        <button type="submit">Connect</button>
-      </form>
-      <p data-status data-state="idle">Disconnected</p>
-    </main>
-  `;
+  root.innerHTML = renderWebUiShell();
 
   const form = root.querySelector<HTMLFormElement>("[data-connect-form]");
   form?.addEventListener("submit", (event) => {

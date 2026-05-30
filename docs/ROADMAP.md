@@ -240,7 +240,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | Step | Spec | Goal | Status |
 |---|---|---|---|
 | M5.1 | [`S0030`](spec/ship/S0030-webui-baseline.md) | 建立 browser-safe WebUI app shell，并通过 `DaemonClient + WsTransport` 连接 remote daemon session。 | Done |
-| M5.2 | `S0031` | WebUI 信息架构和视觉基线：落地 Codex App / Alma 风格的 sidebar、主会话区、底部 composer 骨架。 | Planned |
+| M5.2 | [`S0031`](spec/ship/S0031-webui-information-architecture.md) | WebUI 信息架构和视觉基线：落地 Codex App / Alma 风格的 sidebar、主会话区、底部 composer 骨架。 | Done |
 | M5.3 | `S0032` | Remote session attach / reconnect：通过 endpoint/token/session 连接，展示 daemon identity，并处理断线、错误和刷新恢复。 | Planned |
 | M5.4 | `S0033` | Event stream viewer：展示 user/assistant、streaming delta、tool call/result，并避免重连后重复渲染。 | Planned |
 | M5.5 | `S0034` | Project/session browser：基于 project index/session lookup 选择 session，并展示第一版 session tree。 | Planned |
@@ -306,6 +306,7 @@ M5 WebUI 的产品形态参考 Codex App / Alma 当前交互，而不是做传�
 | [`S0028`](spec/ship/S0028-client-attach-diagnostics-log.md) | 为本地 attach cache 增加同级 diagnostics `.log`，暴露 remote/local attach 客户端侧调试信息 | Done |
 | [`S0029`](spec/ship/S0029-project-index-for-session-lookup.md) | 增加轻量 project index，用 project 视角索引 local/remote sessions 与 attach logs | Done |
 | [`S0030`](spec/ship/S0030-webui-baseline.md) | 建立 M5 WebUI baseline 和 browser-safe remote connect wiring | Done |
+| [`S0031`](spec/ship/S0031-webui-information-architecture.md) | 建立 Codex App / Alma 风格的 WebUI 信息架构和视觉骨架 | Done |
 
 ---
 
