@@ -30,6 +30,14 @@ describe("Transcript", () => {
     expect(screen.getByText(/No messages yet/)).toBeTruthy();
   });
 
+  it("delegates scroll behavior to AutoscrollRegion", () => {
+    render(<Transcript turns={[userTurn("u1", "hello")]} />);
+    // The scrollable container is owned by AutoscrollRegion now; Transcript
+    // renders its turn list inside it.
+    expect(screen.getByTestId("autoscroll-region")).toBeTruthy();
+    expect(screen.getByTestId("transcript")).toBeTruthy();
+  });
+
   it("renders user and assistant turns in order", () => {
     const turns: Turn[] = [userTurn("u1", "hello"), assistantTurn("a1", "hi there")];
     render(<Transcript turns={turns} />);

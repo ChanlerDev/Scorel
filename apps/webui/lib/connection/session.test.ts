@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   asClientId,
   asEventId,
@@ -174,6 +174,31 @@ function turnEnd(seq: number, turnIndex = 1, clientId: ClientId = CLIENT_ID): Sc
     clientId,
     ts: 0,
     turnIndex,
+  };
+}
+
+function messageStart(eventId: string, seq: number, clientId: ClientId = CLIENT_ID): ScorelEvent {
+  return {
+    type: "message_start",
+    eventId: asEventId(eventId),
+    parentId: null,
+    role: "assistant",
+    seq: asSeq(seq),
+    sessionId: SESSION_ID,
+    clientId,
+    ts: 0,
+  };
+}
+
+function textDelta(eventId: string, seq: number, delta: string, clientId: ClientId = CLIENT_ID): ScorelEvent {
+  return {
+    type: "text_delta",
+    eventId: asEventId(eventId),
+    delta,
+    seq: asSeq(seq),
+    sessionId: SESSION_ID,
+    clientId,
+    ts: 0,
   };
 }
 
@@ -443,5 +468,122 @@ describe("createSessionAttachController", () => {
     expect(last.projectSlug).toBe("Users-foo-bar");
     expect(last.persistentLastSeq).toBe(2);
     expect(last.streamLastSeq).toBe(2);
+  });
+});
+
+describe("createSessionAttachController text_delta rAF batching", () => {
+  let queue: Array<(ts: number) => void>;
+
+  beforeEach(() => {
+    queue = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: (ts: number) => void) => {
+      queue.push(cb);
+      return queue.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", () => {
+      // Drop the queued callback so a stray flush cannot run later. The real
+      // browser cancels by handle; for the test we treat any cancel as
+      // "drop everything pending" because the controller only ever holds one.
+      queue.length = 0;
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function flushFrame(): void {
+    const cb = queue.shift();
+    cb?.(0);
+  }
+
+  it("coalesces a burst of three text_delta events into one snapshot per frame", async () => {
+    const fake = new FakeDaemonClient();
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      attachCache: makeAttachCache(),
+      onState: (s) => snapshots.push(s),
+    });
+    await controller.start();
+    // Establish a streaming assistant via message_start; this is a non-delta
+    // event so it must flush synchronously.
+    for (const sub of fake.subscribers) sub(messageStart("evt_a_1", 10));
+    const baseline = snapshots.length;
+
+    // Burst: three text_delta events arrive back-to-back. None should emit
+    // until the next frame.
+    for (const sub of fake.subscribers) sub(textDelta("evt_a_1", 11, "He"));
+    for (const sub of fake.subscribers) sub(textDelta("evt_a_1", 12, "ll"));
+    for (const sub of fake.subscribers) sub(textDelta("evt_a_1", 13, "o"));
+    expect(snapshots.length).toBe(baseline);
+    expect(queue.length).toBe(1);
+
+    // Frame fires: exactly one snapshot is appended with the merged state.
+    flushFrame();
+    expect(snapshots.length).toBe(baseline + 1);
+    const merged = snapshots.at(-1)!;
+    const assistant = merged.state.turns.find((t) => t.id === "evt_a_1");
+    expect(assistant).toBeDefined();
+    if (assistant && assistant.kind === "assistant") {
+      const textPart = assistant.parts.find((p) => p.kind === "text");
+      expect(textPart && textPart.kind === "text" ? textPart.text : "").toBe("Hello");
+    }
+  });
+
+  it("non-delta event flushes synchronously and cancels the pending batch", async () => {
+    const fake = new FakeDaemonClient();
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      attachCache: makeAttachCache(),
+      onState: (s) => snapshots.push(s),
+    });
+    await controller.start();
+    for (const sub of fake.subscribers) sub(messageStart("evt_a_1", 10));
+    for (const sub of fake.subscribers) sub(textDelta("evt_a_1", 11, "Hi"));
+    expect(queue.length).toBe(1);
+    const before = snapshots.length;
+
+    // turn_end is a non-delta event: it must emit immediately and cancel the
+    // pending rAF so the deferred snapshot does not overwrite the final
+    // state.
+    for (const sub of fake.subscribers) sub(turnEnd(12));
+    expect(snapshots.length).toBe(before + 1);
+    // Cancel cleared the queue so subsequent frame flushes are no-ops.
+    expect(queue.length).toBe(0);
+
+    // Even if a stale frame somehow ran, it must not produce another snapshot
+    // for this turn_end event.
+    flushFrame();
+    expect(snapshots.length).toBe(before + 1);
+  });
+
+  it("stop() cancels any pending rAF batch", async () => {
+    const fake = new FakeDaemonClient();
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      attachCache: makeAttachCache(),
+      onState: (s) => snapshots.push(s),
+    });
+    await controller.start();
+    for (const sub of fake.subscribers) sub(messageStart("evt_a_1", 10));
+    for (const sub of fake.subscribers) sub(textDelta("evt_a_1", 11, "Hi"));
+    expect(queue.length).toBe(1);
+
+    controller.stop();
+    expect(queue.length).toBe(0);
+    flushFrame();
+    // No further snapshots after stop.
+    const finalLength = snapshots.length;
+    flushFrame();
+    expect(snapshots.length).toBe(finalLength);
   });
 });

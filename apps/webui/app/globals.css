@@ -115,3 +115,26 @@ body {
   padding: 0;
   background-color: transparent;
 }
+
+/* Streaming caret animation (S0042). The keyframes flip the opacity in two
+ * discrete steps so the caret blinks instead of fading — `steps(2)` makes the
+ * transition crisp like a terminal cursor rather than a CSS fade.
+ *
+ * The caret element itself is rendered by `components/chatbox/streaming-cursor.tsx`
+ * as a sibling of the streaming `<MarkdownView>`. Reduced-motion users get a
+ * static (but still visible) caret per the spec. */
+@keyframes scorel-caret-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.scorel-caret {
+  animation: scorel-caret-blink 1s steps(2) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scorel-caret {
+    animation: none;
+    opacity: 1;
+  }
+}

@@ -278,7 +278,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 |---|---|---|---|
 | M5.5.1 | [`S0040`](spec/ship/S0040-webui-codex-visual-tokens.md) | Codex 风视觉一刀 + design tokens（CSS vars + Tailwind theme.extend） | Done |
 | M5.5.2 | [`S0041`](spec/ship/S0041-webui-markdown-and-tool-block.md) | Chatbox markdown（react-markdown + GFM + sanitize + lazy Shiki）+ thinking 折叠 + 统一 tool 块走 JSON fence | Done |
-| M5.5.3 | [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | Streaming 光标动画、rAF batch、IntersectionObserver autoscroll、jump-to-bottom 浮按钮 | Planned |
+| M5.5.3 | [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | Streaming 光标动画、rAF batch、IntersectionObserver autoscroll、jump-to-bottom 浮按钮 | Done |
 
 **Not in M5.5**:
 
@@ -288,7 +288,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - streamdown 切换（仅在 S0041 流式抖动反馈不可接受时跟进，不在 M5.5 范围）。
 - Base UI 大规模引入（按需使用，本 milestone 仍 utility 主导）。
 
-**Status**: Planned
+**Status**: Done
 
 ---
 
@@ -351,7 +351,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0039`](spec/ship/S0039-webui-e2e-newchat.md) | WebUI New Chat 与真实 daemon 端到端验证（M5 收口） | Done |
 | [`S0040`](spec/ship/S0040-webui-codex-visual-tokens.md) | WebUI Codex 风视觉一刀与 design tokens | Done |
 | [`S0041`](spec/ship/S0041-webui-markdown-and-tool-block.md) | WebUI markdown 渲染、代码高亮与统一 tool 块 | Done |
-| [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | WebUI streaming UX 与 autoscroll | Planned |
+| [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | WebUI streaming UX 与 autoscroll | Done |
 
 ---
 

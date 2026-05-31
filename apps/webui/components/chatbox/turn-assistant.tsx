@@ -2,6 +2,7 @@
 
 import type { Turn, TurnPart } from "../../lib/events/projector";
 import { MarkdownView } from "./markdown-view";
+import { StreamingCursor } from "./streaming-cursor";
 import { TurnTool } from "./turn-tool";
 
 export type TurnAssistantProps = {
@@ -17,11 +18,6 @@ export function TurnAssistant({ turn }: TurnAssistantProps): JSX.Element {
     >
       <header className="mb-1 flex items-center gap-2 font-display text-xs uppercase tracking-wide text-muted">
         <span>Assistant</span>
-        {turn.streaming ? (
-          <span data-testid="streaming-cursor" className="text-faint">
-            ▋
-          </span>
-        ) : null}
         {turn.stopReason && turn.stopReason !== "end_turn" ? (
           <span className="text-status-warn">{turn.stopReason}</span>
         ) : null}
@@ -30,6 +26,11 @@ export function TurnAssistant({ turn }: TurnAssistantProps): JSX.Element {
         {turn.parts.map((part, idx) => (
           <PartView key={idx} part={part} />
         ))}
+        {/* The streaming caret lives strictly outside <MarkdownView> so the
+         * markdown parser never sees it. Mounting it here (a sibling of the
+         * parts) keeps the cursor at the visual end of the streaming text
+         * without interleaving into the parsed token tree. */}
+        {turn.streaming ? <StreamingCursor /> : null}
       </div>
     </article>
   );

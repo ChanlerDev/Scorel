@@ -9,6 +9,7 @@ import {
   type SessionId,
 } from "@scorel/protocol";
 
+import { createRafBatcher } from "../events/delta-batch";
 import {
   appendPendingUserTurn,
   emptyProjectorState,
@@ -213,12 +214,31 @@ export function createSessionAttachController(
     }
   }
 
+  // Coalesce text_delta snapshots into one emit per animation frame. Other
+  // event kinds (turn_*, message_*, persistent assistant_message, errors)
+  // flush synchronously and cancel any pending frame so the final state
+  // never lags behind a stale rAF tick. See S0042 spec §rAF-batched.
+  const deltaBatcher = createRafBatcher(() => {
+    if (stopped) return;
+    if (initializing) return;
+    emit(false);
+  });
+
   function applyEvent(event: ScorelEvent): void {
     state = projectEvent(state, event);
     persistEvent(event);
     trackInFlight(event);
     trackSeq(event);
-    if (!initializing) emit(false);
+    if (initializing) return;
+    if (event.type === "text_delta") {
+      deltaBatcher.schedule();
+      return;
+    }
+    // Any non-delta event flushes immediately — drop the pending rAF first so
+    // we never overwrite the just-emitted authoritative state with a stale
+    // batched snapshot.
+    deltaBatcher.cancel();
+    emit(false);
   }
 
   async function start(): Promise<void> {
@@ -293,6 +313,7 @@ export function createSessionAttachController(
 
   function stop(): void {
     stopped = true;
+    deltaBatcher.cancel();
     unsubscribe?.();
     unsubscribe = undefined;
   }

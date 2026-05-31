@@ -39,7 +39,10 @@ describe("TurnAssistant", () => {
     render(<TurnAssistant turn={streamingTurn("Hel")} />);
     const article = screen.getByTestId("turn-assistant");
     expect(article.dataset.streaming).toBe("true");
-    expect(screen.getByTestId("streaming-cursor")).toBeTruthy();
+    const cursor = screen.getByTestId("streaming-cursor");
+    // S0042: cursor is now the animated <StreamingCursor /> element with the
+    // .scorel-caret class so the keyframes target it.
+    expect(cursor.classList.contains("scorel-caret")).toBe(true);
     expect(article.textContent).toContain("Hel");
   });
 

@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-
 import type { Turn, TurnPart } from "../../lib/events/projector";
+import { AutoscrollRegion } from "./autoscroll-region";
 import { TurnAssistant } from "./turn-assistant";
 import { TurnTool } from "./turn-tool";
 import { TurnUser } from "./turn-user";
@@ -11,54 +10,57 @@ export type TranscriptProps = {
   turns: Turn[];
 };
 
-const SCROLL_BOTTOM_THRESHOLD_PX = 64;
-
+/**
+ * Pure presenter for the projected turn list. Scroll behavior delegates to
+ * `<AutoscrollRegion>` (S0042) so this component carries no scroll state.
+ *
+ * The empty placeholder still mounts inside the region so that the user can
+ * scroll-to-bottom even before the first message arrives.
+ *
+ * `tickKey` is built from turn count plus the last turn's first text part
+ * length so that streaming text_delta growth (which keeps `turns.length`
+ * stable but extends the last turn's text) still triggers the
+ * follow-when-at-bottom auto-scroll effect. The IntersectionObserver gate
+ * inside AutoscrollRegion is what actually decides whether to scroll, so
+ * this is just a "something visibly changed" pulse.
+ */
 export function Transcript({ turns }: TranscriptProps): JSX.Element {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  // Track whether the user has scrolled away from the bottom; if not we
-  // pin to bottom on every event.
-  const stickToBottomRef = useRef(true);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
-    const onScroll = (): void => {
-      const remaining = node.scrollHeight - node.scrollTop - node.clientHeight;
-      stickToBottomRef.current = remaining < SCROLL_BOTTOM_THRESHOLD_PX;
-    };
-    node.addEventListener("scroll", onScroll);
-    return () => node.removeEventListener("scroll", onScroll);
-  }, []);
-
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
-    if (stickToBottomRef.current) {
-      node.scrollTop = node.scrollHeight;
-    }
-  }, [turns]);
-
   if (turns.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-sm italic text-muted">
-        No messages yet — type below to start.
-      </div>
+      <AutoscrollRegion
+        tickKey={"empty"}
+        className="flex h-full items-center justify-center overflow-y-auto bg-bg text-sm italic text-muted"
+      >
+        <span data-testid="transcript-empty">
+          No messages yet — type below to start.
+        </span>
+      </AutoscrollRegion>
     );
   }
 
   return (
-    <div
-      ref={containerRef}
-      data-testid="transcript"
+    <AutoscrollRegion
+      tickKey={transcriptTickKey(turns)}
       className="flex h-full flex-col gap-3 overflow-y-auto bg-bg px-2 py-3"
     >
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+      <div
+        data-testid="transcript"
+        className="mx-auto flex w-full max-w-3xl flex-col gap-3"
+      >
         {turns.map((turn) => (
           <TurnView key={turn.id} turn={turn} />
         ))}
       </div>
-    </div>
+    </AutoscrollRegion>
   );
+}
+
+function transcriptTickKey(turns: Turn[]): string {
+  const last = turns[turns.length - 1];
+  if (!last) return `${turns.length}:0`;
+  const firstText = last.parts.find((p) => p.kind === "text");
+  const len = firstText && firstText.kind === "text" ? firstText.text.length : 0;
+  return `${turns.length}:${last.id}:${len}`;
 }
 
 function TurnView({ turn }: { turn: Turn }): JSX.Element {
