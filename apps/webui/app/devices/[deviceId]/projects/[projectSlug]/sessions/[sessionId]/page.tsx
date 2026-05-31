@@ -142,6 +142,11 @@ function Chatbox({
     sessionId,
   });
   const controllerRef = useRef<SessionAttachController | null>(null);
+  // S0046: one-shot consumer for the empty-composer's pending prompt. Once
+  // the attach controller has finished its initial resync (snapshot.loading
+  // flips to false), pull the stashed text and dispatch a single send. The
+  // ref guards against re-firing across renders or HMR resets.
+  const pendingConsumedRef = useRef(false);
 
   useEffect(() => {
     if (!managed) return;
@@ -172,6 +177,27 @@ function Chatbox({
       controllerRef.current = null;
     };
   }, [managed, remoteDeviceId, projectSlug, sessionId]);
+
+  // S0046: drain the empty-composer pending prompt exactly once after the
+  // controller is fully attached (loading=false ⇒ initial resync settled).
+  // We key on sessionId so concurrent tabs do not collide; sessionStorage is
+  // per-tab anyway, but the per-session key keeps the behaviour explicit.
+  useEffect(() => {
+    if (pendingConsumedRef.current) return;
+    if (snapshot.loading) return;
+    const controller = controllerRef.current;
+    if (!controller) return;
+    if (typeof window === "undefined") return;
+    const key = `scorel.pending-prompt:${sessionId}`;
+    const pending = window.sessionStorage.getItem(key);
+    if (!pending) return;
+    pendingConsumedRef.current = true;
+    window.sessionStorage.removeItem(key);
+    void controller.send(pending).catch(() => {
+      // Errors propagate through `snapshot.error` (set by the attach
+      // controller); no extra UI work needed here.
+    });
+  }, [snapshot.loading, sessionId]);
 
   const send = useMemo(
     () =>

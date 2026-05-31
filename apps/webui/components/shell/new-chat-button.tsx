@@ -1,26 +1,19 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-
-import {
-  getConnectionPool,
-  getDevicesStoreInstance,
-} from "../../lib/connection/use-connection";
-import { createSessionForProject } from "../../lib/sync/session-create";
 
 export type NewChatButtonProps = {
-  /** Active route's deviceId. When undefined the button is disabled. */
+  /** Active route's deviceId (forwarded as `?device=` so the empty composer
+   * lands on the same device). When undefined, the button still navigates to
+   * `/` so the user can land on the empty composer and pick a device. */
   deviceId: string | undefined;
-  /** Active route's projectSlug. When undefined the button is disabled with
-   * an explanatory tooltip. */
+  /** Active route's projectSlug (forwarded as `?project=`). When undefined,
+   * the empty composer falls back to its persisted last-active project /
+   * first available. */
   projectSlug: string | undefined;
   /** Visual variant: `sidebar` is the compact full-width pill; `page`
    * is a primary action button rendered above the project's session list. */
   variant: "sidebar" | "page";
-  /** Test seam — defaults to the production helper. Lets the project-page
-   * and sidebar tests inject a stub. */
-  createSession?: typeof createSessionForProject;
 };
 
 const SIDEBAR_BASE =
@@ -30,81 +23,39 @@ const PAGE_BASE =
 
 const ENABLED_THEME =
   "border-accent bg-accent text-bg hover:bg-accent-hover";
-const DISABLED_THEME =
-  "border-subtle bg-surface text-faint cursor-not-allowed";
 
+/**
+ * S0046: New Chat is no longer a session-creation button — it navigates to
+ * the empty-state composer at `/`, optionally carrying the active route's
+ * `device` / `project` as query parameters so the composer pre-selects them.
+ * Session creation is deferred to the user's first send inside
+ * `EmptyComposer.handleSend`. The boundary test enforces that this file no
+ * longer imports `lib/sync/session-create`.
+ */
 export function NewChatButton({
   deviceId,
   projectSlug,
   variant,
-  createSession = createSessionForProject,
 }: NewChatButtonProps): JSX.Element {
   const router = useRouter();
-  const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const ready = Boolean(deviceId && projectSlug);
-  const tooltip = ready
-    ? undefined
-    : "Select a project first";
-
-  const handleClick = async (): Promise<void> => {
-    if (!ready || !deviceId || !projectSlug) return;
-    setError(null);
-    const pool = getConnectionPool();
-    const client = pool.peekClient(deviceId);
-    if (!client) {
-      setError("Connect to the device first");
-      return;
-    }
-    const store = getDevicesStoreInstance();
-    setCreating(true);
-    try {
-      const { sessionId } = await createSession({
-        client,
-        store,
-        deviceId,
-        projectSlug,
-      });
-      const target = `/devices/${encodeURIComponent(
-        deviceId,
-      )}/projects/${encodeURIComponent(projectSlug)}/sessions/${encodeURIComponent(
-        sessionId,
-      )}`;
-      router.push(target);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message);
-    } finally {
-      setCreating(false);
-    }
+  const handleClick = (): void => {
+    const params = new URLSearchParams();
+    if (deviceId) params.set("device", deviceId);
+    if (projectSlug) params.set("project", projectSlug);
+    const target = params.toString() ? `/?${params.toString()}` : "/";
+    router.push(target);
   };
 
   const base = variant === "sidebar" ? SIDEBAR_BASE : PAGE_BASE;
-  const theme = ready ? ENABLED_THEME : DISABLED_THEME;
 
   return (
-    <div className={variant === "sidebar" ? "space-y-1" : "space-y-2"}>
-      <button
-        type="button"
-        disabled={!ready || creating}
-        title={tooltip}
-        aria-disabled={!ready || creating}
-        onClick={() => {
-          void handleClick();
-        }}
-        className={`${base} ${theme} ${creating ? "opacity-70" : ""}`}
-      >
-        {creating ? "Creating session…" : "+ New Chat"}
-      </button>
-      {error ? (
-        <p
-          role="alert"
-          className="rounded-md border border-status-err bg-surface-raised px-3 py-2 text-xs text-status-err"
-        >
-          {error}
-        </p>
-      ) : null}
-    </div>
+    <button
+      type="button"
+      onClick={handleClick}
+      className={`${base} ${ENABLED_THEME}`}
+    >
+      + New Chat
+    </button>
   );
 }

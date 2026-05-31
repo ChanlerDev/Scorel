@@ -272,6 +272,31 @@ describe("apps/webui package boundaries", () => {
     ).toEqual([]);
   });
 
+  it("forbids new-chat-button.tsx from importing lib/sync/session-create (S0046)", async () => {
+    // S0046: NewChatButton no longer creates sessions — it is a pure
+    // navigation control. The boundary prevents a regression where someone
+    // re-introduces direct daemon session creation in this component, which
+    // would resurrect the empty-session sprawl problem we just fixed.
+    const target = path.join(
+      appRoot,
+      "components",
+      "shell",
+      "new-chat-button.tsx",
+    );
+    const text = await fs.readFile(target, "utf8");
+    const offenders: string[] = [];
+    if (/from\s+["'][^"']*lib\/sync\/session-create["']/.test(text)) {
+      offenders.push("imports lib/sync/session-create");
+    }
+    if (/\bcreateSessionForProject\b/.test(text)) {
+      offenders.push("references createSessionForProject");
+    }
+    expect(
+      offenders,
+      `new-chat-button.tsx must stay a pure navigation component (S0046).\nOffenders:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
+
   it("forbids any reference to the removed CollapseToggle component (S0045)", async () => {
     // `CollapseToggle` was deleted in S0045 — folding moved inline to the
     // `ProjectNode` / `DeviceTree` row buttons. Catch stale imports or JSX

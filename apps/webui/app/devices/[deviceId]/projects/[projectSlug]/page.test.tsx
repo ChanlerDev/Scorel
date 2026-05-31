@@ -275,7 +275,7 @@ describe("ProjectPage", () => {
     expect(screen.getByText("Retry")).toBeTruthy();
   });
 
-  it("New Chat creates a session via daemon and navigates", async () => {
+  it("New Chat navigates to the empty composer carrying device + project (S0046)", async () => {
     const { device, store } = seedDevice();
     store.setProjects(device.id, [
       { projectSlug: "alpha", displayName: "Alpha" },
@@ -285,56 +285,28 @@ describe("ProjectPage", () => {
     render(
       <ProjectPage params={{ deviceId: device.id, projectSlug: "alpha" }} />,
     );
-    // Wait for connect + initial sync to settle so peekClient returns connected.
+    // Wait for connect + initial sync to settle.
     await act(async () => {
       for (let i = 0; i < 10; i += 1) await Promise.resolve();
     });
 
     const btn = screen.getByRole("button", { name: /New Chat/ });
+    // S0046: button is always enabled — empty composer handles missing
+    // context gracefully on the landing.
     expect(btn.hasAttribute("disabled")).toBe(false);
     fireEvent.click(btn);
     await act(async () => {
       for (let i = 0; i < 10; i += 1) await Promise.resolve();
     });
 
-    expect(createSessionCalls).toBe(1);
-    expect(createSessionLastMeta?.projectSlug).toBe("alpha");
-    expect(createSessionLastMeta?.title).toBe("New chat");
-    expect(_push).toHaveBeenCalledWith(
-      `/devices/${encodeURIComponent(device.id)}/projects/alpha/sessions/session_new`,
-    );
-    // Optimistic prepend to local cache.
-    const project = store
-      .get(device.id)
-      ?.projects?.find((p) => p.projectSlug === "alpha");
-    expect(project?.sessions?.session_new).toBeTruthy();
-  });
-
-  it("shows banner and stays on page when daemon rejects create_session", async () => {
-    const { device, store } = seedDevice();
-    store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Alpha" },
-    ]);
-    createSessionImpl = async () => {
-      throw new Error("create boom");
-    };
-    installPool(store);
-
-    render(
-      <ProjectPage params={{ deviceId: device.id, projectSlug: "alpha" }} />,
-    );
-    await act(async () => {
-      for (let i = 0; i < 10; i += 1) await Promise.resolve();
-    });
-
-    const btn = screen.getByRole("button", { name: /New Chat/ });
-    fireEvent.click(btn);
-    await act(async () => {
-      for (let i = 0; i < 10; i += 1) await Promise.resolve();
-    });
-    expect(_push).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toBe("create boom");
-    // Cache untouched — no `session_new` row appeared.
+    // Crucially: clicking New Chat must NOT mint a session. Lazy creation
+    // happens only on the empty composer's first send.
+    expect(createSessionCalls).toBe(0);
+    const target = _push.mock.calls[0]?.[0] as string;
+    expect(target.startsWith("/?")).toBe(true);
+    expect(target).toContain(`device=${encodeURIComponent(device.id)}`);
+    expect(target).toContain("project=alpha");
+    // Cache must be untouched.
     const project = store
       .get(device.id)
       ?.projects?.find((p) => p.projectSlug === "alpha");

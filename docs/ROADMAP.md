@@ -361,44 +361,6 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M5.7: WebUI Chatbox Rebuild
-
-**Goal**: 推翻 M5.5 暖纸 + 墨蓝 + Newsreader serif 视觉,改为 ChatGPT 哲学(纯白 + 黑字 + sans + 极简)+ Chatbox 三段式 sidebar 结构。Project 节点独立折叠,Composer pill 形态,未实装功能用 Codex 风灰按钮占位。设计哲学固化到 `docs/design.md`。
-
-**Done when**:
-
-- `docs/design.md` 锁定视觉/交互真相源,后续 spec 引用本文件。
-- `:root` tokens 重写为 ChatGPT 色板(`#FFFFFF` / `#0D0D0D` / `#F7F7F8` / 黑 accent),`--font-display` 删除,全 sans。
-- Sidebar 三段式:顶部 4 行(`+ 新对话` active + 搜索/插件/自动化灰)→ 中段 device/project 树(▸/▾ 折叠 + localStorage 持久化)→ 底部 Settings + 主题切换灰。
-- Topbar 删除。
-- Composer 改 pill:`Message Scorel…` placeholder + 左 `⊕` 灰 + 右 `model ▾` 灰 + 右 `🎤` 灰 + 圆形黑 send / 红 cancel。
-- User 气泡靠右 `max-w-[70%] rounded-lg bg-accent-soft`;assistant 无气泡贴 bg。
-- `@fontsource/newsreader` 移除,boundary test 同步。
-- 自动测试 + 真实 LLM e2e 通过。
-
-**Product Intent**:
-
-设计哲学见 [`docs/design.md`](design.md)。讨论与决策见 [`self/discussions/2026-05-31-webui-chatbox-rebuild-brainstorm.md`](../self/discussions/2026-05-31-webui-chatbox-rebuild-brainstorm.md) §5。
-
-**Steps**:
-
-| Step | Spec | Goal | Status |
-|---|---|---|---|
-| M5.7.1 | [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md) | 整 webui 一刀重构:tokens + 三段式 sidebar + 折叠 + composer pill + 灰按钮 + 气泡形态 | Planned |
-
-**Not in M5.7**:
-
-- 暗色模式实装(token 占位即可,后置 spec)。
-- Cmd+K / 命令面板 / 全局快捷键。
-- Sidebar 整体折叠到 56px(后置)。
-- Composer `+` / `🎤` / model picker 真实功能(本轮仅灰按钮占位)。
-- Tool block 特化(Bash/Edit/diff viewer);保持统一 JSON fence。
-- Composer 历史回溯(↑ 键)。
-
-**Status**: Planned
-
----
-
 ## M5.8: WebUI Card Sidebar + Session Cleanup
 
 **Goal**: 修复 S0044 ship 后 verification 暴露的会话页结构偏差(SessionHeader / Chatbox 卡片外壳)+ stale-token 未捕获错误,并按用户二轮视觉迭代要求把 sidebar 改为单卡片浅灰底、project/device 行 click 即 toggle(无 ▸/▾)、session 行加相对时间 hint。
@@ -429,31 +391,31 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M5.8: WebUI Card Sidebar + Session Cleanup
+## M5.9: WebUI Empty Composer + Lazy Session
 
-**Goal**: 修复 S0044 ship 后 verification 暴露的会话页结构偏差(SessionHeader / Chatbox 卡片外壳)+ stale-token 未捕获错误,并按用户二轮视觉迭代要求把 sidebar 改为单卡片浅灰底、project/device 行 click 即 toggle(无 ▸/▾)、session 行加相对时间 hint。
+**Goal**: 主区空态 `/` 改为 Codex/Chatbox 风的居中大 H1 + 大 composer + project picker;Sidebar `+ 新对话` 与 project 页 New Chat 按钮改为 nav 到此空态(继承 device/project query),首次 send 才创建 session,避免空 session 堆积。
 
 **Done when**:
 
-- Sidebar 一整块卡片底无内分隔/边框;层级靠留白与 hover/active 底色。
-- Project / Device 行 click = toggle 折叠,无路由跳转;Session 行单一进会话入口。
-- Session 行右侧显示相对时间(`刚刚` / `3 周` / `1 个月` 等),每分钟刷新。
-- SessionHeader / Chatbox 卡片外壳整删,transcript 直接贴主区 `bg-bg`。
-- `WsTransport is not connected` 同步抛错被 client 公开 API 包成 `code: "transport_disconnected"` rejection,WebUI 显示友好 inline 降级提示,Next dev overlay 不再弹。
-- WebUI 顶层 + session 路由 ErrorBoundary 兜底。
+- `/` populated 状态展示 H1 "我们应该在 Scorel 中构建什么?" + pill composer + project select + 模式/分支灯。
+- Project `<select>` 切换写 URL `?project=` + localStorage `scorel.ui.last-active-project`。
+- Sidebar / project 页 `+ 新对话` nav 到 `/?device=&project=`,**不再立即 createSession**。
+- 空态 composer onSend → createSession → sessionStorage `pending-prompt:<id>` → push session route。
+- Session page mount 后消费 pending-prompt 一次性触发 send。
 - 自动测试 + 手工 e2e 通过。
 
 **Steps**:
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
-| M5.8.1 | [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport-disconnected 错误吸收 | Planned |
+| M5.9.1 | [`S0046`](spec/ship/S0046-webui-empty-composer-and-lazy-session.md) | EmptyComposer + lazy session 创建 + NewChatButton 改 nav | Planned |
 
-**Not in M5.8**:
+**Not in M5.9**:
 
-- 真实 ⌘1..9 跳转 / Cmd+B / 整 sidebar 折叠到 56px。
-- "展开显示" 截断 UI / session 状态图标 / project 概览页改造。
-- 暗色模式 / model picker 真实切换 / daemon 协议变化。
+- Project hover `...` / ✏ 边控、底部装饰卡片、"完全访问权限"标签。
+- 真实模式/分支/model 切换。
+- daemon firstPrompt 一步协议。
+- 多 device 切换 picker。
 
 **Status**: Planned
 
@@ -522,7 +484,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0043`](spec/ship/S0043-startup-ergonomics.md) | 单 `scorel` 入口、token 持久化、WebUI 自动发现、`scorel up` 一键启动 | Done |
 | [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md) | WebUI 一刀重构为 Chatbox 风 + ChatGPT 哲学(推翻 M5.5) | Planned |
 | [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport guard | Planned |
-| [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport guard | Planned |
+| [`S0046`](spec/ship/S0046-webui-empty-composer-and-lazy-session.md) | 空态主区大 composer + project picker + lazy session 创建 | Planned |
 
 ---
 
