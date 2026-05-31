@@ -257,6 +257,41 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
+## M5.5: WebUI Polish (Codex Pass)
+
+**Goal**: 把 v1 honest plain WebUI 升级到接近 Codex App 的视觉与交互质量：暖灰底 + ink-blue accent + serif 标题、markdown + 代码高亮、流式光标 + autoscroll。统一展示路径，不做 tool 特化、不引快捷键、不做 dark mode。
+
+**Done when**:
+
+- WebUI 全局走 design tokens，无 zinc 字面量灰阶。
+- Chatbox 渲染 markdown + GFM + 代码高亮，sanitize 防 XSS。
+- Streaming 体验：光标动画、rAF batch 整合 text_delta、IntersectionObserver autoscroll、jump-to-bottom 浮按钮。
+- 所有改动通过自动测试 + 手工真实 LLM 烟雾。
+
+**Product Intent**:
+
+设计共识与库选型记录在 [`self/discussions/2026-05-31-webui-polish-brainstorm.md`](../self/discussions/2026-05-31-webui-polish-brainstorm.md) §5.5（决策）+ §8.2（markdown 调研结论）。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M5.5.1 | [`S0040`](spec/ship/S0040-webui-codex-visual-tokens.md) | Codex 风视觉一刀 + design tokens（CSS vars + Tailwind theme.extend） | Planned |
+| M5.5.2 | [`S0041`](spec/ship/S0041-webui-markdown-and-tool-block.md) | Chatbox markdown（react-markdown + GFM + sanitize + lazy Shiki）+ thinking 折叠 + 统一 tool 块走 JSON fence | Planned |
+| M5.5.3 | [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | Streaming 光标动画、rAF batch、IntersectionObserver autoscroll、jump-to-bottom 浮按钮 | Planned |
+
+**Not in M5.5**:
+
+- Dark mode（backlog）。
+- Cmd+K / 全局快捷键 / sidebar 折叠持久化 / composer 历史回溯（backlog）。
+- Tool block 特化（Bash/Edit/diff viewer/TodoWrite list；保持统一 JSON fence 渲染）。
+- streamdown 切换（仅在 S0041 流式抖动反馈不可接受时跟进，不在 M5.5 范围）。
+- Base UI 大规模引入（按需使用，本 milestone 仍 utility 主导）。
+
+**Status**: Planned
+
+---
+
 ## M6: Ecosystem
 
 **Goal**: Scorel 可以通过 MCP、extensions、channels 接入外部工作流。
@@ -314,6 +349,9 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0037`](spec/ship/S0037-webui-chatbox-v1.md) | WebUI Chatbox v1：attach-cache 渲染、dual-seq resync、event 投影、prompt 发送 | Done |
 | [`S0038`](spec/ship/S0038-webui-cancel-multiclient.md) | WebUI Composer Cancel 与多端共享真实 session 验证 | Done |
 | [`S0039`](spec/ship/S0039-webui-e2e-newchat.md) | WebUI New Chat 与真实 daemon 端到端验证（M5 收口） | Done |
+| [`S0040`](spec/ship/S0040-webui-codex-visual-tokens.md) | WebUI Codex 风视觉一刀与 design tokens | Planned |
+| [`S0041`](spec/ship/S0041-webui-markdown-and-tool-block.md) | WebUI markdown 渲染、代码高亮与统一 tool 块 | Planned |
+| [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | WebUI streaming UX 与 autoscroll | Planned |
 
 ---
 
