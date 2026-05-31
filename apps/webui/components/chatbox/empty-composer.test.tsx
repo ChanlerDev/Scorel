@@ -113,7 +113,7 @@ describe("EmptyComposer", () => {
     ]);
     render(<EmptyComposer />);
     expect(
-      screen.getByText("我们应该在 Scorel 中构建什么?"),
+      screen.getByText("我们应该在 Alpha 中构建什么?"),
     ).toBeTruthy();
     const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
     expect(input.placeholder).toBe("随心输入");
@@ -367,5 +367,45 @@ describe("EmptyComposer", () => {
     expect(screen.getByTestId("composer-error").textContent).toContain(
       "设备未连接",
     );
+  });
+
+  // S0047: dynamic H1 — picks `displayName ?? projectSlug`, falls back to a
+  // brand-neutral question when no project resolves.
+  it("S0047 H1 uses project displayName when present", () => {
+    const { store } = freshPool();
+    const device = store.create({
+      name: "Tokyo",
+      link: "wss://h",
+      token: "t",
+    });
+    store.setProjects(device.id, [
+      { projectSlug: "scorel", displayName: "Scorel" },
+    ]);
+    render(<EmptyComposer />);
+    const heading = screen.getByTestId("empty-composer-greeting");
+    expect(heading.textContent).toBe("我们应该在 Scorel 中构建什么?");
+  });
+
+  it("S0047 H1 falls back to projectSlug when displayName is missing", () => {
+    const { store } = freshPool();
+    const device = store.create({
+      name: "Tokyo",
+      link: "wss://h",
+      token: "t",
+    });
+    store.setProjects(device.id, [{ projectSlug: "raw-slug" }]);
+    render(<EmptyComposer />);
+    const heading = screen.getByTestId("empty-composer-greeting");
+    expect(heading.textContent).toBe("我们应该在 raw-slug 中构建什么?");
+  });
+
+  it("S0047 H1 falls back to brand-neutral question when no project resolves", () => {
+    const { store } = freshPool();
+    // Device exists but has no projects → projectSlug remains undefined and
+    // the H1 should drop the project clause entirely.
+    store.create({ name: "Tokyo", link: "wss://h", token: "t" });
+    render(<EmptyComposer />);
+    const heading = screen.getByTestId("empty-composer-greeting");
+    expect(heading.textContent).toBe("我们应该构建什么?");
   });
 });

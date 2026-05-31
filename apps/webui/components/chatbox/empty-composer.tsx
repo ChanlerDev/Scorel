@@ -141,14 +141,27 @@ export function EmptyComposer({
     );
   }
 
+  // S0047: render the H1 with a project-aware label when one resolves.
+  // Falls back to the brand-neutral question when no project is available
+  // (e.g. devices exist but the picked device has no projects yet).
+  const greetingProject = projects.find((p) => p.projectSlug === projectSlug);
+  const greetingLabel =
+    greetingProject?.displayName ?? greetingProject?.projectSlug;
+  const greetingText = greetingLabel
+    ? `我们应该在 ${greetingLabel} 中构建什么?`
+    : "我们应该构建什么?";
+
   return (
     <div
       data-testid="empty-composer"
       className="flex h-full flex-col items-center justify-center px-4"
     >
       <div className="w-full max-w-3xl space-y-6">
-        <h1 className="greeting text-center">
-          我们应该在 Scorel 中构建什么?
+        <h1
+          className="greeting text-center"
+          data-testid="empty-composer-greeting"
+        >
+          {greetingText}
         </h1>
         <Composer
           onSend={handleSend}

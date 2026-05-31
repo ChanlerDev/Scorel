@@ -203,7 +203,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /Hello/ })).toBeTruthy();
 
     // Click project button — no router push, just collapse.
-    const projectButton = screen.getByRole("button", { name: /Alpha/ });
+    const projectButton = screen.getByRole("button", { name: /^Alpha/ });
     expect(projectButton.tagName).toBe("BUTTON");
     fireEvent.click(projectButton);
     expect(_push).not.toHaveBeenCalled();

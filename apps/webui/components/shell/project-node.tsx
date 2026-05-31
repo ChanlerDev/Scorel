@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 import type {
@@ -44,6 +45,7 @@ export function ProjectNode({
   offline,
   onSelect,
 }: ProjectNodeProps): JSX.Element {
+  const router = useRouter();
   const sessions = sortSessions(project.sessions);
   const id = `project:${deviceId}/${project.projectSlug}`;
   const [collapsed, toggle] = useCollapsed(id);
@@ -80,21 +82,44 @@ export function ProjectNode({
     toggle();
   }
 
+  // S0047: hover/focus-only `✏` button per project row navigates to the
+  // empty composer with this project pre-selected. `stopPropagation` keeps
+  // the row-level toggle from firing on the same click.
+  function handleNewChat(event: React.MouseEvent<HTMLButtonElement>): void {
+    event.stopPropagation();
+    const params = new URLSearchParams();
+    params.set("device", deviceId);
+    params.set("project", project.projectSlug);
+    router.push(`/?${params.toString()}`);
+  }
+
+  const projectLabel = project.displayName ?? project.projectSlug;
+
   return (
     <li>
-      <button
-        type="button"
-        onClick={handleClick}
-        aria-expanded={!collapsed}
-        className="flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm text-text hover:bg-surface-hover"
-      >
-        <span className="truncate">
-          {project.displayName ?? project.projectSlug}
-        </span>
-        {sessionCount !== undefined ? (
-          <span className="shrink-0 text-xs text-faint">{sessionCount}</span>
-        ) : null}
-      </button>
+      <div className="group relative flex w-full items-center">
+        <button
+          type="button"
+          onClick={handleClick}
+          aria-expanded={!collapsed}
+          className="flex flex-1 items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm text-text hover:bg-surface-hover"
+        >
+          <span className="truncate">{projectLabel}</span>
+          {sessionCount !== undefined ? (
+            <span className="shrink-0 text-xs text-faint">{sessionCount}</span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          onClick={handleNewChat}
+          data-testid={`project-new-chat-${project.projectSlug}`}
+          aria-label={`在 ${projectLabel} 中开始新对话`}
+          title={`在 ${projectLabel} 中开始新对话`}
+          className="ml-1 hidden h-6 w-6 shrink-0 items-center justify-center rounded-sm text-muted hover:bg-surface-hover hover:text-text group-hover:flex focus-visible:flex"
+        >
+          <span aria-hidden>✏</span>
+        </button>
+      </div>
       {!collapsed && sessions.length > 0 ? (
         <ul className="ml-2 mt-0.5 space-y-0.5">
           {sessions.map((session) => (
