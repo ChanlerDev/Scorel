@@ -31,6 +31,16 @@ const _projectsSyncListeners = new Map<string, Set<() => void>>();
 const _sessionsSyncError = new Map<string, string | undefined>();
 const _sessionsSyncListeners = new Map<string, Set<() => void>>();
 
+// S0045: track per-device whether the last connect attempt failed with auth
+// or unknown reason and the most recent sync threw `transport_disconnected`.
+// We use this to gate `syncProjects` / `syncSessions` retries so a stale
+// token doesn't flap a spammy retry loop in dev.
+const _disconnectStop = new Set<string>();
+
+function isTransportDisconnectedMessage(message: string): boolean {
+  return message.startsWith("disconnected:") || /transport_disconnected/.test(message);
+}
+
 function sessionsKey(deviceId: string, projectSlug: string): string {
   return `${deviceId} ${projectSlug}`;
 }
@@ -125,6 +135,9 @@ export function useConnection(device: Device): UseConnectionResult {
     let prevName: ConnectionState["name"] = managedConn.state.name;
     const unsubscribeState = pool.subscribe(device.id, (state) => {
       if (state.name === "connected" && prevName !== "connected") {
+        // A successful reconnect clears the disconnect-stop flag so future
+        // sync attempts can run again.
+        _disconnectStop.delete(device.id);
         setProjectsSyncError(device.id, undefined);
         void syncProjects({
           client: managedConn.client,
@@ -132,8 +145,17 @@ export function useConnection(device: Device): UseConnectionResult {
           deviceId: device.id,
         }).catch((err: unknown) => {
           const message = err instanceof Error ? err.message : String(err);
+          if (isTransportDisconnectedMessage(message)) {
+            _disconnectStop.add(device.id);
+          }
           setProjectsSyncError(device.id, message);
         });
+      }
+      // S0045 §4.2.iii: when the pool transitions to `error` (auth or
+      // unknown), stop firing fresh sync attempts on the dead client. The
+      // pool's own retry policy already handles network-class reconnects.
+      if (state.name === "error") {
+        _disconnectStop.add(device.id);
       }
       prevName = state.name;
     });
@@ -168,11 +190,15 @@ export function useConnection(device: Device): UseConnectionResult {
   const syncProjectsNow = useCallback(async (): Promise<void> => {
     if (!managed) return;
     if (managed.state.name !== "connected") return;
+    if (_disconnectStop.has(device.id)) return;
     setProjectsSyncError(device.id, undefined);
     try {
       await syncProjects({ client: managed.client, store, deviceId: device.id });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      if (isTransportDisconnectedMessage(message)) {
+        _disconnectStop.add(device.id);
+      }
       setProjectsSyncError(device.id, message);
     }
   }, [device.id, managed, store]);
@@ -181,6 +207,7 @@ export function useConnection(device: Device): UseConnectionResult {
     async (projectSlug: string): Promise<void> => {
       if (!managed) return;
       if (managed.state.name !== "connected") return;
+      if (_disconnectStop.has(device.id)) return;
       setSessionsSyncError(device.id, projectSlug, undefined);
       try {
         await syncSessions({
@@ -191,6 +218,9 @@ export function useConnection(device: Device): UseConnectionResult {
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
+        if (isTransportDisconnectedMessage(message)) {
+          _disconnectStop.add(device.id);
+        }
         setSessionsSyncError(device.id, projectSlug, message);
       }
     },
@@ -273,6 +303,7 @@ export function __resetConnectionForTests(): void {
   _projectsSyncListeners.clear();
   _sessionsSyncError.clear();
   _sessionsSyncListeners.clear();
+  _disconnectStop.clear();
 }
 
 // Test seam: inject a custom pool/store. Production code does not call this.

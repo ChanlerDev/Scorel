@@ -399,6 +399,66 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
+## M5.8: WebUI Card Sidebar + Session Cleanup
+
+**Goal**: 修复 S0044 ship 后 verification 暴露的会话页结构偏差(SessionHeader / Chatbox 卡片外壳)+ stale-token 未捕获错误,并按用户二轮视觉迭代要求把 sidebar 改为单卡片浅灰底、project/device 行 click 即 toggle(无 ▸/▾)、session 行加相对时间 hint。
+
+**Done when**:
+
+- Sidebar 一整块卡片底无内分隔/边框;层级靠留白与 hover/active 底色。
+- Project / Device 行 click = toggle 折叠,无路由跳转;Session 行单一进会话入口。
+- Session 行右侧显示相对时间(`刚刚` / `3 周` / `1 个月` 等),每分钟刷新。
+- SessionHeader / Chatbox 卡片外壳整删,transcript 直接贴主区 `bg-bg`。
+- `WsTransport is not connected` 同步抛错被 client 公开 API 包成 `code: "transport_disconnected"` rejection,WebUI 显示友好 inline 降级提示,Next dev overlay 不再弹。
+- WebUI 顶层 + session 路由 ErrorBoundary 兜底。
+- 自动测试 + 手工 e2e 通过。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M5.8.1 | [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport-disconnected 错误吸收 | Planned |
+
+**Not in M5.8**:
+
+- 真实 ⌘1..9 跳转 / Cmd+B / 整 sidebar 折叠到 56px。
+- "展开显示" 截断 UI / session 状态图标 / project 概览页改造。
+- 暗色模式 / model picker 真实切换 / daemon 协议变化。
+
+**Status**: Planned
+
+---
+
+## M5.8: WebUI Card Sidebar + Session Cleanup
+
+**Goal**: 修复 S0044 ship 后 verification 暴露的会话页结构偏差(SessionHeader / Chatbox 卡片外壳)+ stale-token 未捕获错误,并按用户二轮视觉迭代要求把 sidebar 改为单卡片浅灰底、project/device 行 click 即 toggle(无 ▸/▾)、session 行加相对时间 hint。
+
+**Done when**:
+
+- Sidebar 一整块卡片底无内分隔/边框;层级靠留白与 hover/active 底色。
+- Project / Device 行 click = toggle 折叠,无路由跳转;Session 行单一进会话入口。
+- Session 行右侧显示相对时间(`刚刚` / `3 周` / `1 个月` 等),每分钟刷新。
+- SessionHeader / Chatbox 卡片外壳整删,transcript 直接贴主区 `bg-bg`。
+- `WsTransport is not connected` 同步抛错被 client 公开 API 包成 `code: "transport_disconnected"` rejection,WebUI 显示友好 inline 降级提示,Next dev overlay 不再弹。
+- WebUI 顶层 + session 路由 ErrorBoundary 兜底。
+- 自动测试 + 手工 e2e 通过。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M5.8.1 | [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport-disconnected 错误吸收 | Planned |
+
+**Not in M5.8**:
+
+- 真实 ⌘1..9 跳转 / Cmd+B / 整 sidebar 折叠到 56px。
+- "展开显示" 截断 UI / session 状态图标 / project 概览页改造。
+- 暗色模式 / model picker 真实切换 / daemon 协议变化。
+
+**Status**: Planned
+
+---
+
 ## M6: Ecosystem
 
 **Goal**: Scorel 可以通过 MCP、extensions、channels 接入外部工作流。
@@ -461,6 +521,8 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | WebUI streaming UX 与 autoscroll | Done |
 | [`S0043`](spec/ship/S0043-startup-ergonomics.md) | 单 `scorel` 入口、token 持久化、WebUI 自动发现、`scorel up` 一键启动 | Done |
 | [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md) | WebUI 一刀重构为 Chatbox 风 + ChatGPT 哲学(推翻 M5.5) | Planned |
+| [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport guard | Planned |
+| [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport guard | Planned |
 
 ---
 

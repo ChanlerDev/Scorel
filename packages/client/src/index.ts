@@ -30,6 +30,62 @@ export const clientProtocolDependency = protocolPackageName;
 export const clientProtocolVersion = protocolVersion;
 export type ClientDaemonTransport = DaemonTransport;
 
+/**
+ * Public marker error for "the underlying transport tried to write while not
+ * connected" (S0045). Every public DaemonClient method that funnels through
+ * the transport catches synchronous transport throws and re-emits them as a
+ * rejected Promise carrying this error class, so callers in browser /
+ * React effect paths can handle a stale-token / closed-socket scenario as a
+ * normal rejection instead of an unhandled runtime error.
+ *
+ * `code` is a const literal for stable string-based dispatch in webui
+ * (`session.ts` classifyError, `sidebar.tsx` etc).
+ */
+export class TransportDisconnectedError extends Error {
+  readonly code = "transport_disconnected" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "TransportDisconnectedError";
+  }
+}
+
+function isTransportDisconnectedError(
+  cause: unknown,
+): cause is TransportDisconnectedError {
+  if (cause instanceof TransportDisconnectedError) return true;
+  if (typeof cause !== "object" || cause === null) return false;
+  return (cause as { code?: unknown }).code === "transport_disconnected";
+}
+
+function toTransportError(cause: unknown): TransportDisconnectedError {
+  if (cause instanceof TransportDisconnectedError) return cause;
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return new TransportDisconnectedError(message);
+}
+
+/**
+ * Heuristic: synchronous throws from `WsTransport.#write` carry the literal
+ * "WsTransport is not connected" message. Other transport implementations
+ * may throw for unrelated reasons (parse, schema, etc); only the
+ * not-connected case is mapped to `TransportDisconnectedError` so daemon-
+ * side errors keep their existing reason.
+ */
+function isTransportNotConnected(cause: unknown): boolean {
+  if (cause instanceof TransportDisconnectedError) return true;
+  if (cause instanceof Error) {
+    return /not connected/i.test(cause.message) && /transport/i.test(cause.message);
+  }
+  const text = String(cause);
+  return /not connected/i.test(text) && /transport/i.test(text);
+}
+
+function wrapTransportThrow(cause: unknown): never {
+  if (isTransportDisconnectedError(cause) || isTransportNotConnected(cause)) {
+    throw toTransportError(cause);
+  }
+  throw cause;
+}
+
 export type WsTransportOptions = {
   url: string;
   token: string;
@@ -116,27 +172,49 @@ export class DaemonClient {
   }
 
   async connect(sessionId?: SessionId): Promise<void> {
-    this.#state = "connecting";
-    this.#unsubscribe ??= this.#transport.onMessage((message) => this.#handleMessage(message));
-    const result = await this.#transport.connect({
-      clientId: this.clientId,
-      sessionId,
-      persistentLastSeq: this.#persistentLastSeq,
-      streamLastSeq: this.#streamLastSeq,
-      lastSeq: this.#streamLastSeq,
-    });
-    this.#sessionId = result.sessionId ?? sessionId ?? null;
-    this.#connectionIdentity = {
-      deviceId: result.deviceId,
-      deviceDisplayName: result.deviceDisplayName,
-      projectSlug: result.projectSlug,
-    };
-    this.#state = "connected";
+    try {
+      this.#state = "connecting";
+      this.#unsubscribe ??= this.#transport.onMessage((message) => this.#handleMessage(message));
+      const result = await this.#transport.connect({
+        clientId: this.clientId,
+        sessionId,
+        persistentLastSeq: this.#persistentLastSeq,
+        streamLastSeq: this.#streamLastSeq,
+        lastSeq: this.#streamLastSeq,
+      });
+      this.#sessionId = result.sessionId ?? sessionId ?? null;
+      this.#connectionIdentity = {
+        deviceId: result.deviceId,
+        deviceDisplayName: result.deviceDisplayName,
+        projectSlug: result.projectSlug,
+      };
+      this.#state = "connected";
+    } catch (cause) {
+      // Map transport-level not-connected throws to the public marker error
+      // so callers in React effect paths see a rejection rather than an
+      // unhandled runtime error (S0045 §4.1).
+      wrapTransportThrow(cause);
+    }
   }
 
   disconnect(): void {
-    this.#transport.send({ type: "disconnect", sessionId: this.#sessionId ?? undefined });
-    this.#transport.close();
+    try {
+      this.#transport.send({ type: "disconnect", sessionId: this.#sessionId ?? undefined });
+    } catch (cause) {
+      // Disconnect is a fire-and-forget cleanup; if the socket is already
+      // closed we still want to flush local state. Re-throwing would force
+      // every caller to wrap a try/catch that has no useful recovery path.
+      if (!isTransportNotConnected(cause)) {
+        // Non-transport errors are unexpected; log and continue cleanup.
+        // eslint-disable-next-line no-console
+        console.warn("[scorel/client] transport.send(disconnect) threw:", cause);
+      }
+    }
+    try {
+      this.#transport.close();
+    } catch {
+      /* ignore */
+    }
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
     this.#state = "disconnected";
@@ -254,7 +332,21 @@ export class DaemonClient {
 
     return new Promise((resolve, reject) => {
       this.#pending.set(String(requestId), { resolve, reject } as PendingRequest);
-      void this.#transport.send(request as ClientRequest);
+      try {
+        this.#transport.send(request as ClientRequest);
+      } catch (cause) {
+        // Synchronous throw from transport.send (e.g. socket already
+        // closed). The Promise body would auto-reject, but we drop the
+        // pending entry first so a late `error` message doesn't try to
+        // reject the same request twice. Map to the public marker error
+        // so webui can classify it as `transport_disconnected` (S0045).
+        this.#pending.delete(String(requestId));
+        if (isTransportDisconnectedError(cause) || isTransportNotConnected(cause)) {
+          reject(toTransportError(cause));
+        } else {
+          reject(cause instanceof Error ? cause : new Error(String(cause)));
+        }
+      }
     });
   }
 

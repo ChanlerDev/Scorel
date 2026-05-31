@@ -24,6 +24,35 @@ import {
 } from "../store/attach-cache";
 
 /**
+ * Classify a thrown cause from a `client.*` call into a {reason, message}
+ * pair for `snapshot.error`. The transport-disconnected case (S0045 §4.2)
+ * is detected via `code === "transport_disconnected"` — the public
+ * `TransportDisconnectedError` class set by `@scorel/client` carries it.
+ * All other causes fall through to the caller-supplied fallback reason
+ * (resync_failed / send_failed / cancel_failed).
+ */
+function classifyError(
+  cause: unknown,
+  fallback: Exclude<SessionError["reason"], "disconnected">,
+): SessionError {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  const code =
+    typeof cause === "object" && cause !== null
+      ? (cause as { code?: unknown }).code
+      : undefined;
+  if (code === "transport_disconnected") {
+    return { reason: "disconnected", message };
+  }
+  return { reason: fallback, message };
+}
+
+export type SessionError =
+  | { reason: "resync_failed"; message: string }
+  | { reason: "send_failed"; message: string }
+  | { reason: "cancel_failed"; message: string }
+  | { reason: "disconnected"; message: string };
+
+/**
  * Session attach controller. Glues together the attach-cache, daemon resync
  * and the event projector for a single (scopeKey, sessionId) attachment.
  *
@@ -54,7 +83,7 @@ export type SessionAttachSnapshot = {
   loading: boolean;
   state: ProjectorState;
   resyncMode?: "stream_resume" | "persistent_fallback" | "full_reload";
-  error?: { reason: string; message: string };
+  error?: SessionError;
   /** True between `turn_start` and `turn_end` for the current session. */
   inFlight: boolean;
   /**
@@ -296,10 +325,7 @@ export function createSessionAttachController(
         writeCacheFresh(persistents);
       }
     } catch (cause) {
-      error = {
-        reason: "resync_failed",
-        message: cause instanceof Error ? cause.message : String(cause),
-      };
+      error = classifyError(cause, "resync_failed");
       initializing = false;
       emit(false);
       return;
@@ -333,10 +359,7 @@ export function createSessionAttachController(
         ...state,
         turns: state.turns.filter((t) => t.id !== placeholderId),
       };
-      error = {
-        reason: "send_failed",
-        message: cause instanceof Error ? cause.message : String(cause),
-      };
+      error = classifyError(cause, "send_failed");
       emit(false);
       throw cause;
     }
@@ -355,10 +378,7 @@ export function createSessionAttachController(
       await client.cancel();
     } catch (cause) {
       cancelling = false;
-      error = {
-        reason: "cancel_failed",
-        message: cause instanceof Error ? cause.message : String(cause),
-      };
+      error = classifyError(cause, "cancel_failed");
       emit(false);
     }
   }

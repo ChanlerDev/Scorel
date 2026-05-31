@@ -442,6 +442,69 @@ describe("createSessionAttachController", () => {
     expect(final.error?.message).toBe("cancel boom");
   });
 
+  it("classifies transport_disconnected during resync as disconnected", async () => {
+    const fake = new FakeDaemonClient();
+    fake.resync = async () => {
+      const err = new Error("WsTransport is not connected");
+      (err as Error & { code?: string }).code = "transport_disconnected";
+      throw err;
+    };
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      attachCache: makeAttachCache(),
+      onState: (s) => snapshots.push(s),
+    });
+    await controller.start();
+    const last = snapshots.at(-1)!;
+    expect(last.error?.reason).toBe("disconnected");
+  });
+
+  it("classifies transport_disconnected during send as disconnected", async () => {
+    const fake = new FakeDaemonClient();
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      attachCache: makeAttachCache(),
+      onState: (s) => snapshots.push(s),
+    });
+    await controller.start();
+    fake.sendMessage = async () => {
+      const err = new Error("WsTransport is not connected");
+      (err as Error & { code?: string }).code = "transport_disconnected";
+      throw err;
+    };
+    await expect(controller.send("hi")).rejects.toThrow();
+    const last = snapshots.at(-1)!;
+    expect(last.error?.reason).toBe("disconnected");
+  });
+
+  it("classifies transport_disconnected during cancel as disconnected", async () => {
+    const fake = new FakeDaemonClient();
+    fake.cancelImpl = async () => {
+      const err = new Error("WsTransport is not connected");
+      (err as Error & { code?: string }).code = "transport_disconnected";
+      throw err;
+    };
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      attachCache: makeAttachCache(),
+      onState: (s) => snapshots.push(s),
+    });
+    await controller.start();
+    for (const sub of fake.subscribers) sub(turnStart(10));
+    await controller.cancel();
+    const last = snapshots.at(-1)!;
+    expect(last.error?.reason).toBe("disconnected");
+  });
+
   it("snapshot exposes diagnostics: persistent/stream seq + identity + sessionId", async () => {
     const fake = new FakeDaemonClient();
     fake.connectionIdentity = {

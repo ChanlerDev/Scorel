@@ -24,10 +24,7 @@ import { buildConnectionSummary } from "../../../../../../../lib/diagnostics/con
 import { computeScopeKey } from "../../../../../../../lib/identity/scope-key";
 import { getSharedAttachCache } from "../../../../../../../lib/store";
 import { useDevices } from "../../../../../../../lib/store/use-devices";
-import type {
-  Device,
-  DeviceSessionSummary,
-} from "../../../../../../../lib/domain/devices";
+import type { Device } from "../../../../../../../lib/domain/devices";
 import { asSessionId } from "@scorel/protocol";
 
 type Params = { deviceId: string; projectSlug: string; sessionId: string };
@@ -73,8 +70,7 @@ function SessionView({
   const { state: connState, managed, syncSessionsNow } = useConnection(device);
   const error = useSessionsSyncError(device.id, projectSlug);
   const project = device.projects?.find((p) => p.projectSlug === projectSlug);
-  const session: DeviceSessionSummary | undefined =
-    project?.sessions?.[sessionId];
+  const session = project?.sessions?.[sessionId];
   const searchParams = useSearchParams();
   const debugEnabled = searchParams?.get("debug") === "1";
 
@@ -87,25 +83,23 @@ function SessionView({
 
   const remoteDeviceId = device.remoteIdentity?.deviceId;
 
+  // S0045: SessionHeader is gone — main area is transcript-first per the
+  // ChatGPT-philosophy spec. The session id surfaces as a hover title in the
+  // sidebar; the conversation itself names the room.
   return (
-    <div className="flex h-full flex-col gap-3 p-6 text-sm text-text">
-      <SessionHeader
-        device={device}
-        projectSlug={projectSlug}
-        sessionId={sessionId}
-        session={session}
-      />
-
+    <div className="flex h-full flex-col text-sm text-text">
       {error ? (
-        <div className="rounded-md border border-status-err bg-surface-raised px-3 py-2 text-sm text-status-err">
-          Failed to load session metadata: {error}
-        </div>
+        <p className="px-6 pt-4 text-sm text-status-err" data-testid="session-error">
+          {error.startsWith("disconnected:")
+            ? "连接已断开。检查 daemon token 后刷新页面。"
+            : `Failed to load session metadata: ${error}`}
+        </p>
       ) : null}
 
       {!remoteDeviceId ? (
-        <div className="rounded-md border border-dashed border-subtle bg-surface px-4 py-6 text-center text-muted">
+        <p className="flex h-full items-center justify-center text-sm text-muted">
           Connecting to daemon… (waiting for device identity)
-        </div>
+        </p>
       ) : (
         <Chatbox
           device={device}
@@ -207,8 +201,10 @@ function Chatbox({
     ? buildConnectionSummary({ device, connectionState, snapshot })
     : null;
 
+  // S0045: no card outer. Transcript + composer flow directly inside the
+  // main area's `bg-bg`.
   return (
-    <div className="flex h-[60vh] min-h-[400px] flex-col overflow-hidden rounded-md border border-subtle bg-surface">
+    <div className="flex h-full flex-col overflow-hidden">
       <div className="flex-1 overflow-hidden">
         {snapshot.loading && snapshot.state.turns.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm italic text-muted">
@@ -235,9 +231,14 @@ function ChatboxBody({ snapshot }: { snapshot: SessionAttachSnapshot }): JSX.Ele
   return (
     <div className="flex h-full flex-col">
       {snapshot.error ? (
-        <div className="border-b border-status-err bg-surface-raised px-3 py-1 text-xs text-status-err">
-          {snapshot.error.reason}: {snapshot.error.message}
-        </div>
+        <p
+          className="px-6 py-2 text-xs text-status-err"
+          data-testid="chatbox-error"
+        >
+          {snapshot.error.reason === "disconnected"
+            ? "连接已断开。检查 daemon token 后刷新页面。"
+            : `${snapshot.error.reason}: ${snapshot.error.message}`}
+        </p>
       ) : null}
       <Transcript turns={snapshot.state.turns} />
     </div>
@@ -246,62 +247,3 @@ function ChatboxBody({ snapshot }: { snapshot: SessionAttachSnapshot }): JSX.Ele
 
 // Type guard helper for ProjectorState if downstream consumers want it.
 export type { ProjectorState };
-
-function SessionHeader({
-  device,
-  projectSlug,
-  sessionId,
-  session,
-}: {
-  device: Device;
-  projectSlug: string;
-  sessionId: string;
-  session: DeviceSessionSummary | undefined;
-}) {
-  const projectHref = `/devices/${encodeURIComponent(device.id)}/projects/${encodeURIComponent(
-    projectSlug,
-  )}`;
-  if (!session) {
-    return (
-      <header className="space-y-1">
-        <p className="text-xs uppercase tracking-wide text-muted">
-          {device.name} ·{" "}
-          <Link href={projectHref} className="underline hover:text-accent">
-            {projectSlug}
-          </Link>
-        </p>
-        <h1 className="text-lg font-semibold text-text">{sessionId}</h1>
-        <p className="text-xs italic text-faint">
-          Loading session metadata…
-        </p>
-      </header>
-    );
-  }
-  const title = session.title?.trim() || sessionId;
-  return (
-    <header className="space-y-1">
-      <p className="text-xs uppercase tracking-wide text-muted">
-        {device.name} ·{" "}
-        <Link href={projectHref} className="underline hover:text-accent">
-          {projectSlug}
-        </Link>
-      </p>
-      <h1 className="text-lg font-semibold text-text">{title}</h1>
-      <p className="text-xs text-faint">
-        {session.model ?? "model unknown"}
-        {session.updatedAt ? ` · updated ${formatTimestamp(session.updatedAt)}` : ""}
-        {typeof session.currentSeq === "number"
-          ? ` · seq ${session.currentSeq}`
-          : ""}
-      </p>
-    </header>
-  );
-}
-
-function formatTimestamp(ms: number): string {
-  try {
-    return new Date(ms).toLocaleString();
-  } catch {
-    return "—";
-  }
-}

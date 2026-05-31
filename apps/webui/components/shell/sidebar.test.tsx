@@ -150,15 +150,41 @@ describe("Sidebar", () => {
     expect(screen.getByText("Tokyo")).toBeTruthy();
     expect(screen.getByText("Alpha")).toBeTruthy();
     expect(screen.getByText("Beta")).toBeTruthy();
-    const sessions = screen.getAllByRole("link", { name: /Hello|World/ });
-    expect(sessions[0]?.textContent).toBe("Hello");
-    expect(sessions[1]?.textContent).toBe("World");
-    expect(sessions[0]?.getAttribute("href")).toContain(
+    const sessionLinks = screen
+      .getAllByRole("link")
+      .filter((el) => el.textContent?.includes("Hello") || el.textContent?.includes("World"));
+    expect(sessionLinks).toHaveLength(2);
+    const helloLink = sessionLinks.find((el) => el.textContent?.includes("Hello"));
+    expect(helloLink?.getAttribute("href")).toContain(
       `/devices/${encodeURIComponent(device.id)}/projects/alpha/sessions/session_1`,
     );
   });
 
-  it("collapsing a project hides its sessions and persists across remount", () => {
+  it("device row is a button (not a link) and toggles project visibility", () => {
+    const { store } = freshPool();
+    const device = store.create({ name: "Tokyo", link: "wss://h", token: "t" });
+    store.setProjects(device.id, [
+      { projectSlug: "alpha", displayName: "Alpha" },
+    ]);
+    render(<Sidebar />);
+
+    const deviceButton = screen.getByRole("button", { name: /Tokyo/ });
+    expect(deviceButton.tagName).toBe("BUTTON");
+    expect(screen.queryByRole("link", { name: /Tokyo/ })).toBeNull();
+
+    // Initial: device expanded, project visible.
+    expect(screen.getByText("Alpha")).toBeTruthy();
+
+    // Click device button to collapse.
+    fireEvent.click(deviceButton);
+    expect(screen.queryByText("Alpha")).toBeNull();
+
+    // Click again to expand.
+    fireEvent.click(deviceButton);
+    expect(screen.getByText("Alpha")).toBeTruthy();
+  });
+
+  it("clicking a project row toggles session visibility without navigation", () => {
     const { store } = freshPool();
     const device = store.create({
       name: "Tokyo",
@@ -174,21 +200,14 @@ describe("Sidebar", () => {
     setParams({ deviceId: device.id, projectSlug: "alpha" });
 
     const { unmount } = render(<Sidebar />);
-    // Project session is visible.
-    expect(screen.getByRole("link", { name: "Hello" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Hello/ })).toBeTruthy();
 
-    // Click the collapse toggle on the project row. Two toggles exist —
-    // one for the device, one for the project. The project toggle is the
-    // second (rendered after the device row's toggle).
-    const toggles = screen.getAllByTestId("collapse-toggle");
-    const projectToggle = toggles.find(
-      (el) => el.getAttribute("aria-label") === "Collapse" && el !== toggles[0],
-    );
-    expect(projectToggle).toBeTruthy();
-    fireEvent.click(projectToggle as HTMLElement);
-
-    // Session row should now be hidden.
-    expect(screen.queryByRole("link", { name: "Hello" })).toBeNull();
+    // Click project button — no router push, just collapse.
+    const projectButton = screen.getByRole("button", { name: /Alpha/ });
+    expect(projectButton.tagName).toBe("BUTTON");
+    fireEvent.click(projectButton);
+    expect(_push).not.toHaveBeenCalled();
+    expect(screen.queryByRole("link", { name: /Hello/ })).toBeNull();
 
     // localStorage write happened.
     const persisted = JSON.parse(
@@ -200,7 +219,7 @@ describe("Sidebar", () => {
     unmount();
     __resetCollapsedForTests();
     render(<Sidebar />);
-    expect(screen.queryByRole("link", { name: "Hello" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Hello/ })).toBeNull();
   });
 
   it("flags an offline tint when device has lastConnectedAt and is not currently connected", () => {
@@ -217,5 +236,17 @@ describe("Sidebar", () => {
     render(<Sidebar />);
     expect(screen.getByText("offline")).toBeTruthy();
     expect(screen.getByText("Alpha")).toBeTruthy();
+  });
+
+  it("does not render a top-of-bottom-segment divider (S0045 single card)", () => {
+    freshPool();
+    const { container } = render(<Sidebar />);
+    // The previous implementation had `border-t border-subtle p-3` on the
+    // bottom segment. S0045 collapses the sidebar into one card; verify no
+    // descendant of `<aside>` carries `border-t`.
+    const aside = container.querySelector("aside");
+    expect(aside).not.toBeNull();
+    const offenders = aside?.querySelectorAll(".border-t, .border-r");
+    expect(offenders?.length ?? 0).toBe(0);
   });
 });

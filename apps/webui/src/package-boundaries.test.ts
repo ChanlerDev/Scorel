@@ -271,4 +271,37 @@ describe("apps/webui package boundaries", () => {
       `\`font-display\` was removed in S0044 (sans-only palette). Use plain text utilities instead.\nOffenders:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
+
+  it("forbids any reference to the removed CollapseToggle component (S0045)", async () => {
+    // `CollapseToggle` was deleted in S0045 — folding moved inline to the
+    // `ProjectNode` / `DeviceTree` row buttons. Catch stale imports or JSX
+    // usage so a partial revert can't sneak the chevron back in.
+    const JSX_RE = /<CollapseToggle\b/g;
+    const IMPORT_RE_LOCAL = /from\s+["'][^"']*collapse-toggle["']/g;
+
+    const files: string[] = [];
+    for (const sub of ["app", "components"]) {
+      files.push(...(await walk(path.join(appRoot, sub))));
+    }
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const rel = path.relative(appRoot, file);
+      if (isTestFile(rel)) continue;
+      const text = await fs.readFile(file, "utf8");
+      JSX_RE.lastIndex = 0;
+      IMPORT_RE_LOCAL.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = JSX_RE.exec(text)) !== null) {
+        offenders.push(`${rel}: ${match[0]}`);
+      }
+      while ((match = IMPORT_RE_LOCAL.exec(text)) !== null) {
+        offenders.push(`${rel}: ${match[0]}`);
+      }
+    }
+    expect(
+      offenders,
+      `CollapseToggle was deleted in S0045. Inline the toggle on the row button instead.\nOffenders:\n${offenders.join("\n")}`,
+    ).toEqual([]);
+  });
 });

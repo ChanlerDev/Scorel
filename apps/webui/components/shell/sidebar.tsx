@@ -13,7 +13,6 @@ import {
 import { IDLE, type ConnectionState } from "../../lib/connection/state";
 import { useCollapsed } from "../../lib/store/use-collapsed";
 import { syncSessions } from "../../lib/sync/sessions";
-import { CollapseToggle } from "./collapse-toggle";
 import { DeviceStatus } from "./device-status";
 import { ProjectNode } from "./project-node";
 
@@ -104,9 +103,8 @@ function DeviceTree({
   const projects = device.projects ?? [];
   const offline = isOffline(state);
   const isActiveDevice = activeDeviceId === device.id;
-  const activeOnDevice = isActiveDevice && !activeProjectSlug;
 
-  const [collapsed] = useCollapsed(`device:${device.id}`);
+  const [collapsed, toggle] = useCollapsed(`device:${device.id}`);
 
   const handleProjectSelect = (
     deviceId: string,
@@ -122,34 +120,30 @@ function DeviceTree({
 
   return (
     <li>
-      <div className="flex items-center gap-1">
-        <CollapseToggle id={`device:${device.id}`} />
-        <Link
-          href={`/devices/${encodeURIComponent(device.id)}`}
-          aria-current={activeOnDevice ? "page" : undefined}
-          className={`flex flex-1 items-center justify-between gap-2 rounded-sm px-2 py-1.5 hover:bg-surface-hover ${
-            activeOnDevice
-              ? "bg-surface-hover font-medium text-text"
-              : "text-text"
-          }`}
-        >
-          <span className="truncate text-sm">{device.name}</span>
-          <span className="flex shrink-0 items-center gap-1">
-            {offline && device.lastConnectedAt ? (
-              <span
-                className="rounded-sm bg-bg px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-faint"
-                title="Last seen offline"
-              >
-                offline
-              </span>
-            ) : null}
-            <DeviceStatus state={state} />
-          </span>
-        </Link>
-      </div>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={!collapsed}
+        aria-controls={`device-children-${device.id}`}
+        className="flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-sm font-medium text-text hover:bg-surface-hover"
+      >
+        <span className="truncate">{device.name}</span>
+        <span className="flex shrink-0 items-center gap-1">
+          {offline && device.lastConnectedAt ? (
+            <span
+              className="rounded-sm bg-bg px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-faint"
+              title="Last seen offline"
+            >
+              offline
+            </span>
+          ) : null}
+          <DeviceStatus state={state} />
+        </span>
+      </button>
       {!collapsed ? (
         <div
-          className={`ml-5 mt-1 ${
+          id={`device-children-${device.id}`}
+          className={`ml-2 mt-1 ${
             offline && device.lastConnectedAt ? "opacity-60" : ""
           }`}
         >
@@ -168,10 +162,6 @@ function DeviceTree({
                   key={project.projectSlug}
                   deviceId={device.id}
                   project={project}
-                  isActive={
-                    isActiveDevice &&
-                    activeProjectSlug === project.projectSlug
-                  }
                   activeSessionId={
                     isActiveDevice &&
                     activeProjectSlug === project.projectSlug
@@ -249,8 +239,10 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* Segment 3: bottom fixed actions */}
-      <div className="px-3 py-3 space-y-1">
+      {/* Segment 3: bottom fixed actions. No top divider — sidebar is one
+       * card-style block, hierarchy comes from `space-y-*` and hover/active
+       * background only (S0045 §1). */}
+      <div className="px-3 pb-3 pt-2 space-y-1">
         <SettingsLink />
         <DisabledRow icon="☀" label="主题" />
       </div>

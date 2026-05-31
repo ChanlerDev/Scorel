@@ -12,6 +12,12 @@ import type { ConnectionErrorReason } from "./state";
 // - `version_mismatch` ↔ daemon `protocol_mismatch` error code OR
 //                        `protocolMismatch === true` flag from the caller.
 // - else `unknown`.
+//
+// Note (S0045 §4.2): the new `transport_disconnected` marker error from
+// `@scorel/client` falls through to the `unknown` bucket, which the pool
+// does NOT auto-retry. That means a stale-token / dead-socket scenario
+// surfaces once, the user sees the error, and they have to manually click
+// Reconnect — no infinite retry storm.
 
 export type CategorizeInput = {
   closeCode?: number;
