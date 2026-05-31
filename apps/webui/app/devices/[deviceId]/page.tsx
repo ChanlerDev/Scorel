@@ -18,10 +18,10 @@ export default function DevicePage({ params }: { params: Params }) {
 
   if (!device) {
     return (
-      <div className="p-6 text-sm text-zinc-600">
-        <p className="font-medium text-zinc-800">Device not found</p>
+      <div className="p-6 text-sm text-muted">
+        <p className="font-medium text-text">Device not found</p>
         <p className="mt-2">
-          <Link href="/" className="text-zinc-700 underline hover:text-zinc-900">
+          <Link href="/" className="text-accent underline hover:text-accent-hover">
             Back to home
           </Link>
         </p>
@@ -37,10 +37,10 @@ function DeviceConnected({ device }: { device: Device }) {
   const projectsError = useProjectsSyncError(device.id);
 
   return (
-    <div className="p-6 space-y-4 text-sm text-zinc-700">
+    <div className="p-6 space-y-4 text-sm text-text">
       <header>
-        <h1 className="text-base font-semibold text-zinc-900">{device.name}</h1>
-        <p className="mt-1 text-xs text-zinc-500">{device.link}</p>
+        <h1 className="font-display text-lg text-text">{device.name}</h1>
+        <p className="mt-1 text-xs text-faint">{device.link}</p>
       </header>
 
       <Banner device={device} state={state} onReconnect={reconnect} onDisconnect={disconnect} />
@@ -72,28 +72,30 @@ function ProjectListSection({
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between">
-        <h2 className="text-xs uppercase tracking-wide text-zinc-500">Projects</h2>
+        <h2 className="font-display text-sm uppercase tracking-wide text-muted">
+          Projects
+        </h2>
         {device.projectsFetchedAt ? (
-          <span className="text-[10px] text-zinc-400">
+          <span className="text-[10px] text-faint">
             synced {formatTimestamp(device.projectsFetchedAt)}
           </span>
         ) : null}
       </div>
       {error ? (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+        <div className="flex items-center justify-between gap-3 rounded-md border border-status-err bg-surface-raised px-3 py-2 text-sm text-status-err">
           <span>Failed to load projects: {error}</span>
           <button
             type="button"
             onClick={onRetry}
             disabled={state.name !== "connected"}
-            className="rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-md border border-status-err bg-surface-raised px-2 py-1 text-xs font-medium text-status-err hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60"
           >
             Retry
           </button>
         </div>
       ) : null}
       {projects.length === 0 ? (
-        <p className="text-xs italic text-zinc-500">
+        <p className="text-xs italic text-muted">
           {state.name === "connected"
             ? "No projects yet — try sending a message from the CLI to populate this list."
             : device.lastConnectedAt
@@ -125,18 +127,18 @@ function ProjectRow({
     <li>
       <Link
         href={href}
-        className="flex items-center justify-between rounded-md border border-zinc-200 px-3 py-2 hover:bg-zinc-50"
+        className="flex items-center justify-between rounded-md border border-subtle bg-surface-raised px-3 py-2 hover:bg-accent-soft"
       >
         <div className="min-w-0">
-          <p className="truncate font-medium text-zinc-900">
+          <p className="truncate font-medium text-text">
             {project.displayName ?? project.projectSlug}
           </p>
           {project.workDirHint ? (
-            <p className="truncate text-xs text-zinc-500">{project.workDirHint}</p>
+            <p className="truncate text-xs text-faint">{project.workDirHint}</p>
           ) : null}
         </div>
         {project.sessionCount !== undefined ? (
-          <span className="ml-3 shrink-0 text-xs text-zinc-500">
+          <span className="ml-3 shrink-0 text-xs text-muted">
             {project.sessionCount} session{project.sessionCount === 1 ? "" : "s"}
           </span>
         ) : null}
@@ -181,7 +183,7 @@ function Banner({
             <button
               type="button"
               onClick={onReconnect}
-              className="rounded-md border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+              className="rounded-md border border-subtle bg-surface-raised px-3 py-1 text-xs font-medium text-muted hover:border-border-strong hover:text-text"
             >
               Reconnect
             </button>
@@ -189,10 +191,10 @@ function Banner({
         </BannerShell>
       );
     case "connecting":
-      return <BannerShell tone="amber">Connecting…</BannerShell>;
+      return <BannerShell tone="warn">Connecting…</BannerShell>;
     case "reconnecting":
       return (
-        <BannerShell tone="amber">
+        <BannerShell tone="warn">
           Reconnecting (attempt {state.attempt})…
         </BannerShell>
       );
@@ -202,13 +204,13 @@ function Banner({
         state.remoteIdentity.deviceId ??
         "remote daemon";
       return (
-        <BannerShell tone="emerald">
+        <BannerShell tone="ok">
           <div className="flex items-center justify-between gap-3">
             <span>Connected as {name}</span>
             <button
               type="button"
               onClick={onDisconnect}
-              className="rounded-md border border-emerald-300 bg-white px-3 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-50"
+              className="rounded-md border border-status-ok bg-surface-raised px-3 py-1 text-xs font-medium text-status-ok hover:bg-accent-soft"
             >
               Disconnect
             </button>
@@ -224,7 +226,7 @@ function Banner({
             <button
               type="button"
               onClick={onReconnect}
-              className="rounded-md border border-zinc-300 px-3 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+              className="rounded-md border border-subtle bg-surface-raised px-3 py-1 text-xs font-medium text-muted hover:border-border-strong hover:text-text"
             >
               Reconnect
             </button>
@@ -234,12 +236,12 @@ function Banner({
     case "error": {
       if (state.reason === "auth") {
         return (
-          <BannerShell tone="red">
+          <BannerShell tone="err">
             <div className="flex items-center justify-between gap-3">
               <span>Token rejected; update token in Settings.</span>
               <Link
                 href={`/settings/devices/${device.id}`}
-                className="rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                className="rounded-md border border-status-err bg-surface-raised px-3 py-1 text-xs font-medium text-status-err hover:bg-accent-soft"
               >
                 Open Settings
               </Link>
@@ -249,20 +251,20 @@ function Banner({
       }
       if (state.reason === "version_mismatch") {
         return (
-          <BannerShell tone="red">
+          <BannerShell tone="err">
             Daemon protocol version unsupported; upgrade required.
           </BannerShell>
         );
       }
       if (state.reason === "network") {
         return (
-          <BannerShell tone="red">
+          <BannerShell tone="err">
             <div className="flex items-center justify-between gap-3">
               <span>Cannot reach {hostnameOf(device.link)}; will retry.</span>
               <button
                 type="button"
                 onClick={onReconnect}
-                className="rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                className="rounded-md border border-status-err bg-surface-raised px-3 py-1 text-xs font-medium text-status-err hover:bg-accent-soft"
               >
                 Reconnect
               </button>
@@ -271,13 +273,13 @@ function Banner({
         );
       }
       return (
-        <BannerShell tone="red">
+        <BannerShell tone="err">
           <div className="flex items-center justify-between gap-3">
             <span>{state.message}</span>
             <button
               type="button"
               onClick={onReconnect}
-              className="rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+              className="rounded-md border border-status-err bg-surface-raised px-3 py-1 text-xs font-medium text-status-err hover:bg-accent-soft"
             >
               Reconnect
             </button>
@@ -289,10 +291,10 @@ function Banner({
 }
 
 const TONE_CLASSES = {
-  muted: "border-zinc-200 bg-zinc-50 text-zinc-700",
-  amber: "border-amber-300 bg-amber-50 text-amber-900",
-  emerald: "border-emerald-300 bg-emerald-50 text-emerald-900",
-  red: "border-red-300 bg-red-50 text-red-900",
+  muted: "border-subtle bg-surface text-muted",
+  warn: "border-status-warn bg-surface-raised text-status-warn",
+  ok: "border-status-ok bg-surface-raised text-status-ok",
+  err: "border-status-err bg-surface-raised text-status-err",
 } as const;
 
 function BannerShell({

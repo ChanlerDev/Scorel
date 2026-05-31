@@ -60,9 +60,12 @@ export function DeviceForm({ initial, onSubmit, onCancel, submitLabel }: DeviceF
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4 border border-zinc-200 rounded-md bg-white p-4">
+    <form
+      onSubmit={handleSubmit}
+      className="space-y-4 rounded-md border border-subtle bg-surface-raised p-4"
+    >
       <div className="space-y-1">
-        <label htmlFor="device-name" className="block text-sm font-medium text-zinc-700">
+        <label htmlFor="device-name" className="block text-sm font-medium text-text">
           Name
         </label>
         <input
@@ -71,19 +74,19 @@ export function DeviceForm({ initial, onSubmit, onCancel, submitLabel }: DeviceF
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={() => setTouched((t) => ({ ...t, name: true }))}
-          className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm"
+          className="w-full rounded-md border border-subtle bg-surface-raised px-3 py-2 text-sm text-text"
           aria-invalid={touched.name && !!errors.name}
           aria-describedby={errors.name ? "device-name-error" : undefined}
         />
         {touched.name && errors.name ? (
-          <p id="device-name-error" className="text-xs text-red-600">
+          <p id="device-name-error" className="text-xs text-status-err">
             {errors.name}
           </p>
         ) : null}
       </div>
 
       <div className="space-y-1">
-        <label htmlFor="device-link" className="block text-sm font-medium text-zinc-700">
+        <label htmlFor="device-link" className="block text-sm font-medium text-text">
           Link
         </label>
         <input
@@ -93,19 +96,19 @@ export function DeviceForm({ initial, onSubmit, onCancel, submitLabel }: DeviceF
           placeholder="wss://host:9876"
           onChange={(e) => setLink(e.target.value)}
           onBlur={() => setTouched((t) => ({ ...t, link: true }))}
-          className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-mono"
+          className="w-full rounded-md border border-subtle bg-surface-raised px-3 py-2 text-sm font-mono text-text"
           aria-invalid={touched.link && !!errors.link}
           aria-describedby={errors.link ? "device-link-error" : undefined}
         />
         {touched.link && errors.link ? (
-          <p id="device-link-error" className="text-xs text-red-600">
+          <p id="device-link-error" className="text-xs text-status-err">
             {errors.link}
           </p>
         ) : null}
       </div>
 
       <div className="space-y-1">
-        <label htmlFor="device-token" className="block text-sm font-medium text-zinc-700">
+        <label htmlFor="device-token" className="block text-sm font-medium text-text">
           Token
         </label>
         <input
@@ -114,16 +117,16 @@ export function DeviceForm({ initial, onSubmit, onCancel, submitLabel }: DeviceF
           value={token}
           onChange={(e) => setToken(e.target.value)}
           onBlur={() => setTouched((t) => ({ ...t, token: true }))}
-          className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-mono"
+          className="w-full rounded-md border border-subtle bg-surface-raised px-3 py-2 text-sm font-mono text-text"
           aria-invalid={touched.token && !!errors.token}
           aria-describedby={errors.token ? "device-token-error" : undefined}
         />
         {touched.token && errors.token ? (
-          <p id="device-token-error" className="text-xs text-red-600">
+          <p id="device-token-error" className="text-xs text-status-err">
             {errors.token}
           </p>
         ) : null}
-        <p className="text-xs text-amber-700">
+        <p className="text-xs text-status-warn">
           Token is stored in cleartext in browser storage. Do not share screenshots of Settings.
         </p>
       </div>
@@ -132,14 +135,14 @@ export function DeviceForm({ initial, onSubmit, onCancel, submitLabel }: DeviceF
         <button
           type="submit"
           disabled={!isValid}
-          className="rounded-md bg-zinc-900 px-3 py-2 text-sm text-white disabled:bg-zinc-300 disabled:cursor-not-allowed"
+          className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-surface-raised hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
         >
           {submitLabel}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-md border border-zinc-300 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+          className="rounded-md border border-subtle bg-surface-raised px-3 py-1.5 text-sm text-muted hover:border-border-strong hover:text-text"
         >
           Cancel
         </button>

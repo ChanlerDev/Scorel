@@ -99,6 +99,18 @@ These are intentional cuts in M5. They are tracked in `docs/ROADMAP.md` for futu
 
 ---
 
+## Design tokens and fonts (S0040)
+
+The WebUI uses a Codex-style visual pass:
+
+- **Single light theme** — warm paper background, ink-blue accent, serif display + system sans body + JetBrains Mono code. Dark mode is intentionally backlog.
+- **CSS variables in `app/globals.css` `:root`** — every color, font family, font size + line-height pair, spacing step, border radius, and shadow lives behind a `--color-*` / `--font-*` / `--text-*` / `--space-*` / `--radius-*` / `--shadow-*` variable.
+- **Tailwind `theme.extend` in `tailwind.config.ts`** — maps each variable to a semantic utility (`bg-surface`, `text-muted`, `border-subtle`, `text-accent`, `text-status-ok|warn|err|idle`, `font-display`, `text-md`, `space-y-3`, `rounded-md`, `shadow-md`, `shadow-focus`, …). Components consume these utilities only; literal `zinc-*` / `emerald-*` / `red-*` / `amber-*` are banned and enforced by `src/package-boundaries.test.ts`.
+- **Self-hosted fonts** — `@fontsource/newsreader` (display serif) and `@fontsource/jetbrains-mono` (mono) are bundled woff2 packages. They are imported once at the top of `app/layout.tsx`, so first paint never waits on a Google Fonts network request. Body sans uses the platform `system-ui` stack and never loads a font.
+- **Focus ring globals** — `*:focus-visible` in `globals.css` paints `box-shadow: var(--shadow-focus)`. Components stay utility-only (no `.btn-*` classes) so styling for buttons / links / inputs can evolve without a parallel CSS layer.
+
+When dark mode lands later it will swap variable values inside a `prefers-color-scheme: dark` block; component classes do not change.
+
 ## Architecture quick reference
 
 | Concern | Lives in |

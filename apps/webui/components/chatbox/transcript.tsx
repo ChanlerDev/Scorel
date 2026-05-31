@@ -40,7 +40,7 @@ export function Transcript({ turns }: TranscriptProps): JSX.Element {
 
   if (turns.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center text-sm italic text-zinc-500">
+      <div className="flex h-full items-center justify-center text-sm italic text-muted">
         No messages yet — type below to start.
       </div>
     );
@@ -50,11 +50,13 @@ export function Transcript({ turns }: TranscriptProps): JSX.Element {
     <div
       ref={containerRef}
       data-testid="transcript"
-      className="flex h-full flex-col gap-3 overflow-y-auto px-2 py-3"
+      className="flex h-full flex-col gap-3 overflow-y-auto bg-bg px-2 py-3"
     >
-      {turns.map((turn) => (
-        <TurnView key={turn.id} turn={turn} />
-      ))}
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+        {turns.map((turn) => (
+          <TurnView key={turn.id} turn={turn} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -66,9 +68,11 @@ function TurnView({ turn }: { turn: Turn }): JSX.Element {
   return (
     <article
       data-testid="turn-tool-standalone"
-      className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800"
+      className="rounded-md border border-subtle bg-surface-raised p-3 text-sm text-text"
     >
-      <header className="mb-1 text-xs uppercase tracking-wide text-zinc-500">Tool</header>
+      <header className="mb-1 font-display text-xs uppercase tracking-wide text-muted">
+        Tool
+      </header>
       <div className="space-y-2">
         {turn.parts.map((part, idx) =>
           part.kind === "tool_call" || part.kind === "tool_result" ? (

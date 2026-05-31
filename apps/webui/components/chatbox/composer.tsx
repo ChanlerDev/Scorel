@@ -68,7 +68,7 @@ export function Composer({
   return (
     <form
       data-testid="composer"
-      className="flex flex-col gap-1 border-t border-zinc-200 bg-white px-3 py-2"
+      className="flex flex-col gap-1 border-t border-subtle bg-surface px-3 py-2"
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
@@ -77,7 +77,7 @@ export function Composer({
       <div className="flex items-end gap-2">
         <textarea
           data-testid="composer-input"
-          className="min-h-[40px] flex-1 resize-y rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-900 outline-none focus:border-zinc-400"
+          className="min-h-[40px] flex-1 resize-y rounded-md border border-subtle bg-surface-raised px-2 py-1 text-sm text-text outline-none focus-visible:shadow-focus"
           placeholder={
             placeholder ?? "Send a message — Enter to submit, Shift+Enter for newline, Esc to cancel"
           }
@@ -91,7 +91,7 @@ export function Composer({
           <button
             type="button"
             data-testid="composer-cancel"
-            className="rounded-md bg-red-600 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:bg-red-300"
+            className="rounded-md bg-status-err px-3 py-1.5 text-sm font-medium text-surface-raised hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             onClick={fireCancel}
             disabled={cancelDisabled}
           >
@@ -101,7 +101,7 @@ export function Composer({
           <button
             type="submit"
             data-testid="composer-send"
-            className="rounded-md bg-zinc-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:bg-zinc-300"
+            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-surface-raised hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
             disabled={sendDisabled}
           >
             Send
@@ -111,7 +111,7 @@ export function Composer({
       {errorBanner ? (
         <p
           data-testid="composer-error"
-          className="text-xs text-red-700"
+          className="text-xs text-status-err"
           role="alert"
         >
           {errorBanner}

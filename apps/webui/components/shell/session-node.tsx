@@ -28,8 +28,10 @@ export function SessionNode({
       <Link
         href={href}
         aria-current={isActive ? "page" : undefined}
-        className={`block truncate rounded px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 ${
-          isActive ? "bg-zinc-100 font-medium text-zinc-900" : ""
+        className={`block truncate rounded px-2 py-1 text-xs hover:bg-accent-soft ${
+          isActive
+            ? "bg-accent-soft font-medium text-accent"
+            : "text-muted"
         }`}
         title={label}
       >

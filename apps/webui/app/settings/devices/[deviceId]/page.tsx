@@ -18,8 +18,8 @@ export default function SettingsDevicePage() {
   if (!device) {
     return (
       <div className="mx-auto w-full max-w-2xl space-y-4 p-6">
-        <p className="text-sm text-zinc-600">Device not found.</p>
-        <Link href="/settings" className="text-sm text-zinc-700 underline hover:text-zinc-900">
+        <p className="text-sm text-muted">Device not found.</p>
+        <Link href="/settings" className="text-sm text-accent underline hover:text-accent-hover">
           Back to Settings
         </Link>
       </div>
@@ -29,7 +29,7 @@ export default function SettingsDevicePage() {
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <header className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-zinc-900">Edit Device</h1>
+        <h1 className="font-display text-lg text-text">Edit Device</h1>
         <button
           type="button"
           onClick={() => {
@@ -39,14 +39,14 @@ export default function SettingsDevicePage() {
             store.remove(device.id);
             router.push("/settings");
           }}
-          className="rounded-md border border-red-300 px-3 py-2 text-sm text-red-700 hover:bg-red-50"
+          className="rounded-md border border-status-err px-3 py-1.5 text-sm text-status-err hover:bg-accent-soft"
         >
           Delete
         </button>
       </header>
 
       {error ? (
-        <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="rounded-md border border-status-err bg-surface-raised px-3 py-2 text-sm text-status-err">
           {error}
         </div>
       ) : null}

@@ -14,9 +14,15 @@ const ALLOWED_EXTERNALS = new Set([
   "next",
   "@scorel/protocol",
   "@scorel/client",
+  // Self-hosted woff2 design-system fonts (S0040). The two packages drop
+  // pure CSS @font-face declarations into the bundle; no JavaScript or
+  // network calls. Allowing them as externals keeps the boundary test
+  // honest while still blocking arbitrary npm packages.
+  "@fontsource/newsreader",
+  "@fontsource/jetbrains-mono",
 ]);
 
-const ALLOWED_PREFIXES = ["next/"];
+const ALLOWED_PREFIXES = ["next/", "@fontsource/newsreader/", "@fontsource/jetbrains-mono/"];
 
 const FORBIDDEN_EXTERNALS = new Set([
   "@scorel/core",
@@ -58,6 +64,8 @@ async function walk(dir: string): Promise<string[]> {
 }
 
 const IMPORT_RE = /from\s+["']([^"']+)["']/g;
+// Side-effect imports: `import "..."`. Used by @fontsource css imports.
+const SIDE_EFFECT_IMPORT_RE = /^\s*import\s+["']([^"']+)["']/gm;
 
 function specifierIsRelative(spec: string): boolean {
   return spec.startsWith(".") || spec.startsWith("/");
@@ -86,7 +94,7 @@ function isTestFile(rel: string): boolean {
 }
 
 describe("apps/webui package boundaries", () => {
-  it("only imports from approved externals (react, next, @scorel/protocol|client)", async () => {
+  it("only imports from approved externals (react, next, @scorel/protocol|client, @fontsource/*)", async () => {
     const files: string[] = [];
     for (const sub of SCAN_DIRS) {
       files.push(...(await walk(path.join(appRoot, sub))));
@@ -101,10 +109,17 @@ describe("apps/webui package boundaries", () => {
       if (isTestFile(rel)) continue;
 
       const text = await fs.readFile(file, "utf8");
+      const specs = new Set<string>();
       IMPORT_RE.lastIndex = 0;
       let match: RegExpExecArray | null;
       while ((match = IMPORT_RE.exec(text)) !== null) {
-        const spec = match[1] as string;
+        specs.add(match[1] as string);
+      }
+      SIDE_EFFECT_IMPORT_RE.lastIndex = 0;
+      while ((match = SIDE_EFFECT_IMPORT_RE.exec(text)) !== null) {
+        specs.add(match[1] as string);
+      }
+      for (const spec of specs) {
         if (!isAllowed(spec) || isForbidden(spec)) {
           violations.push(`${rel}: ${spec}`);
         }
@@ -112,6 +127,13 @@ describe("apps/webui package boundaries", () => {
     }
 
     expect(violations, `Forbidden imports:\n${violations.join("\n")}`).toEqual([]);
+  });
+
+  it("explicitly whitelists @fontsource/newsreader and @fontsource/jetbrains-mono", () => {
+    expect(ALLOWED_EXTERNALS.has("@fontsource/newsreader")).toBe(true);
+    expect(ALLOWED_EXTERNALS.has("@fontsource/jetbrains-mono")).toBe(true);
+    expect(ALLOWED_PREFIXES).toContain("@fontsource/newsreader/");
+    expect(ALLOWED_PREFIXES).toContain("@fontsource/jetbrains-mono/");
   });
 
   it("localStorage references stay inside lib/store/", async () => {
@@ -134,6 +156,39 @@ describe("apps/webui package boundaries", () => {
     expect(
       offenders,
       `localStorage must only be referenced under lib/store/.\nOffenders:\n${offenders.join("\n")}`
+    ).toEqual([]);
+  });
+
+  it("forbids literal palette utilities outside design tokens", async () => {
+    // Match Tailwind palette utilities that bypass the design tokens. We use
+    // word boundaries on both sides so compound class names like
+    // `prose-zinc` (typography plugin variant) or `text-zinc-foo` are not
+    // matched — only standalone `zinc-100`, `emerald-500`, etc.
+    //
+    // Allowed palette names map roughly to the colors we removed in S0040.
+    // Any new use should go through `bg-surface`, `text-muted`,
+    // `border-subtle`, `text-accent`, `text-status-*`, etc.
+    const PALETTE_RE = /\b(zinc|emerald|red|amber|sky|stone|slate|gray)-\d{2,3}\b/g;
+
+    const files: string[] = [];
+    for (const sub of ["app", "components"]) {
+      files.push(...(await walk(path.join(appRoot, sub))));
+    }
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const rel = path.relative(appRoot, file);
+      if (isTestFile(rel)) continue;
+      const text = await fs.readFile(file, "utf8");
+      PALETTE_RE.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = PALETTE_RE.exec(text)) !== null) {
+        offenders.push(`${rel}: ${match[0]}`);
+      }
+    }
+    expect(
+      offenders,
+      `Literal palette utilities are banned outside design tokens. Use semantic classes (\`bg-surface\`, \`text-muted\`, \`text-status-*\`).\nOffenders:\n${offenders.join("\n")}`
     ).toEqual([]);
   });
 });

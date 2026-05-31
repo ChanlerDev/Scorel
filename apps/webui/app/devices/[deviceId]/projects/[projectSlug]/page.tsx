@@ -24,10 +24,10 @@ export default function ProjectPage({ params }: { params: Params }) {
 
   if (!device) {
     return (
-      <div className="p-6 text-sm text-zinc-600">
-        <p className="font-medium text-zinc-800">Device not found</p>
+      <div className="p-6 text-sm text-muted">
+        <p className="font-medium text-text">Device not found</p>
         <p className="mt-2">
-          <Link href="/" className="text-zinc-700 underline hover:text-zinc-900">
+          <Link href="/" className="text-accent underline hover:text-accent-hover">
             Back to home
           </Link>
         </p>
@@ -59,16 +59,16 @@ function ProjectView({
   const sessions = sortSessions(project?.sessions);
 
   return (
-    <div className="p-6 space-y-4 text-sm text-zinc-700">
+    <div className="p-6 space-y-4 text-sm text-text">
       <header className="space-y-1">
-        <p className="text-xs uppercase tracking-wide text-zinc-500">
+        <p className="font-display text-xs uppercase tracking-wide text-muted">
           {device.name} · {device.link}
         </p>
-        <h1 className="text-base font-semibold text-zinc-900">
+        <h1 className="font-display text-lg text-text">
           {project?.displayName ?? projectSlug}
         </h1>
         {project?.workDirHint ? (
-          <p className="text-xs text-zinc-500">{project.workDirHint}</p>
+          <p className="text-xs text-faint">{project.workDirHint}</p>
         ) : null}
       </header>
 
@@ -79,7 +79,7 @@ function ProjectView({
       />
 
       {error ? (
-        <div className="flex items-center justify-between gap-3 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+        <div className="flex items-center justify-between gap-3 rounded-md border border-status-err bg-surface-raised px-3 py-2 text-sm text-status-err">
           <span>Failed to load sessions: {error}</span>
           <button
             type="button"
@@ -87,7 +87,7 @@ function ProjectView({
               void syncSessionsNow(projectSlug);
             }}
             disabled={state.name !== "connected"}
-            className="rounded-md border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-md border border-status-err bg-surface-raised px-2 py-1 text-xs font-medium text-status-err hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60"
           >
             Retry
           </button>
@@ -95,13 +95,13 @@ function ProjectView({
       ) : null}
 
       {!project ? (
-        <p className="text-xs italic text-zinc-500">
+        <p className="text-xs italic text-muted">
           {state.name === "connected"
             ? "Loading project metadata…"
             : "Project not in cache; connect to load."}
         </p>
       ) : sessions.length === 0 ? (
-        <p className="text-xs italic text-zinc-500">
+        <p className="text-xs italic text-muted">
           No sessions yet — click + New Chat above to start one.
         </p>
       ) : (
@@ -137,17 +137,17 @@ function SessionRow({
     <li>
       <Link
         href={href}
-        className="flex items-center justify-between rounded-md border border-zinc-200 px-3 py-2 hover:bg-zinc-50"
+        className="flex items-center justify-between rounded-md border border-subtle bg-surface-raised px-3 py-2 hover:bg-accent-soft"
       >
         <div className="min-w-0">
-          <p className="truncate font-medium text-zinc-900">{label}</p>
-          <p className="truncate text-xs text-zinc-500">
+          <p className="truncate font-medium text-text">{label}</p>
+          <p className="truncate text-xs text-faint">
             {session.model ?? "—"}
             {session.updatedAt ? ` · ${formatTimestamp(session.updatedAt)}` : ""}
           </p>
         </div>
         {typeof session.currentSeq === "number" ? (
-          <span className="ml-3 shrink-0 text-xs text-zinc-500">
+          <span className="ml-3 shrink-0 text-xs text-muted">
             seq {session.currentSeq}
           </span>
         ) : null}

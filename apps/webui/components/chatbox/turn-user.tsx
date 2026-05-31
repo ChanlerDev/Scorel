@@ -15,9 +15,9 @@ export function TurnUser({ turn }: TurnUserProps): JSX.Element {
     <article
       data-testid="turn-user"
       data-pending={turn.pending ? "true" : undefined}
-      className="rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-800"
+      className="rounded-md border border-subtle bg-accent-soft p-3 text-sm text-text"
     >
-      <header className="mb-1 text-xs uppercase tracking-wide text-zinc-500">
+      <header className="mb-1 font-display text-xs uppercase tracking-wide text-muted">
         You{turn.pending ? " · sending…" : ""}
       </header>
       <pre className="whitespace-pre-wrap font-sans text-sm">{text}</pre>

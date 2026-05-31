@@ -58,21 +58,23 @@ export function ProjectNode({
           if (!offline) onSelect?.(deviceId, project.projectSlug);
         }}
         aria-current={isActive ? "page" : undefined}
-        className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-zinc-100 ${
-          isActive ? "bg-zinc-100" : ""
+        className={`flex items-center justify-between gap-2 rounded-md border-l-2 px-2 py-1.5 hover:bg-accent-soft ${
+          isActive
+            ? "border-accent bg-accent-soft text-accent"
+            : "border-transparent text-text"
         }`}
       >
-        <span className="truncate">
+        <span className="truncate text-sm">
           {project.displayName ?? project.projectSlug}
         </span>
         {project.sessionCount !== undefined ? (
-          <span className="shrink-0 text-xs text-zinc-500">
+          <span className="shrink-0 text-xs text-faint">
             {project.sessionCount}
           </span>
         ) : null}
       </Link>
       {expanded && sessions.length > 0 ? (
-        <ul className="ml-4 mt-1 space-y-0.5 border-l border-zinc-200 pl-2">
+        <ul className="ml-4 mt-1 space-y-0.5 border-l border-subtle pl-2">
           {sessions.map((session) => (
             <SessionNode
               key={session.sessionId}

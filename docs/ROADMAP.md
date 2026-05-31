@@ -276,7 +276,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
-| M5.5.1 | [`S0040`](spec/ship/S0040-webui-codex-visual-tokens.md) | Codex 风视觉一刀 + design tokens（CSS vars + Tailwind theme.extend） | Planned |
+| M5.5.1 | [`S0040`](spec/ship/S0040-webui-codex-visual-tokens.md) | Codex 风视觉一刀 + design tokens（CSS vars + Tailwind theme.extend） | Done |
 | M5.5.2 | [`S0041`](spec/ship/S0041-webui-markdown-and-tool-block.md) | Chatbox markdown（react-markdown + GFM + sanitize + lazy Shiki）+ thinking 折叠 + 统一 tool 块走 JSON fence | Planned |
 | M5.5.3 | [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | Streaming 光标动画、rAF batch、IntersectionObserver autoscroll、jump-to-bottom 浮按钮 | Planned |
 
@@ -349,7 +349,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0037`](spec/ship/S0037-webui-chatbox-v1.md) | WebUI Chatbox v1：attach-cache 渲染、dual-seq resync、event 投影、prompt 发送 | Done |
 | [`S0038`](spec/ship/S0038-webui-cancel-multiclient.md) | WebUI Composer Cancel 与多端共享真实 session 验证 | Done |
 | [`S0039`](spec/ship/S0039-webui-e2e-newchat.md) | WebUI New Chat 与真实 daemon 端到端验证（M5 收口） | Done |
-| [`S0040`](spec/ship/S0040-webui-codex-visual-tokens.md) | WebUI Codex 风视觉一刀与 design tokens | Planned |
+| [`S0040`](spec/ship/S0040-webui-codex-visual-tokens.md) | WebUI Codex 风视觉一刀与 design tokens | Done |
 | [`S0041`](spec/ship/S0041-webui-markdown-and-tool-block.md) | WebUI markdown 渲染、代码高亮与统一 tool 块 | Planned |
 | [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | WebUI streaming UX 与 autoscroll | Planned |
 

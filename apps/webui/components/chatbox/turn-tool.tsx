@@ -17,11 +17,13 @@ export function TurnTool({ part }: TurnToolProps): JSX.Element {
   return (
     <div
       data-testid={isCall ? "turn-tool-call" : "turn-tool-result"}
-      className={`rounded border px-2 py-1 text-xs ${
-        isError ? "border-red-300 bg-red-50" : "border-zinc-300 bg-white"
+      className={`rounded-md border px-2 py-1 text-xs ${
+        isError
+          ? "border-status-err bg-surface-raised"
+          : "border-subtle bg-surface-raised"
       }`}
     >
-      <header className="flex items-center justify-between gap-2 text-zinc-600">
+      <header className="flex items-center justify-between gap-2 text-muted">
         <span className="font-mono">
           {label}
           {isError ? " · error" : ""}
@@ -29,13 +31,13 @@ export function TurnTool({ part }: TurnToolProps): JSX.Element {
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
-          className="text-xs text-zinc-500 underline hover:text-zinc-800"
+          className="text-xs text-accent underline hover:text-accent-hover"
         >
           {open ? "Hide details" : "Show details"}
         </button>
       </header>
       {open ? (
-        <pre className="mt-1 max-h-64 overflow-auto rounded bg-zinc-900 px-2 py-1 font-mono text-xs text-zinc-100">
+        <pre className="mt-1 max-h-64 overflow-auto rounded bg-surface px-2 py-1 font-mono text-xs text-muted">
           {safeStringify(payload)}
         </pre>
       ) : null}

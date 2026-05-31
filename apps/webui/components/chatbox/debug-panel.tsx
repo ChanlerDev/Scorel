@@ -37,15 +37,15 @@ export function DebugPanel({ summary }: DebugPanelProps): JSX.Element {
   return (
     <aside
       data-testid="debug-panel"
-      className="fixed bottom-4 right-4 z-50 w-80 max-w-[90vw] rounded-md border border-zinc-700 bg-zinc-900/95 p-3 font-mono text-[11px] leading-snug text-zinc-100 shadow-lg"
+      className="fixed bottom-4 right-4 z-50 w-80 max-w-[90vw] rounded-md border border-subtle bg-surface-raised p-3 font-mono text-[11px] leading-snug text-text shadow-md"
     >
       <header className="mb-2 flex items-center justify-between">
-        <span className="font-semibold tracking-wider text-zinc-300">DEBUG</span>
+        <span className="font-display text-sm tracking-wider text-text">DEBUG</span>
         <button
           type="button"
           data-testid="debug-panel-copy"
           onClick={() => void copy()}
-          className="rounded border border-zinc-600 px-2 py-0.5 text-[10px] text-zinc-200 hover:bg-zinc-800"
+          className="rounded border border-subtle px-2 py-0.5 text-[10px] text-muted hover:text-accent hover:border-border-strong"
         >
           {copied ? "copied" : "copy"}
         </button>
@@ -76,10 +76,10 @@ export function DebugPanel({ summary }: DebugPanelProps): JSX.Element {
 function Row({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <>
-      <dt className="text-zinc-400">{label}</dt>
+      <dt className="text-faint">{label}</dt>
       <dd
         data-testid={`debug-panel-${label}`}
-        className="break-all text-zinc-100"
+        className="break-all text-text"
       >
         {value}
       </dd>

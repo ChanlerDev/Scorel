@@ -8,24 +8,24 @@ export function DeviceList() {
 
   if (devices.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-zinc-300 bg-white px-4 py-6 text-center text-sm text-zinc-500">
+      <div className="rounded-md border border-dashed border-subtle bg-surface-raised px-4 py-6 text-center text-sm text-muted">
         No devices yet.
       </div>
     );
   }
 
   return (
-    <ul className="divide-y divide-zinc-200 rounded-md border border-zinc-200 bg-white">
+    <ul className="divide-y divide-subtle rounded-md border border-subtle bg-surface-raised">
       {devices.map((device) => (
         <li key={device.id} className="flex items-center justify-between px-4 py-3">
           <div className="min-w-0">
             <Link
               href={`/settings/devices/${device.id}`}
-              className="block truncate text-sm font-medium text-zinc-900 hover:underline"
+              className="block truncate text-sm font-medium text-text hover:text-accent hover:underline"
             >
               {device.name}
             </Link>
-            <div className="truncate text-xs text-zinc-500 font-mono">{device.link}</div>
+            <div className="truncate text-xs text-muted font-mono">{device.link}</div>
           </div>
           <button
             type="button"
@@ -35,7 +35,7 @@ export function DeviceList() {
               if (!ok) return;
               store.remove(device.id);
             }}
-            className="ml-4 shrink-0 rounded-md border border-zinc-300 px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+            className="ml-4 shrink-0 rounded-md border border-status-err px-3 py-1 text-xs text-status-err hover:bg-accent-soft"
           >
             Delete
           </button>

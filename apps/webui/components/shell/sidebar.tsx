@@ -51,21 +51,24 @@ function DeviceTree({
   };
 
   const isActiveDevice = activeDeviceId === device.id;
+  const activeOnDevice = isActiveDevice && !activeProjectSlug;
 
   return (
     <li>
       <Link
         href={`/devices/${encodeURIComponent(device.id)}`}
-        aria-current={isActiveDevice && !activeProjectSlug ? "page" : undefined}
-        className={`flex items-center justify-between gap-2 rounded-md px-2 py-2 hover:bg-zinc-100 ${
-          isActiveDevice && !activeProjectSlug ? "bg-zinc-100" : ""
+        aria-current={activeOnDevice ? "page" : undefined}
+        className={`flex items-center justify-between gap-2 rounded-md border-l-2 px-2 py-1.5 hover:bg-accent-soft ${
+          activeOnDevice
+            ? "border-accent bg-accent-soft text-accent"
+            : "border-transparent"
         }`}
       >
-        <span className="truncate font-medium text-zinc-800">{device.name}</span>
+        <span className="truncate text-sm font-medium">{device.name}</span>
         <span className="flex items-center gap-1 shrink-0">
           {offline && device.lastConnectedAt ? (
             <span
-              className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500"
+              className="rounded bg-surface-raised px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-faint"
               title="Last seen offline"
             >
               offline
@@ -76,7 +79,7 @@ function DeviceTree({
       </Link>
       <div className={`ml-2 mt-1 ${offline && device.lastConnectedAt ? "opacity-60" : ""}`}>
         {projects.length === 0 ? (
-          <p className="px-2 py-1 text-xs italic text-zinc-500">
+          <p className="px-2 py-1 text-xs italic text-faint">
             {state.name === "connected"
               ? "(no projects yet)"
               : device.lastConnectedAt
@@ -127,26 +130,29 @@ export function Sidebar() {
     : undefined;
 
   return (
-    <aside className="w-[280px] shrink-0 border-r border-zinc-200 bg-white flex flex-col">
+    <aside className="w-[280px] shrink-0 border-r border-subtle bg-surface flex flex-col">
       <div className="p-3 space-y-2">
         <NewChatButton
           deviceId={activeDeviceId}
           projectSlug={activeProjectSlug}
           variant="sidebar"
         />
-        <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-400">
+        <div className="rounded-md border border-subtle bg-surface-raised px-3 py-2 text-sm text-faint">
           Search…
         </div>
       </div>
 
-      <div className="px-3 pt-2 pb-1 text-xs uppercase tracking-wide text-zinc-500">
+      <div className="px-3 pt-2 pb-1 font-display text-sm text-muted">
         Projects
       </div>
-      <div className="flex-1 overflow-auto px-3 pb-3 text-sm text-zinc-600">
+      <div className="flex-1 overflow-auto px-3 pb-3 text-sm text-text">
         {devices.length === 0 ? (
-          <div className="px-2 py-3 italic text-zinc-500">
+          <div className="px-2 py-3 text-sm italic text-muted">
             No devices configured.{" "}
-            <Link href="/settings" className="not-italic text-zinc-700 underline hover:text-zinc-900">
+            <Link
+              href="/settings"
+              className="not-italic text-accent underline hover:text-accent-hover"
+            >
               Add a device in Settings
             </Link>
           </div>
@@ -165,10 +171,10 @@ export function Sidebar() {
         )}
       </div>
 
-      <div className="border-t border-zinc-200 p-3">
+      <div className="border-t border-subtle p-3">
         <Link
           href="/settings"
-          className="block rounded-md px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-100"
+          className="block rounded-md px-3 py-1.5 text-sm text-muted hover:bg-accent-soft hover:text-accent"
         >
           ⚙ Settings
         </Link>

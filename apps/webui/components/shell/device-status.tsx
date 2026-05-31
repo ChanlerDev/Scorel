@@ -3,12 +3,12 @@
 import type { ConnectionState } from "../../lib/connection/state";
 
 const DOT_CLASSES: Record<ConnectionState["name"], string> = {
-  idle: "bg-zinc-400",
-  connecting: "bg-amber-500",
-  reconnecting: "bg-amber-500",
-  connected: "bg-emerald-500",
-  disconnected: "bg-zinc-500",
-  error: "bg-red-500",
+  idle: "bg-status-idle",
+  connecting: "bg-status-warn",
+  reconnecting: "bg-status-warn",
+  connected: "bg-status-ok",
+  disconnected: "bg-status-idle",
+  error: "bg-status-err",
 };
 
 function tooltipFor(state: ConnectionState): string {

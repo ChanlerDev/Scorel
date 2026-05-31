@@ -41,10 +41,10 @@ export default function SessionPage({ params }: { params: Params }) {
 
   if (!device) {
     return (
-      <div className="p-6 text-sm text-zinc-600">
-        <p className="font-medium text-zinc-800">Device not found</p>
+      <div className="p-6 text-sm text-muted">
+        <p className="font-medium text-text">Device not found</p>
         <p className="mt-2">
-          <Link href="/" className="text-zinc-700 underline hover:text-zinc-900">
+          <Link href="/" className="text-accent underline hover:text-accent-hover">
             Back to home
           </Link>
         </p>
@@ -88,7 +88,7 @@ function SessionView({
   const remoteDeviceId = device.remoteIdentity?.deviceId;
 
   return (
-    <div className="flex h-full flex-col gap-3 p-6 text-sm text-zinc-700">
+    <div className="flex h-full flex-col gap-3 p-6 text-sm text-text">
       <SessionHeader
         device={device}
         projectSlug={projectSlug}
@@ -97,13 +97,13 @@ function SessionView({
       />
 
       {error ? (
-        <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900">
+        <div className="rounded-md border border-status-err bg-surface-raised px-3 py-2 text-sm text-status-err">
           Failed to load session metadata: {error}
         </div>
       ) : null}
 
       {!remoteDeviceId ? (
-        <div className="rounded-md border border-dashed border-zinc-300 bg-zinc-50 px-4 py-6 text-center text-zinc-500">
+        <div className="rounded-md border border-dashed border-subtle bg-surface px-4 py-6 text-center text-muted">
           Connecting to daemon… (waiting for device identity)
         </div>
       ) : (
@@ -208,10 +208,10 @@ function Chatbox({
     : null;
 
   return (
-    <div className="flex h-[60vh] min-h-[400px] flex-col overflow-hidden rounded-md border border-zinc-200 bg-white">
+    <div className="flex h-[60vh] min-h-[400px] flex-col overflow-hidden rounded-md border border-subtle bg-surface">
       <div className="flex-1 overflow-hidden">
         {snapshot.loading && snapshot.state.turns.length === 0 ? (
-          <div className="flex h-full items-center justify-center text-sm italic text-zinc-500">
+          <div className="flex h-full items-center justify-center text-sm italic text-muted">
             Loading session…
           </div>
         ) : (
@@ -235,7 +235,7 @@ function ChatboxBody({ snapshot }: { snapshot: SessionAttachSnapshot }): JSX.Ele
   return (
     <div className="flex h-full flex-col">
       {snapshot.error ? (
-        <div className="border-b border-red-200 bg-red-50 px-3 py-1 text-xs text-red-900">
+        <div className="border-b border-status-err bg-surface-raised px-3 py-1 text-xs text-status-err">
           {snapshot.error.reason}: {snapshot.error.message}
         </div>
       ) : null}
@@ -264,14 +264,14 @@ function SessionHeader({
   if (!session) {
     return (
       <header className="space-y-1">
-        <p className="text-xs uppercase tracking-wide text-zinc-500">
+        <p className="font-display text-xs uppercase tracking-wide text-muted">
           {device.name} ·{" "}
-          <Link href={projectHref} className="underline hover:text-zinc-700">
+          <Link href={projectHref} className="underline hover:text-accent">
             {projectSlug}
           </Link>
         </p>
-        <h1 className="text-base font-semibold text-zinc-900">{sessionId}</h1>
-        <p className="text-xs italic text-zinc-500">
+        <h1 className="font-display text-lg text-text">{sessionId}</h1>
+        <p className="text-xs italic text-faint">
           Loading session metadata…
         </p>
       </header>
@@ -280,14 +280,14 @@ function SessionHeader({
   const title = session.title?.trim() || sessionId;
   return (
     <header className="space-y-1">
-      <p className="text-xs uppercase tracking-wide text-zinc-500">
+      <p className="font-display text-xs uppercase tracking-wide text-muted">
         {device.name} ·{" "}
-        <Link href={projectHref} className="underline hover:text-zinc-700">
+        <Link href={projectHref} className="underline hover:text-accent">
           {projectSlug}
         </Link>
       </p>
-      <h1 className="text-base font-semibold text-zinc-900">{title}</h1>
-      <p className="text-xs text-zinc-500">
+      <h1 className="font-display text-lg text-text">{title}</h1>
+      <p className="text-xs text-faint">
         {session.model ?? "model unknown"}
         {session.updatedAt ? ` · updated ${formatTimestamp(session.updatedAt)}` : ""}
         {typeof session.currentSeq === "number"

@@ -13,7 +13,7 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <header className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-zinc-900">Devices</h1>
+        <h1 className="font-display text-lg text-text">Devices</h1>
         {!adding ? (
           <button
             type="button"
@@ -21,7 +21,7 @@ export default function SettingsPage() {
               setError(null);
               setAdding(true);
             }}
-            className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800"
+            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-surface-raised hover:bg-accent-hover"
           >
             + Add Device
           </button>
@@ -48,7 +48,7 @@ export default function SettingsPage() {
       ) : null}
 
       {error ? (
-        <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div className="rounded-md border border-status-err bg-surface-raised px-3 py-2 text-sm text-status-err">
           {error}
         </div>
       ) : null}

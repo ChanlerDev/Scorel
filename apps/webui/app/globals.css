@@ -1,1 +1,77 @@
 @import "tailwindcss";
+@config "../tailwind.config.ts";
+
+/* Codex-style design tokens (S0040). All colors, type, spacing, radius, and
+ * shadow flow through these CSS variables. Components must consume them via
+ * the semantic Tailwind classes wired up in `tailwind.config.ts`
+ * (`bg-surface`, `text-muted`, `border-subtle`, `text-accent`, ...). No
+ * `dark:` variants in this milestone — single light theme only. When dark
+ * mode lands, swap the same variable names inside a
+ * `prefers-color-scheme: dark` block. */
+:root {
+  /* color */
+  --color-bg: #f6f1e7;            /* warm paper */
+  --color-surface: #fbf7ee;       /* card / sidebar surface */
+  --color-surface-raised: #ffffff;/* composer, modal */
+  --color-border: #e6dfd0;        /* subtle separator */
+  --color-border-strong: #c9bfa8;
+  --color-text: #1f1b16;          /* primary text */
+  --color-text-muted: #5b524a;
+  --color-text-faint: #8a8076;
+  --color-accent: #1e3a8a;        /* ink-blue primary action */
+  --color-accent-hover: #1e40af;
+  --color-accent-soft: #dbe3f5;   /* accent background tint */
+  --color-status-ok: #2f7d4f;
+  --color-status-warn: #b27a18;
+  --color-status-err: #b3261e;
+  --color-status-idle: #8a8076;
+
+  /* typography */
+  --font-display: "Newsreader", ui-serif, Georgia, serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* sizes */
+  --text-xs: 12px;  --leading-xs: 18px;
+  --text-sm: 13px;  --leading-sm: 20px;
+  --text-base: 14px; --leading-base: 22px;
+  --text-md: 16px;  --leading-md: 24px;
+  --text-lg: 18px;  --leading-lg: 26px;
+  --text-xl: 22px;  --leading-xl: 30px;
+
+  /* spacing — 4px step */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px;
+
+  /* radius */
+  --radius-sm: 4px; --radius-md: 6px; --radius-lg: 10px;
+
+  /* shadow */
+  --shadow-sm: 0 1px 2px rgba(31, 27, 22, 0.05);
+  --shadow-md: 0 2px 8px rgba(31, 27, 22, 0.08);
+  --shadow-focus: 0 0 0 3px rgba(30, 58, 138, 0.25);
+}
+
+/* Body baseline. Components rely on the warm-paper background and primary
+ * ink color set here so that bare divs without `bg-*`/`text-*` still inherit
+ * the Codex palette. */
+html,
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+}
+
+/* Focus ring globals. We deliberately use `focus-visible` only — mouse
+ * clicks should not paint a ring. Components stay utility-only (no
+ * `.btn-*` classes in v1) so the focus shadow is centralized here and
+ * inherited by every button, link, input, textarea, summary, and listitem
+ * with a click handler. */
+*:focus {
+  outline: none;
+}
+*:focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-radius: var(--radius-sm);
+}

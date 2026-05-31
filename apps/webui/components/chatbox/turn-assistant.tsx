@@ -12,17 +12,17 @@ export function TurnAssistant({ turn }: TurnAssistantProps): JSX.Element {
     <article
       data-testid="turn-assistant"
       data-streaming={turn.streaming ? "true" : "false"}
-      className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-800"
+      className="rounded-md border border-subtle bg-surface p-3 text-sm text-text"
     >
-      <header className="mb-1 flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500">
+      <header className="mb-1 flex items-center gap-2 font-display text-xs uppercase tracking-wide text-muted">
         <span>Assistant</span>
         {turn.streaming ? (
-          <span data-testid="streaming-cursor" className="text-zinc-400">
+          <span data-testid="streaming-cursor" className="text-faint">
             ▋
           </span>
         ) : null}
         {turn.stopReason && turn.stopReason !== "end_turn" ? (
-          <span className="text-amber-600">{turn.stopReason}</span>
+          <span className="text-status-warn">{turn.stopReason}</span>
         ) : null}
       </header>
       <div className="space-y-2">
@@ -47,7 +47,7 @@ function PartView({ part }: { part: TurnPart }): JSX.Element | null {
     return (
       <p
         data-testid="error-part"
-        className="rounded border border-red-300 bg-red-50 px-2 py-1 text-xs text-red-900"
+        className="rounded border border-status-err bg-surface-raised px-2 py-1 text-xs text-status-err"
       >
         Error{part.code ? ` (${part.code})` : ""}: {part.message}
       </p>
