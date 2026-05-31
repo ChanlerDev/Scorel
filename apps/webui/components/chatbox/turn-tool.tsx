@@ -3,20 +3,26 @@
 import { useState } from "react";
 
 import type { TurnPart } from "../../lib/events/projector";
+import { MarkdownView } from "./markdown-view";
 
 export type TurnToolProps = {
   part: Extract<TurnPart, { kind: "tool_call" } | { kind: "tool_result" }>;
 };
 
 export function TurnTool({ part }: TurnToolProps): JSX.Element {
-  const [open, setOpen] = useState(false);
   const isCall = part.kind === "tool_call";
+  const isError = !isCall && Boolean((part as Extract<TurnPart, { kind: "tool_result" }>).isError);
+  // Default-collapsed for tool_call. Default-expanded only for tool_result
+  // whose isError === true so failures surface immediately. Successful
+  // tool_results stay collapsed to keep the transcript scannable.
+  const [open, setOpen] = useState<boolean>(isError);
   const label = isCall ? `tool_call · ${part.toolName}` : `tool_result · ${part.toolName}`;
-  const payload = isCall ? part.args : part.result;
-  const isError = !isCall && part.isError;
+  const payload = isCall ? part.args : (part as Extract<TurnPart, { kind: "tool_result" }>).result;
+  const fenced = "```json\n" + safeStringify(payload) + "\n```";
   return (
     <div
       data-testid={isCall ? "turn-tool-call" : "turn-tool-result"}
+      data-tool-open={open ? "true" : "false"}
       className={`rounded-md border px-2 py-1 text-xs ${
         isError
           ? "border-status-err bg-surface-raised"
@@ -37,9 +43,9 @@ export function TurnTool({ part }: TurnToolProps): JSX.Element {
         </button>
       </header>
       {open ? (
-        <pre className="mt-1 max-h-64 overflow-auto rounded bg-surface px-2 py-1 font-mono text-xs text-muted">
-          {safeStringify(payload)}
-        </pre>
+        <div className="mt-1 max-h-96 overflow-auto">
+          <MarkdownView text={fenced} />
+        </div>
       ) : null}
     </div>
   );

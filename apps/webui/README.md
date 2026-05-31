@@ -111,6 +111,27 @@ The WebUI uses a Codex-style visual pass:
 
 When dark mode lands later it will swap variable values inside a `prefers-color-scheme: dark` block; component classes do not change.
 
+## Markdown rendering (S0041)
+
+Chatbox markdown lives in one place: `components/chatbox/markdown-view.tsx`. Every user, assistant, thinking, and tool block flows through this component, so visual changes (heading style, link color, code-block chrome) are a single-file edit.
+
+Stack:
+
+- **`react-markdown` 10** — markdown → React element tree. We never use `dangerouslySetInnerHTML` for markdown; the renderer produces real React elements so custom components (links, code blocks, tables) can be injected without portal hacks.
+- **`remark-gfm` 4** — GitHub Flavored Markdown: tables, task lists, strikethrough, autolinks.
+- **`rehype-sanitize` 6** — schema-based hast sanitizer. Schema lives at module scope in `markdown-view.tsx` and is reviewed alongside the file. The schema starts from `defaultSchema` and only widens `code.className`, `span.className`, and `a[target|rel]`.
+- **`shiki` 4 + `@shikijs/rehype` 4** — VS Code-grade code highlighting. Lazy-loaded via `lazy(() => import("./shiki-code-block"))` so the highlighter engine + WASM never enter the first paint of an empty chat. Languages are split into per-grammar chunks via a static loader map (`LANG_LOADERS`); adding a language is a one-line addition.
+- **`@tailwindcss/typography` 0.5** — `prose` defaults for headings / lists / tables. The `.prose-tweak` class in `app/globals.css` rewires every typography variable to design tokens so prose colors match the warm-paper / ink-blue palette.
+
+Security boundaries (must hold across edits):
+
+- **`rehype-raw` is intentionally absent.** Adding it would surface raw HTML from LLM output through the sanitizer and re-open the XSS surface. The file carries an inline comment to make the boundary clear; PR review must verify that no plugin re-enables raw HTML.
+- **All `<a>` elements get `target="_blank" rel="noreferrer noopener"`** via the custom `a` component, even for user-typed links — keeps the safety floor uniform regardless of source.
+- **`<script>` and `<style>` are stripped** from the schema's tag-name list defensively; the default schema already excludes them, but the explicit filter survives partial overrides during future maintenance.
+- **`src/package-boundaries.test.ts`** whitelists the five new externals (`react-markdown`, `remark-gfm`, `rehype-sanitize`, `shiki`, `@shikijs/rehype`) plus the `shiki/` import prefix used for theme / engine / grammar submodules.
+
+The unified tool block (`turn-tool.tsx`) renders structured tool payloads through the same pipeline by wrapping `JSON.stringify(payload, null, 2)` in a triple-backtick `json` fence and feeding it to `MarkdownView`. Tool calls collapse by default; tool results expand by default only when `isError === true`.
+
 ## Architecture quick reference
 
 | Concern | Lives in |

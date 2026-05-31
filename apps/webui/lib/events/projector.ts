@@ -31,6 +31,10 @@ import type {
 
 export type TurnPart =
   | { kind: "text"; text: string }
+  // Assistant `thinking` reasoning trail. Persistent only — the wire protocol
+  // does not stream incremental thinking deltas, so this part only appears
+  // after the final `assistant_message` lands. See S0041.
+  | { kind: "thinking"; text: string }
   | { kind: "tool_call"; toolCallId: string; toolName: string; args: unknown }
   | {
       kind: "tool_result";
@@ -147,6 +151,12 @@ function blocksToParts(blocks: ContentBlock[]): TurnPart[] {
   for (const block of blocks) {
     if (block.type === "text") {
       parts.push({ kind: "text", text: block.text });
+    } else if (block.type === "thinking") {
+      // Thinking blocks ride on the persistent assistant_message only — there
+      // is no transient `thinking_delta` on the wire today, so streaming
+      // text_delta paths never produce a thinking part. The UI folds these
+      // into a collapsed <details> by default (S0041).
+      parts.push({ kind: "thinking", text: block.text });
     } else if (block.type === "tool_call") {
       parts.push({
         kind: "tool_call",
@@ -163,7 +173,6 @@ function blocksToParts(blocks: ContentBlock[]): TurnPart[] {
         ...(block.isError ? { isError: true } : {}),
       });
     }
-    // `thinking` blocks ignored — debugging aid only.
   }
   return parts;
 }

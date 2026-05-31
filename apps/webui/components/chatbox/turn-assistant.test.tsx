@@ -1,5 +1,14 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+
+// Mock lazy Shiki to keep highlighter WASM out of jsdom.
+vi.mock("./shiki-code-block", () => ({
+  default: ({ lang, code }: { lang: string; code: string }) => (
+    <pre data-testid="shiki-mock" data-lang={lang}>
+      {code}
+    </pre>
+  ),
+}));
 
 import { TurnAssistant } from "./turn-assistant";
 import type { Turn } from "../../lib/events/projector";
@@ -53,5 +62,36 @@ describe("TurnAssistant", () => {
     };
     render(<TurnAssistant turn={turn} />);
     expect(screen.getByTestId("error-part").textContent).toContain("boom");
+  });
+
+  it("renders a thinking part as a default-collapsed <details>", () => {
+    const turn: Turn & { kind: "assistant" } = {
+      id: "a3",
+      kind: "assistant",
+      parts: [
+        { kind: "thinking", text: "let me think about it" },
+        { kind: "text", text: "Done." },
+      ],
+      streaming: false,
+    };
+    render(<TurnAssistant turn={turn} />);
+    const details = screen.getByTestId("thinking-part") as HTMLDetailsElement;
+    expect(details.tagName.toLowerCase()).toBe("details");
+    // <details> without `open` attribute starts collapsed.
+    expect(details.hasAttribute("open")).toBe(false);
+    const summary = details.querySelector("summary");
+    expect(summary?.textContent).toMatch(/thinking/i);
+  });
+
+  it("re-renders streaming text without unmounting on extending delta", () => {
+    const { rerender } = render(<TurnAssistant turn={streamingTurn("Hel")} />);
+    const articleA = screen.getByTestId("turn-assistant");
+    rerender(<TurnAssistant turn={streamingTurn("Hello world")} />);
+    const articleB = screen.getByTestId("turn-assistant");
+    // Same DOM node persists — React reconciles the markdown subtree in
+    // place rather than unmounting and rebuilding.
+    expect(articleB).toBe(articleA);
+    expect(articleB.textContent).toContain("Hello world");
+    expect(articleB.dataset.streaming).toBe("true");
   });
 });

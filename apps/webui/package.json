@@ -15,12 +15,18 @@
     "@fontsource/newsreader": "^5.1.0",
     "@scorel/client": "workspace:*",
     "@scorel/protocol": "workspace:*",
+    "@shikijs/rehype": "^4.1.0",
     "next": "^14.2.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "shiki": "^4.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",
+    "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/react": "^18.3.0",

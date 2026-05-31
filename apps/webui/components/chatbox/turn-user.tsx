@@ -1,6 +1,7 @@
 "use client";
 
 import type { Turn } from "../../lib/events/projector";
+import { MarkdownView } from "./markdown-view";
 
 export type TurnUserProps = {
   turn: Turn & { kind: "user" };
@@ -20,7 +21,7 @@ export function TurnUser({ turn }: TurnUserProps): JSX.Element {
       <header className="mb-1 font-display text-xs uppercase tracking-wide text-muted">
         You{turn.pending ? " · sending…" : ""}
       </header>
-      <pre className="whitespace-pre-wrap font-sans text-sm">{text}</pre>
+      <MarkdownView text={text} />
     </article>
   );
 }

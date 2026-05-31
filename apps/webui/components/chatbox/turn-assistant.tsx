@@ -1,6 +1,7 @@
 "use client";
 
 import type { Turn, TurnPart } from "../../lib/events/projector";
+import { MarkdownView } from "./markdown-view";
 import { TurnTool } from "./turn-tool";
 
 export type TurnAssistantProps = {
@@ -36,8 +37,19 @@ export function TurnAssistant({ turn }: TurnAssistantProps): JSX.Element {
 
 function PartView({ part }: { part: TurnPart }): JSX.Element | null {
   if (part.kind === "text") {
+    return <MarkdownView text={part.text} />;
+  }
+  if (part.kind === "thinking") {
     return (
-      <pre className="whitespace-pre-wrap font-sans text-sm">{part.text}</pre>
+      <details
+        data-testid="thinking-part"
+        className="my-2 rounded-md border border-subtle bg-surface p-2 text-muted"
+      >
+        <summary className="cursor-pointer select-none font-display text-sm">
+          Thinking…
+        </summary>
+        <MarkdownView text={part.text} />
+      </details>
     );
   }
   if (part.kind === "tool_call" || part.kind === "tool_result") {

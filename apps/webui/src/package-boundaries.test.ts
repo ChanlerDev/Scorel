@@ -20,9 +20,24 @@ const ALLOWED_EXTERNALS = new Set([
   // honest while still blocking arbitrary npm packages.
   "@fontsource/newsreader",
   "@fontsource/jetbrains-mono",
+  // S0041 markdown stack: react-markdown + GFM + sanitizer + Shiki. Each
+  // entry is justified one line apart so future audits can trace why.
+  "react-markdown", // markdown→React-tree renderer (no innerHTML)
+  "remark-gfm", // GFM tables, task lists, strikethrough, autolink
+  "rehype-sanitize", // hast schema-based XSS guard (rehype-raw NEVER enabled)
+  "shiki", // VS Code-grade syntax highlighting (lazy chunked)
+  "@shikijs/rehype", // rehype adapter for Shiki (kept for future direct use)
 ]);
 
-const ALLOWED_PREFIXES = ["next/", "@fontsource/newsreader/", "@fontsource/jetbrains-mono/"];
+const ALLOWED_PREFIXES = [
+  "next/",
+  "@fontsource/newsreader/",
+  "@fontsource/jetbrains-mono/",
+  // Shiki's themes / langs / engine submodules are imported lazily via
+  // `import("shiki/...")` in `shiki-code-block.tsx`. The prefix lets the
+  // boundary test see the dynamic chunks without enumerating every grammar.
+  "shiki/",
+];
 
 const FORBIDDEN_EXTERNALS = new Set([
   "@scorel/core",

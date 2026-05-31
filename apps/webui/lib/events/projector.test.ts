@@ -374,6 +374,42 @@ describe("projector", () => {
     expect(s.turns).toEqual([]);
   });
 
+  it("projects thinking + text + tool_call assistant blocks into ordered parts", () => {
+    reset();
+    const event: ScorelEvent = {
+      type: "assistant_message",
+      id: asEventId("evt_a_1"),
+      parentId: null,
+      seq: asSeq(seq()),
+      sessionId: SESSION_ID,
+      clientId: CLIENT_ID,
+      ts: 0,
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", text: "let me think" },
+          { type: "text", text: "running ls" },
+          { type: "tool_call", toolCallId: "tc_1", toolName: "ls", args: {} },
+        ] as ContentBlock[],
+      },
+    };
+    const s = projectEvent(emptyProjectorState(), event);
+    expect(s.turns).toHaveLength(1);
+    const turn = s.turns[0]!;
+    if (turn.kind !== "assistant") throw new Error("unreachable");
+    expect(turn.parts.map((p) => p.kind)).toEqual([
+      "thinking",
+      "text",
+      "tool_call",
+    ]);
+    expect(turn.parts[0]).toEqual({ kind: "thinking", text: "let me think" });
+    expect(turn.parts[1]).toEqual({ kind: "text", text: "running ls" });
+    const callPart = turn.parts[2];
+    if (callPart?.kind !== "tool_call") throw new Error("unreachable");
+    expect(callPart.toolCallId).toBe("tc_1");
+    expect(callPart.toolName).toBe("ls");
+  });
+
   it("does not lose appliedSeqs across calls", () => {
     reset();
     let s: ProjectorState = emptyProjectorState();
