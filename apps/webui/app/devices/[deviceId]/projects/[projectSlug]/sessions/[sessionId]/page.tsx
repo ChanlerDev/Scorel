@@ -264,13 +264,13 @@ function SessionHeader({
   if (!session) {
     return (
       <header className="space-y-1">
-        <p className="font-display text-xs uppercase tracking-wide text-muted">
+        <p className="text-xs uppercase tracking-wide text-muted">
           {device.name} ·{" "}
           <Link href={projectHref} className="underline hover:text-accent">
             {projectSlug}
           </Link>
         </p>
-        <h1 className="font-display text-lg text-text">{sessionId}</h1>
+        <h1 className="text-lg font-semibold text-text">{sessionId}</h1>
         <p className="text-xs italic text-faint">
           Loading session metadata…
         </p>
@@ -280,13 +280,13 @@ function SessionHeader({
   const title = session.title?.trim() || sessionId;
   return (
     <header className="space-y-1">
-      <p className="font-display text-xs uppercase tracking-wide text-muted">
+      <p className="text-xs uppercase tracking-wide text-muted">
         {device.name} ·{" "}
         <Link href={projectHref} className="underline hover:text-accent">
           {projectSlug}
         </Link>
       </p>
-      <h1 className="font-display text-lg text-text">{title}</h1>
+      <h1 className="text-lg font-semibold text-text">{title}</h1>
       <p className="text-xs text-faint">
         {session.model ?? "model unknown"}
         {session.updatedAt ? ` · updated ${formatTimestamp(session.updatedAt)}` : ""}

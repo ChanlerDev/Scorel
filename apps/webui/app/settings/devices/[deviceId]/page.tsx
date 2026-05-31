@@ -29,7 +29,7 @@ export default function SettingsDevicePage() {
   return (
     <div className="mx-auto w-full max-w-2xl space-y-6 p-6">
       <header className="flex items-center justify-between">
-        <h1 className="font-display text-lg text-text">Edit Device</h1>
+        <h1 className="text-lg font-semibold text-text">Edit Device</h1>
         <button
           type="button"
           onClick={() => {

@@ -41,11 +41,11 @@ export function Transcript({ turns }: TranscriptProps): JSX.Element {
   return (
     <AutoscrollRegion
       tickKey={transcriptTickKey(turns)}
-      className="flex h-full flex-col gap-3 overflow-y-auto bg-bg px-2 py-3"
+      className="flex h-full flex-col overflow-y-auto bg-bg"
     >
       <div
         data-testid="transcript"
-        className="mx-auto flex w-full max-w-3xl flex-col gap-3"
+        className="mx-auto flex w-full max-w-3xl flex-col gap-6 py-6"
       >
         {turns.map((turn) => (
           <TurnView key={turn.id} turn={turn} />
@@ -70,15 +70,23 @@ function TurnView({ turn }: { turn: Turn }): JSX.Element {
   return (
     <article
       data-testid="turn-tool-standalone"
-      className="rounded-md border border-subtle bg-surface-raised p-3 text-sm text-text"
+      className="px-4 text-md text-text"
     >
-      <header className="mb-1 font-display text-xs uppercase tracking-wide text-muted">
+      <header className="mb-1 text-xs uppercase tracking-wide text-muted">
         Tool
       </header>
       <div className="space-y-2">
         {turn.parts.map((part, idx) =>
           part.kind === "tool_call" || part.kind === "tool_result" ? (
-            <TurnTool key={idx} part={part as Extract<TurnPart, { kind: "tool_call" } | { kind: "tool_result" }>} />
+            <TurnTool
+              key={idx}
+              part={
+                part as Extract<
+                  TurnPart,
+                  { kind: "tool_call" } | { kind: "tool_result" }
+                >
+              }
+            />
           ) : null,
         )}
       </div>

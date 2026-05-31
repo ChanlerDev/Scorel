@@ -14,14 +14,11 @@ export function TurnAssistant({ turn }: TurnAssistantProps): JSX.Element {
     <article
       data-testid="turn-assistant"
       data-streaming={turn.streaming ? "true" : "false"}
-      className="rounded-md border border-subtle bg-surface p-3 text-sm text-text"
+      className="px-4 py-2 text-md text-text"
     >
-      <header className="mb-1 flex items-center gap-2 font-display text-xs uppercase tracking-wide text-muted">
-        <span>Assistant</span>
-        {turn.stopReason && turn.stopReason !== "end_turn" ? (
-          <span className="text-status-warn">{turn.stopReason}</span>
-        ) : null}
-      </header>
+      {turn.stopReason && turn.stopReason !== "end_turn" ? (
+        <p className="mb-1 text-xs text-status-warn">{turn.stopReason}</p>
+      ) : null}
       <div className="space-y-2">
         {turn.parts.map((part, idx) => (
           <PartView key={idx} part={part} />
@@ -44,9 +41,9 @@ function PartView({ part }: { part: TurnPart }): JSX.Element | null {
     return (
       <details
         data-testid="thinking-part"
-        className="my-2 rounded-md border border-subtle bg-surface p-2 text-muted"
+        className="my-2 rounded-md bg-surface p-2 text-muted"
       >
-        <summary className="cursor-pointer select-none font-display text-sm">
+        <summary className="cursor-pointer select-none text-sm">
           Thinking…
         </summary>
         <MarkdownView text={part.text} />
@@ -60,7 +57,7 @@ function PartView({ part }: { part: TurnPart }): JSX.Element | null {
     return (
       <p
         data-testid="error-part"
-        className="rounded border border-status-err bg-surface-raised px-2 py-1 text-xs text-status-err"
+        className="rounded-sm border border-status-err bg-bg px-2 py-1 text-xs text-status-err"
       >
         Error{part.code ? ` (${part.code})` : ""}: {part.message}
       </p>

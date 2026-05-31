@@ -40,7 +40,7 @@ export function DebugPanel({ summary }: DebugPanelProps): JSX.Element {
       className="fixed bottom-4 right-4 z-50 w-80 max-w-[90vw] rounded-md border border-subtle bg-surface-raised p-3 font-mono text-[11px] leading-snug text-text shadow-md"
     >
       <header className="mb-2 flex items-center justify-between">
-        <span className="font-display text-sm tracking-wider text-text">DEBUG</span>
+        <span className="text-sm font-semibold tracking-wider text-text">DEBUG</span>
         <button
           type="button"
           data-testid="debug-panel-copy"

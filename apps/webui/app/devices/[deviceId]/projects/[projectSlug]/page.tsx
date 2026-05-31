@@ -61,10 +61,10 @@ function ProjectView({
   return (
     <div className="p-6 space-y-4 text-sm text-text">
       <header className="space-y-1">
-        <p className="font-display text-xs uppercase tracking-wide text-muted">
+        <p className="text-xs uppercase tracking-wide text-muted">
           {device.name} · {device.link}
         </p>
-        <h1 className="font-display text-lg text-text">
+        <h1 className="text-lg font-semibold text-text">
           {project?.displayName ?? projectSlug}
         </h1>
         {project?.workDirHint ? (

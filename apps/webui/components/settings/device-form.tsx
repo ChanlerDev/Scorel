@@ -135,7 +135,7 @@ export function DeviceForm({ initial, onSubmit, onCancel, submitLabel }: DeviceF
         <button
           type="submit"
           disabled={!isValid}
-          className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-surface-raised hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
         >
           {submitLabel}
         </button>

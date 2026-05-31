@@ -14,11 +14,10 @@ const ALLOWED_EXTERNALS = new Set([
   "next",
   "@scorel/protocol",
   "@scorel/client",
-  // Self-hosted woff2 design-system fonts (S0040). The two packages drop
-  // pure CSS @font-face declarations into the bundle; no JavaScript or
-  // network calls. Allowing them as externals keeps the boundary test
-  // honest while still blocking arbitrary npm packages.
-  "@fontsource/newsreader",
+  // Self-hosted woff2 design-system fonts (S0040 → S0044). Newsreader was
+  // dropped in S0044 (sans-only palette); only the JetBrains Mono package
+  // remains for `--font-mono`. Allowing it as an external keeps the
+  // boundary test honest while still blocking arbitrary npm packages.
   "@fontsource/jetbrains-mono",
   // S0041 markdown stack: react-markdown + GFM + sanitizer + Shiki. Each
   // entry is justified one line apart so future audits can trace why.
@@ -31,7 +30,6 @@ const ALLOWED_EXTERNALS = new Set([
 
 const ALLOWED_PREFIXES = [
   "next/",
-  "@fontsource/newsreader/",
   "@fontsource/jetbrains-mono/",
   // Shiki's themes / langs / engine submodules are imported lazily via
   // `import("shiki/...")` in `shiki-code-block.tsx`. The prefix lets the
@@ -118,7 +116,7 @@ function isServerRouteFile(rel: string): boolean {
 }
 
 describe("apps/webui package boundaries", () => {
-  it("only imports from approved externals (react, next, @scorel/protocol|client, @fontsource/*)", async () => {
+  it("only imports from approved externals (react, next, @scorel/protocol|client, @fontsource/jetbrains-mono)", async () => {
     const files: string[] = [];
     for (const sub of SCAN_DIRS) {
       files.push(...(await walk(path.join(appRoot, sub))));
@@ -156,11 +154,35 @@ describe("apps/webui package boundaries", () => {
     expect(violations, `Forbidden imports:\n${violations.join("\n")}`).toEqual([]);
   });
 
-  it("explicitly whitelists @fontsource/newsreader and @fontsource/jetbrains-mono", () => {
-    expect(ALLOWED_EXTERNALS.has("@fontsource/newsreader")).toBe(true);
+  it("explicitly whitelists @fontsource/jetbrains-mono and excludes @fontsource/newsreader", () => {
     expect(ALLOWED_EXTERNALS.has("@fontsource/jetbrains-mono")).toBe(true);
-    expect(ALLOWED_PREFIXES).toContain("@fontsource/newsreader/");
     expect(ALLOWED_PREFIXES).toContain("@fontsource/jetbrains-mono/");
+    // Newsreader was dropped in S0044 (sans-only palette).
+    expect(ALLOWED_EXTERNALS.has("@fontsource/newsreader")).toBe(false);
+    expect(ALLOWED_PREFIXES).not.toContain("@fontsource/newsreader/");
+  });
+
+  it("forbids any source file from importing @fontsource/newsreader", async () => {
+    const files: string[] = [];
+    for (const sub of SCAN_DIRS) {
+      files.push(...(await walk(path.join(appRoot, sub))));
+    }
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const rel = path.relative(appRoot, file);
+      // Tests reference the package name as data; skip them so the rule does
+      // not self-trip on its own assertions.
+      if (isTestFile(rel)) continue;
+      const text = await fs.readFile(file, "utf8");
+      if (text.includes("@fontsource/newsreader")) {
+        offenders.push(rel);
+      }
+    }
+    expect(
+      offenders,
+      `@fontsource/newsreader was removed in S0044. No source file may import it.\nOffenders:\n${offenders.join("\n")}`,
+    ).toEqual([]);
   });
 
   it("localStorage references stay inside lib/store/", async () => {
@@ -194,8 +216,9 @@ describe("apps/webui package boundaries", () => {
     //
     // Allowed palette names map roughly to the colors we removed in S0040.
     // Any new use should go through `bg-surface`, `text-muted`,
-    // `border-subtle`, `text-accent`, `text-status-*`, etc.
-    const PALETTE_RE = /\b(zinc|emerald|red|amber|sky|stone|slate|gray)-\d{2,3}\b/g;
+    // `border-subtle`, `text-accent`, `text-status-*`, etc. `neutral-*` was
+    // added in S0044 since ChatGPT-ish palettes sometimes regress to it.
+    const PALETTE_RE = /\b(zinc|emerald|red|amber|sky|stone|slate|gray|neutral)-\d{2,3}\b/g;
 
     const files: string[] = [];
     for (const sub of ["app", "components"]) {
@@ -216,6 +239,36 @@ describe("apps/webui package boundaries", () => {
     expect(
       offenders,
       `Literal palette utilities are banned outside design tokens. Use semantic classes (\`bg-surface\`, \`text-muted\`, \`text-status-*\`).\nOffenders:\n${offenders.join("\n")}`
+    ).toEqual([]);
+  });
+
+  it("forbids the font-display className anywhere in source (S0044 sans-only)", async () => {
+    // The Newsreader serif slot was removed in S0044. The boundary test
+    // catches stragglers — any `font-display` className left behind would
+    // resolve to nothing in the new Tailwind config, but its presence still
+    // signals stale styling. Test files reference the literal as data and
+    // are excluded so the rule does not self-trip.
+    const FONT_DISPLAY_RE = /\bfont-display\b/g;
+
+    const files: string[] = [];
+    for (const sub of ["app", "components"]) {
+      files.push(...(await walk(path.join(appRoot, sub))));
+    }
+
+    const offenders: string[] = [];
+    for (const file of files) {
+      const rel = path.relative(appRoot, file);
+      if (isTestFile(rel)) continue;
+      const text = await fs.readFile(file, "utf8");
+      FONT_DISPLAY_RE.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = FONT_DISPLAY_RE.exec(text)) !== null) {
+        offenders.push(`${rel}: ${match[0]}`);
+      }
+    }
+    expect(
+      offenders,
+      `\`font-display\` was removed in S0044 (sans-only palette). Use plain text utilities instead.\nOffenders:\n${offenders.join("\n")}`,
     ).toEqual([]);
   });
 });

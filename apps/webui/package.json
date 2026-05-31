@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@fontsource/jetbrains-mono": "^5.1.0",
-    "@fontsource/newsreader": "^5.1.0",
     "@scorel/client": "workspace:*",
     "@scorel/protocol": "workspace:*",
     "@shikijs/rehype": "^4.1.0",

@@ -39,7 +39,7 @@ function DeviceConnected({ device }: { device: Device }) {
   return (
     <div className="p-6 space-y-4 text-sm text-text">
       <header>
-        <h1 className="font-display text-lg text-text">{device.name}</h1>
+        <h1 className="text-lg font-semibold text-text">{device.name}</h1>
         <p className="mt-1 text-xs text-faint">{device.link}</p>
       </header>
 
@@ -72,7 +72,7 @@ function ProjectListSection({
   return (
     <section className="space-y-2">
       <div className="flex items-center justify-between">
-        <h2 className="font-display text-sm uppercase tracking-wide text-muted">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-muted">
           Projects
         </h2>
         {device.projectsFetchedAt ? (

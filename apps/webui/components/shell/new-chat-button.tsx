@@ -29,7 +29,7 @@ const PAGE_BASE =
   "inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors";
 
 const ENABLED_THEME =
-  "border-accent bg-accent text-surface-raised hover:bg-accent-hover";
+  "border-accent bg-accent text-bg hover:bg-accent-hover";
 const DISABLED_THEME =
   "border-subtle bg-surface text-faint cursor-not-allowed";
 

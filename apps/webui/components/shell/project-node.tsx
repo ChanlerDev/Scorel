@@ -6,13 +6,16 @@ import type {
   DeviceProject,
   DeviceSessionSummary,
 } from "../../lib/domain/devices";
+import { useCollapsed } from "../../lib/store/use-collapsed";
+import { CollapseToggle } from "./collapse-toggle";
 import { SessionNode } from "./session-node";
 
 export type ProjectNodeProps = {
   deviceId: string;
   project: DeviceProject;
-  /** True when this project's slug matches the active route. Drives expansion
-   * of the session children. */
+  /** True when this project's slug matches the active route. Used to
+   * highlight the row; expansion is now driven solely by the persisted
+   * collapse map. */
   isActive?: boolean;
   /** When this project is the active one, identifies the active session
    * (used to highlight the row). */
@@ -45,36 +48,38 @@ export function ProjectNode({
   onSelect,
 }: ProjectNodeProps) {
   const sessions = sortSessions(project.sessions);
-  const expanded = Boolean(isActive) || sessions.length > 0;
+  const id = `project:${deviceId}/${project.projectSlug}`;
+  const [collapsed] = useCollapsed(id);
   const href = `/devices/${encodeURIComponent(deviceId)}/projects/${encodeURIComponent(
     project.projectSlug,
   )}`;
 
   return (
     <li>
-      <Link
-        href={href}
-        onClick={() => {
-          if (!offline) onSelect?.(deviceId, project.projectSlug);
-        }}
-        aria-current={isActive ? "page" : undefined}
-        className={`flex items-center justify-between gap-2 rounded-md border-l-2 px-2 py-1.5 hover:bg-accent-soft ${
-          isActive
-            ? "border-accent bg-accent-soft text-accent"
-            : "border-transparent text-text"
-        }`}
-      >
-        <span className="truncate text-sm">
-          {project.displayName ?? project.projectSlug}
-        </span>
-        {project.sessionCount !== undefined ? (
-          <span className="shrink-0 text-xs text-faint">
-            {project.sessionCount}
+      <div className="flex items-center gap-1">
+        <CollapseToggle id={id} />
+        <Link
+          href={href}
+          onClick={() => {
+            if (!offline) onSelect?.(deviceId, project.projectSlug);
+          }}
+          aria-current={isActive ? "page" : undefined}
+          className={`flex flex-1 items-center justify-between gap-2 rounded-sm px-2 py-1.5 hover:bg-surface-hover ${
+            isActive ? "bg-surface-hover font-medium text-text" : "text-text"
+          }`}
+        >
+          <span className="truncate text-sm">
+            {project.displayName ?? project.projectSlug}
           </span>
-        ) : null}
-      </Link>
-      {expanded && sessions.length > 0 ? (
-        <ul className="ml-4 mt-1 space-y-0.5 border-l border-subtle pl-2">
+          {project.sessionCount !== undefined ? (
+            <span className="shrink-0 text-xs text-faint">
+              {project.sessionCount}
+            </span>
+          ) : null}
+        </Link>
+      </div>
+      {!collapsed && sessions.length > 0 ? (
+        <ul className="ml-5 mt-1 space-y-0.5">
           {sessions.map((session) => (
             <SessionNode
               key={session.sessionId}

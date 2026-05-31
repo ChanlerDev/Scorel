@@ -9,22 +9,22 @@ export default function HomePage() {
   if (devices.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
-        <p className="text-sm text-muted">
-          Add a device in Settings to get started.
-        </p>
+        <h1 className="greeting">欢迎使用 Scorel</h1>
+        <p className="text-md text-muted">先添加一个设备开始</p>
         <Link
           href="/settings"
-          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-surface-raised hover:bg-accent-hover"
+          className="rounded-pill bg-accent px-5 py-2 text-bg hover:bg-accent-hover"
         >
-          Open Settings
+          打开 Settings
         </Link>
       </div>
     );
   }
 
   return (
-    <div className="p-6 text-sm text-muted">
-      Select a device from the sidebar to get started.
+    <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center">
+      <h1 className="greeting">今天聊点什么?</h1>
+      <p className="text-md text-muted">从左侧选择一个设备和会话开始</p>
     </div>
   );
 }

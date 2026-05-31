@@ -117,15 +117,22 @@ These are intentional cuts in M5. They are tracked in `docs/ROADMAP.md` for futu
 
 ---
 
-## Design tokens and fonts (S0040)
+## Design tokens and fonts (S0040 → S0044)
 
-The WebUI uses a Codex-style visual pass:
+The WebUI uses a Chatbox-style three-segment shell with ChatGPT-philosophy
+visuals (S0044). M5.5's warm-paper + ink-blue + Newsreader serif palette
+(S0040–S0042) was retired in favour of pure white + near-black + sans-only:
 
-- **Single light theme** — warm paper background, ink-blue accent, serif display + system sans body + JetBrains Mono code. Dark mode is intentionally backlog.
-- **CSS variables in `app/globals.css` `:root`** — every color, font family, font size + line-height pair, spacing step, border radius, and shadow lives behind a `--color-*` / `--font-*` / `--text-*` / `--space-*` / `--radius-*` / `--shadow-*` variable.
-- **Tailwind `theme.extend` in `tailwind.config.ts`** — maps each variable to a semantic utility (`bg-surface`, `text-muted`, `border-subtle`, `text-accent`, `text-status-ok|warn|err|idle`, `font-display`, `text-md`, `space-y-3`, `rounded-md`, `shadow-md`, `shadow-focus`, …). Components consume these utilities only; literal `zinc-*` / `emerald-*` / `red-*` / `amber-*` are banned and enforced by `src/package-boundaries.test.ts`.
-- **Self-hosted fonts** — `@fontsource/newsreader` (display serif) and `@fontsource/jetbrains-mono` (mono) are bundled woff2 packages. They are imported once at the top of `app/layout.tsx`, so first paint never waits on a Google Fonts network request. Body sans uses the platform `system-ui` stack and never loads a font.
-- **Focus ring globals** — `*:focus-visible` in `globals.css` paints `box-shadow: var(--shadow-focus)`. Components stay utility-only (no `.btn-*` classes) so styling for buttons / links / inputs can evolve without a parallel CSS layer.
+- **Single light theme** — `#FFFFFF` page bg, `#F7F7F8` sidebar surface, `#0D0D0D` text + accent (single black for active session and the circular send button), no shadows. Dark mode is intentionally backlog.
+- **CSS variables in `app/globals.css` `:root`** — every color, font family, font size + line-height pair, spacing step, and border radius lives behind a `--color-*` / `--font-*` / `--text-*` / `--space-*` / `--radius-*` variable. Box-shadow tokens still exist but resolve to `none` so the "no shadow anywhere" rule holds while existing utilities keep compiling.
+- **Tailwind `theme.extend` in `tailwind.config.ts`** — maps each variable to a semantic utility (`bg-surface`, `bg-surface-hover`, `text-muted`, `border-subtle`, `text-accent`, `text-status-ok|warn|err|idle`, `text-md`, `space-y-3`, `rounded-pill`, `rounded-full`, …). Components consume these utilities only; literal `zinc-*` / `emerald-*` / `red-*` / `amber-*` / `neutral-*` are banned and enforced by `src/package-boundaries.test.ts`.
+- **Self-hosted mono font** — `@fontsource/jetbrains-mono` is bundled as woff2 and imported once at the top of `app/layout.tsx`, so first paint never waits on a Google Fonts network request. Body sans uses the platform `system-ui` stack and never loads a font. The Newsreader display serif was removed in S0044 — there is no serif anywhere.
+- **Focus ring globals** — `*:focus-visible` in `globals.css` paints `outline: 2px solid var(--color-text)` with a 2px offset; box-shadow rings are not used.
+- **Codex-semantic placeholders** — unimplemented buttons (sidebar Search/Plugins/Automation, theme toggle, composer attach/voice/model picker) render with the native `disabled` attribute plus the `.btn-disabled` class (`opacity 0.4 + cursor-not-allowed + pointer-events: none`), no tooltip. Visible-but-inert is the product honesty signal.
+
+Sidebar layout: top fixed actions (`+ 新对话` active + 3 grayed) → middle device/project tree with per-row ▸/▾ collapse persisted to `localStorage["scorel.ui.collapsed"]` → bottom fixed `Settings` link + grayed theme toggle. The main area has no topbar; populated chat shows transcript only, empty home shows a centered greeting.
+
+Composer: a 24px pill with `Message Scorel…` placeholder, three grayed placeholders on the action row (`⊕`, `model ▾`, `🎤`), and a circular black send button (`↑`) that swaps to a red cancel (`■`) while a turn is in flight. The textarea auto-resizes up to ~5 lines.
 
 When dark mode lands later it will swap variable values inside a `prefers-color-scheme: dark` block; component classes do not change.
 

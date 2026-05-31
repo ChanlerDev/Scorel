@@ -2,10 +2,11 @@ import type { Config } from "tailwindcss";
 import typography from "@tailwindcss/typography";
 
 /**
- * Codex-style design tokens (S0040). Every utility maps to a CSS variable
- * defined in `app/globals.css`, so swapping the palette is a one-file
- * change. Components write semantic classes (`bg-surface`, `text-muted`,
- * `border-subtle`, `text-accent`) instead of literal `zinc-*` / `red-*`.
+ * ChatGPT-philosophy design tokens (S0044). Every utility maps to a CSS
+ * variable defined in `app/globals.css`, so swapping the palette is a
+ * one-file change. Components write semantic classes (`bg-surface`,
+ * `text-muted`, `border-subtle`, `text-accent`) instead of literal
+ * `zinc-*` / `red-*`.
  *
  * Tailwind 4 resolves `var(--…)` natively in the color pipeline — no
  * `rgb(var(--x) / <alpha-value>)` trick required.
@@ -18,6 +19,7 @@ const config: Config = {
         bg: "var(--color-bg)",
         surface: "var(--color-surface)",
         "surface-raised": "var(--color-surface-raised)",
+        "surface-hover": "var(--color-surface-hover)",
         border: {
           DEFAULT: "var(--color-border)",
           strong: "var(--color-border-strong)",
@@ -45,7 +47,6 @@ const config: Config = {
         accent: "var(--color-accent)",
       },
       fontFamily: {
-        display: "var(--font-display)",
         sans: "var(--font-body)",
         mono: "var(--font-mono)",
       },
@@ -70,6 +71,8 @@ const config: Config = {
         sm: "var(--radius-sm)",
         md: "var(--radius-md)",
         lg: "var(--radius-lg)",
+        pill: "var(--radius-pill)",
+        full: "var(--radius-full)",
       },
       boxShadow: {
         sm: "var(--shadow-sm)",

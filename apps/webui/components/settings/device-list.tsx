@@ -86,7 +86,7 @@ export function DeviceList() {
         <button
           type="button"
           onClick={handleAdoptLocalDaemon}
-          className="mt-3 rounded-md bg-accent px-3 py-1 text-xs text-surface-raised hover:bg-accent-hover"
+          className="mt-3 rounded-md bg-accent px-3 py-1 text-xs text-bg hover:bg-accent-hover"
         >
           Use this device
         </button>

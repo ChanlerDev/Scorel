@@ -6,6 +6,37 @@ import { Composer } from "./composer";
 afterEach(() => cleanup());
 
 describe("Composer", () => {
+  it("renders the pill with Message Scorel… placeholder + 4 buttons", () => {
+    render(<Composer onSend={() => {}} />);
+    const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    expect(input.placeholder).toBe("Message Scorel…");
+    // Three placeholders + send.
+    const attach = screen.getByTestId(
+      "composer-attach",
+    ) as HTMLButtonElement;
+    const model = screen.getByTestId("composer-model") as HTMLButtonElement;
+    const voice = screen.getByTestId("composer-voice") as HTMLButtonElement;
+    const send = screen.getByTestId("composer-send") as HTMLButtonElement;
+    for (const btn of [attach, model, voice]) {
+      expect(btn.disabled).toBe(true);
+      expect(btn.className).toContain("btn-disabled");
+    }
+    expect(send.disabled).toBe(true);
+  });
+
+  it("renders the model label inside the picker (defaults to Default)", () => {
+    render(<Composer onSend={() => {}} />);
+    const model = screen.getByTestId("composer-model");
+    expect(model.textContent).toContain("Default");
+  });
+
+  it("renders a custom model label when provided", () => {
+    render(<Composer onSend={() => {}} modelLabel="GPT-4" />);
+    expect(screen.getByTestId("composer-model").textContent).toContain(
+      "GPT-4",
+    );
+  });
+
   it("disables Send while empty", () => {
     render(<Composer onSend={() => {}} />);
     const button = screen.getByTestId("composer-send") as HTMLButtonElement;
@@ -60,14 +91,14 @@ describe("Composer", () => {
     render(<Composer onSend={() => {}} onCancel={() => {}} inFlight />);
     expect(screen.queryByTestId("composer-send")).toBeNull();
     const cancel = screen.getByTestId("composer-cancel") as HTMLButtonElement;
-    expect(cancel.textContent).toBe("Cancel");
     expect(cancel.disabled).toBe(false);
+    expect(cancel.getAttribute("aria-label")).toBe("Cancel");
   });
 
-  it("shows Cancelling… and disables Cancel button while cancelling", () => {
+  it("flags Cancel as cancelling and disables it", () => {
     render(<Composer onSend={() => {}} onCancel={() => {}} inFlight cancelling />);
     const cancel = screen.getByTestId("composer-cancel") as HTMLButtonElement;
-    expect(cancel.textContent).toBe("Cancelling…");
+    expect(cancel.getAttribute("aria-label")).toBe("Cancelling");
     expect(cancel.disabled).toBe(true);
   });
 
@@ -94,7 +125,6 @@ describe("Composer", () => {
 
     rerender(<Composer onSend={() => {}} onCancel={onCancel} inFlight cancelling />);
     fireEvent.keyDown(input, { key: "Escape" });
-    // Already cancelling — Esc should be a no-op.
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -109,7 +139,6 @@ describe("Composer", () => {
     );
     const banner = screen.getByTestId("composer-error");
     expect(banner.textContent).toBe("cancel_failed: boom");
-    // Send should still toggle on input.
     const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "retry" } });
     const send = screen.getByTestId("composer-send") as HTMLButtonElement;

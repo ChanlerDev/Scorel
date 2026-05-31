@@ -323,6 +323,82 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
+## M5.7: WebUI Chatbox Rebuild
+
+**Goal**: 推翻 M5.5 暖纸 + 墨蓝 + Newsreader serif 视觉,改为 ChatGPT 哲学(纯白 + 黑字 + sans + 极简)+ Chatbox 三段式 sidebar 结构。Project 节点独立折叠,Composer pill 形态,未实装功能用 Codex 风灰按钮占位。设计哲学固化到 `docs/design.md`。
+
+**Done when**:
+
+- `docs/design.md` 锁定视觉/交互真相源,后续 spec 引用本文件。
+- `:root` tokens 重写为 ChatGPT 色板(`#FFFFFF` / `#0D0D0D` / `#F7F7F8` / 黑 accent),`--font-display` 删除,全 sans。
+- Sidebar 三段式:顶部 4 行(`+ 新对话` active + 搜索/插件/自动化灰)→ 中段 device/project 树(▸/▾ 折叠 + localStorage 持久化)→ 底部 Settings + 主题切换灰。
+- Topbar 删除。
+- Composer 改 pill:`Message Scorel…` placeholder + 左 `⊕` 灰 + 右 `model ▾` 灰 + 右 `🎤` 灰 + 圆形黑 send / 红 cancel。
+- User 气泡靠右 `max-w-[70%] rounded-lg bg-accent-soft`;assistant 无气泡贴 bg。
+- `@fontsource/newsreader` 移除,boundary test 同步。
+- 自动测试 + 真实 LLM e2e 通过。
+
+**Product Intent**:
+
+设计哲学见 [`docs/design.md`](design.md)。讨论与决策见 [`self/discussions/2026-05-31-webui-chatbox-rebuild-brainstorm.md`](../self/discussions/2026-05-31-webui-chatbox-rebuild-brainstorm.md) §5。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M5.7.1 | [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md) | 整 webui 一刀重构:tokens + 三段式 sidebar + 折叠 + composer pill + 灰按钮 + 气泡形态 | Planned |
+
+**Not in M5.7**:
+
+- 暗色模式实装(token 占位即可,后置 spec)。
+- Cmd+K / 命令面板 / 全局快捷键。
+- Sidebar 整体折叠到 56px(后置)。
+- Composer `+` / `🎤` / model picker 真实功能(本轮仅灰按钮占位)。
+- Tool block 特化(Bash/Edit/diff viewer);保持统一 JSON fence。
+- Composer 历史回溯(↑ 键)。
+
+**Status**: Planned
+
+---
+
+## M5.7: WebUI Chatbox Rebuild
+
+**Goal**: 推翻 M5.5 暖纸 + 墨蓝 + Newsreader serif 视觉,改为 ChatGPT 哲学(纯白 + 黑字 + sans + 极简)+ Chatbox 三段式 sidebar 结构。Project 节点独立折叠,Composer pill 形态,未实装功能用 Codex 风灰按钮占位。设计哲学固化到 `docs/design.md`。
+
+**Done when**:
+
+- `docs/design.md` 锁定视觉/交互真相源,后续 spec 引用本文件。
+- `:root` tokens 重写为 ChatGPT 色板(`#FFFFFF` / `#0D0D0D` / `#F7F7F8` / 黑 accent),`--font-display` 删除,全 sans。
+- Sidebar 三段式:顶部 4 行(`+ 新对话` active + 搜索/插件/自动化灰)→ 中段 device/project 树(▸/▾ 折叠 + localStorage 持久化)→ 底部 Settings + 主题切换灰。
+- Topbar 删除。
+- Composer 改 pill:`Message Scorel…` placeholder + 左 `⊕` 灰 + 右 `model ▾` 灰 + 右 `🎤` 灰 + 圆形黑 send / 红 cancel。
+- User 气泡靠右 `max-w-[70%] rounded-lg bg-accent-soft`;assistant 无气泡贴 bg。
+- `@fontsource/newsreader` 移除,boundary test 同步。
+- 自动测试 + 真实 LLM e2e 通过。
+
+**Product Intent**:
+
+设计哲学见 [`docs/design.md`](design.md)。讨论与决策见 [`self/discussions/2026-05-31-webui-chatbox-rebuild-brainstorm.md`](../self/discussions/2026-05-31-webui-chatbox-rebuild-brainstorm.md) §5。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M5.7.1 | [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md) | 整 webui 一刀重构:tokens + 三段式 sidebar + 折叠 + composer pill + 灰按钮 + 气泡形态 | Planned |
+
+**Not in M5.7**:
+
+- 暗色模式实装(token 占位即可,后置 spec)。
+- Cmd+K / 命令面板 / 全局快捷键。
+- Sidebar 整体折叠到 56px(后置)。
+- Composer `+` / `🎤` / model picker 真实功能(本轮仅灰按钮占位)。
+- Tool block 特化(Bash/Edit/diff viewer);保持统一 JSON fence。
+- Composer 历史回溯(↑ 键)。
+
+**Status**: Planned
+
+---
+
 ## M6: Ecosystem
 
 **Goal**: Scorel 可以通过 MCP、extensions、channels 接入外部工作流。
@@ -384,6 +460,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0041`](spec/ship/S0041-webui-markdown-and-tool-block.md) | WebUI markdown 渲染、代码高亮与统一 tool 块 | Done |
 | [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | WebUI streaming UX 与 autoscroll | Done |
 | [`S0043`](spec/ship/S0043-startup-ergonomics.md) | 单 `scorel` 入口、token 持久化、WebUI 自动发现、`scorel up` 一键启动 | Done |
+| [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md) | WebUI 一刀重构为 Chatbox 风 + ChatGPT 哲学(推翻 M5.5) | Planned |
 
 ---
 

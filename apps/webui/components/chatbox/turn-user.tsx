@@ -13,15 +13,17 @@ export function TurnUser({ turn }: TurnUserProps): JSX.Element {
     .map((p) => p.text)
     .join("");
   return (
-    <article
-      data-testid="turn-user"
-      data-pending={turn.pending ? "true" : undefined}
-      className="rounded-md border border-subtle bg-accent-soft p-3 text-sm text-text"
-    >
-      <header className="mb-1 font-display text-xs uppercase tracking-wide text-muted">
-        You{turn.pending ? " · sending…" : ""}
-      </header>
-      <MarkdownView text={text} />
-    </article>
+    <div className="flex justify-end px-4">
+      <article
+        data-testid="turn-user"
+        data-pending={turn.pending ? "true" : undefined}
+        className="max-w-[70%] rounded-lg bg-accent-soft px-4 py-3 text-md text-text"
+      >
+        <MarkdownView text={text} />
+        {turn.pending ? (
+          <span className="mt-1 block text-xs text-faint">sending…</span>
+        ) : null}
+      </article>
+    </div>
   );
 }
