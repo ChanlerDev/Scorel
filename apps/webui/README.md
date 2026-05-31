@@ -46,6 +46,24 @@ Vitest + jsdom. Boundary tests forbid `node:*`, `fs`, `@scorel/core`, and `@scor
 
 The WebUI never spawns a daemon; you start one separately and add it as a Device.
 
+### Auto-detect (preferred, S0043)
+
+When the WebUI runs on the same host as the daemon, the Settings page detects `~/.scorel/daemon.json` automatically:
+
+1. `pnpm dev` from the repo root brings up both `scorel daemon serve` and `scorel webui` (`scorel up`).
+2. Open `http://127.0.0.1:3000/settings`.
+3. A **Detected local daemon** banner appears above the device list with the daemon's `wsUrl` and `cwd`. Click **Use this device** to add it to the BrowserStore and route to its device page.
+
+The detection request hits `GET /api/local-daemon`, a Next App Router server route. Important invariants:
+
+- The route reads `~/.scorel/daemon.json` server-side; the file contents never appear in the client JS bundle.
+- It only succeeds when the WebUI server runs on the same machine as the daemon. Hosting the WebUI on a remote machine returns `404 { ok: false }` because the file does not exist there. Acceptable v1.
+- The token returned is the same persistent token CLI / `scorel attach` use; treat the same-origin browser tab as already-trusted with local filesystem access.
+
+### Manual (remote daemons)
+
+For a daemon that lives on another host (e.g. a VPS), add the device by hand:
+
 ### 1. Start a daemon
 
 In the repo (or anywhere with a Scorel install), pick a working directory and start a remote daemon:

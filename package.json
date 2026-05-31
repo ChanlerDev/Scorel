@@ -9,7 +9,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "scorel": "node --import tsx apps/cli/src/index.ts",
-    "scorel-daemon": "node --import tsx apps/daemon/src/index.ts"
+    "dev": "node --import tsx apps/cli/src/index.ts up"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

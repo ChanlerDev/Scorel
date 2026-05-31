@@ -8,14 +8,12 @@ import type { Readable, Writable } from "node:stream";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { DaemonClient, WsTransport, clientPackageName } from "@scorel/client";
-import { NodeSocketTransport } from "@scorel/client/node";
 import {
   EmbeddedDaemon,
   createEmbeddedTransport,
   createRealRuntime,
   daemonPackageName,
   loadScorelConfig,
-  readLocalDaemonState,
   scorelSessionsDir,
   type ScorelConfig,
 } from "@scorel/daemon";
@@ -30,6 +28,10 @@ import {
   type PersistentEvent,
   type ScorelEvent,
 } from "@scorel/protocol";
+
+import { runCliDaemon } from "./daemon-cli.js";
+import { runCliUp } from "./up-cli.js";
+import { runCliWebUi } from "./webui-cli.js";
 
 export const cliAppName = "@scorel/app-cli" as const;
 export const cliClientDependency = clientPackageName;
@@ -74,7 +76,22 @@ export const runCli = async (
     return runChat({ ...chatOptions, config: runOptions.config, sessionsDir, stateDir: stateDirFromSessionsDir(sessionsDir) }, io);
   }
   if (command === "daemon") {
-    return runCliDaemon(rest, { stateDir: stateDirFromSessionsDir(runOptions.sessionsDir), output: io.output, error: io.error });
+    return runCliDaemon(rest, {
+      stateDir: stateDirFromSessionsDir(runOptions.sessionsDir),
+      sessionsDir: runOptions.sessionsDir,
+      output: io.output,
+      error: io.error,
+    });
+  }
+  if (command === "webui") {
+    return runCliWebUi(rest, { output: io.output, error: io.error });
+  }
+  if (command === "up") {
+    return runCliUp(rest, {
+      stateDir: stateDirFromSessionsDir(runOptions.sessionsDir),
+      output: io.output,
+      error: io.error,
+    });
   }
   if (command === "attach") {
     try {
@@ -138,38 +155,26 @@ const runLogs = async (
 
 type AttachOptions = {
   sessionId: ReturnType<typeof asSessionId>;
-  remoteUrl?: string;
-  token?: string;
+  remoteUrl: string;
+  token: string;
 };
 
 const runAttach = async (
   options: AttachOptions,
   io: { stateDir: string; cwd: string; input: NodeJS.ReadableStream; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
 ): Promise<number> => {
-  const state = await readLocalDaemonState({ stateDir: io.stateDir });
-  if (!state && !options.remoteUrl) {
-    io.error.write("scorel attach error: local daemon is not running\n");
-    return 1;
-  }
-  if (options.remoteUrl && !options.token) {
-    io.error.write("scorel attach error: --token is required with --remote\n");
-    return 1;
-  }
-  const transport = options.remoteUrl
-    ? new WsTransport({ url: options.remoteUrl, token: options.token ?? "" })
-    : new NodeSocketTransport({ path: state!.socketPath, token: state!.token });
+  const transport = new WsTransport({ url: options.remoteUrl, token: options.token });
   const client = new DaemonClient(transport, {
     clientId: asClientId("client_cli_attach"),
   });
   const diagnostics = new AttachDiagnostics(io.stateDir, options.sessionId);
   try {
     diagnostics.record("attach_connect_started", {
-      remote: Boolean(options.remoteUrl),
       remoteUrl: options.remoteUrl,
     });
     await client.connect(options.sessionId);
     const renderer = new AttachEventRenderer(io.output, io.error);
-    const cacheScope = attachCacheScope(options, state?.socketPath, client.connectionIdentity);
+    const cacheScope = attachCacheScope(options, client.connectionIdentity);
     diagnostics.setScope(cacheScope);
     diagnostics.record("attach_connect_succeeded", {
       scopeKind: cacheScope.kind,
@@ -282,7 +287,7 @@ const runAttach = async (
     client.disconnect();
     return 0;
   } catch (cause) {
-    diagnostics.ensureScope(attachCacheScope(options, state?.socketPath));
+    diagnostics.ensureScope(attachCacheScope(options));
     diagnostics.record("attach_failed", { message: cause instanceof Error ? cause.message : String(cause) });
     await diagnostics.flush();
     io.error.write(`scorel attach error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
@@ -291,7 +296,7 @@ const runAttach = async (
 };
 
 type AttachCacheScope = {
-  kind: "local" | "remote";
+  kind: "remote";
   locator: string;
   displayName?: string;
 };
@@ -317,20 +322,16 @@ type AttachCacheSnapshot = {
 
 const attachCacheScope = (
   options: AttachOptions,
-  localSocketPath: string | undefined,
   identity?: { deviceId?: DeviceId; deviceDisplayName?: string; projectSlug?: string },
 ): AttachCacheScope => {
-  if (options.remoteUrl) {
-    if (identity?.deviceId && identity.projectSlug) {
-      return {
-        kind: "remote",
-        locator: `device:${identity.deviceId}/project:${identity.projectSlug}`,
-        displayName: identity.deviceDisplayName,
-      };
-    }
-    return { kind: "remote", locator: `endpoint:${options.remoteUrl}` };
+  if (identity?.deviceId && identity.projectSlug) {
+    return {
+      kind: "remote",
+      locator: `device:${identity.deviceId}/project:${identity.projectSlug}`,
+      displayName: identity.deviceDisplayName,
+    };
   }
-  return { kind: "local", locator: localSocketPath ?? "local-daemon" };
+  return { kind: "remote", locator: `endpoint:${options.remoteUrl}` };
 };
 
 const attachCacheFilePath = (stateDir: string, scope: AttachCacheScope, sessionId: ReturnType<typeof asSessionId>): string => {
@@ -498,7 +499,7 @@ const projectIndexEntryForAttach = async (
 ): Promise<ProjectIndexEntry> => {
   const now = Date.now();
   const sessionId = String(options.sessionId);
-  if (scope.kind === "remote" && identity?.deviceId && identity.projectSlug) {
+  if (identity?.deviceId && identity.projectSlug) {
     return {
       projectKey: `remote:${identity.deviceId}:${identity.projectSlug}`,
       kind: "remote",
@@ -809,6 +810,12 @@ const parseAttachOptions = (argv: string[]): AttachOptions => {
     }
     throw new Error(`Unknown attach option: ${arg}`);
   }
+  if (!remoteUrl) {
+    throw new Error("--remote is required (e.g. --remote ws://127.0.0.1:7777)");
+  }
+  if (!token) {
+    throw new Error("--token is required with --remote");
+  }
   return { sessionId, remoteUrl, token };
 };
 
@@ -847,24 +854,6 @@ const parseLogsOptions = (argv: string[]): LogsOptions => {
     throw new Error("--session requires a value");
   }
   return { sessionId, tail, attach, remoteUrl };
-};
-
-const runCliDaemon = async (
-  argv: string[],
-  options: { stateDir: string; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
-): Promise<number> => {
-  const [command] = argv;
-  if (command === "status") {
-    const state = await readLocalDaemonState({ stateDir: options.stateDir });
-    if (!state) {
-      options.error.write("scorel daemon stopped\n");
-      return 1;
-    }
-    options.output.write(`scorel daemon running pid=${state.pid} socket=${state.socketPath}\n`);
-    return 0;
-  }
-  options.error.write("Usage: scorel daemon status\n");
-  return command === "--help" || command === "-h" ? 0 : 1;
 };
 
 export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> => {
@@ -1022,7 +1011,19 @@ const promptIfInteractive = (output: NodeJS.WritableStream): void => {
 };
 
 const writeUsage = (output: NodeJS.WritableStream): void => {
-  output.write("Usage: scorel chat [--session <id>] [--cwd <dir>]\nUsage: scorel attach [--session <id>] [--remote <ws-url> --token <token>]\nUsage: scorel logs [--attach] --session <id> [--remote <ws-url>] [--tail <n>]\n");
+  output.write(
+    [
+      "Usage: scorel chat [--session <id>] [--cwd <dir>]",
+      "       scorel attach --session <id> --remote <ws-url> --token <token>",
+      "       scorel daemon serve [--host <h>] [--port <p>] [--token <t>] [--cwd <d>]",
+      "       scorel daemon status [--show-token]",
+      "       scorel daemon stop",
+      "       scorel daemon reset",
+      "       scorel webui [--port <p>] [--host <h>]",
+      "       scorel up [--daemon-port <p>] [--webui-port <p>] [--cwd <d>]",
+      "       scorel logs [--attach] --session <id> [--remote <ws-url>] [--tail <n>]",
+    ].join("\n") + "\n",
+  );
 };
 
 const writeEventError = (output: NodeJS.WritableStream, event: ErrorEvent): void => {

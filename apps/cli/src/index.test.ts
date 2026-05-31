@@ -1,6 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { mkdtemp, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
-import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
@@ -9,7 +8,6 @@ import { describe, expect, it } from "vitest";
 
 import { cliAppName, cliClientDependency, cliDaemonDependency, createSigintHandler, runCli } from "@scorel/app-cli";
 import {
-  createLocalDaemonState,
   startRemoteDaemonWebSocketServer,
   type RemoteDaemonWebSocketConnection,
   type ScorelConfig,
@@ -70,20 +68,20 @@ describe("@scorel/app-cli", () => {
     expect(output.toString()).toContain("[cancelled]");
   });
 
-  it("routes daemon status to local daemon discovery", async () => {
+  it("daemon status reports not configured when there is no state file", async () => {
     const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-state-"));
     const result = await runCliWithInput(["daemon", "status"], "", testConfig("http://127.0.0.1:1"), sessionsDir);
 
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("scorel daemon stopped");
+    expect(result.stderr).toContain("scorel daemon not configured");
   });
 
-  it("reports a clear error when attach cannot find a local daemon", async () => {
+  it("attach requires a remote URL since the local-socket path was retired", async () => {
     const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-attach-"));
     const result = await runCliWithInput(["attach", "--session", "ses_missing"], "", testConfig("http://127.0.0.1:1"), sessionsDir);
 
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain("scorel attach error: local daemon is not running");
+    expect(result.stderr).toContain("--remote is required");
   });
 
   it("prints a local session diagnostics log with tail support", async () => {
@@ -140,50 +138,6 @@ describe("@scorel/app-cli", () => {
       });
     } finally {
       await server.close();
-    }
-  });
-
-  it("attaches to a local daemon socket from daemon state", async () => {
-    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-attach-"));
-    const socketPath = join(stateDir, "daemon.sock");
-    const server = createNetServer((socket) => {
-      socket.setEncoding("utf8");
-      socket.on("data", (chunk) => {
-        for (const line of chunk.toString().split("\n").filter(Boolean)) {
-          const message = JSON.parse(line) as { type: string; clientId?: string; requestId?: string };
-          if (message.type === "connect") {
-            socket.write(`${JSON.stringify({ type: "connected", clientId: message.clientId, sessionId: "ses_attach", currentSeq: 0 })}\n`);
-          }
-          if (message.type === "load_session") {
-            socket.write(`${JSON.stringify({ type: "error", requestId: message.requestId, ok: false, code: "session_not_found", message: "missing session" })}\n`);
-          }
-          if (message.type === "create_session") {
-            socket.write(`${JSON.stringify({ type: "response", requestType: "create_session", requestId: message.requestId, ok: true, data: { sessionId: "ses_attach" } })}\n`);
-          }
-          if (message.type === "resync_events") {
-            socket.write(`${JSON.stringify({ type: "response", requestType: "resync_events", requestId: message.requestId, ok: true, data: { events: [], throughSeq: 0, mode: "stream_resume" } })}\n`);
-          }
-        }
-      });
-    });
-    await new Promise<void>((resolve) => server.listen(socketPath, resolve));
-    await createLocalDaemonState({
-      stateDir,
-      pid: 123,
-      socketPath,
-      token: "local-secret",
-      startedAt: 1,
-    });
-
-    try {
-      const result = await runCliWithInput(["attach", "--session", "ses_attach"], "", testConfig("http://127.0.0.1:1"), stateDir);
-      expect(result.code).toBe(0);
-      expect(result.stdout).toContain("scorel attach created session ses_attach");
-      const log = await readFile(await findAttachLogPath(stateDir, "ses_attach"), "utf8");
-      expect(log).toContain("event=attach_connect_succeeded");
-      expect(log).toContain("scopeKind=local");
-    } finally {
-      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   });
 

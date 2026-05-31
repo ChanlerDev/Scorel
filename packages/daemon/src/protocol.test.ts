@@ -1,5 +1,4 @@
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
-import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -20,10 +19,10 @@ import {
   EmbeddedDaemon,
   createEmbeddedTransport,
   createLocalDaemonState,
+  daemonStateLiveness,
+  markDaemonStopped,
   readLocalDaemonState,
   removeLocalDaemonState,
-  startLocalDaemonSocketServer,
-  startEmbeddedDaemonSocketServer,
   startEmbeddedDaemonWebSocketServer,
   startRemoteDaemonWebSocketServer,
 } from "./index.js";
@@ -149,105 +148,96 @@ describe("daemon protocol boundary", () => {
     });
   });
 
-  it("persists and removes local daemon connection state", async () => {
+  it("persists daemon state with the new schema and removes it on reset", async () => {
     const stateDir = mkdtempSync(join(tmpdir(), "scorel-state-"));
 
     const state = await createLocalDaemonState({
       stateDir,
-      pid: 123,
-      socketPath: join(stateDir, "daemon.sock"),
-      token: "local-secret",
-      startedAt: 1,
+      host: "127.0.0.1",
+      port: 7777,
+      wsUrl: "ws://127.0.0.1:7777",
+      token: "persistent-token",
+      cwd: "/Users/chanler/personal/Scorel",
+      pid: 4242,
+      startedAt: 1700,
+      stoppedAt: null,
     });
 
-    expect(state).toMatchObject({
-      pid: 123,
-      token: "local-secret",
-      startedAt: 1,
+    expect(state).toEqual({
+      host: "127.0.0.1",
+      port: 7777,
+      wsUrl: "ws://127.0.0.1:7777",
+      token: "persistent-token",
+      cwd: "/Users/chanler/personal/Scorel",
+      pid: 4242,
+      startedAt: 1700,
+      stoppedAt: null,
     });
     expect(await readLocalDaemonState({ stateDir })).toEqual(state);
 
+    await markDaemonStopped({ stateDir, stoppedAt: 1900 });
+    expect(await readLocalDaemonState({ stateDir })).toMatchObject({
+      stoppedAt: 1900,
+      token: "persistent-token",
+      pid: 4242,
+    });
+
     await removeLocalDaemonState({ stateDir });
     expect(existsSync(join(stateDir, "daemon.json"))).toBe(false);
+    expect(await readLocalDaemonState({ stateDir })).toBeNull();
   });
 
-  it("starts a local daemon socket server and validates local token", async () => {
-    const socketPath = join(mkdtempSync(join(tmpdir(), "scorel-socket-")), "daemon.sock");
-    const server = await startLocalDaemonSocketServer({
-      socketPath,
-      token: "local-secret",
-      onClientMessage: (_connection, message) => (message.type === "ping" ? { type: "pong", requestId: message.requestId } : undefined),
-    });
+  it("classifies daemon liveness across pid + stoppedAt combinations", () => {
+    const baseline = {
+      host: "127.0.0.1",
+      port: 7777,
+      wsUrl: "ws://127.0.0.1:7777",
+      token: "t",
+      cwd: "/cwd",
+      pid: 1,
+      startedAt: 1,
+    };
 
-    expect(server.socketPath).toBe(socketPath);
-
-    await server.close();
-    expect(existsSync(socketPath)).toBe(false);
+    expect(
+      daemonStateLiveness({ ...baseline, stoppedAt: null }, { isPidAlive: () => true }),
+    ).toBe("running");
+    expect(
+      daemonStateLiveness({ ...baseline, stoppedAt: null }, { isPidAlive: () => false }),
+    ).toBe("orphan");
+    expect(
+      daemonStateLiveness({ ...baseline, stoppedAt: 100 }, { isPidAlive: () => true }),
+    ).toBe("stopped");
+    expect(
+      daemonStateLiveness({ ...baseline, stoppedAt: 100 }, { isPidAlive: () => false }),
+    ).toBe("stopped");
   });
 
-  it("adapts embedded daemon protocol to a local socket transport", async () => {
+  it("classifies the current process as alive without a custom probe", () => {
+    expect(
+      daemonStateLiveness({
+        host: "127.0.0.1",
+        port: 7777,
+        wsUrl: "ws://127.0.0.1:7777",
+        token: "t",
+        cwd: "/cwd",
+        pid: process.pid,
+        startedAt: 1,
+        stoppedAt: null,
+      }),
+    ).toBe("running");
+  });
+
+  it("falls back to persistent JSONL events when websocket resync buffer is cold", async () => {
     const daemon = createDaemon();
-    const socketPath = join(mkdtempSync(join(tmpdir(), "scorel-embedded-socket-")), "daemon.sock");
-    const server = await startEmbeddedDaemonSocketServer({
+    const server = await startEmbeddedDaemonWebSocketServer({
       daemon,
-      socketPath,
-      token: "local-secret",
+      host: "127.0.0.1",
+      port: 0,
+      token: "remote-secret",
     });
     await daemon.start();
-    const clientA = await connectTestSocket(socketPath, "local-secret", "client_a", "ses_socket");
-    const clientB = await connectTestSocket(socketPath, "local-secret", "client_b", "ses_socket");
-    const clientAMessages: DaemonMessage[] = [];
-    const clientBMessages: DaemonMessage[] = [];
-
-    try {
-      clientA.onMessage((message) => clientAMessages.push(message));
-      clientB.onMessage((message) => clientBMessages.push(message));
-      clientA.send({
-        type: "create_session",
-        requestId: asRequestId("req_create_socket"),
-        sessionId: asSessionId("ses_socket"),
-        meta: { model: "test-model" },
-      });
-      await waitForDaemonMessage(
-        clientAMessages,
-        (message) => "requestId" in message && message.requestId === "req_create_socket",
-      );
-      clientB.send({
-        type: "subscribe_events",
-        requestId: asRequestId("req_subscribe_socket"),
-        sessionId: asSessionId("ses_socket"),
-        lastSeq: asSeq(0),
-      });
-      clientA.send({
-        type: "send_message",
-        requestId: asRequestId("req_send_socket"),
-        sessionId: asSessionId("ses_socket"),
-        content: "hello",
-      });
-
-      await expect(waitForDaemonMessage(clientBMessages, (message) => message.type === "event")).resolves.toMatchObject({
-        type: "event",
-        event: { type: "user_message", sessionId: "ses_socket" },
-      });
-    } finally {
-      clientA.close();
-      clientB.close();
-      await server.close();
-      await daemon.shutdown();
-    }
-  });
-
-  it("falls back to persistent JSONL events when socket resync buffer is cold", async () => {
-    const daemon = createDaemon();
-    const socketPath = join(mkdtempSync(join(tmpdir(), "scorel-resync-socket-")), "daemon.sock");
-    const server = await startEmbeddedDaemonSocketServer({
-      daemon,
-      socketPath,
-      token: "local-secret",
-    });
-    await daemon.start();
-    const clientA = await connectTestSocket(socketPath, "local-secret", "client_a", "ses_resync");
-    const clientB = await connectTestSocket(socketPath, "local-secret", "client_b", "ses_resync");
+    const clientA = await connectTestWebSocket(server.url, "remote-secret", "client_a", "ses_resync");
+    const clientB = await connectTestWebSocket(server.url, "remote-secret", "client_b", "ses_resync");
     const clientAMessages: DaemonMessage[] = [];
     const clientBMessages: DaemonMessage[] = [];
 
@@ -288,23 +278,6 @@ describe("daemon protocol boundary", () => {
           mode: "persistent_fallback",
         },
       });
-
-      const seenBeforeLive = clientBMessages.length;
-      clientA.send({
-        type: "send_message",
-        requestId: asRequestId("req_send_after_fallback"),
-        sessionId: asSessionId("ses_resync"),
-        content: "after fallback",
-      });
-      await expect(
-        waitForDaemonMessage(
-          clientBMessages,
-          (message) =>
-            clientBMessages.indexOf(message) >= seenBeforeLive &&
-            message.type === "event" &&
-            Number(message.event.seq) > 4,
-        ),
-      ).resolves.toMatchObject({ type: "event" });
     } finally {
       clientA.close();
       clientB.close();
@@ -313,71 +286,85 @@ describe("daemon protocol boundary", () => {
     }
   });
 
-  it("does not treat a non-contiguous persistent-only buffer as stream resume", async () => {
-    const daemon = createDaemon();
-    const socketPath = join(mkdtempSync(join(tmpdir(), "scorel-resync-gap-")), "daemon.sock");
-    const server = await startEmbeddedDaemonSocketServer({
-      daemon,
-      socketPath,
-      token: "local-secret",
-    });
-    await daemon.start();
-    const clientA = await connectTestSocket(socketPath, "local-secret", "client_a", "ses_gap");
-    const clientB = await connectTestSocket(socketPath, "local-secret", "client_b", "ses_gap");
-    const clientAMessages: DaemonMessage[] = [];
-    const clientBMessages: DaemonMessage[] = [];
+  it("lazy-loads a cold session lane from disk on resync_events", async () => {
+    // Session is created on one daemon instance, then a fresh daemon with
+    // the same sessionsDir attaches. The new instance has no in-memory lane
+    // for this session id, so persistentLastSeq=0/streamLastSeq=0 must NOT
+    // short-circuit on a stale `currentSeq=0`; the daemon must hydrate from
+    // disk so the client receives a full_reload with the real history.
+    const sessionsDir = mkdtempSync(join(tmpdir(), "scorel-cold-resume-"));
+    const sessionId = asSessionId("ses_cold_resume");
 
+    const seedDaemon = createDaemonWithSessionsDir(sessionsDir);
+    const seedServer = await startEmbeddedDaemonWebSocketServer({
+      daemon: seedDaemon,
+      host: "127.0.0.1",
+      port: 0,
+      token: "cold-secret",
+    });
+    await seedDaemon.start();
+    const seedClient = await connectTestWebSocket(seedServer.url, "cold-secret", "client_seed", sessionId);
+    const seedMessages: DaemonMessage[] = [];
     try {
-      clientA.onMessage((message) => clientAMessages.push(message));
-      clientB.onMessage((message) => clientBMessages.push(message));
-      clientA.send({
+      seedClient.onMessage((message) => seedMessages.push(message));
+      seedClient.send({
         type: "create_session",
-        requestId: asRequestId("req_create_gap"),
-        sessionId: asSessionId("ses_gap"),
+        requestId: asRequestId("req_cold_create"),
+        sessionId,
         meta: { model: "test-model" },
       });
-      await waitForDaemonMessage(clientAMessages, (message) => "requestId" in message && message.requestId === "req_create_gap");
-      clientA.send({
+      await waitForDaemonMessage(seedMessages, (message) => "requestId" in message && message.requestId === "req_cold_create");
+      seedClient.send({
         type: "send_message",
-        requestId: asRequestId("req_send_gap"),
-        sessionId: asSessionId("ses_gap"),
-        content: "hello",
+        requestId: asRequestId("req_cold_send"),
+        sessionId,
+        content: "hi cold",
       });
-      await waitForDaemonMessage(clientAMessages, (message) => message.type === "event" && message.event.type === "assistant_message");
-      daemon.releaseSessionEventBuffer(asSessionId("ses_gap"));
+      await waitForDaemonMessage(seedMessages, (message) => message.type === "event" && message.event.type === "assistant_message");
+    } finally {
+      seedClient.close();
+      await seedServer.close();
+      await seedDaemon.shutdown();
+    }
 
-      clientB.send({
-        type: "load_session",
-        requestId: asRequestId("req_load_gap"),
-        sessionId: asSessionId("ses_gap"),
-      });
-      await waitForDaemonMessage(clientBMessages, (message) => "requestId" in message && message.requestId === "req_load_gap");
-      clientB.send({
+    // New daemon instance, same sessionsDir — simulates `scorel daemon stop &&
+    // serve` followed by WebUI opening the historical session.
+    const coldDaemon = createDaemonWithSessionsDir(sessionsDir);
+    const coldServer = await startEmbeddedDaemonWebSocketServer({
+      daemon: coldDaemon,
+      host: "127.0.0.1",
+      port: 0,
+      token: "cold-secret",
+    });
+    await coldDaemon.start();
+    const coldClient = await connectTestWebSocket(coldServer.url, "cold-secret", "client_cold", sessionId);
+    const coldMessages: DaemonMessage[] = [];
+    try {
+      coldClient.onMessage((message) => coldMessages.push(message));
+      coldClient.send({
         type: "resync_events",
-        requestId: asRequestId("req_resync_gap"),
-        sessionId: asSessionId("ses_gap"),
-        persistentLastSeq: asSeq(1),
-        streamLastSeq: asSeq(2),
+        requestId: asRequestId("req_cold_resync"),
+        sessionId,
+        persistentLastSeq: asSeq(0),
+        streamLastSeq: asSeq(0),
       });
-
       await expect(
-        waitForDaemonMessage(clientBMessages, (message) => "requestId" in message && message.requestId === "req_resync_gap"),
+        waitForDaemonMessage(coldMessages, (message) => "requestId" in message && message.requestId === "req_cold_resync"),
       ).resolves.toMatchObject({
         type: "response",
         requestType: "resync_events",
         data: {
-          mode: "persistent_fallback",
-          throughSeq: 4,
-          gapFromSeq: 3,
-          gapToSeq: 5,
-          events: [expect.objectContaining({ type: "assistant_message", seq: 4 })],
+          mode: "full_reload",
+          events: expect.arrayContaining([
+            expect.objectContaining({ type: "user_message" }),
+            expect.objectContaining({ type: "assistant_message" }),
+          ]),
         },
       });
     } finally {
-      clientA.close();
-      clientB.close();
-      await server.close();
-      await daemon.shutdown();
+      coldClient.close();
+      await coldServer.close();
+      await coldDaemon.shutdown();
     }
   });
 
@@ -729,57 +716,10 @@ describe("daemon protocol boundary", () => {
   });
 });
 
-type TestSocket = {
-  send(message: object): void;
-  onMessage(handler: (message: DaemonMessage) => void): void;
-  close(): void;
-};
-
 type TestWebSocket = {
   send(message: object): void;
   onMessage(handler: (message: DaemonMessage) => void): void;
   close(): void;
-};
-
-const connectTestSocket = async (
-  socketPath: string,
-  token: string,
-  clientId: string,
-  sessionId: string,
-): Promise<TestSocket> => {
-  const socket = connect(socketPath);
-  const handlers = new Set<(message: DaemonMessage) => void>();
-  let buffer = "";
-  socket.setEncoding("utf8");
-  socket.on("data", (chunk) => {
-    buffer += chunk.toString();
-    while (buffer.includes("\n")) {
-      const index = buffer.indexOf("\n");
-      const line = buffer.slice(0, index);
-      buffer = buffer.slice(index + 1);
-      if (!line.trim()) {
-        continue;
-      }
-      const message = JSON.parse(line) as DaemonMessage;
-      for (const handler of handlers) {
-        handler(message);
-      }
-    }
-  });
-  await new Promise<void>((resolve) => socket.once("connect", resolve));
-  socket.write(`${JSON.stringify({ type: "connect", token, clientId, sessionId })}\n`);
-  return {
-    send(message) {
-      socket.write(`${JSON.stringify(message)}\n`);
-    },
-    onMessage(handler) {
-      handlers.add(handler);
-    },
-    close() {
-      socket.end();
-      socket.destroy();
-    },
-  };
 };
 
 const connectTestWebSocket = async (

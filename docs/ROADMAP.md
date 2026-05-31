@@ -292,6 +292,37 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
+## M5.6: Startup Ergonomics
+
+**Goal**: 把多二进制、多必填参数、多终端的启动流程,收敛为单 `scorel` 入口 + 持久 token + 一键 `scorel up`。WebUI 自动发现本地 daemon,避免手填。
+
+**Done when**:
+
+- `scorel` 单入口承载 chat / attach / daemon / webui / up / logs。
+- `scorel-daemon` 二进制退役,`apps/daemon/` 删除。
+- `scorel daemon serve` 全部 flag 有合理默认;token 在 `~/.scorel/daemon.json` 持久化,跨重启复用。
+- `~/.scorel/daemon.json` 不再每次启动删除;通过 pid liveness + `stoppedAt` 判存活。
+- WebUI Settings 页面通过 `/api/local-daemon` server route 自动发现本地 daemon,一键添加 device。
+- `scorel up` 同时拉起 daemon serve + webui,Ctrl+C 一并退出。
+- 全部改动通过自动测试,真实 LLM 手工烟雾通过。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M5.6.1 | [`S0043`](spec/ship/S0043-startup-ergonomics.md) | 单 `scorel` 入口 + 默认值 + token 持久化 + WebUI 自动发现 + `scorel up` | Done |
+
+**Not in M5.6**:
+
+- WebUI 多 daemon 切换 UI;每用户单 daemon 假设。
+- 自动 supervisor / restart;仍需手工 `scorel daemon stop && serve`。
+- Windows 专属 PID 语义。
+- TLS / OAuth / 公网隧道。
+
+**Status**: Done
+
+---
+
 ## M6: Ecosystem
 
 **Goal**: Scorel 可以通过 MCP、extensions、channels 接入外部工作流。
@@ -352,6 +383,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0040`](spec/ship/S0040-webui-codex-visual-tokens.md) | WebUI Codex 风视觉一刀与 design tokens | Done |
 | [`S0041`](spec/ship/S0041-webui-markdown-and-tool-block.md) | WebUI markdown 渲染、代码高亮与统一 tool 块 | Done |
 | [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | WebUI streaming UX 与 autoscroll | Done |
+| [`S0043`](spec/ship/S0043-startup-ergonomics.md) | 单 `scorel` 入口、token 持久化、WebUI 自动发现、`scorel up` 一键启动 | Done |
 
 ---
 

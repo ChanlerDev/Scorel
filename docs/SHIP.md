@@ -19,6 +19,18 @@
 
 ---
 
+## Quickstart
+
+```bash
+pnpm install
+pnpm dev          # = scorel up; daemon + WebUI 同时启动
+open http://127.0.0.1:3000
+```
+
+第一次运行后,`~/.scorel/daemon.json` 会写入持久 token;后续 `pnpm dev` 复用同一 token,无需手填。WebUI Settings 页面会通过 `/api/local-daemon` 自动检测并提示 "Use this device"。
+
+---
+
 ## Check
 
 当前一键验证：

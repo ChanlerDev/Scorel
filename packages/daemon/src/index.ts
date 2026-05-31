@@ -1,5 +1,4 @@
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { createServer, type Server, type Socket } from "node:net";
 import { join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
@@ -56,11 +55,23 @@ export const daemonProtocolVersion = protocolVersion;
 export type EmbeddedDaemonTransport = DaemonTransport;
 export { loadScorelConfig, scorelSessionsDir, type ScorelConfig };
 
+/**
+ * On-disk shape of `~/.scorel/daemon.json` (S0043). The unix-socket era schema
+ * (`socketPath` + `pid`-only) is removed; a single WS daemon owns the state
+ * file across restarts. `token` persists so subsequent `serve` runs reuse it
+ * without operator intervention; `stoppedAt` flips from `null` → epoch on
+ * graceful shutdown so `daemonStateLiveness` can distinguish a clean stop
+ * from a crashed/orphan pid.
+ */
 export type LocalDaemonState = {
-  pid: number;
-  socketPath: string;
+  host: string;
+  port: number;
+  wsUrl: string;
   token: string;
+  cwd: string;
+  pid: number;
   startedAt: number;
+  stoppedAt: number | null;
 };
 
 export type LocalDaemonStateOptions = {
@@ -69,23 +80,7 @@ export type LocalDaemonStateOptions = {
 
 export type CreateLocalDaemonStateOptions = LocalDaemonStateOptions & LocalDaemonState;
 
-export type LocalDaemonSocketConnection = {
-  clientId?: ClientId;
-  socket: Socket;
-  send(message: DaemonMessage): void;
-};
-
-export type LocalDaemonSocketServerOptions = {
-  socketPath: string;
-  token: string;
-  onClientConnect?: (connection: LocalDaemonSocketConnection, params: ConnectParams) => ConnectResult;
-  onClientMessage: (connection: LocalDaemonSocketConnection, message: ClientMessage) => DaemonMessage | void;
-};
-
-export type LocalDaemonSocketServer = {
-  socketPath: string;
-  close(): Promise<void>;
-};
+export type DaemonStateLiveness = "running" | "stopped" | "orphan";
 
 export type RemoteDaemonWebSocketConnection = {
   clientId?: ClientId;
@@ -111,11 +106,15 @@ export type RemoteDaemonWebSocketServer = {
 const localDaemonStateFile = (stateDir: string): string => join(stateDir, "daemon.json");
 
 export const createLocalDaemonState = async (options: CreateLocalDaemonStateOptions): Promise<LocalDaemonState> => {
-  const state = {
-    pid: options.pid,
-    socketPath: options.socketPath,
+  const state: LocalDaemonState = {
+    host: options.host,
+    port: options.port,
+    wsUrl: options.wsUrl,
     token: options.token,
+    cwd: options.cwd,
+    pid: options.pid,
     startedAt: options.startedAt,
+    stoppedAt: options.stoppedAt,
   };
   await mkdir(options.stateDir, { recursive: true });
   await writeFile(localDaemonStateFile(options.stateDir), `${JSON.stringify(state, null, 2)}\n`);
@@ -124,7 +123,29 @@ export const createLocalDaemonState = async (options: CreateLocalDaemonStateOpti
 
 export const readLocalDaemonState = async (options: LocalDaemonStateOptions): Promise<LocalDaemonState | null> => {
   try {
-    return JSON.parse(await readFile(localDaemonStateFile(options.stateDir), "utf8")) as LocalDaemonState;
+    const raw = JSON.parse(await readFile(localDaemonStateFile(options.stateDir), "utf8")) as Partial<LocalDaemonState>;
+    if (
+      typeof raw.host !== "string" ||
+      typeof raw.port !== "number" ||
+      typeof raw.wsUrl !== "string" ||
+      typeof raw.token !== "string" ||
+      typeof raw.cwd !== "string" ||
+      typeof raw.pid !== "number" ||
+      typeof raw.startedAt !== "number" ||
+      !(raw.stoppedAt === null || typeof raw.stoppedAt === "number")
+    ) {
+      return null;
+    }
+    return {
+      host: raw.host,
+      port: raw.port,
+      wsUrl: raw.wsUrl,
+      token: raw.token,
+      cwd: raw.cwd,
+      pid: raw.pid,
+      startedAt: raw.startedAt,
+      stoppedAt: raw.stoppedAt,
+    };
   } catch (cause) {
     if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
       return null;
@@ -137,84 +158,63 @@ export const removeLocalDaemonState = async (options: LocalDaemonStateOptions): 
   await rm(localDaemonStateFile(options.stateDir), { force: true });
 };
 
-export const startLocalDaemonSocketServer = async (
-  options: LocalDaemonSocketServerOptions,
-): Promise<LocalDaemonSocketServer> => {
-  await rm(options.socketPath, { force: true });
-  const server = createServer((socket) => {
-    let buffer = "";
-    const connection: LocalDaemonSocketConnection = {
-      socket,
-      send(message) {
-        if (!socket.destroyed && socket.writable) {
-          socket.write(`${JSON.stringify(message)}\n`);
-        }
-      },
-    };
+/**
+ * Partial in-place update used by `serve` graceful-shutdown to flip
+ * `stoppedAt` from `null` to a timestamp without disturbing other fields.
+ * Silently no-ops if the state file disappeared (e.g. operator ran `reset`
+ * concurrently) — flipping `stoppedAt` is a best-effort marker.
+ */
+export const markDaemonStopped = async (
+  options: LocalDaemonStateOptions & { stoppedAt: number },
+): Promise<void> => {
+  const state = await readLocalDaemonState({ stateDir: options.stateDir });
+  if (!state) {
+    return;
+  }
+  await writeFile(
+    localDaemonStateFile(options.stateDir),
+    `${JSON.stringify({ ...state, stoppedAt: options.stoppedAt }, null, 2)}\n`,
+  );
+};
 
-    socket.setEncoding("utf8");
-    socket.on("error", () => undefined);
-    socket.on("data", (chunk) => {
-      buffer += chunk;
-      while (buffer.includes("\n")) {
-        const index = buffer.indexOf("\n");
-        const line = buffer.slice(0, index);
-        buffer = buffer.slice(index + 1);
-        if (!line.trim()) {
-          continue;
-        }
-        const message = JSON.parse(line) as ClientMessage | ({ type: "connect"; token: string } & ConnectParams);
-        if (message.type === "connect") {
-          if (message.token !== options.token) {
-            connection.send({
-              type: "error",
-              ok: false,
-              code: "invalid_request",
-              message: "invalid local token",
-            });
-            socket.end();
-            continue;
-          }
-          connection.clientId = message.clientId;
-          const result = options.onClientConnect?.(connection, message) ?? {
-            clientId: message.clientId,
-            sessionId: message.sessionId,
-            currentSeq: message.streamLastSeq ?? message.lastSeq ?? asSeq(0),
-          };
-          connection.send({
-            type: "connected",
-            clientId: result.clientId,
-            sessionId: result.sessionId,
-            currentSeq: result.currentSeq,
-            deviceId: result.deviceId,
-            deviceDisplayName: result.deviceDisplayName,
-            projectSlug: result.projectSlug,
-          });
-          continue;
-        }
-        const response = options.onClientMessage(connection, message);
-        if (response) {
-          connection.send(response);
-        }
-      }
-    });
-  });
+/**
+ * Classify a state file's owning process. The `pid` field is only meaningful
+ * paired with `stoppedAt`: a dead pid + null `stoppedAt` is the orphan case
+ * that `serve` is allowed to overwrite, while a dead pid + populated
+ * `stoppedAt` is the normal "previous run exited" case.
+ *
+ * `process.kill(pid, 0)` on POSIX returns truthy for any process the caller
+ * could signal — including unrelated processes that happen to have inherited
+ * the pid after wraparound. The trade-off is documented in the spec; users
+ * can always `scorel daemon reset` if they get a false-positive after a
+ * reboot.
+ */
+export const daemonStateLiveness = (
+  state: LocalDaemonState,
+  options: { isPidAlive?: (pid: number) => boolean } = {},
+): DaemonStateLiveness => {
+  const isAlive = options.isPidAlive ?? defaultIsPidAlive;
+  const alive = isAlive(state.pid);
+  if (alive && state.stoppedAt === null) {
+    return "running";
+  }
+  if (!alive && state.stoppedAt === null) {
+    return "orphan";
+  }
+  return "stopped";
+};
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(options.socketPath, () => {
-      server.off("error", reject);
-      resolve();
-    });
-  });
-
-  return {
-    socketPath: options.socketPath,
-    close: async () => {
-      await closeServer(server);
-      await rm(options.socketPath, { force: true });
-    },
-  };
+const defaultIsPidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    if (cause instanceof Error && "code" in cause && cause.code === "EPERM") {
+      // Pid exists but we can't signal it (different user). Treat as alive.
+      return true;
+    }
+    return false;
+  }
 };
 
 export const startRemoteDaemonWebSocketServer = async (
@@ -359,67 +359,6 @@ export const startEmbeddedDaemonWebSocketServer = async (
     },
   });
 };
-
-export const startEmbeddedDaemonSocketServer = async (
-  options: { daemon: EmbeddedDaemon; socketPath: string; token: string },
-): Promise<LocalDaemonSocketServer> => {
-  const connections = new WeakMap<LocalDaemonSocketConnection, Connection>();
-  const daemonConnectionFor = (socketConnection: LocalDaemonSocketConnection, params?: ConnectParams): Connection => {
-    const existing = connections.get(socketConnection);
-    if (existing) {
-      return existing;
-    }
-    const connection: Connection = {
-      clientId: params?.clientId ?? asClientId("socket_unconnected"),
-      emit: (daemonMessage) => socketConnection.send(daemonMessage),
-    };
-    connections.set(socketConnection, connection);
-    return connection;
-  };
-
-  return startLocalDaemonSocketServer({
-    socketPath: options.socketPath,
-    token: options.token,
-    onClientConnect: (socketConnection, params) => {
-      const daemonConnection = daemonConnectionFor(socketConnection, params);
-      daemonConnection.clientId = params.clientId;
-      const result = options.daemon.connect(daemonConnection, params.sessionId);
-      return {
-        clientId: params.clientId,
-        sessionId: result.sessionId,
-        currentSeq: result.currentSeq,
-        deviceId: result.deviceId,
-        deviceDisplayName: result.deviceDisplayName,
-        projectSlug: result.projectSlug,
-      };
-    },
-    onClientMessage: (socketConnection, message) => {
-      const daemonConnection = daemonConnectionFor(socketConnection);
-      if (!daemonConnection.clientId) {
-        return {
-          type: "error",
-          ok: false,
-          code: "invalid_request",
-          message: "socket is not connected",
-        };
-      }
-      void options.daemon.handleMessage(daemonConnection, message).catch((cause) => {
-        socketConnection.send({
-          type: "error",
-          ok: false,
-          code: "internal_error",
-          message: cause instanceof Error ? cause.message : String(cause),
-        });
-      });
-      return undefined;
-    },
-  });
-};
-
-const closeServer = (server: Server): Promise<void> =>
-  new Promise((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
 
 const closeWebSocketServer = (server: WebSocketServer): Promise<void> =>
   new Promise((resolve, reject) => {
@@ -931,6 +870,19 @@ export class EmbeddedDaemon {
     sessionId: SessionId,
     anchors: { persistentLastSeq?: Seq; streamLastSeq?: Seq },
   ): Promise<ResyncEventsResult> {
+    // Cold attach: a client connected to a session id we have not yet loaded
+    // into memory (typical when WebUI opens a historical session that lives
+    // only on disk). Load the lane so #seqs reflects the persisted tail
+    // before deciding whether to short-circuit on stream_resume — otherwise
+    // currentSeq stays at 0 and the early return strands the caller with an
+    // empty event list.
+    if (!this.#seqs.has(sessionId)) {
+      try {
+        await this.#getLane(sessionId);
+      } catch {
+        // Session id unknown to disk; fall through with currentSeq=0.
+      }
+    }
     const currentSeq = asSeq(this.#seqs.get(sessionId) ?? 0);
     const persistentLastSeq = anchors.persistentLastSeq ?? asSeq(0);
     const streamLastSeq = anchors.streamLastSeq ?? persistentLastSeq;

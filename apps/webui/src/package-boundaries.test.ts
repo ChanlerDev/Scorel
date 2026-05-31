@@ -108,6 +108,15 @@ function isTestFile(rel: string): boolean {
   return rel.endsWith(".test.ts") || rel.endsWith(".test.tsx");
 }
 
+function isServerRouteFile(rel: string): boolean {
+  // Next App Router server-only files. They never enter the client bundle, so
+  // node:* imports are safe; the route handler at app/api/local-daemon/route.ts
+  // (S0043) needs node:fs/promises + node:os + node:path to read
+  // ~/.scorel/daemon.json.
+  const norm = rel.split(path.sep).join("/");
+  return /(^|\/)route\.(ts|tsx)$/.test(norm);
+}
+
 describe("apps/webui package boundaries", () => {
   it("only imports from approved externals (react, next, @scorel/protocol|client, @fontsource/*)", async () => {
     const files: string[] = [];
@@ -122,6 +131,9 @@ describe("apps/webui package boundaries", () => {
       // Skip the test files themselves — they intentionally reference forbidden
       // module names as data, and routes.test.ts walks the app/ tree.
       if (isTestFile(rel)) continue;
+      // Server-only route handlers are not bundled into the client; allow
+      // node:* and other server externals there.
+      if (isServerRouteFile(rel)) continue;
 
       const text = await fs.readFile(file, "utf8");
       const specs = new Set<string>();
