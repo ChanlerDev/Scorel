@@ -45,6 +45,7 @@ interface SessionHeader {
 }
 
 interface SessionMeta {
+  projectId: ProjectId;     // owning Host 中稳定的 Project 身份
   name?: string;
   title?: string;
   model: string;
@@ -58,7 +59,7 @@ interface SessionMeta {
 ### 2.3 示例文件
 
 ```jsonl
-{"version":1,"sessionId":"ses_abc","deviceId":"vps-tokyo-01","createdAt":1716000000000,"meta":{"model":"claude-sonnet-4-20250514","thinkingLevel":"medium"}}
+{"version":1,"sessionId":"ses_abc","deviceId":"vps-tokyo-01","createdAt":1716000000000,"meta":{"projectId":"prj_abc","model":"claude-sonnet-4-20250514","thinkingLevel":"medium"}}
 {"type":"message","id":"e01","parentId":null,"seq":1,"sessionId":"ses_abc","clientId":"gui-mac-chanler","ts":1716000001000,"message":{"role":"user","content":"解释 monads"}}
 {"type":"message","id":"e02","parentId":"e01","seq":5,"sessionId":"ses_abc","clientId":"daemon","ts":1716000005000,"message":{"role":"assistant","content":[{"type":"text","text":"Monad 是..."}],"model":"claude-sonnet-4-20250514","stopReason":"end_turn","usage":{"inputTokens":150,"outputTokens":420}}}
 {"type":"message","id":"e03","parentId":"e01","seq":10,"sessionId":"ses_abc","clientId":"tg-bot-001","ts":1716000010000,"message":{"role":"user","content":"用更简单的话解释"}}
@@ -94,10 +95,10 @@ Daemon-owned JSONL remains the authoritative session store. Attach clients may k
 Cache scope is part of the identity:
 
 - local attach cache is scoped under a local project locator
-- remote attach cache is scoped under a remote `deviceId + projectSlug`
+- remote attach cache is scoped under a remote `deviceId + projectId`
 - same `sessionId` under different scopes must not share cache files
 
-The remote endpoint URL is a connection locator, not stable identity. If a daemon reports the same `deviceId + projectSlug` after the URL changes, attach should reuse the same cache. A daemon may also provide a `deviceDisplayName` for UI labels, but display names are not identity.
+The remote endpoint URL is a connection locator, not stable identity. If a daemon reports the same `deviceId + projectId` after the URL changes, attach should reuse the same cache. A daemon may also provide a `deviceDisplayName` for UI labels, but display names are not identity.
 
 The cache may advance `persistentLastSeq` only after a persistent event has been durably written to the local cache. It must not advance persistent anchors from transient events. If metadata no longer matches the requested attach target, the client must ignore or isolate the cache and perform daemon reconciliation.
 
@@ -132,22 +133,22 @@ Attach clients have their own client-side diagnostics under the attach cache tre
 
 That attach `.log` is local client evidence for connection, cache, resync, rendering, and outbound send behavior. It is intentionally separate from the daemon-owned session `.log`; remote attach should not mix remote daemon runtime/provider diagnostics into the local attach cache.
 
-### 2.7 Project Index
+### 2.7 Project Registry
 
-Scorel may also maintain a lightweight project index:
+The owning Host maintains a Project Registry:
 
 ```text
-~/.scorel/project-index.json
+~/.scorel/projects.json
 ```
 
-This file organizes existing session assets by project for CLI lookup and future GUI display. It is not replay state and is not the authority for session contents.
+This file is the owning Host's Project Registry. It records the Device's registered workspaces for CLI, WebUI, GUI, and future HTTP clients. It is not replay state and is not the authority for session contents.
 
-The index points to existing paths:
+The Registry points to existing paths:
 
 - local session JSONL and daemon diagnostics under `sessions/`
 - attach cache and attach diagnostics under `attach-cache/`
 
-No session, cache, or log file is moved because of the index. For local projects, identity is the canonical `workDir`. For remote projects, `projectSlug` identifies the remote project path namespace, while `deviceId` only disambiguates devices that expose the same slug.
+No session, cache, or log file is moved because of the Registry. `projectId` is the stable Project identity; the owning Host maps it to canonical `workDir`. Remote clients scope their cache with both `deviceId` and `projectId`. Client code must not derive identity from paths, display names, or transport URLs.
 
 ---
 

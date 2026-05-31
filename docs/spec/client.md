@@ -1,16 +1,24 @@
 # DaemonClient SDK
 
 > 上游：`spec/daemon.md`、`spec/events.md`
-> 主题：Client 侧统一接口。CLI / GUI / WebUI 都用同一个类，只是传入不同的 transport。
+> 主题：CLI / GUI / WebUI / HTTP adapter 面向 Device-level Host 的统一客户端。
 > 归属包：`@scorel/client`。该包只依赖 `@scorel/protocol`，不得依赖 `@scorel/core` 或 `@scorel/daemon`。
 
 ---
 
-## 0. 包边界
+## 0. 定位
 
-DaemonClient 是 Entry 侧 SDK，不是 Daemon 的一部分。它负责连接、重连、request/response、dual-seq resync、transient buffer 和本地 UI state projection。
+`DaemonClient` 是 Entry 侧 SDK，不是 Host 的一部分。它负责：
 
-`@scorel/client` 提供 platform-neutral `DaemonClient`、browser-safe `WsTransport`、Node socket transport（subpath export）。需要直接持有 Daemon 实例的 embedded adapter 由 `@scorel/daemon` 提供，因为它必须接触 Daemon 内部对象，不能放进 browser-safe client 包。
+- transport 连接、认证、重连和 request/response correlation
+- Device handshake
+- Project Registry 操作
+- Session 操作
+- dual-seq resync、transient buffer 和本地 UI state projection
+
+`@scorel/client` 提供 platform-neutral `DaemonClient` 和 browser-safe `WsTransport`。需要直接持有 Host 实例的 embedded adapter 由 `@scorel/daemon` 提供。
+
+Client 不持有 Runtime，不自行解释工作目录，不从 URL、display name 或路径 slug 反推 project 身份。
 
 ---
 
@@ -18,243 +26,258 @@ DaemonClient 是 Entry 侧 SDK，不是 Daemon 的一部分。它负责连接、
 
 ```typescript
 interface DaemonClient {
-  // ─── 连接 ───
+  // Connection
   connect(sessionId?: SessionId): Promise<void>;
   disconnect(): void;
   readonly state: "disconnected" | "connecting" | "connected" | "reconnecting";
   readonly sessionId: SessionId | null;
   readonly clientId: ClientId;
+  readonly connectionIdentity: {
+    deviceId: DeviceId;
+    deviceDisplayName?: string;
+  } | null;
 
-  // ─── 对话操作 ───
-  sendMessage(content: string | ContentBlock[], options?: SendOptions): Promise<{
-    userEventId: EventId;
-    assistantEventId: EventId;  // 预分配的 assistant 消息 id
-  }>;
-  steer(content: string): void;   // 运行中插话，fire-and-forget
-  followUp(content: string): void; // 追加任务（agent 停下后消费）
-  cancel(): Promise<{ sessionId: SessionId; cancelled: boolean }>;
+  // Projects
+  listDirectories(path?: string): Promise<DirectoryListing>;
+  registerProject(workDir: string): Promise<HostProject>;
+  listProjects(): Promise<HostProjectSummary[]>;
+  removeProject(projectId: ProjectId): Promise<void>;
 
-  // ─── 树操作 ───
-  rewind(targetEventId: EventId): Promise<EventId>;
-  branch(leafEventId: EventId): Promise<EventId>;
-  compact(): Promise<EventId>;
-
-  // ─── Session 管理 ───
-  createSession(meta: Partial<SessionMeta>): Promise<SessionId>;
-  listSessions(filter?: { projectSlug?: string; limit?: number }): Promise<SessionSummary[]>;
-  listProjects(): Promise<DaemonProjectSummary[]>;
+  // Sessions
+  createSession(input: {
+    meta: Omit<SessionMeta, "projectId"> & { projectId: ProjectId };
+  }): Promise<SessionId>;
+  listSessions(filter?: {
+    projectId?: ProjectId;
+    limit?: number;
+  }): Promise<SessionSummary[]>;
   deleteSession(sessionId: SessionId): Promise<void>;
   switchSession(sessionId: SessionId): Promise<void>;
   cloneSession(fromEventId: EventId, meta?: Partial<SessionMeta>): Promise<SessionId>;
   updateSessionInfo(changes: Partial<SessionMeta>): Promise<EventId>;
 
-  // ─── 查询 ───
-  getTree(): Promise<PersistentEvent[]>;   // 完整 session 树
-  getStatus(): Promise<DaemonStatus>;      // runtime 状态
+  // Conversation
+  sendMessage(content: string | ContentBlock[], options?: SendOptions): Promise<{
+    userEventId: EventId;
+    assistantEventId: EventId;
+  }>;
+  steer(content: string): void;
+  followUp(content: string): void;
+  cancel(): Promise<{ sessionId: SessionId; cancelled: boolean }>;
+  rewind(targetEventId: EventId): Promise<EventId>;
+  branch(leafEventId: EventId): Promise<EventId>;
+  compact(): Promise<EventId>;
 
-  // ─── 事件订阅 ───
+  // Query and subscription
+  getTree(): Promise<PersistentEvent[]>;
+  getStatus(): Promise<DaemonStatus>;
   subscribe(handler: (event: ScorelEvent) => void): Unsubscribe;
   on<T extends ScorelEvent["type"]>(
     type: T,
     handler: (event: Extract<ScorelEvent, { type: T }>) => void
   ): Unsubscribe;
 
-  // ─── 同步 ───
+  // Recovery
   readonly persistentLastSeq: Seq;
   readonly streamLastSeq: Seq;
-  resync(anchors?: { persistentLastSeq?: Seq; streamLastSeq?: Seq }): Promise<{
-    mode: "stream_resume" | "persistent_fallback" | "full_reload";
-    throughSeq: Seq;
-    gapFromSeq?: Seq;
-    gapToSeq?: Seq;
-  }>;
+  resync(anchors?: {
+    persistentLastSeq?: Seq;
+    streamLastSeq?: Seq;
+  }): Promise<ResyncResult>;
 
-  // ─── 本地 UI 状态（从收到的事件投影）───
+  // Local UI projection
   getLocalState(): ClientSessionState;
   getEvents(): PersistentEvent[];
   getActiveLeaf(): EventId | null;
 }
-
-interface DaemonStatus {
-  running: boolean;          // runtime 是否在执行 turn
-  model: string;
-  activeClients: ClientId[];
-  sessionCount: number;
-  uptime: number;
-}
-
-interface ClientSessionState {
-  sessionId: SessionId;
-  events: PersistentEvent[];
-  activeLeafId: EventId | null;
-  transients: TransientMessage[];
-}
-
-interface TransientMessage {
-  eventId: EventId;
-  role: "assistant";
-  content: ContentBlock[];
-  partial: true;
-}
 ```
+
+`connect()` 可以不带 `sessionId`。此时 Client 只绑定 Device，可执行 Project 和 Session 管理操作；`sendMessage()`、`cancel()`、`resync()` 等会话操作必须先绑定 Session。
 
 ---
 
-## 2. 使用示例
+## 2. Project 操作
+
+### 2.1 身份
+
+`projectId` 是 Host 生成的稳定身份。Client 只把它当 opaque ID。
+
+- `workDir` 是 owning Host 上的 canonical absolute path。
+- `displayName` 是 UI label。
+- Device URL、SSH host、token 和 `displayName` 都不是 project 身份。
+- 不再使用 `projectSlug` 或 `workDirHint`。
 
 ```typescript
-// CLI 使用（embedded transport）
-const daemon = await createEmbeddedDaemon(config);
-const transport = createEmbeddedTransport(daemon); // from @scorel/daemon/embedded
-const client = new DaemonClient(transport, { clientId: "cli-local-001" });
+interface HostProjectSummary {
+  projectId: ProjectId;
+  displayName: string;
+  workDir: string;
+  createdAt: number;
+  updatedAt: number;
+}
 
-await client.connect(sessionId);
-
-client.on("text_delta", (e) => process.stdout.write(e.delta));
-client.on("message", (e) => {
-  if (e.message.role === "assistant") {
-    process.stdout.write("\n");
-  }
-});
-
-await client.sendMessage("解释 monads");
+interface DirectoryListing {
+  path: string;
+  parentPath?: string;
+  entries: Array<{
+    name: string;
+    path: string;
+    kind: "directory";
+  }>;
+}
 ```
+
+### 2.2 添加 Project
+
+GUI 和 WebUI 的添加流程统一为：
+
+1. 选择 Device。
+2. 调用 `listDirectories()` 浏览该 Device 文件系统。
+3. 用户选中目录。
+4. 调用 `registerProject(workDir)`。
+5. Host canonicalize 路径并返回 Project。
+
+本地和远程使用同一套协议。远程 GUI 通过 SSH proxy 接入时，目录浏览仍由远端 Host 完成。
+
+### 2.3 Trusted Full Access
+
+开发阶段默认 Host 拥有本机完整文件访问能力。`listDirectories()` 不做 workspace-root 限制，也不在本轮引入 ACL、scope 或 approval policy。
+
+仍然必须：
+
+- canonicalize path
+- 拒绝不存在或不是 directory 的目标
+- 不把 token、API key 或 SSH secret 写入日志
 
 ---
 
-## 3. 连接状态机
+## 3. Session 操作
 
+每个 Session 必须归属一个 Project：
+
+```typescript
+interface SessionMeta {
+  projectId: ProjectId;
+  title?: string;
+  model: string;
+  thinkingLevel: "none" | "low" | "medium" | "high";
+}
 ```
-disconnected → connecting → connected ⇄ reconnecting
-                    ↓                         ↓
-              auth_failed              disconnected（重试耗尽）
-```
 
-- `connecting`：正在进行 transport 连接 + auth 验证
-- `connected`：正常工作状态
-- `reconnecting`：transport 断开后自动重试中（lastSeq 保留用于补发）
-- `disconnected`：显式 disconnect 或重试耗尽
+`createSession()` 只接受已注册 `projectId`。Host 根据 Registry 解析 canonical `workDir`，再创建 project-aware Runtime。Client 不允许直接覆盖 `cwd`。
 
-`connect()` 也可不带 `sessionId`（daemon-only handshake）：transport 仍走 `connect` 帧但 `sessionId` 缺省，daemon 回的 `connected` 消息带 `deviceId / deviceDisplayName / projectSlug` 落进 `connectionIdentity`。这种连接只用于 `listProjects` / `listSessions` 等不绑定 session 的请求；`sendMessage` / `cancel` / `resync` 仍需先绑定 session。
+`listSessions({ projectId })` 返回目标 Project 下的 Session；省略过滤器时返回当前 Device 的全部 Session。
 
 ---
 
-## 4. 本地状态管理
+## 4. 本地状态和恢复
 
-DaemonClient 内部维护从收到的事件投影出的本地 UI 状态：
+DaemonClient 内部维护：
 
-- **events**：最近一次 resync 以来的 PersistentEvent 列表
-- **tree projection**：可选的只读 UI 投影，用于展示分支结构，不等同于 core 的 SessionTree
-- **activeLeaf**：当前 active 叶子节点
-- **transient buffer**：从 `message_start` 到对应 PersistentEvent 之间的 delta 累积
+- `events`：最近一次 resync 以来的 PersistentEvent 列表
+- `tree projection`：只读 UI 投影，不是 core 的权威 SessionTree
+- `activeLeaf`：当前 active 叶子
+- `transient buffer`：从 `message_start` 到对应 PersistentEvent 之间的 delta
 
-当收到 PersistentEvent(MessageEvent) 时，用 `id` 匹配替换对应 transient buffer → UI 从流式渲染过渡到完整消息。
+Client 不实现 `buildContext`。LLM context 构建属于 `@scorel/core/session`。
 
-DaemonClient 不实现 `buildContext`。LLM context 构建属于 `@scorel/core/session`，由 daemon 在执行 turn 前调用。Client 侧的 tree projection 只服务 UI 展示，不能成为调度、压缩或 rewind 判断的权威来源。
+### 4.1 Dual-Seq
 
-### 4.1 Dual-Seq Recovery State
+Client 保存两个恢复锚点：
 
-Client keeps two reconnect anchors:
+- `persistentLastSeq`：已经持久化、进程重启后仍可渲染的最高 seq
+- `streamLastSeq`：实时流中已经观察到的最高 seq
 
-- `persistentLastSeq`: highest persistent event seq that the client has durably recorded and can render after a process restart.
-- `streamLastSeq`: highest event seq the client has actually observed in the live stream.
+`resync()` 显式返回：
 
-`streamLastSeq` may be ahead of `persistentLastSeq` while an assistant response is streaming. After a cold start, a client must not claim transient stream continuity from an old `streamLastSeq` unless it also has durable transient anchors such as `message_start.eventId`. Without those anchors, the safe reconnect request uses the durable persistent anchor for both values.
+- `stream_resume`：ring buffer 连续覆盖 `streamLastSeq + 1`
+- `persistent_fallback`：无法证明 transient 连续性，只补 persistent events
+- `full_reload`：本地缓存不兼容，重新加载 Host 权威状态
 
-Attach clients that do persist transient anchors may render the cached in-progress assistant prefix before resync and then ask daemon to resume from the cached `streamLastSeq`. Any transient events returned by `resync()` are emitted to subscribers just like live transport events; otherwise terminal renderers would silently miss the recovered delta range.
+### 4.2 Attach Cache
 
-`resync()` returns an explicit recovery mode:
+远程 attach cache 身份来自 Host metadata，不来自 URL：
 
-- `stream_resume`: daemon buffer continuously covers `streamLastSeq + 1`; returned events may include transient and persistent events.
-- `persistent_fallback`: daemon buffer cannot prove stream continuity; returned events contain only missing persistent events after `persistentLastSeq`, and any lost transient gap is explicit.
-- `full_reload`: client cache is unusable or incompatible; client must rebuild from daemon persistent state.
+```text
+remote + deviceId + projectId + sessionId
+```
 
-For terminal clients, local cache pre-render is conservative: cache metadata must match the requested attach target before output is printed, and `full_reload` must be visibly separated from any already printed stale cache because stdout cannot be rolled back.
-
-Remote attach cache identity comes from daemon connection metadata, not from the URL alone. The daemon reports a stable `deviceId`, optional `deviceDisplayName`, and project-level `projectSlug`; the attach cache key is `remote + deviceId + projectSlug + sessionId`. The URL remains the current endpoint and may change without invalidating cache for the same remote project.
-
-### 4.2 Attach Diagnostics
-
-Attach clients also write a client-owned diagnostics log beside their local attach cache:
+URL 只是 transport locator。相同 Device 和 Project 改用另一个 URL 后，应复用同一份缓存。
 
 ```text
 ~/.scorel/attach-cache/{scopeKey}/{sessionId}.json
 ~/.scorel/attach-cache/{scopeKey}/{sessionId}.log
 ```
 
-This log records what the client observed and did: connection lifecycle, resolved cache scope, daemon identity, cache read/write summaries, resync anchors and mode, rendered inbound events, outbound sends, and disconnect. For remote attach, the log uses the same stable scope as the cache: `deviceId + projectSlug` after daemon identity is known, with URL only as a transport locator before identity resolution.
+attach diagnostics 记录连接生命周期、身份解析、cache read/write、resync anchors、恢复模式、事件摘要和 outbound sends。不得记录 token、API key、SSH secret、完整 prompt 或完整 tool result。
 
-Attach diagnostics are not authoritative replay state and are not a copy of daemon-side session diagnostics. They are local client evidence for debugging connection, cache, and rendering behavior. They may include rich event summaries, but must not record bearer tokens, API keys, local daemon tokens, or other secrets.
+---
 
-### 4.3 Project Index
+## 5. Transport
 
-Clients maintain a lightweight project index at:
+当前产品路径：
+
+```typescript
+// CLI local
+const transport = createEmbeddedTransport(host);
+
+// WebUI and direct remote control
+const transport = new WsTransport({ url, token });
+```
+
+未来新增 adapter：
+
+```typescript
+// GUI-managed remote device
+const transport = await createSshProxyTransport(sshConfig);
+
+// Pure HTTP integration
+const client = new HttpScorelClient({ baseUrl, token });
+```
+
+规则：
+
+- Embedded 和 WebSocket 是当前已实现 transport。
+- GUI 默认通过 SSH 启动或连接远端 Scorel，再使用 stdio proxy 转发协议。
+- 已经部署好的 Host 可作为高级入口直接使用 WS URL + token。
+- HTTP API 是独立 adapter：命令走 HTTP request，事件走 SSE。它映射同一 Host use cases，不复制业务逻辑。
+- 不恢复 Unix socket transport；S0043 已删除该产品路径。
+
+---
+
+## 6. UI 组织方式
+
+WebUI 只能联机，采用 Device-first：
 
 ```text
-~/.scorel/project-index.json
+Device
+  └── Project
+        └── Session
 ```
 
-The index is a lookup and UI organization file. It does not replace session JSONL, daemon diagnostics, attach cache, or attach diagnostics, and those existing files are not moved into project directories.
+GUI 同时管理本地和远程环境，采用 Project-first：
 
-Project is the user-facing organization unit:
+```text
+Project
+  ├── Local Device
+  └── Remote Device
+```
 
-- local project identity is the canonical CLI `workDir`
-- remote project identity is the remote daemon `projectSlug`
-- `deviceId` disambiguates remote devices that serve the same `projectSlug`
-- `deviceDisplayName`, project display name, and remote URL are UI/connection metadata, not identity
-
-Remote project keys therefore include both pieces needed for stable storage, for example `remote:<deviceId>:<projectSlug>`, but product surfaces should still present the project slug as the project and the device as disambiguating context. The latest remote URL is stored only so a later CLI lookup such as `scorel logs --attach --remote <url>` can resolve the local attach diagnostics path.
-
-### 4.4 Cancel, ListSessions, ListProjects
-
-`cancel()` requires a session-bound client; it returns `{ sessionId, cancelled }`. `cancelled` is `false` when no turn is running on that session. The daemon writes a `cancel_requested` diagnostic regardless.
-
-`listSessions(filter?)` and `listProjects()` only require an active daemon connection (no session). `listSessions` accepts `{ projectSlug?, limit? }`; daemon enforces the default/max limits and stable ordering. `listProjects` returns `DaemonProjectSummary[]` aggregated from the daemon's sessions directory; the result includes `displayName` and `workDirHint` for UI use only.
-
-`createSession({ meta?: Partial<SessionMeta> })` only requires an active daemon connection (no session). The daemon mints a fresh `sessionId`, persists meta (including `projectSlug`, `title`, `model`) into the new session header on first message, and returns the id so the caller can navigate to / attach to it. The WebUI's `+ New Chat` button (S0039) is the canonical caller of this surface today; `cwd` defaults to the daemon's startup `cwd` and is not user-overridable in v1.
+两种视图都只使用同一组 Host API。区别只是入口和信息架构，不是后端模型分叉。
 
 ---
 
-## 5. Transport 选择
+## 7. Pre-1.0 切换规则
 
-```typescript
-// Embedded（由 @scorel/daemon/embedded 提供）
-const transport = createEmbeddedTransport(daemon);
+S0048 实现时直接删除旧兼容面：
 
-// Local socket（@scorel/client/node）
-const transport = new SocketTransport("/tmp/scorel.sock");
+- 删除 `projectSlug`、`workDirHint` wire/schema。
+- 删除 attach cache 和 WebUI local storage 的旧 key。
+- 删除从 Session JSONL 聚合 Project 的旧逻辑。
+- bump `protocolVersion`，旧 Client 明确失败。
 
-// Remote WebSocket（@scorel/client）
-const transport = new WsTransport({ url: "wss://vps:18789", token: "sk-xxx" });
-
-// 统一使用
-const client = new DaemonClient(transport, { clientId });
-```
-
-DaemonClient 代码完全相同，transport 是唯一差异点。Transport 的具体实现可以来自 `@scorel/client` 或 `@scorel/daemon/embedded`，但都实现同一个 `DaemonTransport` protocol interface。
-
-### 5.1 Remote WebSocket
-
-Remote control uses the root `@scorel/client` export:
-
-```typescript
-const client = new DaemonClient(
-  new WsTransport({ url: "ws://remote-host:18789", token }),
-  { clientId }
-);
-
-await client.connect(sessionId);
-await client.resync({ persistentLastSeq, streamLastSeq });
-```
-
-Rules:
-
-- Token auth is bearer-token style and belongs to the transport handshake.
-- `@scorel/client` does not persist tokens.
-- Reconnect keeps client-side `persistentLastSeq` and `streamLastSeq`; the client reconnects to the same session and calls `resync_events`.
-- Auth failure is surfaced as a concise connection error.
-- The same `DaemonClient` API is used for embedded, local socket, and remote WebSocket modes.
+不做 alias、dual-write、迁移脚本或 silent fallback。
 
 ---
 
-*DaemonClient 是所有 Entry 面对 Daemon 的唯一接口。不同的只是传入的 transport。*
+*DaemonClient 是所有 Entry 面向 Host 的统一接口。不同产品入口只替换 transport 和视图组织方式。*

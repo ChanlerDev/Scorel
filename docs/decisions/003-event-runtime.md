@@ -4,6 +4,8 @@
 **日期**：2026-05-23
 **参与者**：Chanler, Claude
 
+> 2026-06-01 补充：本 ADR 的事件持久化、dual-seq 和 replay 决策继续有效。Transport 已演进：Unix socket 由 S0043 删除；当前实现为 embedded + WebSocket，未来 SSH proxy 和 HTTP + SSE adapter 以 [`ADR-006`](006-device-host-project-registry.md) 为准。
+
 ## 背景
 
 d006 定义了统一事件模型（PersistentEvent + TransientEvent），但以下运行时行为未明确：
@@ -128,15 +130,16 @@ Compact event 是硬边界。`rewind(targetId)` 时检查 path：
 
 Compact 之前的事件保留在 JSONL 中供审计查阅，但不可回退到、UI 不展示。
 
-### 10. Transport 保持三种独立实现
+### 10. Transport 保持 adapter 边界
 
 | Transport | 安全模型 | 场景 |
 |---|---|---|
-| EmbeddedTransport | 无需（进程内） | CLI/GUI 单用户，Daemon 随进程生死 |
-| SocketTransport | 文件系统权限 | 本地多 Entry 共享 |
-| WsTransport | TLS + token auth | 远端 VPS / 浏览器 WebUI |
+| EmbeddedTransport | 无需（进程内） | CLI 本地临时 Host |
+| WsTransport | token auth | WS Host / 浏览器 WebUI / CLI remote attach |
+| SSH stdio proxy（未来） | SSH 凭据 | GUI 管理远程 Device |
+| HTTP + SSE（未来） | token auth | 纯 API 集成 |
 
-共享 `DaemonTransport` interface。不合并 Socket/WS 因为：安全模型不同、浏览器只能用 WS、错误模式不同、重连策略不同。
+当前 transport 共享 Host use cases，但保持 adapter 边界。SSH proxy 和 HTTP + SSE 不得复制 Project、Session 或 Runtime 业务逻辑。
 
 ## 否决的方案
 
@@ -145,7 +148,7 @@ Compact 之前的事件保留在 JSONL 中供审计查阅，但不可回退到�
 3. **Cancel 时丢弃所有已生成内容** — 用户已看到文本突然消失 = 糟糕 UX
 4. **Rewind 允许跨 compact** — compact 存在就是因为 context 太长，跨过去又变长
 5. **环形缓冲按条数限制** — 事件大小差异大（text_delta vs tool_result with 大文件），按字节更公平
-6. **合并 SocketTransport / WsTransport 为一个 NetworkTransport** — 安全模型、错误模式、重连策略完全不同；浏览器不能连 Unix socket；合并只是表面统一实际内部分支更复杂
+6. **把所有 transport 塞进一个分支巨大的 NetworkTransport** — 安全模型、错误模式和重连策略不同；共享 Host use cases 即可，adapter 保持独立
 
 ## 参考
 

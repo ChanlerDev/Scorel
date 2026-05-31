@@ -13,9 +13,10 @@
 3. `docs/ROADMAP.md` — 产品阶段目标。
 4. `docs/spec/*.md` — 抽象规约。
 5. `docs/spec/ship/*.md` — 当前 active S spec。
-6. `self/` — 协作讨论、取舍过程、未正式锁定的上下文。
 
 `docs/IMPLEMENTATION_PROMPT.md` 和旧实现不作为 source of truth。
+
+`self/` 只用于本机探索性草稿，不纳入 Git handoff，也不得成为实现所需上下文。确认后的结论必须同步到 `docs/`。
 
 ---
 
@@ -52,11 +53,25 @@ pnpm typecheck && pnpm test
 
 ---
 
+## Development Stage Rule
+
+Scorel 当前仍处于 pre-1.0 开发阶段。除非某个 spec 明确要求兼容，否则默认规则是：
+
+- 优先选择长期正确、边界清晰的架构，不为未发布的旧实现保留兼容层。
+- 可以删除旧命令、旧 schema、旧 transport、旧缓存和旧本地状态文件。
+- 不添加 deprecated alias、双写逻辑、自动迁移器或 fallback 分支来延长错误抽象。
+- 发生 wire protocol 不兼容变更时，直接更新 protocol 类型、调用方、测试和 `protocolVersion`。
+- 发生本地状态不兼容变更时，在 spec 中写清楚需要删除或重建的 `~/.scorel` 工件。
+
+这条规则不代表可以无说明地破坏用户数据。Session JSONL 是否保留、重建或删除，必须由当前 spec 显式决定。
+
+---
+
 ## Ship Loop
 
 ### 1. Idea
 
-新想法先讨论，不直接写代码。讨论记录放入：
+新想法先讨论，不直接写代码。本机可选草稿位置：
 
 ```text
 self/discussions/YYYY-MM-DD-topic.md
@@ -207,7 +222,7 @@ codex/S####-slug
 - 新工作单元 → `docs/spec/ship/S####-*.md`（只在准备实现或范围已确认时创建）
 - 计划变化 → `docs/ROADMAP.md`
 - 配置 schema / provider 接入变化 → `docs/spec/extensions.md` + 当前 S spec
-- 讨论和取舍 → `self/discussions/`
-- 决策锁定 → `self/decisions/` + 必要时同步 `docs/decisions/`
+- 讨论和取舍 → 可选本机草稿 `self/discussions/`
+- 决策锁定 → 必须同步 `docs/decisions/`
 
-探索性笔记不混进 ADR；未确认方向不写成正式决策。
+探索性笔记不混进 ADR；未确认方向不写成正式决策。任何需要跨机器继续开发的上下文都必须写入 Git 跟踪的 `docs/`。

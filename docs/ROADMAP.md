@@ -11,7 +11,7 @@ Scorel 是一个 **可回放、可恢复、可远程控制的 AI Agent 工作台
 推进顺序：
 
 ```text
-Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Control → WebUI → GUI → Ecosystem
+Design Baseline → CLI Alpha → Safe Coding CLI → Remote Control → WebUI → Device-level Host → WebUI Project Management → GUI → SSH Remote Device → HTTP API → Ecosystem
 ```
 
 ---
@@ -228,13 +228,13 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Local Daemon → Remote Co
 
 **Product Intent**:
 
-M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-intent.md)。详细设计讨论在 [`self/discussions/2026-05-30-webui-rebuild-brainstorm.md`](../self/discussions/2026-05-30-webui-rebuild-brainstorm.md)。
+M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-intent.md)。
 
 **Steps**:
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
-| M5.1 | [`S0031`](spec/ship/S0031-daemon-projectslug-rule.md) | 锁定 daemon 侧 codebuddy 风格 `projectSlug` 生成规则 | Planned |
+| M5.1 | [`S0031`](spec/ship/S0031-daemon-projectslug-rule.md) | 锁定 daemon 侧 codebuddy 风格 `projectSlug` 生成规则 | Done |
 | M5.2 | [`S0032`](spec/ship/S0032-daemon-protocol-completion.md) | 重新加回 `cancel`、实现 `list_sessions` + `projectSlug` 过滤、新增 `list_projects` | Done |
 | M5.3 | [`S0033`](spec/ship/S0033-webui-skeleton-routing.md) | 建立 Next.js 14 App Router + Tailwind 4 应用骨架与路由 | Done |
 | M5.4 | [`S0034`](spec/ship/S0034-webui-device-settings.md) | Device 域模型、BrowserStore 与 Settings CRUD | Done |
@@ -270,7 +270,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 **Product Intent**:
 
-设计共识与库选型记录在 [`self/discussions/2026-05-31-webui-polish-brainstorm.md`](../self/discussions/2026-05-31-webui-polish-brainstorm.md) §5.5（决策）+ §8.2（markdown 调研结论）。
+设计共识与库选型已落实到 [`S0040`](spec/ship/S0040-webui-codex-visual-tokens.md)、[`S0041`](spec/ship/S0041-webui-markdown-and-tool-block.md) 和 [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md)。
 
 **Steps**:
 
@@ -340,13 +340,13 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 **Product Intent**:
 
-设计哲学见 [`docs/design.md`](design.md)。讨论与决策见 [`self/discussions/2026-05-31-webui-chatbox-rebuild-brainstorm.md`](../self/discussions/2026-05-31-webui-chatbox-rebuild-brainstorm.md) §5。
+设计哲学见 [`docs/design.md`](design.md)，实现合同见 [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md)。
 
 **Steps**:
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
-| M5.7.1 | [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md) | 整 webui 一刀重构:tokens + 三段式 sidebar + 折叠 + composer pill + 灰按钮 + 气泡形态 | Planned |
+| M5.7.1 | [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md) | 整 webui 一刀重构:tokens + 三段式 sidebar + 折叠 + composer pill + 灰按钮 + 气泡形态 | Done |
 
 **Not in M5.7**:
 
@@ -357,7 +357,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - Tool block 特化(Bash/Edit/diff viewer);保持统一 JSON fence。
 - Composer 历史回溯(↑ 键)。
 
-**Status**: Planned
+**Status**: Done
 
 ---
 
@@ -379,7 +379,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
-| M5.8.1 | [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport-disconnected 错误吸收 | Planned |
+| M5.8.1 | [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport-disconnected 错误吸收 | Done |
 
 **Not in M5.8**:
 
@@ -387,7 +387,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - "展开显示" 截断 UI / session 状态图标 / project 概览页改造。
 - 暗色模式 / model picker 真实切换 / daemon 协议变化。
 
-**Status**: Planned
+**Status**: Done
 
 ---
 
@@ -408,7 +408,8 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
-| M5.9.1 | [`S0046`](spec/ship/S0046-webui-empty-composer-and-lazy-session.md) | EmptyComposer + lazy session 创建 + NewChatButton 改 nav | Planned |
+| M5.9.1 | [`S0046`](spec/ship/S0046-webui-empty-composer-and-lazy-session.md) | EmptyComposer + lazy session 创建 + NewChatButton 改 nav | Done |
+| M5.9.2 | [`S0047`](spec/ship/S0047-webui-project-hover-newchat-and-dynamic-greeting.md) | Project hover 新建会话 + EmptyComposer 动态 Project greeting | Done |
 
 **Not in M5.9**:
 
@@ -417,11 +418,94 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - daemon firstPrompt 一步协议。
 - 多 device 切换 picker。
 
+**Status**: Done
+
+---
+
+## M6: Device-level Host
+
+**Goal**: 一个 Device 只有一个逻辑 Host。Host 持久管理多个 Project，Session 和 Runtime 通过稳定 `projectId` 绑定到 canonical 工作目录。
+
+**Done when**:
+
+- `~/.scorel/projects.json` 成为 Project Registry。
+- `projectId` 取代 `projectSlug` 和 `workDirHint`。
+- 同一个 WS Host 可注册两个真实仓库，并在两个 Project 下分别执行 Session。
+- CLI embedded Host、WS Host、WebUI、未来 GUI 和 HTTP API 共享同一个 Host contract。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M6.1 | [`S0048`](spec/ship/S0048-device-level-host-project-registry.md) | Device-level Host + Project Registry + project-aware Runtime | Planned |
+
 **Status**: Planned
 
 ---
 
-## M6: Ecosystem
+## M7: WebUI Project Management
+
+**Goal**: WebUI 侧边栏可以添加 Project：选择 Device、浏览该 Device 文件夹、注册工作空间、创建 Session。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M7.1 | [`S0049`](spec/ship/S0049-webui-add-project-directory-browser.md) | WebUI 添加项目 + Host 目录浏览 + projectId 路由切换 | Planned |
+
+**Status**: Planned
+
+---
+
+## M8: GUI
+
+**Goal**: 提供 Project-first desktop GUI，统一管理本地和远程 Device 上的 Project。
+
+**Candidate scope**:
+
+- 本地 Project 添加和 Session 管理。
+- 远程 Device 添加。
+- Project-first sidebar。
+- desktop main 管理本地 Host 和远程连接。
+
+**Status**: Planned
+
+---
+
+## M9: SSH Remote Device
+
+**Goal**: GUI 可通过 SSH 添加远程 Device，并在远端安装、启动或连接 Scorel Host。
+
+**Candidate scope**:
+
+- 读取用户导入的 SSH config 或手工录入连接信息。
+- 远端安装与版本检查。
+- SSH stdio proxy。
+- 已经部署好的 WS URL + token 作为高级直接连接入口。
+
+**Status**: Planned
+
+---
+
+## M10: HTTP API
+
+**Goal**: 提供纯 HTTP 集成，不要求调用方使用 GUI 或 WebSocket SDK。
+
+**Candidate scope**:
+
+- Project Registry HTTP endpoints。
+- Session 生命周期 endpoints。
+- prompt / cancel 命令。
+- SSE event stream。
+- OpenAPI。
+
+HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
+
+**Status**: Planned
+
+---
+
+## M11: Ecosystem
 
 **Goal**: Scorel 可以通过 MCP、extensions、channels 接入外部工作流。
 
@@ -468,8 +552,8 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0027`](spec/ship/S0027-session-diagnostics-log.md) | 为每个 session 增加同目录 diagnostics `.log`，暴露 provider/runtime/daemon 调试信息 | Done |
 | [`S0028`](spec/ship/S0028-client-attach-diagnostics-log.md) | 为本地 attach cache 增加同级 diagnostics `.log`，暴露 remote/local attach 客户端侧调试信息 | Done |
 | [`S0029`](spec/ship/S0029-project-index-for-session-lookup.md) | 增加轻量 project index，用 project 视角索引 local/remote sessions 与 attach logs | Done |
-| [`S0030`](spec/ship/S0030-webui-product-intent.md) | 记录 M5 WebUI 产品方向：Device -> Project -> Session -> Chatbox，作为下一轮实现前置共识 | Planned |
-| [`S0031`](spec/ship/S0031-daemon-projectslug-rule.md) | 锁定 daemon 侧 codebuddy 风格 `projectSlug` 生成规则 | Planned |
+| [`S0030`](spec/ship/S0030-webui-product-intent.md) | 记录 M5 WebUI 产品方向：Device -> Project -> Session -> Chatbox，作为下一轮实现前置共识 | Done |
+| [`S0031`](spec/ship/S0031-daemon-projectslug-rule.md) | 锁定 daemon 侧 codebuddy 风格 `projectSlug` 生成规则 | Done |
 | [`S0032`](spec/ship/S0032-daemon-protocol-completion.md) | 重新加回 `cancel`，实现 `list_sessions` + `projectSlug` 过滤，新增 `list_projects` | Done |
 | [`S0033`](spec/ship/S0033-webui-skeleton-routing.md) | Next.js 14 App Router + Tailwind 4 应用骨架与路由 | Done |
 | [`S0034`](spec/ship/S0034-webui-device-settings.md) | WebUI Device 域模型、BrowserStore、Settings CRUD | Done |
@@ -482,10 +566,12 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | [`S0041`](spec/ship/S0041-webui-markdown-and-tool-block.md) | WebUI markdown 渲染、代码高亮与统一 tool 块 | Done |
 | [`S0042`](spec/ship/S0042-webui-streaming-ux-autoscroll.md) | WebUI streaming UX 与 autoscroll | Done |
 | [`S0043`](spec/ship/S0043-startup-ergonomics.md) | 单 `scorel` 入口、token 持久化、WebUI 自动发现、`scorel up` 一键启动 | Done |
-| [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md) | WebUI 一刀重构为 Chatbox 风 + ChatGPT 哲学(推翻 M5.5) | Planned |
-| [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport guard | Planned |
-| [`S0046`](spec/ship/S0046-webui-empty-composer-and-lazy-session.md) | 空态主区大 composer + project picker + lazy session 创建 | Planned |
-| [`S0047`](spec/ship/S0047-webui-project-hover-newchat-and-dynamic-greeting.md) | Project 行 hover ✏ 新建会话按钮 + EmptyComposer H1 动态 project 名 | Planned |
+| [`S0044`](spec/ship/S0044-webui-chatbox-rebuild.md) | WebUI 一刀重构为 Chatbox 风 + ChatGPT 哲学(推翻 M5.5) | Done |
+| [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport guard | Done |
+| [`S0046`](spec/ship/S0046-webui-empty-composer-and-lazy-session.md) | 空态主区大 composer + project picker + lazy session 创建 | Done |
+| [`S0047`](spec/ship/S0047-webui-project-hover-newchat-and-dynamic-greeting.md) | Project 行 hover ✏ 新建会话按钮 + EmptyComposer H1 动态 project 名 | Done |
+| [`S0048`](spec/ship/S0048-device-level-host-project-registry.md) | Device-level Host、持久 Project Registry、project-aware Runtime | Planned |
+| [`S0049`](spec/ship/S0049-webui-add-project-directory-browser.md) | WebUI 添加项目、Device 目录浏览、projectId 路由切换 | Planned |
 
 ---
 

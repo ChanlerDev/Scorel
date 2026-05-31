@@ -4,6 +4,8 @@
 **日期**：2026-05-22
 **参与者**：Chanler, Claude
 
+> 2026-06-01 补充：本 ADR 保留“所有 Entry 通过统一 Host 层访问 Runtime”的原始决策。具体部署已经演进：Unix socket 和 `apps/daemon` 已由 S0043 删除；Device-level Host、Project Registry、WebSocket / SSH proxy / HTTP adapter 的目标态以 [`ADR-006`](006-device-host-project-registry.md) 为准。
+
 ## 决策
 
 在 Entry（CLI / GUI / WebUI / IM Bot）和 Scorel Core 之间引入统一的 **Daemon 层**。所有 Entry 都是 thin client，通过统一协议与 Daemon 交互。Daemon 是 Runtime 和 Session 的唯一持有者与写入者。
@@ -26,7 +28,7 @@
 Entry Layer（纯 UI / IO）
     │
 DaemonClient（统一协议客户端）
-    │ transport: embedded | socket | ws
+    │ transport: embedded | ws | future ssh proxy / HTTP + SSE
     │
 Daemon（运行时持有者，唯一 session writer）
     │
@@ -47,15 +49,16 @@ pi-ai + pi-agent-core
 | Extension / MCP 生命周期 | — |
 | 断线重连 + missed event 补发 | — |
 
-### 三种部署模式（三种 Transport 实现）
+### Transport adapter
 
 | 模式 | 场景 | Transport |
 |---|---|---|
-| **embedded** | CLI/GUI 单用户本地 | EmbeddedTransport（进程内直调，零开销） |
-| **local standalone** | 多 Entry 共享、后台持久运行 | SocketTransport（Unix socket，文件权限 auth） |
-| **remote** | VPS agent、手机遥控、IM bot / WebUI | WsTransport（WebSocket + TLS + token auth） |
+| **embedded** | CLI 单用户本地临时 Host | EmbeddedTransport（进程内直调，零开销） |
+| **WS Host** | WebUI、CLI remote attach、直接远程连接 | WsTransport（WebSocket + token auth） |
+| **SSH remote device** | GUI 管理远程 Device，后续阶段 | SSH stdio proxy |
+| **pure API** | HTTP 集成，后续阶段 | HTTP + SSE adapter |
 
-三种实现共享 `DaemonTransport` interface，Client 代码不变。保持独立实现是因为安全模型、错误处理、重连策略各自不同。
+各 adapter 映射同一 Host use cases。Client 代码复用，业务逻辑不进入 transport。
 
 Client 代码完全一样，传输层是可替换 adapter：
 
