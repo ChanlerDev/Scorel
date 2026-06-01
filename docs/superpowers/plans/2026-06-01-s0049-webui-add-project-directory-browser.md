@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 WebUI 侧边栏加入“添加项目”，让用户选择 Device、浏览该 Device 的目录、注册 Project，并在新 Project 下创建 Session。
+**Goal:** 在 WebUI 侧边栏加入“添加项目”，让用户选择 Device、浏览该 Device 的目录、注册 Project，并立即看到 Host Registry 的完整 Project 列表。
 
-**Architecture:** WebUI 继续保持 Device-first。Browser 只通过 `DaemonClient` 调用 Host 的目录浏览和 Project Registry API，不直接访问文件系统。所有 UI store、routes、cache 和 sync key 从 `projectSlug` 一次性切到 opaque `projectId`。
+**Architecture:** WebUI 保持 Device-first。Project 是 Host 上 canonical 工作目录的稳定抽象，不是客户端 subscription。Browser 只通过 `DaemonClient` 调用 Host API，不直接读取或解释文件系统。S0048 已完成 `projectId`、route、store、cache 和 Session create 迁移；S0049 只实现目录浏览和注册 UI，并保留 Session 按 Project 懒加载。
 
 **Tech Stack:** Next.js App Router、React、TypeScript、Vitest、Testing Library、现有 `@scorel/client`。
 
@@ -13,134 +13,122 @@
 ## Source Of Truth
 
 - [`docs/spec/ship/S0049-webui-add-project-directory-browser.md`](../../spec/ship/S0049-webui-add-project-directory-browser.md)
+- [`docs/plans/2026-06-01-s0049-webui-add-project-directory-browser-design.md`](../../plans/2026-06-01-s0049-webui-add-project-directory-browser-design.md)
 - [`docs/spec/client.md`](../../spec/client.md)
 - [`docs/spec/daemon.md`](../../spec/daemon.md)
 
 ## Precondition
 
 - [ ] Confirm S0048 is implemented, committed, pushed, and Roadmap status is `Done`.
-- [ ] Run `pnpm typecheck && pnpm test` before editing WebUI.
+- [ ] Create branch `codex/S0049-webui-add-project-directory-browser`.
+- [ ] Run `pnpm check` before editing WebUI.
 
-## Task 1: Switch WebUI Domain State To projectId
+## Already Completed By S0048
 
-**Files:**
+- [x] WebUI domain state uses `projectId`.
+- [x] Project routes use `[projectId]`.
+- [x] `syncProjects()` uses Registry entries.
+- [x] `syncSessions()` sends `{ projectId }` and dedupes by Device + Project.
+- [x] Session create sends `meta.projectId`.
+- [x] attach cache scope uses Device + Project + Session.
+- [x] stale slug-based browser storage is discarded.
 
-- Modify: `apps/webui/lib/domain/devices.ts`
-- Modify: `apps/webui/lib/store/devices.ts`
-- Modify: `apps/webui/lib/store/devices.test.ts`
-- Modify: `apps/webui/lib/store/browser-store.ts`
-- Modify: `apps/webui/lib/store/browser-store.test.ts`
-- Modify: `apps/webui/lib/store/last-active-project.ts`
-- Modify: `apps/webui/lib/store/last-active-project.test.ts`
-
-- [ ] Write failing tests for `DeviceProject.projectId`, `workDir`, store version bump, and last-active Project by ID.
-- [ ] Delete slug-based store migration and snapshots.
-- [ ] Update all store indexing to `projectId`.
-- [ ] Run `pnpm --filter @scorel/webui test -- lib/store`.
-
-Expected: stale browser state is discarded instead of migrated.
-
-## Task 2: Switch Sync, Session Create, Cache And Diagnostics
+## Task 1: Add Directory Browser Dialog Tests
 
 **Files:**
 
-- Modify: `apps/webui/lib/sync/projects.ts`
-- Modify: `apps/webui/lib/sync/projects.test.ts`
-- Modify: `apps/webui/lib/sync/sessions.ts`
-- Modify: `apps/webui/lib/sync/sessions.test.ts`
-- Modify: `apps/webui/lib/sync/session-create.ts`
-- Modify: `apps/webui/lib/sync/session-create.test.ts`
-- Modify: `apps/webui/lib/identity/scope-key.ts`
-- Modify: `apps/webui/lib/identity/scope-key.test.ts`
-- Modify: `apps/webui/lib/diagnostics/connection-summary.ts`
-- Modify: `apps/webui/lib/diagnostics/connection-summary.test.ts`
-- Modify: `apps/webui/lib/connection/use-connection.ts`
-- Modify: `apps/webui/lib/connection/session.ts`
+- Create: `apps/webui/components/projects/add-project-dialog.test.tsx`
 
-- [ ] Write failing tests for `listSessions({ projectId })`, dedupe by `deviceId + projectId`, Session create with `meta.projectId`, and cache scope by Project ID.
-- [ ] Replace slug-based names and comments.
-- [ ] Keep URL as transport locator only.
-- [ ] Run `pnpm --filter @scorel/webui test -- lib`.
+- [ ] Add failing test: no Device shows Settings guidance.
+- [ ] Add failing test: one Device enters directory browsing directly.
+- [ ] Add failing test: multiple Devices require Device selection.
+- [ ] Add failing tests: loading, empty listing, and filesystem error.
+- [ ] Add failing test: child navigation passes Host-returned child `path`.
+- [ ] Add failing test: parent navigation passes Host-returned `parentPath`.
+- [ ] Add failing test: choose current directory calls `registerProject(currentPath)`.
+- [ ] Add failing test: registration error keeps dialog open and renders message.
+- [ ] Add failing test: successful registration returns Host Project to caller.
 
-Expected: internal WebUI state no longer assumes path-derived identity.
+Expected: tests fail because the dialog does not exist.
 
-## Task 3: Move Project Routes
-
-**Files:**
-
-- Move: `apps/webui/app/devices/[deviceId]/projects/[projectSlug]`
-- To: `apps/webui/app/devices/[deviceId]/projects/[projectId]`
-- Modify: `apps/webui/src/routes.test.ts`
-- Modify: `apps/webui/components/shell/project-node.tsx`
-- Modify: `apps/webui/components/shell/project-node.test.tsx`
-- Modify: `apps/webui/components/shell/session-node.tsx`
-- Modify: `apps/webui/components/shell/session-node.test.tsx`
-- Modify: `apps/webui/components/shell/new-chat-button.tsx`
-- Modify: `apps/webui/components/shell/new-chat-button.test.tsx`
-
-- [ ] Change route tests first and confirm they fail.
-- [ ] Move route directory with `git mv`.
-- [ ] Replace route params, labels, hrefs, and pending prompt keys with `projectId`.
-- [ ] Use `displayName ?? projectId` only for UI fallback.
-- [ ] Run `pnpm --filter @scorel/webui test -- src/routes.test.ts components/shell`.
-
-Expected: routes carry opaque Project ID and retain readable labels.
-
-## Task 4: Add Directory Browser Dialog
+## Task 2: Implement Directory Browser Dialog
 
 **Files:**
 
 - Create: `apps/webui/components/projects/add-project-dialog.tsx`
-- Create: `apps/webui/components/projects/add-project-dialog.test.tsx`
 
-- [ ] Write failing tests for Device selection, initial listing, child navigation, parent navigation, loading, empty state, filesystem error, registration success, and registration failure.
-- [ ] Implement dialog state around `client.listDirectories()` and `client.registerProject()`.
-- [ ] Always render Host-returned `path` and `parentPath`; do not interpret remote path syntax in browser code.
-- [ ] Keep dialog open on error.
-- [ ] Run `pnpm --filter @scorel/webui test -- add-project-dialog`.
+- [ ] Implement Device selection.
+- [ ] Resolve connected Device client through existing connection pool helpers.
+- [ ] Call `client.listDirectories(path?)`.
+- [ ] Render Host-returned canonical `path`, `parentPath`, and child entries.
+- [ ] Do not concatenate, normalize, or reverse-parse paths in browser code.
+- [ ] Call `client.registerProject(currentPath)` on confirmation.
+- [ ] Keep dialog open with explicit error on list or registration failure.
+- [ ] Run focused dialog tests.
 
-Expected: dialog is transport-neutral and works for local or remote Device.
+Expected: dialog is transport-neutral and works for local or remote Devices.
 
-## Task 5: Wire Sidebar Add Project
+## Task 3: Wire Sidebar Add Project
 
 **Files:**
 
 - Modify: `apps/webui/components/shell/sidebar.tsx`
 - Modify: `apps/webui/components/shell/sidebar.test.tsx`
-- Modify: `apps/webui/components/chatbox/empty-composer.tsx`
-- Modify: `apps/webui/components/chatbox/empty-composer.test.tsx`
-- Modify: relevant project and session route tests under `apps/webui/app/devices`
 
-- [ ] Add failing sidebar tests for no Device, one Device, multiple Devices, success auto-select, and error visibility.
-- [ ] Add the visible “添加项目” action in sidebar.
-- [ ] After registration, refresh Project list and navigate to the new Project.
-- [ ] Ensure all New Chat entry points create Session with selected `projectId`.
-- [ ] Run `pnpm --filter @scorel/webui test`.
+- [ ] Add failing sidebar tests for visible “添加项目” action.
+- [ ] Add failing integration test: successful registration invokes `syncProjects()` for the selected Device.
+- [ ] Add failing integration test: registration does not manually append a Project to browser store.
+- [ ] Add failing integration test: successful registration expands and navigates to `/devices/:deviceId/projects/:projectId`.
+- [ ] Render Add Project dialog from sidebar.
+- [ ] After dialog success, call existing `syncProjects({ client, store, deviceId })`.
+- [ ] Keep error visible when registration or sync fails.
+- [ ] Run focused sidebar tests.
 
-Expected: adding a Project is discoverable from the primary sidebar.
+Expected: sidebar refreshes Host Registry truth after registration.
 
-## Task 6: Clean Old WebUI Contract
+## Task 4: Preserve Lazy Session Loading
 
+**Files:**
+
+- Modify only if needed: `apps/webui/components/shell/project-node.tsx`
+- Modify only if needed: `apps/webui/lib/sync/sessions.ts`
+- Modify tests only if needed: related project node and sync tests
+
+- [ ] Add or retain regression test: `syncProjects()` does not call `listSessions()`.
+- [ ] Retain regression test: selecting or entering Project calls `listSessions({ projectId })`.
+- [ ] Retain regression test: Session page loads JSONL only after Session selection.
+- [ ] Do not add Project disable, visible-project subset, Session delete, Session archive, or `session-state.json`.
+
+Expected: adding directory browsing does not widen Device connect into eager Session loading.
+
+## Task 5: Documentation And Contract Cleanup
+
+**Files:**
+
+- Modify: `apps/webui/README.md`
+
+- [ ] Document: adding a Device shows the complete Host Registry Project list.
+- [ ] Document: Add Project browses the target Device Host filesystem.
+- [ ] Document: Project registration is idempotent for the same canonical directory.
+- [ ] Confirm ordinary WebUI does not expose `remove_project`.
 - [ ] Run:
 
 ```bash
-rg -n "projectSlug|workDirHint" apps/webui
+rg -n "projectSlug|workDirHint|visibleProject|session-state|archiveSession" apps/webui
 ```
 
-- [ ] Remove all current production and test hits.
-- [ ] Update `apps/webui/README.md` with the Add Project flow.
-- [ ] Confirm old browser local storage is intentionally discarded.
+Expected: no stale or overbuilt lifecycle state enters WebUI.
 
-Expected: no stale slug contract remains in WebUI.
+## Task 6: Verify And Ship
 
-## Task 7: Verify And Ship
-
-- [ ] Run `pnpm typecheck`.
-- [ ] Run `pnpm test`.
+- [ ] Run `pnpm check`.
 - [ ] Start `pnpm dev`.
-- [ ] Add two real temporary repositories from sidebar.
+- [ ] Add Device in WebUI.
+- [ ] Add two real temporary repositories through sidebar directory browser.
+- [ ] Confirm Device shows the complete Host Registry Project list.
+- [ ] Expand both Projects and confirm Session lists load per Project.
 - [ ] Create one Session under each Project.
-- [ ] Send prompts through a real provider.
+- [ ] Send prompts through a real provider and verify cwd isolation.
 - [ ] Refresh browser and verify Device -> Project -> Session restoration.
 - [ ] Attach CLI to one Session and verify shared event stream.
 - [ ] Update Roadmap status for S0049 only after all checks pass.
@@ -149,5 +137,4 @@ Expected: no stale slug contract remains in WebUI.
 ```bash
 git add apps/webui docs
 git commit -m "S0049: feat: add webui project directory browser"
-git push origin main
 ```

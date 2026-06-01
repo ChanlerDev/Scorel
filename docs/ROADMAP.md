@@ -445,7 +445,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ## M7: WebUI Project Management
 
-**Goal**: WebUI 侧边栏可以添加 Project：选择 Device、浏览该 Device 文件夹、注册工作空间、创建 Session。
+**Goal**: WebUI 侧边栏可以添加 Project：选择 Device、浏览该 Device 文件夹、注册工作空间，并展示该 Host Registry 中的全部 Project；Session 继续按 Project 懒加载。
 
 **Steps**:
 
