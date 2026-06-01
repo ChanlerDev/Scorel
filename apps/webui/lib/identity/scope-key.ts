@@ -6,9 +6,9 @@
  *
  * For the WebUI we always use:
  *   kind    = "remote"
- *   locator = `device:<remoteDeviceId>/project:<projectSlug>`
+ *   locator = `device:<remoteDeviceId>/project:<projectId>`
  *
- * SubtleCrypto is async, so this returns a Promise. Per (deviceId, projectSlug)
+ * SubtleCrypto is async, so this returns a Promise. Per (deviceId, projectId)
  * the resulting Promise is memoized in a module-scoped Map so callers can
  * await it cheaply on every render.
  */
@@ -53,14 +53,14 @@ async function digest(input: string): Promise<string> {
  */
 export function computeScopeKey(
   remoteDeviceId: string,
-  projectSlug: string,
+  projectId: string,
 ): Promise<string> {
-  // Cache key uses NUL too so a deviceId containing the projectSlug-prefix
+  // Cache key uses NUL too so a deviceId containing the projectId-prefix
   // can never collide with a sibling.
-  const cacheKey = `${remoteDeviceId}${SEPARATOR}${projectSlug}`;
+  const cacheKey = `${remoteDeviceId}${SEPARATOR}${projectId}`;
   const existing = cache.get(cacheKey);
   if (existing) return existing;
-  const locator = `device:${remoteDeviceId}/project:${projectSlug}`;
+  const locator = `device:${remoteDeviceId}/project:${projectId}`;
   const promise = digest(`remote${SEPARATOR}${locator}`);
   cache.set(cacheKey, promise);
   // If the digest call rejects, drop the cached promise so the next attempt

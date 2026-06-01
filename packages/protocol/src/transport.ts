@@ -13,9 +13,8 @@ export type ConnectResult = {
   clientId: ClientId;
   sessionId?: SessionId;
   currentSeq?: Seq;
-  deviceId?: DeviceId;
+  deviceId: DeviceId;
   deviceDisplayName?: string;
-  projectSlug?: string;
 };
 
 export type RemoteEndpoint = {

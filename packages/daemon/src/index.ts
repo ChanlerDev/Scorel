@@ -2,8 +2,9 @@ import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
-import { toProjectSlug } from "./projects/slug.js";
-import { ProjectAggregator } from "./projects/aggregator.js";
+import { listDirectories as browseDirectories } from "./projects/directories.js";
+import { ProjectRegistry, ProjectRegistryError } from "./projects/registry.js";
+import { listSessionSummaries } from "./projects/sessions.js";
 
 import {
   ScorelRuntime,
@@ -23,6 +24,7 @@ import {
 } from "@scorel/core";
 import {
   asClientId,
+  asDeviceId,
   asEventId,
   asSeq,
   asSessionId,
@@ -37,7 +39,9 @@ import {
   type DaemonMessage,
   type DeviceId,
   type EventId,
+  type HostProject,
   type PersistentEvent,
+  type ProjectId,
   type ScorelEvent,
   type Seq,
   type SessionId,
@@ -52,7 +56,7 @@ export const daemonPackageName = "@scorel/daemon" as const;
 export const daemonCoreDependency = corePackageName;
 export const daemonProtocolDependency = protocolPackageName;
 export const daemonProtocolVersion = protocolVersion;
-export type EmbeddedDaemonTransport = DaemonTransport;
+export type ScorelHostTransport = DaemonTransport;
 export { loadScorelConfig, scorelSessionsDir, type ScorelConfig };
 
 /**
@@ -68,7 +72,6 @@ export type LocalDaemonState = {
   port: number;
   wsUrl: string;
   token: string;
-  cwd: string;
   pid: number;
   startedAt: number;
   stoppedAt: number | null;
@@ -111,7 +114,6 @@ export const createLocalDaemonState = async (options: CreateLocalDaemonStateOpti
     port: options.port,
     wsUrl: options.wsUrl,
     token: options.token,
-    cwd: options.cwd,
     pid: options.pid,
     startedAt: options.startedAt,
     stoppedAt: options.stoppedAt,
@@ -129,7 +131,6 @@ export const readLocalDaemonState = async (options: LocalDaemonStateOptions): Pr
       typeof raw.port !== "number" ||
       typeof raw.wsUrl !== "string" ||
       typeof raw.token !== "string" ||
-      typeof raw.cwd !== "string" ||
       typeof raw.pid !== "number" ||
       typeof raw.startedAt !== "number" ||
       !(raw.stoppedAt === null || typeof raw.stoppedAt === "number")
@@ -141,7 +142,6 @@ export const readLocalDaemonState = async (options: LocalDaemonStateOptions): Pr
       port: raw.port,
       wsUrl: raw.wsUrl,
       token: raw.token,
-      cwd: raw.cwd,
       pid: raw.pid,
       startedAt: raw.startedAt,
       stoppedAt: raw.stoppedAt,
@@ -257,10 +257,11 @@ export const startRemoteDaemonWebSocketServer = async (
           return;
         }
         connection.clientId = message.clientId;
-        const result = options.onClientConnect?.(connection, message) ?? {
+        const result: ConnectResult = options.onClientConnect?.(connection, message) ?? {
           clientId: message.clientId,
           sessionId: message.sessionId,
           currentSeq: message.streamLastSeq ?? message.lastSeq ?? asSeq(0),
+          deviceId: asDeviceId("device_unknown"),
         };
         connection.send({
           type: "connected",
@@ -269,7 +270,6 @@ export const startRemoteDaemonWebSocketServer = async (
           currentSeq: result.currentSeq,
           deviceId: result.deviceId,
           deviceDisplayName: result.deviceDisplayName,
-          projectSlug: result.projectSlug,
         });
         return;
       }
@@ -302,8 +302,8 @@ export const startRemoteDaemonWebSocketServer = async (
   };
 };
 
-export const startEmbeddedDaemonWebSocketServer = async (
-  options: { daemon: EmbeddedDaemon; host: string; port: number; token: string },
+export const startScorelHostWebSocketServer = async (
+  options: { hostService: ScorelHost; host: string; port: number; token: string },
 ): Promise<RemoteDaemonWebSocketServer> => {
   const connections = new WeakMap<RemoteDaemonWebSocketConnection, Connection>();
   const daemonConnectionFor = (webSocketConnection: RemoteDaemonWebSocketConnection, params?: ConnectParams): Connection => {
@@ -316,7 +316,7 @@ export const startEmbeddedDaemonWebSocketServer = async (
       emit: (daemonMessage) => webSocketConnection.send(daemonMessage),
     };
     connections.set(webSocketConnection, connection);
-    webSocketConnection.socket.once("close", () => options.daemon.disconnect(connection));
+    webSocketConnection.socket.once("close", () => options.hostService.disconnect(connection));
     return connection;
   };
 
@@ -327,14 +327,13 @@ export const startEmbeddedDaemonWebSocketServer = async (
     onClientConnect: (webSocketConnection, params) => {
       const daemonConnection = daemonConnectionFor(webSocketConnection, params);
       daemonConnection.clientId = params.clientId;
-      const result = options.daemon.connect(daemonConnection, params.sessionId);
+      const result = options.hostService.connect(daemonConnection, params.sessionId);
       return {
         clientId: params.clientId,
         sessionId: result.sessionId,
         currentSeq: result.currentSeq,
         deviceId: result.deviceId,
         deviceDisplayName: result.deviceDisplayName,
-        projectSlug: result.projectSlug,
       };
     },
     onClientMessage: (webSocketConnection, message) => {
@@ -347,7 +346,7 @@ export const startEmbeddedDaemonWebSocketServer = async (
           message: "websocket is not connected",
         };
       }
-      void options.daemon.handleMessage(daemonConnection, message).catch((cause) => {
+      void options.hostService.handleMessage(daemonConnection, message).catch((cause) => {
         webSocketConnection.send({
           type: "error",
           ok: false,
@@ -373,19 +372,12 @@ export type RuntimeFactoryOptions = {
   config: ScorelConfig;
 };
 
-export type EmbeddedDaemonOptions = {
+export type ScorelHostOptions = {
   sessionsDir: string;
+  projectsPath: string;
   deviceId: DeviceId;
   deviceDisplayName?: string;
-  /**
-   * Daemon working directory. Drives the codebuddy-style `projectSlug`
-   * exposed to clients via handshake / event metadata / diagnostics. Must be
-   * an absolute path; relative inputs are resolved per `path.resolve`.
-   *
-   * See `packages/daemon/src/projects/slug.ts` for the rule.
-   */
-  workDir: string;
-  createRuntime: (sessionId: SessionId) => ScorelRuntime;
+  createRuntime: (options: { sessionId: SessionId; project: HostProject }) => Promise<ScorelRuntime>;
   now?: () => number;
   createId?: () => string;
 };
@@ -406,6 +398,7 @@ export const createRealRuntime = (options: RuntimeFactoryOptions): ScorelRuntime
 
 type SessionLane = {
   session: JsonlSession;
+  project: HostProject;
   runtime: ScorelRuntime;
   queue: Promise<unknown>;
 };
@@ -436,35 +429,32 @@ type RuntimeEventState = {
 
 type ResyncEventsResult = ClientRequestMap["resync_events"]["response"];
 
-export class EmbeddedDaemon {
+export class ScorelHost {
   readonly #sessionsDir: string;
   readonly #deviceId: DeviceId;
   readonly #deviceDisplayName: string | undefined;
-  readonly #workDir: string;
-  readonly #projectSlug: string;
-  readonly #createRuntime: (sessionId: SessionId) => ScorelRuntime;
+  readonly #createRuntime: ScorelHostOptions["createRuntime"];
   readonly #now: () => number;
   readonly #createId: () => string;
   readonly #sessions = new Map<SessionId, SessionLane>();
   readonly #connections = new Set<Connection>();
   readonly #events = new Map<SessionId, ScorelEvent[]>();
   readonly #seqs = new Map<SessionId, number>();
-  readonly #aggregator: ProjectAggregator;
+  readonly #registry: ProjectRegistry;
   #started = false;
 
-  constructor(options: EmbeddedDaemonOptions) {
+  constructor(options: ScorelHostOptions) {
     this.#sessionsDir = options.sessionsDir;
     this.#deviceId = options.deviceId;
     this.#deviceDisplayName = options.deviceDisplayName;
-    this.#workDir = options.workDir;
-    this.#projectSlug = toProjectSlug(options.workDir);
     this.#createRuntime = options.createRuntime;
     this.#now = options.now ?? Date.now;
     this.#createId = options.createId ?? (() => crypto.randomUUID());
-    this.#aggregator = new ProjectAggregator({
+    this.#registry = new ProjectRegistry({
       sessionsDir: this.#sessionsDir,
-      fallbackProjectSlug: this.#projectSlug,
-      fallbackWorkDirHint: this.#workDir,
+      projectsPath: options.projectsPath,
+      createId: this.#createId,
+      now: this.#now,
     });
   }
 
@@ -486,7 +476,6 @@ export class EmbeddedDaemon {
         clientId: connection.clientId,
         deviceId: this.#deviceId,
         deviceDisplayName: this.#deviceDisplayName,
-        projectSlug: this.#projectSlug,
       });
     }
     return {
@@ -495,7 +484,6 @@ export class EmbeddedDaemon {
       currentSeq: asSeq(sessionId ? (this.#seqs.get(sessionId) ?? 0) : 0),
       deviceId: this.#deviceId,
       deviceDisplayName: this.#deviceDisplayName,
-      projectSlug: this.#projectSlug,
     };
   }
 
@@ -514,6 +502,53 @@ export class EmbeddedDaemon {
 
   async handleMessage(connection: Connection, message: ClientMessage): Promise<void> {
     this.#assertStarted();
+    try {
+      await this.#handleMessage(connection, message);
+    } catch (cause) {
+      if ("requestId" in message) {
+        connection.emit({
+          type: "error",
+          requestId: message.requestId,
+          ok: false,
+          code: wireErrorCode(cause),
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+        return;
+      }
+      throw cause;
+    }
+  }
+
+  async listDirectories(path?: string) {
+    const listing = await browseDirectories(path);
+    await this.#appendHostDiagnostic("directory_listed", { path: listing.path });
+    return listing;
+  }
+
+  async registerProject(workDir: string): Promise<HostProject> {
+    const project = await this.#registry.register(workDir);
+    await this.#appendHostDiagnostic("project_registered", {
+      projectId: project.projectId,
+      workDir: project.workDir,
+    });
+    return project;
+  }
+
+  async listProjects(): Promise<HostProject[]> {
+    return this.#registry.list();
+  }
+
+  async removeProject(projectId: ProjectId): Promise<boolean> {
+    const project = await this.#registry.require(projectId);
+    const removed = await this.#registry.remove(projectId);
+    await this.#appendHostDiagnostic("project_removed", {
+      projectId,
+      workDir: project.workDir,
+    });
+    return removed;
+  }
+
+  async #handleMessage(connection: Connection, message: ClientMessage): Promise<void> {
     switch (message.type) {
       case "create_session":
         await this.#handleCreateSession(connection, message);
@@ -551,16 +586,31 @@ export class EmbeddedDaemon {
         this.disconnect(connection);
         break;
       case "list_sessions": {
-        const sessions = await this.#aggregator.listSessions(
-          { projectSlug: message.projectSlug, limit: message.limit },
-          this.#aggregatorOverrides(),
+        const sessions = await listSessionSummaries(
+          this.#sessionsDir,
+          { projectId: message.projectId, limit: message.limit },
+          this.#sessionSummaryOverrides(),
         );
         this.#respond(connection, message, { sessions });
         break;
       }
       case "list_projects": {
-        const projects = await this.#aggregator.listProjects(this.#aggregatorOverrides());
-        this.#respond(connection, message, { projects });
+        this.#respond(connection, message, { projects: await this.listProjects() });
+        break;
+      }
+      case "list_directories": {
+        this.#respond(connection, message, await this.listDirectories(message.path));
+        break;
+      }
+      case "register_project": {
+        this.#respond(connection, message, { project: await this.registerProject(message.workDir) });
+        break;
+      }
+      case "remove_project": {
+        this.#respond(connection, message, {
+          projectId: message.projectId,
+          removed: await this.removeProject(message.projectId),
+        });
         break;
       }
       case "cancel":
@@ -571,7 +621,11 @@ export class EmbeddedDaemon {
 
   async #handleCreateSession(connection: Connection, request: ClientRequest<"create_session">): Promise<void> {
     const sessionId = request.sessionId ?? asSessionId(`ses_${this.#createId()}`);
+    const project = await this.#resolveProject(sessionId, request.meta.projectId);
     if (request.sessionId && (await this.#loadExistingLaneIfPresent(sessionId))) {
+      if (this.#sessions.get(sessionId)?.project.projectId !== project.projectId) {
+        throw new ProjectRegistryError("conflict", `Session ${sessionId} belongs to another project`);
+      }
       await this.#appendDiagnostic(sessionId, "session_loaded", { clientId: connection.clientId });
       this.#respond(connection, request, { sessionId });
       return;
@@ -579,7 +633,7 @@ export class EmbeddedDaemon {
     let lane: SessionLane;
     let created = true;
     try {
-      lane = await this.#createLane(sessionId, request.meta ?? {});
+      lane = await this.#createLane(sessionId, request.meta, project);
     } catch (cause) {
       if (!request.sessionId || !isNodeErrorCode(cause, "EEXIST")) {
         throw cause;
@@ -594,7 +648,9 @@ export class EmbeddedDaemon {
     }
     await this.#appendDiagnostic(sessionId, created ? "session_created" : "session_loaded", {
       clientId: connection.clientId,
-      model: request.meta?.model,
+      projectId: lane.project.projectId,
+      workDir: lane.project.workDir,
+      model: request.meta.model,
     });
     this.#respond(connection, request, { sessionId });
   }
@@ -691,13 +747,7 @@ export class EmbeddedDaemon {
     }
   }
 
-  /**
-   * Build a per-sessionId override map from in-memory state. Live lanes have
-   * the most up-to-date `currentSeq` (and implicitly `updatedAt` ≈ now). The
-   * aggregator's disk scan returns header-time data; overrides bring it
-   * forward without reading every JSONL tail.
-   */
-  #aggregatorOverrides(): Map<string, { currentSeq?: number; updatedAt?: number }> {
+  #sessionSummaryOverrides(): Map<string, { currentSeq?: number; updatedAt?: number }> {
     const overrides = new Map<string, { currentSeq?: number; updatedAt?: number }>();
     for (const [sessionId, currentSeq] of this.#seqs.entries()) {
       overrides.set(String(sessionId), { currentSeq });
@@ -833,7 +883,6 @@ export class EmbeddedDaemon {
   ): Promise<PersistentEvent> {
     const withSeq = { ...event, seq: this.#nextSeq(lane.session.header.sessionId) } as PersistentEvent;
     await lane.session.append(withSeq);
-    this.#aggregator.invalidate();
     this.#recordAndBroadcast(lane.session.header.sessionId, withSeq);
     return withSeq;
   }
@@ -950,9 +999,16 @@ export class EmbeddedDaemon {
       return existing;
     }
     const loaded = await loadSession({ sessionsDir: this.#sessionsDir, sessionId });
+    const project = await this.#resolveProject(sessionId, loaded.header.meta.projectId);
+    const runtime = await this.#createRuntime({ sessionId, project });
+    await this.#appendDiagnostic(sessionId, "runtime_created", {
+      projectId: project.projectId,
+      workDir: project.workDir,
+    });
     const lane = {
       session: loaded,
-      runtime: this.#createRuntime(sessionId),
+      project,
+      runtime,
       queue: Promise.resolve(),
     };
     this.#sessions.set(sessionId, lane);
@@ -975,7 +1031,7 @@ export class EmbeddedDaemon {
     }
   }
 
-  async #createLane(sessionId: SessionId, meta: Partial<SessionMeta>): Promise<SessionLane> {
+  async #createLane(sessionId: SessionId, meta: SessionMeta, project: HostProject): Promise<SessionLane> {
     const session = await createSession({
       sessionsDir: this.#sessionsDir,
       header: {
@@ -985,15 +1041,18 @@ export class EmbeddedDaemon {
         createdAt: this.#now(),
         meta: {
           ...meta,
-          projectSlug: meta.projectSlug ?? this.#projectSlug,
-          workDirHint: meta.workDirHint ?? this.#workDir,
         },
       },
     });
-    this.#aggregator.invalidate();
+    const runtime = await this.#createRuntime({ sessionId, project });
+    await this.#appendDiagnostic(sessionId, "runtime_created", {
+      projectId: project.projectId,
+      workDir: project.workDir,
+    });
     return {
       session,
-      runtime: this.#createRuntime(sessionId),
+      project,
+      runtime,
       queue: Promise.resolve(),
     };
   }
@@ -1014,7 +1073,7 @@ export class EmbeddedDaemon {
 
   #assertStarted(): void {
     if (!this.#started) {
-      throw new Error("EmbeddedDaemon is not started");
+      throw new Error("ScorelHost is not started");
     }
   }
 
@@ -1029,9 +1088,24 @@ export class EmbeddedDaemon {
     await mkdir(this.#sessionsDir, { recursive: true });
     await appendFile(sessionLogFilePath(this.#sessionsDir, sessionId), `${line}\n`, "utf8");
   }
+
+  async #appendHostDiagnostic(event: string, fields: Record<string, unknown> = {}): Promise<void> {
+    const line = formatDiagnosticLine({ ts: this.#now(), level: "info", event, ...fields });
+    await mkdir(this.#sessionsDir, { recursive: true });
+    await appendFile(join(this.#sessionsDir, "host.log"), `${line}\n`, "utf8");
+  }
+
+  async #resolveProject(sessionId: SessionId, projectId: ProjectId): Promise<HostProject> {
+    const project = await this.#registry.require(projectId);
+    await this.#appendDiagnostic(sessionId, "project_resolved", {
+      projectId: project.projectId,
+      workDir: project.workDir,
+    });
+    return project;
+  }
 }
 
-export const createEmbeddedTransport = (daemon: EmbeddedDaemon): DaemonTransport => {
+export const createEmbeddedTransport = (host: ScorelHost): DaemonTransport => {
   const handlers = new Set<(message: DaemonMessage) => void>();
   const connection: Connection = {
     clientId: asClientId("embedded_unconnected"),
@@ -1045,7 +1119,7 @@ export const createEmbeddedTransport = (daemon: EmbeddedDaemon): DaemonTransport
   return {
     async connect(params) {
       connection.clientId = params.clientId;
-      const result = daemon.connect(connection, params.sessionId);
+      const result = host.connect(connection, params.sessionId);
       connection.emit({
         type: "connected",
         clientId: params.clientId,
@@ -1053,7 +1127,6 @@ export const createEmbeddedTransport = (daemon: EmbeddedDaemon): DaemonTransport
         currentSeq: result.currentSeq,
         deviceId: result.deviceId,
         deviceDisplayName: result.deviceDisplayName,
-        projectSlug: result.projectSlug,
       });
       return {
         clientId: params.clientId,
@@ -1061,11 +1134,10 @@ export const createEmbeddedTransport = (daemon: EmbeddedDaemon): DaemonTransport
         currentSeq: result.currentSeq,
         deviceId: result.deviceId,
         deviceDisplayName: result.deviceDisplayName,
-        projectSlug: result.projectSlug,
       };
     },
     send(message) {
-      return daemon.handleMessage(connection, message);
+      return host.handleMessage(connection, message);
     },
     onMessage(handler) {
       handlers.add(handler);
@@ -1074,7 +1146,7 @@ export const createEmbeddedTransport = (daemon: EmbeddedDaemon): DaemonTransport
       };
     },
     close() {
-      daemon.disconnect(connection);
+      host.disconnect(connection);
       handlers.clear();
     },
   };
@@ -1082,6 +1154,13 @@ export const createEmbeddedTransport = (daemon: EmbeddedDaemon): DaemonTransport
 
 const isNodeErrorCode = (cause: unknown, code: string): boolean =>
   cause instanceof Error && "code" in cause && cause.code === code;
+
+const wireErrorCode = (cause: unknown): "project_not_found" | "project_has_sessions" | "filesystem_error" | "conflict" | "internal_error" => {
+  if (!(cause instanceof ProjectRegistryError)) {
+    return "internal_error";
+  }
+  return cause.code;
+};
 
 const hasContinuousCoverage = (events: ScorelEvent[], expectedFirstSeq: number): boolean => {
   if (events.length === 0) {

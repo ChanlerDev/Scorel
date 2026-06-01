@@ -8,7 +8,7 @@ import type { BrowserStore } from "./browser-store";
  * resync runs in the background.
  *
  * Storage layout (within a `BrowserStore` whose namespace is
- * `scorel:webui:v1:`):
+ * `scorel:webui:v2:`):
  *
  *   attach-cache:<scopeKey>:<sessionId>   →  AttachCacheFile  (one per session)
  *   attach-cache:lru                      →  string[]         (LRU sidecar)

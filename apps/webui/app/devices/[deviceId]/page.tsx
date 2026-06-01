@@ -105,7 +105,7 @@ function ProjectListSection({
       ) : (
         <ul className="space-y-1">
           {projects.map((project) => (
-            <ProjectRow key={project.projectSlug} deviceId={device.id} project={project} />
+            <ProjectRow key={project.projectId} deviceId={device.id} project={project} />
           ))}
         </ul>
       )}
@@ -121,7 +121,7 @@ function ProjectRow({
   project: DeviceProject;
 }) {
   const href = `/devices/${encodeURIComponent(deviceId)}/projects/${encodeURIComponent(
-    project.projectSlug,
+    project.projectId,
   )}`;
   return (
     <li>
@@ -131,10 +131,10 @@ function ProjectRow({
       >
         <div className="min-w-0">
           <p className="truncate font-medium text-text">
-            {project.displayName ?? project.projectSlug}
+            {project.displayName ?? project.projectId}
           </p>
-          {project.workDirHint ? (
-            <p className="truncate text-xs text-faint">{project.workDirHint}</p>
+          {project.workDir ? (
+            <p className="truncate text-xs text-faint">{project.workDir}</p>
           ) : null}
         </div>
         {project.sessionCount !== undefined ? (

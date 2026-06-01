@@ -73,7 +73,6 @@ describe("scorel up orchestrator", () => {
                 port: 7800,
                 wsUrl: "ws://127.0.0.1:7800",
                 token: "auto-token",
-                cwd: "/cwd",
                 pid: 99,
                 startedAt: 1,
                 stoppedAt: null,
@@ -126,7 +125,6 @@ describe("scorel up orchestrator", () => {
               port: 7777,
               wsUrl: "ws://127.0.0.1:7777",
               token: "tok",
-              cwd: "/cwd",
               pid: 99,
               startedAt: 1,
               stoppedAt: null,
@@ -196,7 +194,6 @@ describe("scorel up orchestrator", () => {
         port: 7777,
         wsUrl: "ws://127.0.0.1:7777",
         token: "existing",
-        cwd: "/cwd",
         pid: process.pid, // alive → running
         startedAt: 1,
         stoppedAt: null,

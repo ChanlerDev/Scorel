@@ -1,9 +1,9 @@
 // syncSessions: pulls daemon-truth session summaries for a single project
 // (per S0036) and writes them into `DeviceProject.sessions`. Triggered
 // lazily when the user navigates into a project node — see
-// `app/devices/[deviceId]/projects/[projectSlug]/page.tsx`.
+// `app/devices/[deviceId]/projects/[projectId]/page.tsx`.
 //
-// Concurrency: dedupes per `(deviceId, projectSlug)` key. Errors do not
+// Concurrency: dedupes per `(deviceId, projectId)` key. Errors do not
 // erase the cached session map; the caller renders a banner and retries.
 //
 // S0045: when `client.listSessions` rejects with the public marker error
@@ -13,7 +13,7 @@
 // without leaking the raw `WsTransport is not connected` text.
 
 import type { DaemonClient } from "@scorel/client";
-import type { SessionSummary } from "@scorel/protocol";
+import { asProjectId, type SessionSummary } from "@scorel/protocol";
 
 import type { DeviceSessionSummary } from "../domain/devices";
 import type { DevicesStore } from "../store/devices";
@@ -24,14 +24,14 @@ export type SyncSessionsArgs = {
   client: DaemonClient;
   store: DevicesStore;
   deviceId: string;
-  projectSlug: string;
+  projectId: string;
   limit?: number;
 };
 
 const inflight = new Map<string, Promise<DeviceSessionSummary[]>>();
 
-function dedupeKey(deviceId: string, projectSlug: string): string {
-  return `${deviceId} ${projectSlug}`;
+function dedupeKey(deviceId: string, projectId: string): string {
+  return `${deviceId} ${projectId}`;
 }
 
 function isTransportDisconnected(cause: unknown): boolean {
@@ -45,7 +45,7 @@ function isTransportDisconnected(cause: unknown): boolean {
 export async function syncSessions(
   args: SyncSessionsArgs,
 ): Promise<DeviceSessionSummary[]> {
-  const key = dedupeKey(args.deviceId, args.projectSlug);
+  const key = dedupeKey(args.deviceId, args.projectId);
   const existing = inflight.get(key);
   if (existing) return existing;
 
@@ -53,7 +53,7 @@ export async function syncSessions(
   const promise = (async () => {
     try {
       const summaries = await args.client.listSessions({
-        projectSlug: args.projectSlug,
+        projectId: asProjectId(args.projectId),
         limit,
       });
       const map: Record<string, DeviceSessionSummary> = {};
@@ -61,7 +61,7 @@ export async function syncSessions(
         const id = String(summary.sessionId);
         map[id] = toDeviceSessionSummary(summary);
       }
-      args.store.setProjectSessions(args.deviceId, args.projectSlug, map);
+      args.store.setProjectSessions(args.deviceId, args.projectId, map);
       return Object.values(map);
     } catch (cause) {
       if (isTransportDisconnected(cause)) {

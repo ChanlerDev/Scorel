@@ -59,7 +59,7 @@ export function DebugPanel({ summary }: DebugPanelProps): JSX.Element {
         {summary.remoteDeviceDisplayName ? (
           <Row label="remoteName" value={summary.remoteDeviceDisplayName} />
         ) : null}
-        <Row label="project" value={summary.projectSlug ?? "—"} />
+        <Row label="project" value={summary.projectId ?? "—"} />
         <Row label="session" value={summary.sessionId} />
         <Row label="conn" value={summary.connectionState} />
         <Row label="inFlight" value={String(summary.inFlight)} />

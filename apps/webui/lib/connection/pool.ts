@@ -270,7 +270,6 @@ export class ConnectionPool {
       const normalized: ConnectionIdentity = {
         deviceId: identity.deviceId ? String(identity.deviceId) : undefined,
         deviceDisplayName: identity.deviceDisplayName,
-        projectSlug: identity.projectSlug,
       };
       entry.retryAttempt = 0;
       this.#dispatch(entry, { type: "connected", identity: normalized });

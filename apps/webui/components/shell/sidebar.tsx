@@ -85,12 +85,12 @@ function SettingsLink(): JSX.Element {
 function DeviceTree({
   device,
   activeDeviceId,
-  activeProjectSlug,
+  activeProjectId,
   activeSessionId,
 }: {
   device: Device;
   activeDeviceId?: string;
-  activeProjectSlug?: string;
+  activeProjectId?: string;
   activeSessionId?: string;
 }): JSX.Element {
   const pool = getConnectionPool();
@@ -108,12 +108,12 @@ function DeviceTree({
 
   const handleProjectSelect = (
     deviceId: string,
-    projectSlug: string,
+    projectId: string,
   ): void => {
     const client = pool.peekClient(deviceId);
     if (!client) return;
     const store = getDevicesStoreInstance();
-    void syncSessions({ client, store, deviceId, projectSlug }).catch(() => {
+    void syncSessions({ client, store, deviceId, projectId }).catch(() => {
       // The project page itself owns retry UX; sidebar click is best-effort.
     });
   };
@@ -159,12 +159,12 @@ function DeviceTree({
             <ul className="space-y-0.5">
               {projects.map((project) => (
                 <ProjectNode
-                  key={project.projectSlug}
+                  key={project.projectId}
                   deviceId={device.id}
                   project={project}
                   activeSessionId={
                     isActiveDevice &&
-                    activeProjectSlug === project.projectSlug
+                    activeProjectId === project.projectId
                       ? activeSessionId
                       : undefined
                   }
@@ -184,15 +184,15 @@ export function Sidebar() {
   const { devices } = useDevices();
   const params = useParams<{
     deviceId?: string;
-    projectSlug?: string;
+    projectId?: string;
     sessionId?: string;
   }>();
   const pathname = usePathname();
   const activeDeviceId = params?.deviceId
     ? decodeURIComponent(params.deviceId)
     : undefined;
-  const activeProjectSlug = params?.projectSlug
-    ? decodeURIComponent(params.projectSlug)
+  const activeProjectId = params?.projectId
+    ? decodeURIComponent(params.projectId)
     : undefined;
   const activeSessionId = params?.sessionId
     ? decodeURIComponent(params.sessionId)
@@ -231,7 +231,7 @@ export function Sidebar() {
                 key={device.id}
                 device={device}
                 activeDeviceId={activeDeviceId}
-                activeProjectSlug={activeProjectSlug}
+                activeProjectId={activeProjectId}
                 activeSessionId={activeSessionId}
               />
             ))}

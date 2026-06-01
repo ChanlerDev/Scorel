@@ -1,5 +1,5 @@
 // Persistence helper for the empty-state composer's "last active project"
-// per device. Stored as a flat `deviceId → projectSlug` JSON map so each
+// per device. Stored as a flat `deviceId → projectId` JSON map so each
 // device retains its own most-recent picker selection across reloads (S0046).
 //
 // Boundary policy: the WebUI's `localStorage` rule (see
@@ -8,7 +8,7 @@
 // reader/writer for the picker map; `EmptyComposer` reaches it through the
 // exported helpers and never touches `window.localStorage` itself.
 
-const KEY = "scorel.ui.last-active-project";
+const KEY = "scorel.ui.v2.last-active-project";
 
 type LastActiveMap = Record<string, string>;
 
@@ -47,10 +47,10 @@ export function readLastActiveProject(
 
 export function writeLastActiveProject(
   deviceId: string,
-  projectSlug: string,
+  projectId: string,
 ): void {
-  if (!deviceId || !projectSlug) return;
+  if (!deviceId || !projectId) return;
   const map = read();
-  map[deviceId] = projectSlug;
+  map[deviceId] = projectId;
   write(map);
 }

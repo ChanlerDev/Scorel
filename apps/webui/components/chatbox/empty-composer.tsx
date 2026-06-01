@@ -23,20 +23,20 @@ export type EmptyComposerProps = {
   routeDeviceId?: string;
   /** Same as `routeDeviceId` but for projects. URL `?project=` wins over
    * the prop, the prop wins over the persisted-fallback. */
-  routeProjectSlug?: string;
+  routeProjectId?: string;
   /** Test seam — defaults to the production helper. Lets tests inject a
    * stub without monkey-patching the module. */
   createSession?: typeof createSessionForProject;
 };
 
 type ProjectOption = {
-  projectSlug: string;
+  projectId: string;
   displayName?: string;
 };
 
 export function EmptyComposer({
   routeDeviceId,
-  routeProjectSlug,
+  routeProjectId,
   createSession = createSessionForProject,
 }: EmptyComposerProps): JSX.Element {
   const router = useRouter();
@@ -55,24 +55,24 @@ export function EmptyComposer({
   const device = devices.find((d) => d.id === deviceId);
   const projects: ProjectOption[] = device?.projects ?? [];
 
-  // Resolve effective projectSlug. URL query > route segment >
+  // Resolve effective projectId. URL query > route segment >
   // persisted last-active (per device) > first available project on this
   // device.
-  const projectSlug = useMemo(() => {
+  const projectId = useMemo(() => {
     const fromQuery = search?.get("project") ?? undefined;
     if (fromQuery) return fromQuery;
-    if (routeProjectSlug) return routeProjectSlug;
+    if (routeProjectId) return routeProjectId;
     const last = readLastActiveProject(deviceId);
-    if (last && projects.find((p) => p.projectSlug === last)) return last;
-    return projects[0]?.projectSlug;
-  }, [search, routeProjectSlug, deviceId, projects]);
+    if (last && projects.find((p) => p.projectId === last)) return last;
+    return projects[0]?.projectId;
+  }, [search, routeProjectId, deviceId, projects]);
 
   // Persist the active (device, project) pair so subsequent visits
   // pre-select the same project even after the URL drops the query.
   useEffect(() => {
-    if (!deviceId || !projectSlug) return;
-    writeLastActiveProject(deviceId, projectSlug);
-  }, [deviceId, projectSlug]);
+    if (!deviceId || !projectId) return;
+    writeLastActiveProject(deviceId, projectId);
+  }, [deviceId, projectId]);
 
   const handleProjectChange = (slug: string): void => {
     const params = new URLSearchParams(search?.toString() ?? "");
@@ -83,7 +83,7 @@ export function EmptyComposer({
 
   const handleSend = async (content: string): Promise<void> => {
     setError(null);
-    if (!deviceId || !projectSlug) {
+    if (!deviceId || !projectId) {
       setError("先选择设备和项目");
       return;
     }
@@ -99,7 +99,7 @@ export function EmptyComposer({
         client,
         store: getDevicesStoreInstance(),
         deviceId,
-        projectSlug,
+        projectId,
       });
       // Stash the prompt so the session page consumes & sends it once the
       // attach controller is ready. Key includes sessionId so concurrent
@@ -112,7 +112,7 @@ export function EmptyComposer({
       }
       const target = `/devices/${encodeURIComponent(
         deviceId,
-      )}/projects/${encodeURIComponent(projectSlug)}/sessions/${encodeURIComponent(
+      )}/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(
         sessionId,
       )}`;
       router.push(target);
@@ -144,9 +144,9 @@ export function EmptyComposer({
   // S0047: render the H1 with a project-aware label when one resolves.
   // Falls back to the brand-neutral question when no project is available
   // (e.g. devices exist but the picked device has no projects yet).
-  const greetingProject = projects.find((p) => p.projectSlug === projectSlug);
+  const greetingProject = projects.find((p) => p.projectId === projectId);
   const greetingLabel =
-    greetingProject?.displayName ?? greetingProject?.projectSlug;
+    greetingProject?.displayName ?? greetingProject?.projectId;
   const greetingText = greetingLabel
     ? `我们应该在 ${greetingLabel} 中构建什么?`
     : "我们应该构建什么?";
@@ -167,12 +167,12 @@ export function EmptyComposer({
           onSend={handleSend}
           inFlight={false}
           placeholder="随心输入"
-          disabled={busy || !deviceId || !projectSlug}
+          disabled={busy || !deviceId || !projectId}
           errorBanner={error ?? undefined}
         />
         <PickerRow
           projects={projects}
-          activeSlug={projectSlug}
+          activeSlug={projectId}
           onProjectChange={handleProjectChange}
         />
       </div>
@@ -211,8 +211,8 @@ function PickerRow({
             </option>
           ) : (
             projects.map((p) => (
-              <option key={p.projectSlug} value={p.projectSlug}>
-                {p.displayName ?? p.projectSlug}
+              <option key={p.projectId} value={p.projectId}>
+                {p.displayName ?? p.projectId}
               </option>
             ))
           )}

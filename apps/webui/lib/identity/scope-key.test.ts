@@ -28,13 +28,13 @@ describe("computeScopeKey", () => {
     expect(a).not.toBe(b);
   });
 
-  it("returns different keys for different projectSlug", async () => {
+  it("returns different keys for different projectId", async () => {
     const a = await computeScopeKey("device", "project_a");
     const b = await computeScopeKey("device", "project_b");
     expect(a).not.toBe(b);
   });
 
-  it("memoizes by (deviceId, projectSlug) pair", async () => {
+  it("memoizes by (deviceId, projectId) pair", async () => {
     const p1 = computeScopeKey("device_a", "project-alpha");
     const p2 = computeScopeKey("device_a", "project-alpha");
     expect(p1).toBe(p2);

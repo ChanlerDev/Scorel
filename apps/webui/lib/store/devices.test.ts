@@ -50,10 +50,10 @@ describe("DevicesStore", () => {
     expect(devices.get(d.id)).toEqual(d);
   });
 
-  it("persists to underlying storage under scorel:webui:v1:devices", () => {
+  it("persists to underlying storage under scorel:webui:v2:devices", () => {
     const { devices, raw } = freshStore();
     devices.create({ name: "A", link: "wss://h", token: "t" });
-    const stored = raw.raw(`scorel:webui:v1:${DEVICES_KEY}`);
+    const stored = raw.raw(`scorel:webui:v2:${DEVICES_KEY}`);
     expect(stored).toBeTruthy();
     const arr = JSON.parse(stored as string) as Array<{ name: string }>;
     expect(arr).toHaveLength(1);
@@ -185,18 +185,18 @@ describe("DevicesStore", () => {
     const d = devices.create({ name: "A", link: "wss://h", token: "t" });
     const before = Date.now();
     const updated = devices.setProjects(d.id, [
-      { projectSlug: "alpha", displayName: "Alpha", sessionCount: 3 },
-      { projectSlug: "beta", displayName: "Beta", sessionCount: 1 },
+      { projectId: "alpha", displayName: "Alpha", sessionCount: 3 },
+      { projectId: "beta", displayName: "Beta", sessionCount: 1 },
     ]);
     expect(updated?.projects).toHaveLength(2);
-    expect(updated?.projects?.[0]?.projectSlug).toBe("alpha");
+    expect(updated?.projects?.[0]?.projectId).toBe("alpha");
     expect(updated?.projectsFetchedAt).toBeGreaterThanOrEqual(before);
   });
 
   it("setProjects preserves cached sessions for surviving slugs", () => {
     const { devices } = freshStore();
     const d = devices.create({ name: "A", link: "wss://h", token: "t" });
-    devices.setProjects(d.id, [{ projectSlug: "alpha", displayName: "Alpha" }]);
+    devices.setProjects(d.id, [{ projectId: "alpha", displayName: "Alpha" }]);
     devices.setProjectSessions(d.id, "alpha", {
       session_1: {
         sessionId: "session_1",
@@ -206,12 +206,12 @@ describe("DevicesStore", () => {
     });
     // New snapshot still includes alpha but adds beta and drops gone-slug.
     devices.setProjects(d.id, [
-      { projectSlug: "alpha", displayName: "Alpha v2" },
-      { projectSlug: "beta", displayName: "Beta" },
+      { projectId: "alpha", displayName: "Alpha v2" },
+      { projectId: "beta", displayName: "Beta" },
     ]);
     const next = devices.get(d.id);
-    const alpha = next?.projects?.find((p) => p.projectSlug === "alpha");
-    const beta = next?.projects?.find((p) => p.projectSlug === "beta");
+    const alpha = next?.projects?.find((p) => p.projectId === "alpha");
+    const beta = next?.projects?.find((p) => p.projectId === "beta");
     expect(alpha?.displayName).toBe("Alpha v2");
     expect(alpha?.sessions?.session_1?.title).toBe("Stored");
     expect(alpha?.sessionsFetchedAt).toBeTypeOf("number");
@@ -227,7 +227,7 @@ describe("DevicesStore", () => {
   it("setProjectSessions overwrites the session map and stamps fetchedAt", () => {
     const { devices } = freshStore();
     const d = devices.create({ name: "A", link: "wss://h", token: "t" });
-    devices.setProjects(d.id, [{ projectSlug: "alpha", displayName: "Alpha" }]);
+    devices.setProjects(d.id, [{ projectId: "alpha", displayName: "Alpha" }]);
     const before = Date.now();
     devices.setProjectSessions(d.id, "alpha", {
       session_1: { sessionId: "session_1", title: "First", updatedAt: 1 },
@@ -235,7 +235,7 @@ describe("DevicesStore", () => {
     });
     const project = devices
       .get(d.id)
-      ?.projects?.find((p) => p.projectSlug === "alpha");
+      ?.projects?.find((p) => p.projectId === "alpha");
     expect(Object.keys(project?.sessions ?? {})).toEqual([
       "session_1",
       "session_2",
@@ -250,7 +250,7 @@ describe("DevicesStore", () => {
       Object.keys(
         devices
           .get(d.id)
-          ?.projects?.find((p) => p.projectSlug === "alpha")?.sessions ?? {},
+          ?.projects?.find((p) => p.projectId === "alpha")?.sessions ?? {},
       ),
     ).toEqual(["session_3"]);
   });
@@ -259,7 +259,7 @@ describe("DevicesStore", () => {
     const { devices } = freshStore();
     expect(devices.setProjectSessions("missing", "slug", {})).toBeUndefined();
     const d = devices.create({ name: "A", link: "wss://h", token: "t" });
-    devices.setProjects(d.id, [{ projectSlug: "alpha" }]);
+    devices.setProjects(d.id, [{ projectId: "alpha" }]);
     // Unknown slug returns the device unchanged (no projects mutation).
     const before = devices.get(d.id);
     const after = devices.setProjectSessions(d.id, "ghost", {

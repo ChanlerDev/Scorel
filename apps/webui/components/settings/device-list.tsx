@@ -8,7 +8,6 @@ import { useDevices } from "../../lib/store/use-devices";
 type LocalDaemonInfo = {
   wsUrl: string;
   token: string;
-  cwd: string;
   host: string;
   port: number;
 };
@@ -33,7 +32,7 @@ export function DeviceList() {
           return;
         }
         const body = (await response.json()) as { ok?: boolean } & Partial<LocalDaemonInfo>;
-        if (!body.ok || !body.wsUrl || !body.token || !body.cwd || !body.host || body.port === undefined) {
+        if (!body.ok || !body.wsUrl || !body.token || !body.host || body.port === undefined) {
           setLocalDaemon({ status: "absent" });
           return;
         }
@@ -42,7 +41,6 @@ export function DeviceList() {
           info: {
             wsUrl: body.wsUrl,
             token: body.token,
-            cwd: body.cwd,
             host: body.host,
             port: body.port,
           },
@@ -81,7 +79,7 @@ export function DeviceList() {
       <div className="rounded-md border border-subtle bg-surface-raised p-3 text-sm text-text">
         <div className="font-medium">Detected local daemon</div>
         <div className="mt-1 font-mono text-xs text-muted">
-          {localDaemon.info.wsUrl} &nbsp; cwd={localDaemon.info.cwd}
+          {localDaemon.info.wsUrl}
         </div>
         <button
           type="button"

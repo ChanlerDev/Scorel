@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   asClientId,
   asEventId,
+  asProjectId,
   asSeq,
   asSessionId,
   type ClientId,
@@ -71,6 +72,17 @@ class FakeDaemonClient {
   async connect(sessionId?: SessionId): Promise<void> {
     this.connectCalls += 1;
     if (sessionId) this.sessionId = sessionId;
+  }
+
+  async loadSession(sessionId: SessionId) {
+    this.sessionId = sessionId;
+    return {
+      sessionId,
+      activeLeafId: null,
+      currentSeq: asSeq(0),
+      events: [],
+      meta: { projectId: asProjectId("prj_test") },
+    };
   }
 
   async resync(anchors?: Seq | { persistentLastSeq?: Seq; streamLastSeq?: Seq }): Promise<ResyncResponse> {
@@ -218,6 +230,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (snapshot) => snapshots.push(snapshot),
     });
@@ -257,6 +270,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: cache,
       onState: (snapshot) => snapshots.push(snapshot),
     });
@@ -285,6 +299,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (snapshot) => snapshots.push(snapshot),
     });
@@ -301,6 +316,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (snapshot) => snapshots.push(snapshot),
     });
@@ -329,6 +345,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: () => {},
     });
@@ -345,6 +362,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -367,6 +385,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -383,6 +402,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -403,6 +423,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -430,6 +451,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -454,6 +476,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -469,6 +492,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -495,6 +519,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -509,7 +534,6 @@ describe("createSessionAttachController", () => {
     const fake = new FakeDaemonClient();
     fake.connectionIdentity = {
       deviceId: "remote-device-x" as unknown as DaemonConnectionIdentity["deviceId"],
-      projectSlug: "Users-foo-bar",
     };
     fake.resyncResult = {
       mode: "full_reload",
@@ -521,6 +545,7 @@ describe("createSessionAttachController", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -528,7 +553,7 @@ describe("createSessionAttachController", () => {
     const last = snapshots.at(-1)!;
     expect(last.sessionId).toBe(String(SESSION_ID));
     expect(last.remoteDeviceId).toBe("remote-device-x");
-    expect(last.projectSlug).toBe("Users-foo-bar");
+    expect(last.projectId).toBe("prj_test");
     expect(last.persistentLastSeq).toBe(2);
     expect(last.streamLastSeq).toBe(2);
   });
@@ -567,6 +592,7 @@ describe("createSessionAttachController text_delta rAF batching", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -603,6 +629,7 @@ describe("createSessionAttachController text_delta rAF batching", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });
@@ -633,6 +660,7 @@ describe("createSessionAttachController text_delta rAF batching", () => {
       client: fake.asClient(),
       scopeKey: "scope_a",
       sessionId: SESSION_ID,
+      projectId: "prj_test",
       attachCache: makeAttachCache(),
       onState: (s) => snapshots.push(s),
     });

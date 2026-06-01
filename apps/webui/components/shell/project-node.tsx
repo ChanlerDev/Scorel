@@ -23,7 +23,7 @@ export type ProjectNodeProps = {
    * lazy-trigger `syncSessions`. Does NOT fire on collapse. Also fires once
    * on mount when the project is initially expanded but has no cached
    * sessions yet (so reload + already-expanded still primes the cache). */
-  onSelect?(deviceId: string, projectSlug: string): void;
+  onSelect?(deviceId: string, projectId: string): void;
 };
 
 /** Sort sessions newest first by `updatedAt`. Stable across re-renders. */
@@ -47,7 +47,7 @@ export function ProjectNode({
 }: ProjectNodeProps): JSX.Element {
   const router = useRouter();
   const sessions = sortSessions(project.sessions);
-  const id = `project:${deviceId}/${project.projectSlug}`;
+  const id = `project:${deviceId}/${project.projectId}`;
   const [collapsed, toggle] = useCollapsed(id);
 
   // S0045 mitigation for the `onSelect` semantics flip: previously every
@@ -62,8 +62,8 @@ export function ProjectNode({
     if (offline) return;
     if (project.sessions !== undefined) return;
     mountFiredRef.current = true;
-    onSelect?.(deviceId, project.projectSlug);
-  }, [collapsed, offline, project.sessions, deviceId, project.projectSlug, onSelect]);
+    onSelect?.(deviceId, project.projectId);
+  }, [collapsed, offline, project.sessions, deviceId, project.projectId, onSelect]);
 
   const sessionCount =
     project.sessionCount !== undefined
@@ -77,7 +77,7 @@ export function ProjectNode({
     // collapse a pure UI toggle so users don't refetch on every click. Skip
     // the fire when offline so we don't queue work for an unreachable device.
     if (collapsed && !offline) {
-      onSelect?.(deviceId, project.projectSlug);
+      onSelect?.(deviceId, project.projectId);
     }
     toggle();
   }
@@ -89,11 +89,11 @@ export function ProjectNode({
     event.stopPropagation();
     const params = new URLSearchParams();
     params.set("device", deviceId);
-    params.set("project", project.projectSlug);
+    params.set("project", project.projectId);
     router.push(`/?${params.toString()}`);
   }
 
-  const projectLabel = project.displayName ?? project.projectSlug;
+  const projectLabel = project.displayName ?? project.projectId;
 
   return (
     <li>
@@ -112,7 +112,7 @@ export function ProjectNode({
         <button
           type="button"
           onClick={handleNewChat}
-          data-testid={`project-new-chat-${project.projectSlug}`}
+          data-testid={`project-new-chat-${project.projectId}`}
           aria-label={`在 ${projectLabel} 中开始新对话`}
           title={`在 ${projectLabel} 中开始新对话`}
           className="ml-1 hidden h-6 w-6 shrink-0 items-center justify-center rounded-sm text-muted hover:bg-surface-hover hover:text-text group-hover:flex focus-visible:flex"
@@ -126,7 +126,7 @@ export function ProjectNode({
             <SessionNode
               key={session.sessionId}
               deviceId={deviceId}
-              projectSlug={project.projectSlug}
+              projectId={project.projectId}
               session={session}
               isActive={activeSessionId === session.sessionId}
             />

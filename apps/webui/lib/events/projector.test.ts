@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   asClientId,
   asEventId,
+  asProjectId,
   asSeq,
   asSessionId,
   type ContentBlock,
@@ -368,8 +369,8 @@ describe("projector", () => {
       sessionId: SESSION_ID,
       clientId: CLIENT_ID,
       ts: 0,
-      protocolVersion: 1,
-      meta: {},
+      protocolVersion: 2,
+      meta: { projectId: asProjectId("prj_test") },
     });
     expect(s.turns).toEqual([]);
   });

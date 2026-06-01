@@ -8,7 +8,7 @@ import {
 } from "./sessions";
 import type { DaemonClient } from "@scorel/client";
 import type { SessionSummary } from "@scorel/protocol";
-import { asSeq, asSessionId } from "@scorel/protocol";
+import { asProjectId, asSeq, asSessionId } from "@scorel/protocol";
 
 class FakeStorage implements StorageLike {
   private map = new Map<string, string>();
@@ -43,13 +43,13 @@ function fakeSessions(): SessionSummary[] {
       model: "mock",
       updatedAt: 100,
       currentSeq: asSeq(5),
-      projectSlug: "alpha",
+      projectId: asProjectId("alpha"),
     },
     {
       sessionId: asSessionId("session_2"),
       updatedAt: 200,
       currentSeq: asSeq(7),
-      projectSlug: "alpha",
+      projectId: asProjectId("alpha"),
     },
   ];
 }
@@ -71,7 +71,7 @@ describe("syncSessions", () => {
       link: "wss://h",
       token: "t",
     });
-    store.setProjects(device.id, [{ projectSlug: "alpha" }]);
+    store.setProjects(device.id, [{ projectId: "alpha" }]);
     const listSessions = vi
       .fn<DaemonClient["listSessions"]>()
       .mockResolvedValue(fakeSessions());
@@ -81,15 +81,15 @@ describe("syncSessions", () => {
       client,
       store,
       deviceId: device.id,
-      projectSlug: "alpha",
+      projectId: "alpha",
     });
     expect(listSessions).toHaveBeenCalledWith({
-      projectSlug: "alpha",
+      projectId: "alpha",
       limit: 200,
     });
     const stored = store
       .get(device.id)
-      ?.projects?.find((p) => p.projectSlug === "alpha");
+      ?.projects?.find((p) => p.projectId === "alpha");
     expect(Object.keys(stored?.sessions ?? {})).toEqual([
       "session_1",
       "session_2",
@@ -106,7 +106,7 @@ describe("syncSessions", () => {
       link: "wss://h",
       token: "t",
     });
-    store.setProjects(device.id, [{ projectSlug: "alpha" }]);
+    store.setProjects(device.id, [{ projectId: "alpha" }]);
     const listSessions = vi
       .fn<DaemonClient["listSessions"]>()
       .mockResolvedValue([]);
@@ -116,11 +116,11 @@ describe("syncSessions", () => {
       client,
       store,
       deviceId: device.id,
-      projectSlug: "alpha",
+      projectId: "alpha",
       limit: 50,
     });
     expect(listSessions).toHaveBeenCalledWith({
-      projectSlug: "alpha",
+      projectId: "alpha",
       limit: 50,
     });
   });
@@ -132,7 +132,7 @@ describe("syncSessions", () => {
       link: "wss://h",
       token: "t",
     });
-    store.setProjects(device.id, [{ projectSlug: "alpha" }]);
+    store.setProjects(device.id, [{ projectId: "alpha" }]);
     store.setProjectSessions(device.id, "alpha", {
       session_cached: {
         sessionId: "session_cached",
@@ -150,23 +150,23 @@ describe("syncSessions", () => {
         client,
         store,
         deviceId: device.id,
-        projectSlug: "alpha",
+        projectId: "alpha",
       }),
     ).rejects.toThrow(/net down/);
     const project = store
       .get(device.id)
-      ?.projects?.find((p) => p.projectSlug === "alpha");
+      ?.projects?.find((p) => p.projectId === "alpha");
     expect(project?.sessions?.session_cached?.title).toBe("Cached");
   });
 
-  it("dedupes concurrent calls per (deviceId, projectSlug)", async () => {
+  it("dedupes concurrent calls per (deviceId, projectId)", async () => {
     const { store } = freshStore();
     const device = store.create({
       name: "Tokyo",
       link: "wss://h",
       token: "t",
     });
-    store.setProjects(device.id, [{ projectSlug: "alpha" }]);
+    store.setProjects(device.id, [{ projectId: "alpha" }]);
     let resolveCall: (value: SessionSummary[]) => void = () => {};
     const listSessions = vi
       .fn<DaemonClient["listSessions"]>()
@@ -182,13 +182,13 @@ describe("syncSessions", () => {
       client,
       store,
       deviceId: device.id,
-      projectSlug: "alpha",
+      projectId: "alpha",
     });
     const b = syncSessions({
       client,
       store,
       deviceId: device.id,
-      projectSlug: "alpha",
+      projectId: "alpha",
     });
     expect(listSessions).toHaveBeenCalledTimes(1);
     resolveCall(fakeSessions());
@@ -204,8 +204,8 @@ describe("syncSessions", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "alpha" },
-      { projectSlug: "beta" },
+      { projectId: "alpha" },
+      { projectId: "beta" },
     ]);
     const listSessions = vi
       .fn<DaemonClient["listSessions"]>()
@@ -217,13 +217,13 @@ describe("syncSessions", () => {
         client,
         store,
         deviceId: device.id,
-        projectSlug: "alpha",
+        projectId: "alpha",
       }),
       syncSessions({
         client,
         store,
         deviceId: device.id,
-        projectSlug: "beta",
+        projectId: "beta",
       }),
     ]);
     expect(listSessions).toHaveBeenCalledTimes(2);

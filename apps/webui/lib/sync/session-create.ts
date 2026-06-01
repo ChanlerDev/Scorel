@@ -3,14 +3,15 @@
 // stub to the local cache so the sidebar / project list update before the
 // next `list_sessions` round-trip.
 //
-// Per S0039: New Chat does not allow the user to override `cwd`; the daemon
-// uses its own startup cwd. The first user message will materialize the
+// New Chat does not allow the user to override `cwd`; the Host resolves the
+// registered project's canonical workDir. The first user message will materialize the
 // session JSONL on disk via the existing `create_session` flow on the daemon.
 //
 // Failure path: any rejection bubbles up untouched and the cache is NOT
 // mutated. The caller is expected to render a banner and retry.
 
 import type { DaemonClient } from "@scorel/client";
+import { asProjectId, type CreateSessionMeta } from "@scorel/protocol";
 
 import type { DeviceSessionSummary } from "../domain/devices";
 import type { DevicesStore } from "../store/devices";
@@ -19,7 +20,7 @@ export type CreateSessionForProjectArgs = {
   client: DaemonClient;
   store: DevicesStore;
   deviceId: string;
-  projectSlug: string;
+  projectId: string;
   /** Defaults applied to the optimistic cache row and the daemon
    * `create_session` meta. `model` is mirrored back via subsequent
    * `list_sessions` syncs once the daemon writes the header. */
@@ -34,8 +35,8 @@ export async function createSessionForProject(
   args: CreateSessionForProjectArgs,
 ): Promise<CreateSessionForProjectResult> {
   const title = args.defaults?.title ?? NEW_CHAT_DEFAULT_TITLE;
-  const meta: { projectSlug: string; title: string; model?: string } = {
-    projectSlug: args.projectSlug,
+  const meta: CreateSessionMeta = {
+    projectId: asProjectId(args.projectId),
     title,
   };
   if (args.defaults?.model !== undefined) {
@@ -57,8 +58,8 @@ export async function createSessionForProject(
     summary.model = args.defaults.model;
   }
 
-  const merged = mergeSession(args.store, args.deviceId, args.projectSlug, summary);
-  args.store.setProjectSessions(args.deviceId, args.projectSlug, merged);
+  const merged = mergeSession(args.store, args.deviceId, args.projectId, summary);
+  args.store.setProjectSessions(args.deviceId, args.projectId, merged);
 
   return { sessionId: idStr };
 }
@@ -73,11 +74,11 @@ export async function createSessionForProject(
 function mergeSession(
   store: DevicesStore,
   deviceId: string,
-  projectSlug: string,
+  projectId: string,
   summary: DeviceSessionSummary,
 ): Record<string, DeviceSessionSummary> {
   const device = store.get(deviceId);
-  const project = device?.projects?.find((p) => p.projectSlug === projectSlug);
+  const project = device?.projects?.find((p) => p.projectId === projectId);
   const existing = project?.sessions ?? {};
   return { ...existing, [summary.sessionId]: summary };
 }

@@ -14,8 +14,8 @@ export type ConnectionSummary = {
   remoteDeviceId?: string;
   /** Daemon-reported display name, populated after handshake. */
   remoteDeviceDisplayName?: string;
-  /** projectSlug of the session being attached, if known. */
-  projectSlug?: string;
+  /** projectId of the session being attached, if known. */
+  projectId?: string;
   /** Session id this attach is bound to. */
   sessionId: string;
   /** Connection state machine name (idle/connecting/connected/...). */
@@ -40,7 +40,7 @@ export type ConnectionSummaryInput = {
     | "persistentLastSeq"
     | "streamLastSeq"
     | "remoteDeviceId"
-    | "projectSlug"
+    | "projectId"
     | "sessionId"
   >;
 };
@@ -58,13 +58,13 @@ export function buildConnectionSummary(input: ConnectionSummaryInput): Connectio
   const remoteDeviceId =
     snapshot.remoteDeviceId ?? device.remoteIdentity?.deviceId ?? undefined;
   const remoteDeviceDisplayName = device.remoteIdentity?.deviceDisplayName ?? undefined;
-  const projectSlug = snapshot.projectSlug;
+  const projectId = snapshot.projectId;
 
   return {
     localDeviceId: device.id,
     ...(remoteDeviceId ? { remoteDeviceId } : {}),
     ...(remoteDeviceDisplayName ? { remoteDeviceDisplayName } : {}),
-    ...(projectSlug ? { projectSlug } : {}),
+    ...(projectId ? { projectId } : {}),
     sessionId: snapshot.sessionId,
     connectionState: connectionState.name,
     inFlight: snapshot.inFlight,

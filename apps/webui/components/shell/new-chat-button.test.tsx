@@ -22,7 +22,7 @@ describe("NewChatButton", () => {
     render(
       <NewChatButton
         deviceId={undefined}
-        projectSlug={undefined}
+        projectId={undefined}
         variant="sidebar"
       />,
     );
@@ -36,7 +36,7 @@ describe("NewChatButton", () => {
     render(
       <NewChatButton
         deviceId="dev_abc"
-        projectSlug="alpha"
+        projectId="alpha"
         variant="sidebar"
       />,
     );
@@ -53,7 +53,7 @@ describe("NewChatButton", () => {
     render(
       <NewChatButton
         deviceId="dev_abc"
-        projectSlug={undefined}
+        projectId={undefined}
         variant="page"
       />,
     );
@@ -66,7 +66,7 @@ describe("NewChatButton", () => {
     render(
       <NewChatButton
         deviceId="dev with space"
-        projectSlug="proj/slash"
+        projectId="proj/slash"
         variant="sidebar"
       />,
     );
@@ -81,7 +81,7 @@ describe("NewChatButton", () => {
     render(
       <NewChatButton
         deviceId={undefined}
-        projectSlug={undefined}
+        projectId={undefined}
         variant="sidebar"
       />,
     );
@@ -95,7 +95,7 @@ describe("NewChatButton", () => {
     render(
       <NewChatButton
         deviceId="dev_abc"
-        projectSlug="alpha"
+        projectId="alpha"
         variant="sidebar"
       />,
     );
@@ -107,7 +107,7 @@ describe("NewChatButton", () => {
     render(
       <NewChatButton
         deviceId="dev_abc"
-        projectSlug="alpha"
+        projectId="alpha"
         variant="page"
       />,
     );

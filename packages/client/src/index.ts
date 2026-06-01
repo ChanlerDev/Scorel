@@ -11,16 +11,18 @@ import {
   type ClientRequestMap,
   type ClientRequestType,
   type ContentBlock,
+  type CreateSessionMeta,
   type DaemonMessage,
-  type DaemonProjectSummary,
+  type DirectoryListing,
   type DaemonTransport,
   type DeviceId,
   type EventId,
+  type HostProject,
   type PersistentEvent,
+  type ProjectId,
   type ScorelEvent,
   type Seq,
   type SessionId,
-  type SessionMeta,
   type SessionSummary,
   type Unsubscribe,
 } from "@scorel/protocol";
@@ -113,7 +115,6 @@ export type DaemonClientOptions = {
 export type DaemonConnectionIdentity = {
   deviceId?: DeviceId;
   deviceDisplayName?: string;
-  projectSlug?: string;
 };
 
 type PendingRequest<TType extends ClientRequestType = ClientRequestType> = {
@@ -186,7 +187,6 @@ export class DaemonClient {
       this.#connectionIdentity = {
         deviceId: result.deviceId,
         deviceDisplayName: result.deviceDisplayName,
-        projectSlug: result.projectSlug,
       };
       this.#state = "connected";
     } catch (cause) {
@@ -220,7 +220,7 @@ export class DaemonClient {
     this.#state = "disconnected";
   }
 
-  async createSession(input: { sessionId?: SessionId; meta?: Partial<SessionMeta> }): Promise<SessionId> {
+  async createSession(input: { sessionId?: SessionId; meta: CreateSessionMeta }): Promise<SessionId> {
     const response = await this.#request("create_session", { meta: input.meta, sessionId: input.sessionId });
     return response.sessionId;
   }
@@ -253,19 +253,34 @@ export class DaemonClient {
     return this.#request("cancel", { sessionId: this.#sessionId });
   }
 
-  async listSessions(filter?: { projectSlug?: string; limit?: number }): Promise<SessionSummary[]> {
+  async listSessions(filter?: { projectId?: ProjectId; limit?: number }): Promise<SessionSummary[]> {
     this.#assertDaemonConnected();
     const response = await this.#request("list_sessions", {
-      projectSlug: filter?.projectSlug,
+      projectId: filter?.projectId,
       limit: filter?.limit,
     });
     return response.sessions;
   }
 
-  async listProjects(): Promise<DaemonProjectSummary[]> {
+  async listProjects(): Promise<HostProject[]> {
     this.#assertDaemonConnected();
     const response = await this.#request("list_projects", {});
     return response.projects;
+  }
+
+  async listDirectories(path?: string): Promise<DirectoryListing> {
+    this.#assertDaemonConnected();
+    return this.#request("list_directories", { path });
+  }
+
+  async registerProject(workDir: string): Promise<HostProject> {
+    this.#assertDaemonConnected();
+    return (await this.#request("register_project", { workDir })).project;
+  }
+
+  async removeProject(projectId: ProjectId): Promise<boolean> {
+    this.#assertDaemonConnected();
+    return (await this.#request("remove_project", { projectId })).removed;
   }
 
   #assertDaemonConnected(): void {
@@ -385,7 +400,6 @@ export class DaemonClient {
           deviceId: message.deviceId ?? this.#connectionIdentity.deviceId,
           deviceDisplayName:
             message.deviceDisplayName ?? this.#connectionIdentity.deviceDisplayName,
-          projectSlug: message.projectSlug ?? this.#connectionIdentity.projectSlug,
         };
         break;
       case "disconnected":
@@ -460,7 +474,6 @@ export class WsTransport implements DaemonTransport {
           currentSeq: message.currentSeq,
           deviceId: message.deviceId,
           deviceDisplayName: message.deviceDisplayName,
-          projectSlug: message.projectSlug,
         });
       });
       socket.addEventListener(

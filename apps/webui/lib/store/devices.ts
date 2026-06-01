@@ -148,10 +148,10 @@ export class DevicesStore {
     if (!current) return undefined;
     const previousByslug = new Map<string, DeviceProject>();
     for (const prev of current.projects ?? []) {
-      previousByslug.set(prev.projectSlug, prev);
+      previousByslug.set(prev.projectId, prev);
     }
     const merged = projects.map<DeviceProject>((next) => {
-      const prev = previousByslug.get(next.projectSlug);
+      const prev = previousByslug.get(next.projectId);
       if (!prev) return { ...next };
       const carry: Partial<DeviceProject> = {};
       if (prev.sessions !== undefined) carry.sessions = prev.sessions;
@@ -167,19 +167,19 @@ export class DevicesStore {
   }
 
   /**
-   * Replace the cached session map under a single (device, projectSlug). No-op
+   * Replace the cached session map under a single (device, projectId). No-op
    * if the device or project slug is unknown — the caller is expected to have
    * synced projects first.
    */
   setProjectSessions(
     id: string,
-    projectSlug: string,
+    projectId: string,
     sessions: Record<string, DeviceSessionSummary>,
   ): Device | undefined {
     const current = this.get(id);
     if (!current) return undefined;
     const list = current.projects ?? [];
-    const idx = list.findIndex((p) => p.projectSlug === projectSlug);
+    const idx = list.findIndex((p) => p.projectId === projectId);
     if (idx < 0) return current;
     const updated: DeviceProject = {
       ...(list[idx] as DeviceProject),

@@ -10,7 +10,7 @@ const summary: ConnectionSummary = {
   localDeviceId: "local-1",
   remoteDeviceId: "remote-1",
   remoteDeviceDisplayName: "Macbook",
-  projectSlug: "Users-foo-bar",
+  projectId: "Users-foo-bar",
   sessionId: "session_abc",
   connectionState: "connected",
   inFlight: true,

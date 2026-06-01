@@ -288,6 +288,9 @@ const parseHeader = (value: unknown): SessionHeader => {
   if (typeof value.createdAt !== "number" || !isRecord(value.meta)) {
     throw new SessionStoreError("invalid_header", "Session header is missing createdAt or meta");
   }
+  if (typeof value.meta.projectId !== "string" || value.meta.projectId.length === 0) {
+    throw new SessionStoreError("invalid_header", "Session header is missing meta.projectId");
+  }
   return value as SessionHeader;
 };
 

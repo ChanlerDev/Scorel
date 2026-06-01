@@ -134,8 +134,8 @@ describe("Sidebar", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Alpha", sessionCount: 2 },
-      { projectSlug: "beta", displayName: "Beta", sessionCount: 0 },
+      { projectId: "alpha", displayName: "Alpha", sessionCount: 2 },
+      { projectId: "beta", displayName: "Beta", sessionCount: 0 },
     ]);
     store.setProjectSessions(device.id, "alpha", {
       session_1: { sessionId: "session_1", title: "Hello", updatedAt: 200 },
@@ -143,7 +143,7 @@ describe("Sidebar", () => {
     });
     setParams({
       deviceId: device.id,
-      projectSlug: "alpha",
+      projectId: "alpha",
       sessionId: "session_1",
     });
     render(<Sidebar />);
@@ -164,7 +164,7 @@ describe("Sidebar", () => {
     const { store } = freshPool();
     const device = store.create({ name: "Tokyo", link: "wss://h", token: "t" });
     store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Alpha" },
+      { projectId: "alpha", displayName: "Alpha" },
     ]);
     render(<Sidebar />);
 
@@ -192,12 +192,12 @@ describe("Sidebar", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Alpha", sessionCount: 1 },
+      { projectId: "alpha", displayName: "Alpha", sessionCount: 1 },
     ]);
     store.setProjectSessions(device.id, "alpha", {
       session_1: { sessionId: "session_1", title: "Hello", updatedAt: 200 },
     });
-    setParams({ deviceId: device.id, projectSlug: "alpha" });
+    setParams({ deviceId: device.id, projectId: "alpha" });
 
     const { unmount } = render(<Sidebar />);
     expect(screen.getByRole("link", { name: /Hello/ })).toBeTruthy();
@@ -231,7 +231,7 @@ describe("Sidebar", () => {
     });
     store.update(device.id, { lastConnectedAt: 1700000000000 });
     store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Alpha" },
+      { projectId: "alpha", displayName: "Alpha" },
     ]);
     render(<Sidebar />);
     expect(screen.getByText("offline")).toBeTruthy();

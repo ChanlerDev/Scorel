@@ -1,25 +1,27 @@
 #!/usr/bin/env -S node --import tsx
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { Readable, Writable } from "node:stream";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { DaemonClient, WsTransport, clientPackageName } from "@scorel/client";
 import {
-  EmbeddedDaemon,
+  ScorelHost,
   createEmbeddedTransport,
   createRealRuntime,
   daemonPackageName,
   loadScorelConfig,
+  readLocalDaemonState,
   scorelSessionsDir,
   type ScorelConfig,
 } from "@scorel/daemon";
 import {
   asClientId,
   asDeviceId,
+  asProjectId,
   asSeq,
   asSessionId,
   type ContentBlock,
@@ -107,6 +109,13 @@ export const runCli = async (
       return 1;
     }
   }
+  if (command === "project") {
+    return runProject(rest, {
+      stateDir: stateDirFromSessionsDir(runOptions.sessionsDir),
+      output: io.output,
+      error: io.error,
+    });
+  }
   if (command === "logs") {
     try {
       return runLogs(parseLogsOptions(rest), {
@@ -129,6 +138,53 @@ type LogsOptions = {
   tail?: number;
   attach: boolean;
   remoteUrl?: string;
+};
+
+const runProject = async (
+  argv: string[],
+  io: { stateDir: string; output: NodeJS.WritableStream; error: NodeJS.WritableStream },
+): Promise<number> => {
+  const [command, value, ...extra] = argv;
+  if (extra.length > 0 || !["list", "add", "remove"].includes(command ?? "")) {
+    writeProjectUsage(io.error);
+    return 1;
+  }
+  if ((command === "add" || command === "remove") && !value) {
+    writeProjectUsage(io.error);
+    return 1;
+  }
+  if (command === "list" && value) {
+    writeProjectUsage(io.error);
+    return 1;
+  }
+  const state = await readLocalDaemonState({ stateDir: io.stateDir });
+  if (!state || state.stoppedAt !== null) {
+    io.error.write("scorel project error: local daemon is not running\n");
+    return 1;
+  }
+  const client = new DaemonClient(new WsTransport({ url: state.wsUrl, token: state.token }), {
+    clientId: asClientId("client_cli_project"),
+  });
+  try {
+    await client.connect();
+    if (command === "list") {
+      for (const project of await client.listProjects()) {
+        io.output.write(`${project.projectId}\t${project.displayName}\t${project.workDir}\n`);
+      }
+    } else if (command === "add") {
+      const project = await client.registerProject(value!);
+      io.output.write(`${project.projectId}\t${project.displayName}\t${project.workDir}\n`);
+    } else {
+      await client.removeProject(asProjectId(value!));
+      io.output.write(`removed ${value}\n`);
+    }
+    return 0;
+  } catch (cause) {
+    io.error.write(`scorel project error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+    return 1;
+  } finally {
+    client.disconnect();
+  }
 };
 
 const runLogs = async (
@@ -172,16 +228,17 @@ const runAttach = async (
     diagnostics.record("attach_connect_started", {
       remoteUrl: options.remoteUrl,
     });
-    await client.connect(options.sessionId);
+    await client.connect();
+    const loaded = await client.loadSession(options.sessionId);
     const renderer = new AttachEventRenderer(io.output, io.error);
-    const cacheScope = attachCacheScope(options, client.connectionIdentity);
+    const cacheScope = attachCacheScope(client.connectionIdentity, loaded.meta.projectId);
     diagnostics.setScope(cacheScope);
     diagnostics.record("attach_connect_succeeded", {
       scopeKind: cacheScope.kind,
       scopeLocator: cacheScope.locator,
       deviceId: client.connectionIdentity?.deviceId,
       deviceDisplayName: client.connectionIdentity?.deviceDisplayName,
-      projectSlug: client.connectionIdentity?.projectSlug,
+      projectId: loaded.meta.projectId,
     });
     diagnostics.record("attach_cache_scope_resolved", {
       scopeKind: cacheScope.kind,
@@ -195,10 +252,6 @@ const runAttach = async (
     });
     const persistCache = async (): Promise<void> => {
       await writeAttachCache(io.stateDir, cacheScope, options.sessionId, cacheSnapshot);
-      await upsertProjectIndex(
-        io.stateDir,
-        await projectIndexEntryForAttach(io.stateDir, cacheScope, options, io.cwd, client.connectionIdentity),
-      );
       diagnostics.record("attach_cache_written", {
         persistentEvents: cacheSnapshot.events.length,
         transients: cacheSnapshot.transients.length,
@@ -213,9 +266,8 @@ const runAttach = async (
       });
       void persistCache();
     });
-    const resumed = await loadOrCreateAttachedSession(client, options.sessionId);
-    diagnostics.record(resumed ? "attach_session_loaded" : "attach_session_created");
-    renderer.writeLine(`scorel attach ${resumed ? "resumed" : "created"} session ${options.sessionId}`);
+    diagnostics.record("attach_session_loaded");
+    renderer.writeLine(`scorel attach resumed session ${options.sessionId}`);
     renderer.renderBacklog(cacheSnapshot.events);
     renderer.renderTransientBacklog(cacheSnapshot.transients);
     const persistentLastSeq = highestSeq(cacheSnapshot.events);
@@ -287,7 +339,6 @@ const runAttach = async (
     client.disconnect();
     return 0;
   } catch (cause) {
-    diagnostics.ensureScope(attachCacheScope(options));
     diagnostics.record("attach_failed", { message: cause instanceof Error ? cause.message : String(cause) });
     await diagnostics.flush();
     io.error.write(`scorel attach error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
@@ -321,17 +372,17 @@ type AttachCacheSnapshot = {
 };
 
 const attachCacheScope = (
-  options: AttachOptions,
-  identity?: { deviceId?: DeviceId; deviceDisplayName?: string; projectSlug?: string },
+  identity: { deviceId?: DeviceId; deviceDisplayName?: string },
+  projectId: string,
 ): AttachCacheScope => {
-  if (identity?.deviceId && identity.projectSlug) {
-    return {
-      kind: "remote",
-      locator: `device:${identity.deviceId}/project:${identity.projectSlug}`,
-      displayName: identity.deviceDisplayName,
-    };
+  if (!identity.deviceId) {
+    throw new Error("Remote daemon handshake is missing deviceId");
   }
-  return { kind: "remote", locator: `endpoint:${options.remoteUrl}` };
+  return {
+    kind: "remote",
+    locator: `device:${identity.deviceId}/project:${projectId}`,
+    displayName: identity.deviceDisplayName,
+  };
 };
 
 const attachCacheFilePath = (stateDir: string, scope: AttachCacheScope, sessionId: ReturnType<typeof asSessionId>): string => {
@@ -351,14 +402,10 @@ const attachDiagnosticsFilePath = (
 const findAttachDiagnosticsFilePath = async (
   stateDir: string,
   sessionId: ReturnType<typeof asSessionId>,
-  remoteUrl?: string,
+  _remoteUrl?: string,
 ): Promise<string> => {
-  const indexed = await findAttachDiagnosticsFilePathFromIndex(stateDir, sessionId, remoteUrl);
-  if (indexed) {
-    return indexed;
-  }
   const root = join(stateDir, "attach-cache");
-  const scopes = await readdir(root);
+  const scopes = await readdir(root).catch(() => []);
   for (const scope of scopes) {
     const candidate = join(root, scope, `${sessionId}.log`);
     try {
@@ -371,212 +418,11 @@ const findAttachDiagnosticsFilePath = async (
   return join(root, "__missing__", `${sessionId}.log`);
 };
 
-type ProjectIndexFile = {
-  version: 1;
-  projects: ProjectIndexEntry[];
-};
-
-type ProjectIndexEntry = LocalProjectIndexEntry | RemoteProjectIndexEntry;
-
-type LocalProjectIndexEntry = {
-  projectKey: string;
-  kind: "local";
-  workDir: string;
-  displayName: string;
-  lastSeenAt: number;
-  sessions: Record<string, ProjectIndexSession>;
-};
-
-type RemoteProjectIndexEntry = {
-  projectKey: string;
-  kind: "remote";
-  deviceId: string;
-  deviceDisplayName?: string;
-  projectSlug: string;
-  displayName: string;
-  lastRemoteUrl?: string;
-  lastSeenAt: number;
-  sessions: Record<string, ProjectIndexSession>;
-};
-
-type ProjectIndexSession = {
-  sessionId: string;
-  source: "local-session" | "attach-cache";
-  sessionPath?: string;
-  cachePath?: string;
-  logPath?: string;
-  lastSeenAt: number;
-};
-
 const stateDirFromSessionsDir = (sessionsDir: string | undefined): string => {
   if (!sessionsDir) {
     return defaultStateDir();
   }
   return basename(sessionsDir) === "sessions" ? dirname(sessionsDir) : sessionsDir;
-};
-
-const projectIndexFilePath = (stateDir: string): string => join(stateDir, "project-index.json");
-
-const emptyProjectIndex = (): ProjectIndexFile => ({ version: 1, projects: [] });
-
-const readProjectIndex = async (stateDir: string): Promise<ProjectIndexFile> => {
-  try {
-    const raw = JSON.parse(await readFile(projectIndexFilePath(stateDir), "utf8")) as ProjectIndexFile;
-    if (raw.version !== 1 || !Array.isArray(raw.projects)) {
-      return emptyProjectIndex();
-    }
-    return {
-      version: 1,
-      projects: raw.projects.filter(isProjectIndexEntry),
-    };
-  } catch (cause) {
-    if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
-      return emptyProjectIndex();
-    }
-    return emptyProjectIndex();
-  }
-};
-
-const writeProjectIndex = async (stateDir: string, index: ProjectIndexFile): Promise<void> => {
-  const filePath = projectIndexFilePath(stateDir);
-  await mkdir(dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(index, null, 2)}\n`);
-};
-
-const upsertProjectIndex = async (stateDir: string, entry: ProjectIndexEntry): Promise<void> => {
-  const index = await readProjectIndex(stateDir);
-  const existingIndex = index.projects.findIndex((project) => project.projectKey === entry.projectKey);
-  if (existingIndex >= 0) {
-    const existing = index.projects[existingIndex];
-    index.projects[existingIndex] = {
-      ...existing,
-      ...entry,
-      sessions: {
-        ...existing.sessions,
-        ...entry.sessions,
-      },
-      lastSeenAt: Math.max(existing.lastSeenAt, entry.lastSeenAt),
-    } as ProjectIndexEntry;
-  } else {
-    index.projects.push(entry);
-  }
-  index.projects.sort((left, right) => left.projectKey.localeCompare(right.projectKey));
-  await writeProjectIndex(stateDir, index);
-};
-
-const projectIndexEntryForLocalSession = async (
-  stateDir: string,
-  sessionsDir: string,
-  cwd: string,
-  sessionId: ReturnType<typeof asSessionId>,
-): Promise<ProjectIndexEntry> => {
-  const workDir = await realpathOrResolve(cwd);
-  const now = Date.now();
-  return {
-    projectKey: `local:${workDir}`,
-    kind: "local",
-    workDir,
-    displayName: basename(workDir),
-    lastSeenAt: now,
-    sessions: {
-      [String(sessionId)]: {
-        sessionId: String(sessionId),
-        source: "local-session",
-        sessionPath: relativeProjectPath(stateDir, join(sessionsDir, `${sessionId}.jsonl`)),
-        logPath: relativeProjectPath(stateDir, join(sessionsDir, `${sessionId}.log`)),
-        lastSeenAt: now,
-      },
-    },
-  };
-};
-
-const projectIndexEntryForAttach = async (
-  stateDir: string,
-  scope: AttachCacheScope,
-  options: AttachOptions,
-  cwd: string,
-  identity?: { deviceId?: DeviceId; deviceDisplayName?: string; projectSlug?: string },
-): Promise<ProjectIndexEntry> => {
-  const now = Date.now();
-  const sessionId = String(options.sessionId);
-  if (identity?.deviceId && identity.projectSlug) {
-    return {
-      projectKey: `remote:${identity.deviceId}:${identity.projectSlug}`,
-      kind: "remote",
-      deviceId: String(identity.deviceId),
-      deviceDisplayName: identity.deviceDisplayName,
-      projectSlug: identity.projectSlug,
-      displayName: identity.projectSlug,
-      lastRemoteUrl: options.remoteUrl,
-      lastSeenAt: now,
-      sessions: {
-        [sessionId]: {
-          sessionId,
-          source: "attach-cache",
-          cachePath: relativeProjectPath(stateDir, attachCacheFilePath(stateDir, scope, options.sessionId)),
-          logPath: relativeProjectPath(stateDir, attachDiagnosticsFilePath(stateDir, scope, options.sessionId)),
-          lastSeenAt: now,
-        },
-      },
-    };
-  }
-  const workDir = await realpathOrResolve(cwd);
-  return {
-    projectKey: `local:${workDir}`,
-    kind: "local",
-    workDir,
-    displayName: basename(workDir),
-    lastSeenAt: now,
-    sessions: {
-      [sessionId]: {
-        sessionId,
-        source: "attach-cache",
-        cachePath: relativeProjectPath(stateDir, attachCacheFilePath(stateDir, scope, options.sessionId)),
-        logPath: relativeProjectPath(stateDir, attachDiagnosticsFilePath(stateDir, scope, options.sessionId)),
-        lastSeenAt: now,
-      },
-    },
-  };
-};
-
-const findAttachDiagnosticsFilePathFromIndex = async (
-  stateDir: string,
-  sessionId: ReturnType<typeof asSessionId>,
-  remoteUrl: string | undefined,
-): Promise<string | undefined> => {
-  const index = await readProjectIndex(stateDir);
-  const matches = index.projects
-    .filter((project) => (remoteUrl ? project.kind === "remote" && project.lastRemoteUrl === remoteUrl : true))
-    .map((project) => project.sessions[String(sessionId)])
-    .filter((session): session is ProjectIndexSession => session?.source === "attach-cache" && typeof session.logPath === "string");
-  if (matches.length !== 1) {
-    return undefined;
-  }
-  return join(stateDir, matches[0].logPath!);
-};
-
-const isProjectIndexEntry = (value: unknown): value is ProjectIndexEntry => {
-  if (typeof value !== "object" || value === null || !("projectKey" in value) || !("kind" in value) || !("sessions" in value)) {
-    return false;
-  }
-  const candidate = value as { projectKey?: unknown; kind?: unknown; sessions?: unknown; lastSeenAt?: unknown };
-  return (
-    typeof candidate.projectKey === "string" &&
-    (candidate.kind === "local" || candidate.kind === "remote") &&
-    typeof candidate.sessions === "object" &&
-    candidate.sessions !== null &&
-    typeof candidate.lastSeenAt === "number"
-  );
-};
-
-const relativeProjectPath = (stateDir: string, filePath: string): string => relative(stateDir, filePath).split("\\").join("/");
-
-const realpathOrResolve = async (filePath: string): Promise<string> => {
-  try {
-    return await realpath(filePath);
-  } catch {
-    return resolve(filePath);
-  }
 };
 
 class AttachDiagnostics {
@@ -774,19 +620,6 @@ class AsyncInputQueue {
   }
 }
 
-const loadOrCreateAttachedSession = async (client: DaemonClient, sessionId: ReturnType<typeof asSessionId>): Promise<boolean> => {
-  try {
-    await client.loadSession(sessionId);
-    return true;
-  } catch {
-    await client.createSession({
-      sessionId,
-      meta: {},
-    });
-    return false;
-  }
-};
-
 const parseAttachOptions = (argv: string[]): AttachOptions => {
   let sessionId = asSessionId("ses_default");
   let remoteUrl: string | undefined;
@@ -857,18 +690,21 @@ const parseLogsOptions = (argv: string[]): LogsOptions => {
 };
 
 export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> => {
-  const config = options.config ?? (await loadScorelConfig({ cwd: options.cwd }));
-  const daemon = new EmbeddedDaemon({
+  const daemon = new ScorelHost({
     sessionsDir: options.sessionsDir,
+    projectsPath: join(options.stateDir, "projects.json"),
     deviceId: asDeviceId("device_local"),
-    workDir: options.cwd,
-    createRuntime: () => createRealRuntime({ cwd: options.cwd, config }),
+    createRuntime: async ({ project }) => createRealRuntime({
+      cwd: project.workDir,
+      config: options.config ?? (await loadScorelConfig({ cwd: project.workDir })),
+    }),
   });
   const client = new DaemonClient(createEmbeddedTransport(daemon), {
     clientId: asClientId("client_cli"),
   });
 
   await daemon.start();
+  const project = await daemon.registerProject(options.cwd);
   let inFlight = false;
   let rlClose = (): void => undefined;
   const sigintHandler = createSigintHandler({
@@ -880,11 +716,7 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
   process.on("SIGINT", sigintHandler);
   try {
     await client.connect(options.sessionId);
-    const resumed = await loadOrCreateSession(client, options, config);
-    await upsertProjectIndex(
-      options.stateDir,
-      await projectIndexEntryForLocalSession(options.stateDir, options.sessionsDir, options.cwd, options.sessionId),
-    );
+    const resumed = await loadOrCreateSession(client, options, project.projectId);
     io.error.write(`scorel chat ${resumed ? "resumed" : "created"} session ${options.sessionId}\n`);
 
     const rl = createInterface({ input: io.input as Readable, crlfDelay: Infinity });
@@ -960,14 +792,18 @@ export const createSigintHandler = (options: SigintHandlerOptions): () => void =
   };
 };
 
-const loadOrCreateSession = async (client: DaemonClient, options: ChatOptions, config: ScorelConfig): Promise<boolean> => {
+const loadOrCreateSession = async (
+  client: DaemonClient,
+  options: ChatOptions,
+  projectId: ReturnType<typeof asProjectId>,
+): Promise<boolean> => {
   try {
     await client.loadSession(options.sessionId);
     return true;
   } catch {
     await client.createSession({
       sessionId: options.sessionId,
-      meta: { model: config.model.id },
+      meta: { projectId },
     });
     return false;
   }
@@ -1022,8 +858,15 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
       "       scorel webui [--port <p>] [--host <h>]",
       "       scorel up [--daemon-port <p>] [--webui-port <p>] [--cwd <d>]",
       "       scorel logs [--attach] --session <id> [--remote <ws-url>] [--tail <n>]",
+      "       scorel project list",
+      "       scorel project add <dir>",
+      "       scorel project remove <project-id>",
     ].join("\n") + "\n",
   );
+};
+
+const writeProjectUsage = (output: NodeJS.WritableStream): void => {
+  output.write("Usage: scorel project list | add <dir> | remove <project-id>\n");
 };
 
 const writeEventError = (output: NodeJS.WritableStream, event: ErrorEvent): void => {

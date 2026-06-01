@@ -37,7 +37,6 @@ const detectedResponse = (overrides: Record<string, unknown> = {}): Response =>
       ok: true,
       wsUrl: "ws://127.0.0.1:7777",
       token: "auto-token",
-      cwd: "/Users/me/Scorel",
       host: "127.0.0.1",
       port: 7777,
       ...overrides,
@@ -58,7 +57,7 @@ describe("DeviceList", () => {
     mockNavigation();
     mockFetch(new Response(null, { status: 404 }));
     window.localStorage.setItem(
-      "scorel:webui:v1:devices",
+      "scorel:webui:v2:devices",
       JSON.stringify([
         {
           id: "id-1",
@@ -85,7 +84,7 @@ describe("DeviceList", () => {
     render(<DeviceList />);
     await waitFor(() => expect(screen.getByText(/detected local daemon/i)).toBeTruthy());
     expect(screen.getByText(/ws:\/\/127\.0\.0\.1:7777/)).toBeTruthy();
-    expect(screen.getByText(/cwd=\/Users\/me\/Scorel/)).toBeTruthy();
+    expect(screen.getByText("ws://127.0.0.1:7777")).toBeTruthy();
   });
 
   it("hides the banner when /api/local-daemon returns 404", async () => {
@@ -102,7 +101,7 @@ describe("DeviceList", () => {
     mockNavigation();
     mockFetch(detectedResponse());
     window.localStorage.setItem(
-      "scorel:webui:v1:devices",
+      "scorel:webui:v2:devices",
       JSON.stringify([
         {
           id: "id-existing",

@@ -40,7 +40,7 @@ interface DaemonClient {
   // Projects
   listDirectories(path?: string): Promise<DirectoryListing>;
   registerProject(workDir: string): Promise<HostProject>;
-  listProjects(): Promise<HostProjectSummary[]>;
+  listProjects(): Promise<HostProject[]>;
   removeProject(projectId: ProjectId): Promise<void>;
 
   // Sessions
@@ -108,7 +108,7 @@ interface DaemonClient {
 - 不再使用 `projectSlug` 或 `workDirHint`。
 
 ```typescript
-interface HostProjectSummary {
+interface HostProject {
   projectId: ProjectId;
   displayName: string;
   workDir: string;

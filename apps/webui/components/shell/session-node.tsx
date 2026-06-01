@@ -8,7 +8,7 @@ import { formatRelativeTime } from "../../lib/format/relative-time";
 
 export type SessionNodeProps = {
   deviceId: string;
-  projectSlug: string;
+  projectId: string;
   session: DeviceSessionSummary;
   isActive?: boolean;
 };
@@ -20,14 +20,14 @@ export type SessionNodeProps = {
 // `Date.now()` differing between server and client.
 export function SessionNode({
   deviceId,
-  projectSlug,
+  projectId,
   session,
   isActive,
 }: SessionNodeProps): JSX.Element {
   // Daemon-emitted slugs are URL-safe per S0031 but encode defensively in
   // case future slugs include reserved characters.
   const href = `/devices/${encodeURIComponent(deviceId)}/projects/${encodeURIComponent(
-    projectSlug,
+    projectId,
   )}/sessions/${encodeURIComponent(session.sessionId)}`;
   const label = session.title?.trim() || session.sessionId;
 

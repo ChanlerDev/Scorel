@@ -7,10 +7,10 @@ export type NewChatButtonProps = {
    * lands on the same device). When undefined, the button still navigates to
    * `/` so the user can land on the empty composer and pick a device. */
   deviceId: string | undefined;
-  /** Active route's projectSlug (forwarded as `?project=`). When undefined,
+  /** Active route's projectId (forwarded as `?project=`). When undefined,
    * the empty composer falls back to its persisted last-active project /
    * first available. */
-  projectSlug: string | undefined;
+  projectId: string | undefined;
   /** Visual variant: `sidebar` is the compact full-width pill; `page`
    * is a primary action button rendered above the project's session list. */
   variant: "sidebar" | "page";
@@ -34,7 +34,7 @@ const ENABLED_THEME =
  */
 export function NewChatButton({
   deviceId,
-  projectSlug,
+  projectId,
   variant,
 }: NewChatButtonProps): JSX.Element {
   const router = useRouter();
@@ -42,7 +42,7 @@ export function NewChatButton({
   const handleClick = (): void => {
     const params = new URLSearchParams();
     if (deviceId) params.set("device", deviceId);
-    if (projectSlug) params.set("project", projectSlug);
+    if (projectId) params.set("project", projectId);
     const target = params.toString() ? `/?${params.toString()}` : "/";
     router.push(target);
   };

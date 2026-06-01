@@ -108,8 +108,8 @@ describe("EmptyComposer", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Alpha" },
-      { projectSlug: "beta", displayName: "Beta" },
+      { projectId: "alpha", displayName: "Alpha" },
+      { projectId: "beta", displayName: "Beta" },
     ]);
     render(<EmptyComposer />);
     expect(
@@ -143,16 +143,16 @@ describe("EmptyComposer", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "alpha" },
-      { projectSlug: "beta" },
-      { projectSlug: "gamma" },
+      { projectId: "alpha" },
+      { projectId: "beta" },
+      { projectId: "gamma" },
     ]);
     window.localStorage.setItem(
-      "scorel.ui.last-active-project",
+      "scorel.ui.v2.last-active-project",
       JSON.stringify({ [device.id]: "beta" }),
     );
     _searchString = `device=${encodeURIComponent(device.id)}&project=gamma`;
-    render(<EmptyComposer routeProjectSlug="alpha" />);
+    render(<EmptyComposer routeProjectId="alpha" />);
     const select = screen.getByTestId(
       "empty-composer-project-select",
     ) as HTMLSelectElement;
@@ -167,11 +167,11 @@ describe("EmptyComposer", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "alpha" },
-      { projectSlug: "beta" },
+      { projectId: "alpha" },
+      { projectId: "beta" },
     ]);
     window.localStorage.setItem(
-      "scorel.ui.last-active-project",
+      "scorel.ui.v2.last-active-project",
       JSON.stringify({ [device.id]: "beta" }),
     );
     render(<EmptyComposer />);
@@ -189,11 +189,11 @@ describe("EmptyComposer", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "alpha" },
-      { projectSlug: "beta" },
+      { projectId: "alpha" },
+      { projectId: "beta" },
     ]);
     window.localStorage.setItem(
-      "scorel.ui.last-active-project",
+      "scorel.ui.v2.last-active-project",
       JSON.stringify({ [device.id]: "ghost" }),
     );
     render(<EmptyComposer />);
@@ -211,8 +211,8 @@ describe("EmptyComposer", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "alpha" },
-      { projectSlug: "beta" },
+      { projectId: "alpha" },
+      { projectId: "beta" },
     ]);
     render(<EmptyComposer />);
     const select = screen.getByTestId(
@@ -228,7 +228,7 @@ describe("EmptyComposer", () => {
     expect(arg).toContain(`device=${encodeURIComponent(device.id)}`);
     expect(arg).toContain("project=beta");
     const persisted = JSON.parse(
-      window.localStorage.getItem("scorel.ui.last-active-project") ?? "{}",
+      window.localStorage.getItem("scorel.ui.v2.last-active-project") ?? "{}",
     ) as Record<string, string>;
     expect(persisted[device.id]).toBe("alpha");
   });
@@ -240,7 +240,7 @@ describe("EmptyComposer", () => {
       link: "wss://h",
       token: "t",
     });
-    store.setProjects(device.id, [{ projectSlug: "alpha" }]);
+    store.setProjects(device.id, [{ projectId: "alpha" }]);
     render(<EmptyComposer />);
     const select = screen.getByTestId(
       "empty-composer-project-select",
@@ -253,7 +253,7 @@ describe("EmptyComposer", () => {
     store.create({ name: "Tokyo", link: "wss://h", token: "t" });
     render(<EmptyComposer />);
     // No projects → no slug → composer Send remains disabled because the
-    // wrapper passes `disabled={!projectSlug}` to <Composer>.
+    // wrapper passes `disabled={!projectId}` to <Composer>.
     const input = screen.getByTestId(
       "composer-input",
     ) as HTMLTextAreaElement;
@@ -267,7 +267,7 @@ describe("EmptyComposer", () => {
       link: "wss://h",
       token: "t",
     });
-    store.setProjects(device.id, [{ projectSlug: "alpha" }]);
+    store.setProjects(device.id, [{ projectId: "alpha" }]);
     pool.acquire(device);
     await act(async () => {
       for (let i = 0; i < 5; i += 1) await Promise.resolve();
@@ -289,7 +289,7 @@ describe("EmptyComposer", () => {
     expect(stub).toHaveBeenCalledWith(
       expect.objectContaining({
         deviceId: device.id,
-        projectSlug: "alpha",
+        projectId: "alpha",
       }),
     );
     expect(
@@ -307,7 +307,7 @@ describe("EmptyComposer", () => {
       link: "wss://h",
       token: "t",
     });
-    store.setProjects(device.id, [{ projectSlug: "alpha" }]);
+    store.setProjects(device.id, [{ projectId: "alpha" }]);
     pool.acquire(device);
     await act(async () => {
       for (let i = 0; i < 5; i += 1) await Promise.resolve();
@@ -346,7 +346,7 @@ describe("EmptyComposer", () => {
       link: "wss://h",
       token: "t",
     });
-    store.setProjects(device.id, [{ projectSlug: "alpha" }]);
+    store.setProjects(device.id, [{ projectId: "alpha" }]);
     // Intentionally skip pool.acquire so peekClient returns null.
 
     const stub = vi
@@ -369,7 +369,7 @@ describe("EmptyComposer", () => {
     );
   });
 
-  // S0047: dynamic H1 — picks `displayName ?? projectSlug`, falls back to a
+  // S0047: dynamic H1 — picks `displayName ?? projectId`, falls back to a
   // brand-neutral question when no project resolves.
   it("S0047 H1 uses project displayName when present", () => {
     const { store } = freshPool();
@@ -379,21 +379,21 @@ describe("EmptyComposer", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "scorel", displayName: "Scorel" },
+      { projectId: "scorel", displayName: "Scorel" },
     ]);
     render(<EmptyComposer />);
     const heading = screen.getByTestId("empty-composer-greeting");
     expect(heading.textContent).toBe("我们应该在 Scorel 中构建什么?");
   });
 
-  it("S0047 H1 falls back to projectSlug when displayName is missing", () => {
+  it("S0047 H1 falls back to projectId when displayName is missing", () => {
     const { store } = freshPool();
     const device = store.create({
       name: "Tokyo",
       link: "wss://h",
       token: "t",
     });
-    store.setProjects(device.id, [{ projectSlug: "raw-slug" }]);
+    store.setProjects(device.id, [{ projectId: "raw-slug" }]);
     render(<EmptyComposer />);
     const heading = screen.getByTestId("empty-composer-greeting");
     expect(heading.textContent).toBe("我们应该在 raw-slug 中构建什么?");
@@ -401,7 +401,7 @@ describe("EmptyComposer", () => {
 
   it("S0047 H1 falls back to brand-neutral question when no project resolves", () => {
     const { store } = freshPool();
-    // Device exists but has no projects → projectSlug remains undefined and
+    // Device exists but has no projects → projectId remains undefined and
     // the H1 should drop the project clause entirely.
     store.create({ name: "Tokyo", link: "wss://h", token: "t" });
     render(<EmptyComposer />);

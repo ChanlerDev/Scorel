@@ -65,7 +65,7 @@ describe("BrowserStore", () => {
     const fake = new FakeStorage();
     const store = new BrowserStore({ storage: fake });
     store.set("k", 1);
-    expect(fake.has("scorel:webui:v1:k")).toBe(true);
+    expect(fake.has("scorel:webui:v2:k")).toBe(true);
   });
 
   it("supports custom namespace", () => {
@@ -85,7 +85,7 @@ describe("BrowserStore", () => {
 
   it("get returns undefined when JSON is corrupt", () => {
     const fake = new FakeStorage();
-    fake.setItem("scorel:webui:v1:bad", "{not-json");
+    fake.setItem("scorel:webui:v2:bad", "{not-json");
     const store = new BrowserStore({ storage: fake });
     expect(store.get("bad")).toBeUndefined();
   });

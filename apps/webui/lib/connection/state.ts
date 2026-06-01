@@ -17,7 +17,6 @@ export type ConnectionErrorReason = "auth" | "network" | "version_mismatch" | "u
 export type ConnectionIdentity = {
   deviceId?: string;
   deviceDisplayName?: string;
-  projectSlug?: string;
 };
 
 export type ConnectionState =

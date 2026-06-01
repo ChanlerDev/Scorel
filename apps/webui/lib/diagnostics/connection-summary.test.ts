@@ -33,7 +33,7 @@ describe("buildConnectionSummary", () => {
         persistentLastSeq: 5,
         streamLastSeq: 7,
         remoteDeviceId: "remote-live-1",
-        projectSlug: "Users-foo-bar",
+        projectId: "Users-foo-bar",
         sessionId: "session_test",
       }),
     });
@@ -42,7 +42,7 @@ describe("buildConnectionSummary", () => {
       localDeviceId: "local-1",
       remoteDeviceId: "remote-live-1",
       remoteDeviceDisplayName: "Box",
-      projectSlug: "Users-foo-bar",
+      projectId: "Users-foo-bar",
       sessionId: "session_test",
       connectionState: "connected",
       inFlight: true,
@@ -74,7 +74,7 @@ describe("buildConnectionSummary", () => {
     });
     expect("remoteDeviceId" in summary).toBe(false);
     expect("remoteDeviceDisplayName" in summary).toBe(false);
-    expect("projectSlug" in summary).toBe(false);
+    expect("projectId" in summary).toBe(false);
     expect(summary.localDeviceId).toBe("local-3");
     expect(summary.connectionState).toBe("idle");
   });

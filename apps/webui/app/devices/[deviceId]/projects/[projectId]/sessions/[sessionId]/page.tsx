@@ -27,12 +27,12 @@ import { useDevices } from "../../../../../../../lib/store/use-devices";
 import type { Device } from "../../../../../../../lib/domain/devices";
 import { asSessionId } from "@scorel/protocol";
 
-type Params = { deviceId: string; projectSlug: string; sessionId: string };
+type Params = { deviceId: string; projectId: string; sessionId: string };
 
 export default function SessionPage({ params }: { params: Params }) {
   const { devices } = useDevices();
   const deviceId = decodeURIComponent(params.deviceId);
-  const projectSlug = decodeURIComponent(params.projectSlug);
+  const projectId = decodeURIComponent(params.projectId);
   const sessionId = decodeURIComponent(params.sessionId);
   const device = devices.find((d) => d.id === deviceId);
 
@@ -52,7 +52,7 @@ export default function SessionPage({ params }: { params: Params }) {
   return (
     <SessionView
       device={device}
-      projectSlug={projectSlug}
+      projectId={projectId}
       sessionId={sessionId}
     />
   );
@@ -60,16 +60,16 @@ export default function SessionPage({ params }: { params: Params }) {
 
 function SessionView({
   device,
-  projectSlug,
+  projectId,
   sessionId,
 }: {
   device: Device;
-  projectSlug: string;
+  projectId: string;
   sessionId: string;
 }) {
   const { state: connState, managed, syncSessionsNow } = useConnection(device);
-  const error = useSessionsSyncError(device.id, projectSlug);
-  const project = device.projects?.find((p) => p.projectSlug === projectSlug);
+  const error = useSessionsSyncError(device.id, projectId);
+  const project = device.projects?.find((p) => p.projectId === projectId);
   const session = project?.sessions?.[sessionId];
   const searchParams = useSearchParams();
   const debugEnabled = searchParams?.get("debug") === "1";
@@ -78,8 +78,8 @@ function SessionView({
   useEffect(() => {
     if (connState.name !== "connected") return;
     if (project?.sessions && session) return;
-    void syncSessionsNow(projectSlug);
-  }, [connState.name, project?.sessions, session, projectSlug, syncSessionsNow]);
+    void syncSessionsNow(projectId);
+  }, [connState.name, project?.sessions, session, projectId, syncSessionsNow]);
 
   const remoteDeviceId = device.remoteIdentity?.deviceId;
 
@@ -104,7 +104,7 @@ function SessionView({
         <Chatbox
           device={device}
           remoteDeviceId={remoteDeviceId}
-          projectSlug={projectSlug}
+          projectId={projectId}
           sessionId={sessionId}
           managed={managed}
           connectionState={connState}
@@ -118,7 +118,7 @@ function SessionView({
 function Chatbox({
   device,
   remoteDeviceId,
-  projectSlug,
+  projectId,
   sessionId,
   managed,
   connectionState,
@@ -126,7 +126,7 @@ function Chatbox({
 }: {
   device: Device;
   remoteDeviceId: string;
-  projectSlug: string;
+  projectId: string;
   sessionId: string;
   managed: ReturnType<typeof useConnection>["managed"];
   connectionState: ReturnType<typeof useConnection>["state"];
@@ -154,13 +154,14 @@ function Chatbox({
     let controller: SessionAttachController | undefined;
 
     void (async () => {
-      const scopeKey = await computeScopeKey(remoteDeviceId, projectSlug);
+      const scopeKey = await computeScopeKey(remoteDeviceId, projectId);
       if (cancelled) return;
       const attachCache = getSharedAttachCache();
       controller = createSessionAttachController({
         client: managed.client,
         scopeKey,
         sessionId: asSessionId(sessionId),
+        projectId,
         attachCache,
         onState: (next) => {
           if (cancelled) return;
@@ -176,7 +177,7 @@ function Chatbox({
       controller?.stop();
       controllerRef.current = null;
     };
-  }, [managed, remoteDeviceId, projectSlug, sessionId]);
+  }, [managed, remoteDeviceId, projectId, sessionId]);
 
   // S0046: drain the empty-composer pending prompt exactly once after the
   // controller is fully attached (loading=false ⇒ initial resync settled).

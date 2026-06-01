@@ -234,7 +234,7 @@ describe("AttachCache", () => {
     const read = cache.read("scope_a", "session_1");
     expect(read?.events).toHaveLength(1);
     // But the underlying storage is empty.
-    expect(raw.has("scorel:webui:v1:attach-cache:scope_a:session_1")).toBe(false);
+    expect(raw.has("scorel:webui:v2:attach-cache:scope_a:session_1")).toBe(false);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });

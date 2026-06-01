@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import {
-  EmbeddedDaemon,
+  ScorelHost,
   createLocalDaemonState,
   createRealRuntime,
   daemonStateLiveness,
@@ -12,7 +12,7 @@ import {
   readLocalDaemonState,
   removeLocalDaemonState,
   scorelSessionsDir,
-  startEmbeddedDaemonWebSocketServer,
+  startScorelHostWebSocketServer,
   type DaemonStateLiveness,
   type LocalDaemonState,
 } from "@scorel/daemon";
@@ -103,19 +103,21 @@ const runServeCommand = async (
   }
 
   const token = flags.token ?? existing?.token ?? randomUUID();
-  const wsUrl = `ws://${flags.host}:${flags.port}`;
-  const config = await loadScorelConfig({ cwd: flags.cwd });
-  const daemon = new EmbeddedDaemon({
+  const daemon = new ScorelHost({
     sessionsDir: options.sessionsDir ?? scorelSessionsDir(homedir()),
+    projectsPath: join(options.stateDir, "projects.json"),
     deviceId: asDeviceId("device_local"),
     deviceDisplayName: "Local daemon",
-    workDir: flags.cwd,
-    createRuntime: () => createRealRuntime({ cwd: flags.cwd, config }),
+    createRuntime: async ({ project }) => createRealRuntime({
+      cwd: project.workDir,
+      config: await loadScorelConfig({ cwd: project.workDir }),
+    }),
   });
   await daemon.start();
+  await daemon.registerProject(flags.cwd);
 
-  const server = await startEmbeddedDaemonWebSocketServer({
-    daemon,
+  const server = await startScorelHostWebSocketServer({
+    hostService: daemon,
     host: flags.host,
     port: flags.port,
     token,
@@ -129,7 +131,6 @@ const runServeCommand = async (
     port: server.port,
     wsUrl: server.url,
     token,
-    cwd: flags.cwd,
     pid: process.pid,
     startedAt,
     stoppedAt: null,

@@ -41,7 +41,7 @@ class FakeTransport implements DaemonTransport {
   async connect(_params: ConnectParams): Promise<ConnectResult> {
     const next = FakeTransport.behaviors.shift();
     if (!next) {
-      return { clientId: asClientId("client_default"), currentSeq: asSeq(0) };
+      return { clientId: asClientId("client_default"), currentSeq: asSeq(0), deviceId: asDeviceId("device_default") };
     }
     if (next.kind === "error") throw next.error;
     return next.result;

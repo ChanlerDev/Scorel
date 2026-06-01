@@ -11,9 +11,11 @@ export type Device = {
 };
 
 export type DeviceProject = {
-  projectSlug: string;
+  projectId: string;
   displayName?: string;
-  workDirHint?: string;
+  workDir?: string;
+  createdAt?: number;
+  updatedAt?: number;
   sessionCount?: number;
   lastSeenAt?: number;
   sessions?: Record<string, DeviceSessionSummary>;

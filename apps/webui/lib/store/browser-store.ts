@@ -8,7 +8,7 @@ export type BrowserStoreOptions = {
   onQuotaExceeded?: (key: string, error: unknown) => void;
 };
 
-const DEFAULT_NAMESPACE = "scorel:webui:v1:";
+const DEFAULT_NAMESPACE = "scorel:webui:v2:";
 
 function isQuotaError(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;

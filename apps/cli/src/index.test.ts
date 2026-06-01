@@ -8,11 +8,14 @@ import { describe, expect, it } from "vitest";
 
 import { cliAppName, cliClientDependency, cliDaemonDependency, createSigintHandler, runCli } from "@scorel/app-cli";
 import {
+  ScorelHost,
+  createLocalDaemonState,
+  startScorelHostWebSocketServer,
   startRemoteDaemonWebSocketServer,
   type RemoteDaemonWebSocketConnection,
   type ScorelConfig,
 } from "@scorel/daemon";
-import { asClientId, asDeviceId, asEventId, asSeq, asSessionId } from "@scorel/protocol";
+import { asClientId, asDeviceId, asEventId, asProjectId, asSeq, asSessionId } from "@scorel/protocol";
 
 describe("@scorel/app-cli", () => {
   it("is an entrypoint shell over client/daemon", () => {
@@ -103,8 +106,56 @@ describe("@scorel/app-cli", () => {
     expect(result.stdout).toContain("provider_request_failed");
   });
 
-  it("indexes local chat sessions by canonical project workdir", async () => {
-    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-project-index-"));
+  it("manages the local Host project registry over WebSocket", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-project-command-"));
+    const sessionsDir = join(stateDir, "sessions");
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-project-command-workspace-"));
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath: join(stateDir, "projects.json"),
+      deviceId: asDeviceId("device_project_command"),
+      createRuntime: async () => {
+        throw new Error("project commands must not create runtimes");
+      },
+    });
+    await host.start();
+    const server = await startScorelHostWebSocketServer({
+      hostService: host,
+      host: "127.0.0.1",
+      port: 0,
+      token: "project-command-secret",
+    });
+    await createLocalDaemonState({
+      stateDir,
+      host: server.host,
+      port: server.port,
+      wsUrl: server.url,
+      token: "project-command-secret",
+      pid: process.pid,
+      startedAt: Date.now(),
+      stoppedAt: null,
+    });
+
+    try {
+      const added = await runCliWithInput(["project", "add", workspaceDir], "", testConfig("http://127.0.0.1:1"), sessionsDir);
+      expect(added.code).toBe(0);
+      const [projectId] = added.stdout.trim().split("\t");
+      expect(projectId).toMatch(/^prj_/);
+
+      const listed = await runCliWithInput(["project", "list"], "", testConfig("http://127.0.0.1:1"), sessionsDir);
+      expect(listed.code).toBe(0);
+      expect(listed.stdout).toContain(`${projectId}\t${basename(workspaceDir)}\t${await realpath(workspaceDir)}`);
+
+      const removed = await runCliWithInput(["project", "remove", projectId], "", testConfig("http://127.0.0.1:1"), sessionsDir);
+      expect(removed).toMatchObject({ code: 0, stdout: `removed ${projectId}\n` });
+    } finally {
+      await server.close();
+      await host.shutdown();
+    }
+  });
+
+  it("registers local chat projects by canonical workdir", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-project-registry-"));
     const sessionsDir = join(stateDir, "sessions");
     const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-workspace-index-"));
     const server = await startChatServer([{ content: "Indexed local project.", tool_calls: [] }]);
@@ -119,22 +170,13 @@ describe("@scorel/app-cli", () => {
 
       expect(result.code).toBe(0);
       const canonicalWorkDir = await realpath(workspaceDir);
-      const index = JSON.parse(await readFile(join(stateDir, "project-index.json"), "utf8")) as ProjectIndexFile;
-      expect(index.version).toBe(1);
-      expect(index.projects).toHaveLength(1);
-      expect(index.projects[0]).toMatchObject({
-        projectKey: `local:${canonicalWorkDir}`,
-        kind: "local",
+      const registry = JSON.parse(await readFile(join(stateDir, "projects.json"), "utf8")) as { version: 1; projects: Array<{ projectId: string; displayName: string; workDir: string }> };
+      expect(registry.version).toBe(1);
+      expect(registry.projects).toHaveLength(1);
+      expect(registry.projects[0]).toMatchObject({
+        projectId: expect.stringMatching(/^prj_/),
         workDir: canonicalWorkDir,
         displayName: basename(canonicalWorkDir),
-        sessions: {
-          ses_local_project_index: {
-            sessionId: "ses_local_project_index",
-            source: "local-session",
-            sessionPath: "sessions/ses_local_project_index.jsonl",
-            logPath: "sessions/ses_local_project_index.log",
-          },
-        },
       });
     } finally {
       await server.close();
@@ -151,20 +193,17 @@ describe("@scorel/app-cli", () => {
         messages.push(message.type);
         if (message.type === "load_session") {
           return {
-            type: "error",
-            requestId: message.requestId,
-            ok: false,
-            code: "session_not_found" as const,
-            message: "missing session",
-          };
-        }
-        if (message.type === "create_session") {
-          return {
             type: "response",
-            requestType: "create_session",
+            requestType: "load_session",
             requestId: message.requestId,
             ok: true,
-            data: { sessionId: asSessionId("ses_remote_attach") },
+            data: {
+              sessionId: asSessionId("ses_remote_attach"),
+              activeLeafId: null,
+              currentSeq: asSeq(0),
+              meta: { projectId: asProjectId("prj_test") },
+              events: [],
+            },
           };
         }
         if (message.type === "resync_events") {
@@ -188,7 +227,7 @@ describe("@scorel/app-cli", () => {
         await mkdtemp(join(tmpdir(), "scorel-cli-remote-attach-")),
       );
       expect(result.code).toBe(0);
-      expect(result.stdout).toContain("scorel attach created session ses_remote_attach");
+      expect(result.stdout).toContain("scorel attach resumed session ses_remote_attach");
       expect(messages).toContain("resync_events");
       expect(result.stdout).not.toContain("remote-secret");
       expect(result.stderr).not.toContain("remote-secret");
@@ -217,25 +256,22 @@ describe("@scorel/app-cli", () => {
       token: "remote-secret",
       onClientConnect: (connection, params) => {
         connections.push(connection);
-        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0), deviceId: asDeviceId("device_test") };
       },
       onClientMessage: (_connection, message) => {
         if (message.type === "load_session") {
           return {
-            type: "error",
-            requestId: message.requestId,
-            ok: false,
-            code: "session_not_found" as const,
-            message: "missing session",
-          };
-        }
-        if (message.type === "create_session") {
-          return {
             type: "response",
-            requestType: "create_session",
+            requestType: "load_session",
             requestId: message.requestId,
             ok: true,
-            data: { sessionId: asSessionId("ses_remote_watch") },
+            data: {
+              sessionId: asSessionId("ses_remote_watch"),
+              activeLeafId: null,
+              currentSeq: asSeq(0),
+              meta: { projectId: asProjectId("prj_test") },
+              events: [],
+            },
           };
         }
         if (message.type === "resync_events") {
@@ -267,8 +303,8 @@ describe("@scorel/app-cli", () => {
         await mkdtemp(join(tmpdir(), "scorel-cli-remote-watch-")),
       );
       await waitFor(() => connections.length >= 2, "two remote attach connections");
-      await waitFor(() => attachA.stdout.toString().includes("scorel attach created session ses_remote_watch"), "attach A ready");
-      await waitFor(() => attachB.stdout.toString().includes("scorel attach created session ses_remote_watch"), "attach B ready");
+      await waitFor(() => attachA.stdout.toString().includes("scorel attach resumed session ses_remote_watch"), "attach A ready");
+      await waitFor(() => attachB.stdout.toString().includes("scorel attach resumed session ses_remote_watch"), "attach B ready");
 
       for (const connection of connections) {
         connection.send({
@@ -314,7 +350,7 @@ describe("@scorel/app-cli", () => {
               sessionId: asSessionId("ses_remote_recovered"),
               activeLeafId: asEventId("evt_assistant_recovered"),
               currentSeq: asSeq(2),
-              meta: {},
+              meta: { projectId: asProjectId("prj_test") },
               events: [
                 {
                   type: "user_message",
@@ -386,7 +422,7 @@ describe("@scorel/app-cli", () => {
               sessionId: asSessionId("ses_cache_dedupe"),
               activeLeafId: asEventId("evt_cache_assistant"),
               currentSeq: asSeq(2),
-              meta: {},
+              meta: { projectId: asProjectId("prj_test") },
               events: cachedAttachEvents("ses_cache_dedupe", "cached assistant output"),
             },
           };
@@ -442,7 +478,7 @@ describe("@scorel/app-cli", () => {
               sessionId: asSessionId("ses_same"),
               activeLeafId: asEventId("evt_scope_a_assistant"),
               currentSeq: asSeq(2),
-              meta: {},
+              meta: { projectId: asProjectId("prj_test") },
               events: cachedAttachEvents("ses_same", "remote A cached text", "evt_scope_a"),
             },
           };
@@ -466,20 +502,17 @@ describe("@scorel/app-cli", () => {
       onClientMessage: (_connection, message) => {
         if (message.type === "load_session") {
           return {
-            type: "error",
-            requestId: message.requestId,
-            ok: false,
-            code: "session_not_found" as const,
-            message: "missing session",
-          };
-        }
-        if (message.type === "create_session") {
-          return {
             type: "response",
-            requestType: "create_session",
+            requestType: "load_session",
             requestId: message.requestId,
             ok: true,
-            data: { sessionId: asSessionId("ses_same") },
+            data: {
+              sessionId: asSessionId("ses_same"),
+              activeLeafId: null,
+              currentSeq: asSeq(0),
+              meta: { projectId: asProjectId("prj_other") },
+              events: [],
+            },
           };
         }
         if (message.type === "resync_events") {
@@ -531,9 +564,8 @@ describe("@scorel/app-cli", () => {
           currentSeq: asSeq(0),
           deviceId: asDeviceId("device_tokyo"),
           deviceDisplayName: "Tokyo VPS",
-          projectSlug: "scorel",
         });
-        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0), deviceId: asDeviceId("device_tokyo") };
       },
       onClientMessage: (_connection, message) => {
         if (message.type === "load_session") {
@@ -546,7 +578,7 @@ describe("@scorel/app-cli", () => {
               sessionId: asSessionId("ses_same_remote_project"),
               activeLeafId: asEventId("evt_device_project_assistant"),
               currentSeq: asSeq(2),
-              meta: {},
+              meta: { projectId: asProjectId("prj_test") },
               events: cachedAttachEvents("ses_same_remote_project", "device scoped cached text", "evt_device_project"),
             },
           };
@@ -575,27 +607,23 @@ describe("@scorel/app-cli", () => {
           currentSeq: asSeq(0),
           deviceId: asDeviceId("device_tokyo"),
           deviceDisplayName: "Tokyo VPS",
-          projectSlug: "scorel",
         });
-        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0), deviceId: asDeviceId("device_tokyo") };
       },
       onClientMessage: (_connection, message) => {
         if (message.type === "load_session") {
           return {
-            type: "error",
-            requestId: message.requestId,
-            ok: false,
-            code: "session_not_found" as const,
-            message: "missing session",
-          };
-        }
-        if (message.type === "create_session") {
-          return {
             type: "response",
-            requestType: "create_session",
+            requestType: "load_session",
             requestId: message.requestId,
             ok: true,
-            data: { sessionId: asSessionId("ses_same_remote_project") },
+            data: {
+              sessionId: asSessionId("ses_same_remote_project"),
+              activeLeafId: null,
+              currentSeq: asSeq(0),
+              meta: { projectId: asProjectId("prj_test") },
+              events: [],
+            },
           };
         }
         if (message.type === "resync_events") {
@@ -647,27 +675,23 @@ describe("@scorel/app-cli", () => {
           currentSeq: asSeq(0),
           deviceId: asDeviceId("device_log"),
           deviceDisplayName: "Log Device",
-          projectSlug: "log-project",
         });
-        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0), deviceId: asDeviceId("device_log") };
       },
       onClientMessage: (_connection, message) => {
         if (message.type === "load_session") {
           return {
-            type: "error",
-            requestId: message.requestId,
-            ok: false,
-            code: "session_not_found" as const,
-            message: "missing session",
-          };
-        }
-        if (message.type === "create_session") {
-          return {
             type: "response",
-            requestType: "create_session",
+            requestType: "load_session",
             requestId: message.requestId,
             ok: true,
-            data: { sessionId: asSessionId("ses_attach_log") },
+            data: {
+              sessionId: asSessionId("ses_attach_log"),
+              activeLeafId: null,
+              currentSeq: asSeq(0),
+              meta: { projectId: asProjectId("prj_test") },
+              events: [],
+            },
           };
         }
         if (message.type === "resync_events") {
@@ -705,7 +729,7 @@ describe("@scorel/app-cli", () => {
       expect(log).toContain("event=attach_connect_started");
       expect(log).toContain("event=attach_connect_succeeded");
       expect(log).toContain("deviceId=device_log");
-      expect(log).toContain("projectSlug=log-project");
+      expect(log).toContain("projectId=prj_test");
       expect(log).toContain("event=attach_resync_finished");
       expect(log).toContain("mode=stream_resume");
       expect(log).toContain("event=attach_send_message_started");
@@ -721,99 +745,6 @@ describe("@scorel/app-cli", () => {
       );
       expect(printed.code).toBe(0);
       expect(printed.stdout).toContain("attach_send_message_finished");
-      expect(printed.stdout).toContain("attach_disconnected");
-    } finally {
-      await server.close();
-    }
-  });
-
-  it("indexes remote attach sessions by project slug and resolves logs through the index", async () => {
-    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-remote-project-index-"));
-    const sessionsDir = join(stateDir, "sessions");
-    const server = await startRemoteDaemonWebSocketServer({
-      host: "127.0.0.1",
-      port: 0,
-      token: "remote-secret",
-      onClientConnect: (connection, params) => {
-        connection.send({
-          type: "connected",
-          clientId: params.clientId,
-          sessionId: params.sessionId,
-          currentSeq: asSeq(0),
-          deviceId: asDeviceId("device_remote_index"),
-          deviceDisplayName: "Remote Index Device",
-          projectSlug: "scorel-project",
-        });
-        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
-      },
-      onClientMessage: (_connection, message) => {
-        if (message.type === "load_session") {
-          return {
-            type: "error",
-            requestId: message.requestId,
-            ok: false,
-            code: "session_not_found" as const,
-            message: "missing session",
-          };
-        }
-        if (message.type === "create_session") {
-          return {
-            type: "response",
-            requestType: "create_session",
-            requestId: message.requestId,
-            ok: true,
-            data: { sessionId: asSessionId("ses_remote_project_index") },
-          };
-        }
-        if (message.type === "resync_events") {
-          return {
-            type: "response",
-            requestType: "resync_events",
-            requestId: message.requestId,
-            ok: true,
-            data: { events: [], throughSeq: asSeq(0), mode: "stream_resume" as const },
-          };
-        }
-        return undefined;
-      },
-    });
-
-    try {
-      const result = await runCliWithInput(
-        ["attach", "--remote", server.url, "--token", "remote-secret", "--session", "ses_remote_project_index"],
-        ".exit\n",
-        testConfig("http://127.0.0.1:1"),
-        sessionsDir,
-      );
-      expect(result.code).toBe(0);
-
-      const index = JSON.parse(await readFile(join(stateDir, "project-index.json"), "utf8")) as ProjectIndexFile;
-      expect(index.projects).toHaveLength(1);
-      const project = index.projects[0];
-      expect(project).toMatchObject({
-        projectKey: "remote:device_remote_index:scorel-project",
-        kind: "remote",
-        deviceId: "device_remote_index",
-        deviceDisplayName: "Remote Index Device",
-        projectSlug: "scorel-project",
-        displayName: "scorel-project",
-        lastRemoteUrl: server.url,
-      });
-      const session = project.sessions.ses_remote_project_index;
-      expect(session).toMatchObject({
-        sessionId: "ses_remote_project_index",
-        source: "attach-cache",
-      });
-      expect(session.cachePath).toMatch(/^attach-cache\/[a-f0-9]{24}\/ses_remote_project_index\.json$/);
-      expect(session.logPath).toMatch(/^attach-cache\/[a-f0-9]{24}\/ses_remote_project_index\.log$/);
-
-      const printed = await runCliWithInput(
-        ["logs", "--attach", "--session", "ses_remote_project_index", "--remote", server.url, "--tail", "2"],
-        "",
-        testConfig("http://127.0.0.1:1"),
-        sessionsDir,
-      );
-      expect(printed.code).toBe(0);
       expect(printed.stdout).toContain("attach_disconnected");
     } finally {
       await server.close();
@@ -841,7 +772,7 @@ describe("@scorel/app-cli", () => {
       token: "remote-secret",
       onClientConnect: (connection, params) => {
         connections.push(connection);
-        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(1) };
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(1), deviceId: asDeviceId("device_test") };
       },
       onClientMessage: (_connection, message) => {
         if (message.type === "load_session") {
@@ -854,7 +785,7 @@ describe("@scorel/app-cli", () => {
               sessionId: asSessionId("ses_transient_cache"),
               activeLeafId: asEventId("evt_transient_user"),
               currentSeq: asSeq(1),
-              meta: {},
+              meta: { projectId: asProjectId("prj_test") },
               events: [userEvent],
             },
           };
@@ -955,25 +886,22 @@ describe("@scorel/app-cli", () => {
       token: "remote-secret",
       onClientConnect: (connection, params) => {
         connections.push(connection);
-        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0) };
+        return { clientId: params.clientId, sessionId: params.sessionId, currentSeq: asSeq(0), deviceId: asDeviceId("device_test") };
       },
       onClientMessage: (_connection, message) => {
         if (message.type === "load_session") {
           return {
-            type: "error",
-            requestId: message.requestId,
-            ok: false,
-            code: "session_not_found" as const,
-            message: "missing session",
-          };
-        }
-        if (message.type === "create_session") {
-          return {
             type: "response",
-            requestType: "create_session",
+            requestType: "load_session",
             requestId: message.requestId,
             ok: true,
-            data: { sessionId: asSessionId("ses_remote_format") },
+            data: {
+              sessionId: asSessionId("ses_remote_format"),
+              activeLeafId: null,
+              currentSeq: asSeq(0),
+              meta: { projectId: asProjectId("prj_test") },
+              events: [],
+            },
           };
         }
         if (message.type === "resync_events") {
@@ -1264,30 +1192,6 @@ class StringWritable extends Writable {
 type AssistantResponse = {
   content: string | null;
   tool_calls: Array<ReturnType<typeof toolCall>>;
-};
-
-type ProjectIndexFile = {
-  version: 1;
-  projects: Array<{
-    projectKey: string;
-    kind: "local" | "remote";
-    workDir?: string;
-    deviceId?: string;
-    deviceDisplayName?: string;
-    projectSlug?: string;
-    displayName: string;
-    lastRemoteUrl?: string;
-    sessions: Record<
-      string,
-      {
-        sessionId: string;
-        source: "local-session" | "attach-cache";
-        sessionPath?: string;
-        cachePath?: string;
-        logPath?: string;
-      }
-    >;
-  }>;
 };
 
 const startChatServer = async (responses: AssistantResponse[]) => {

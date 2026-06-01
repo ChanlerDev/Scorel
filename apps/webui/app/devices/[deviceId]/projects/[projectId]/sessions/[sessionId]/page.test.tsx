@@ -61,8 +61,8 @@ vi.mock("../../../../../../../lib/connection/session", () => ({
 }));
 
 vi.mock("../../../../../../../lib/identity/scope-key", () => ({
-  computeScopeKey: async (deviceId: string, projectSlug: string) =>
-    `${deviceId}/${projectSlug}`,
+  computeScopeKey: async (deviceId: string, projectId: string) =>
+    `${deviceId}/${projectId}`,
 }));
 
 import SessionPage from "./page";
@@ -123,7 +123,7 @@ function seedDevice(): { device: Device; store: DevicesStore } {
     token: "tok",
   });
   store.setProjects(device.id, [
-    { projectSlug: "alpha", displayName: "Alpha" },
+    { projectId: "alpha", displayName: "Alpha" },
   ]);
   store.setProjectSessions(device.id, "alpha", {
     session_target: {
@@ -183,7 +183,7 @@ describe("SessionPage pending-prompt consumption (S0046)", () => {
       <SessionPage
         params={{
           deviceId: device.id,
-          projectSlug: "alpha",
+          projectId: "alpha",
           sessionId: "session_target",
         }}
       />,
@@ -223,7 +223,7 @@ describe("SessionPage pending-prompt consumption (S0046)", () => {
       <SessionPage
         params={{
           deviceId: device.id,
-          projectSlug: "alpha",
+          projectId: "alpha",
           sessionId: "session_target",
         }}
       />,
@@ -248,7 +248,7 @@ describe("SessionPage pending-prompt consumption (S0046)", () => {
       <SessionPage
         params={{
           deviceId: device.id,
-          projectSlug: "alpha",
+          projectId: "alpha",
           sessionId: "session_target",
         }}
       />,

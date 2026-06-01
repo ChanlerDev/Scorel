@@ -52,7 +52,7 @@ When the WebUI runs on the same host as the daemon, the Settings page detects `~
 
 1. `pnpm dev` from the repo root brings up both `scorel daemon serve` and `scorel webui` (`scorel up`).
 2. Open `http://127.0.0.1:3000/settings`.
-3. A **Detected local daemon** banner appears above the device list with the daemon's `wsUrl` and `cwd`. Click **Use this device** to add it to the BrowserStore and route to its device page.
+3. A **Detected local daemon** banner appears above the device list with the daemon's `wsUrl`. Click **Use this device** to add it to the BrowserStore and route to its device page.
 
 The detection request hits `GET /api/local-daemon`, a Next App Router server route. Important invariants:
 
@@ -81,7 +81,7 @@ Required:
 - `--remote` — exposes the WebSocket endpoint (without it, only the local Unix socket is bound).
 - `--token TOKEN` — shared secret. The WebUI sends it back during the WebSocket handshake.
 - `--port` — defaults to a non-fixed port; pin one for the WebUI.
-- `--cwd` — the daemon's working directory. **All sessions created from this daemon use this `cwd`.** New Chat in the WebUI does not let the user override it. To run a session against a different repo, run a second daemon on a different port.
+- `--cwd` — an initial project directory registered during daemon startup. New Chat resolves its project through the Host registry.
 
 The daemon prints its connection link on startup, e.g. `ws://127.0.0.1:18789` or `wss://...`.
 
@@ -98,7 +98,7 @@ The daemon prints its connection link on startup, e.g. `ws://127.0.0.1:18789` or
 ### 3. Start chatting
 
 1. Click into a project in the sidebar.
-2. Click **+ New Chat**. The WebUI calls `create_session({ projectSlug })` on the daemon, navigates to `/devices/:id/projects/:slug/sessions/:sessionId`, and opens an empty chatbox.
+2. Click **+ New Chat**. The WebUI calls `create_session({ projectId })` on the daemon, navigates to `/devices/:id/projects/:slug/sessions/:sessionId`, and opens an empty chatbox.
 3. Send a prompt. Streaming text + tool calls render live. The session JSONL is written under `~/.scorel/sessions/...` on the daemon host.
 4. Optional: open `scorel attach --remote ws://… --session <id>` in another terminal to watch the same session from the CLI.
 
@@ -111,7 +111,7 @@ These are intentional cuts in M5. They are tracked in `docs/ROADMAP.md` for futu
 - **Token stored cleartext in `localStorage`.** No encryption, no OS keychain integration. Use a throwaway token for shared/public devices and rotate it via daemon restart when needed.
 - **Manual reconnect on persistent error.** The connection pool retries with exponential backoff up to 5 attempts (1s/2s/4s/8s/30s). After that, the sidebar shows the device as offline and the user has to click Reconnect.
 - **No Skills / Plugins / Automations.** v1 is read/control only; the daemon's extension surface is not exposed in the UI.
-- **No `cwd` input on New Chat.** New sessions inherit the daemon's startup `cwd`. To work in a different working directory, run another daemon.
+- **No `cwd` input on New Chat.** New sessions resolve the selected registered project's canonical working directory.
 - **No model picker on New Chat.** Sessions take whatever default model the daemon's config selects. WebUI does not let the user override per-session.
 - **No project search, session search, branch / fork / compact UI.** Out of scope for v1.
 

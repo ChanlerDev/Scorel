@@ -5,6 +5,7 @@ import {
   asClientId,
   asDeviceId,
   asEventId,
+  asProjectId,
   asRequestId,
   asSeq,
   asSessionId,
@@ -23,7 +24,7 @@ class MemoryTransport implements DaemonTransport {
   #handler: ((message: DaemonMessage) => void) | undefined;
 
   async connect(_params: ConnectParams): Promise<ConnectResult> {
-    return { clientId: asClientId("client_test"), currentSeq: asSeq(0) };
+    return { clientId: asClientId("client_test"), currentSeq: asSeq(0), deviceId: asDeviceId("device_test") };
   }
 
   send(message: ClientMessage): void {
@@ -122,7 +123,6 @@ describe("DaemonClient", () => {
           currentSeq: asSeq(0),
           deviceId: asDeviceId("device_tokyo"),
           deviceDisplayName: "Tokyo VPS",
-          projectSlug: "scorel",
         };
       }
     }
@@ -135,7 +135,6 @@ describe("DaemonClient", () => {
     expect(client.connectionIdentity).toEqual({
       deviceId: "device_tokyo",
       deviceDisplayName: "Tokyo VPS",
-      projectSlug: "scorel",
     });
   });
 
@@ -340,7 +339,6 @@ describe("DaemonClient", () => {
     expect(client.connectionIdentity).toEqual({
       deviceId: "device_tokyo",
       deviceDisplayName: "Tokyo VPS",
-      projectSlug: undefined,
     });
   });
 
@@ -359,12 +357,12 @@ describe("DaemonClient", () => {
     });
 
     await client.connect(asSessionId("ses_listing"));
-    const pending = client.listSessions({ projectSlug: "Users-test-repo", limit: 25 });
+    const pending = client.listSessions({ projectId: asProjectId("prj_repo"), limit: 25 });
 
     expect(transport.sent.at(-1)).toMatchObject({
       type: "list_sessions",
       requestId: "req_list_sessions",
-      projectSlug: "Users-test-repo",
+      projectId: "prj_repo",
       limit: 25,
     });
 
@@ -379,7 +377,7 @@ describe("DaemonClient", () => {
             sessionId: asSessionId("ses_alpha"),
             updatedAt: 5,
             currentSeq: asSeq(3),
-            projectSlug: "Users-test-repo",
+            projectId: asProjectId("prj_repo"),
           },
         ],
       },
@@ -390,12 +388,12 @@ describe("DaemonClient", () => {
         sessionId: "ses_alpha",
         updatedAt: 5,
         currentSeq: 3,
-        projectSlug: "Users-test-repo",
+        projectId: "prj_repo",
       },
     ]);
   });
 
-  it("returns DaemonProjectSummary list from listProjects", async () => {
+  it("returns HostProject list from listProjects", async () => {
     const transport = new MemoryTransport();
     const client = new DaemonClient(transport, {
       clientId: asClientId("client_test"),
@@ -417,11 +415,11 @@ describe("DaemonClient", () => {
       data: {
         projects: [
           {
-            projectSlug: "Users-test-repo",
+            projectId: asProjectId("prj_repo"),
             displayName: "repo",
-            workDirHint: "/Users/test/repo",
-            sessionCount: 4,
-            lastSeenAt: 17,
+            workDir: "/Users/test/repo",
+            createdAt: 4,
+            updatedAt: 17,
           },
         ],
       },
@@ -429,21 +427,86 @@ describe("DaemonClient", () => {
 
     await expect(pending).resolves.toEqual([
       {
-        projectSlug: "Users-test-repo",
+        projectId: "prj_repo",
         displayName: "repo",
-        workDirHint: "/Users/test/repo",
-        sessionCount: 4,
-        lastSeenAt: 17,
+        workDir: "/Users/test/repo",
+        createdAt: 4,
+        updatedAt: 17,
       },
     ]);
   });
 
-  it("rejects listSessions / listProjects when not connected to a daemon", async () => {
+  it("manages projects before binding a session", async () => {
+    const transport = new MemoryTransport();
+    let next = 0;
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+      createRequestId: () => asRequestId(`req_project_${++next}`),
+    });
+    await client.connect();
+
+    const directories = client.listDirectories("/Users/test");
+    expect(transport.sent.at(-1)).toMatchObject({
+      type: "list_directories",
+      path: "/Users/test",
+    });
+    transport.emit({
+      type: "response",
+      requestType: "list_directories",
+      requestId: asRequestId("req_project_1"),
+      ok: true,
+      data: {
+        path: "/Users/test",
+        entries: [{ name: "repo", path: "/Users/test/repo", kind: "directory" }],
+      },
+    });
+    await expect(directories).resolves.toMatchObject({ path: "/Users/test" });
+
+    const project = {
+      projectId: asProjectId("prj_repo"),
+      displayName: "repo",
+      workDir: "/Users/test/repo",
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const registered = client.registerProject("/Users/test/repo");
+    expect(transport.sent.at(-1)).toMatchObject({
+      type: "register_project",
+      workDir: "/Users/test/repo",
+    });
+    transport.emit({
+      type: "response",
+      requestType: "register_project",
+      requestId: asRequestId("req_project_2"),
+      ok: true,
+      data: { project },
+    });
+    await expect(registered).resolves.toEqual(project);
+
+    const removed = client.removeProject(project.projectId);
+    expect(transport.sent.at(-1)).toMatchObject({
+      type: "remove_project",
+      projectId: "prj_repo",
+    });
+    transport.emit({
+      type: "response",
+      requestType: "remove_project",
+      requestId: asRequestId("req_project_3"),
+      ok: true,
+      data: { projectId: project.projectId, removed: true },
+    });
+    await expect(removed).resolves.toBe(true);
+  });
+
+  it("rejects daemon-only operations when not connected", async () => {
     const transport = new MemoryTransport();
     const client = new DaemonClient(transport, { clientId: asClientId("client_test") });
 
     await expect(client.listSessions()).rejects.toThrow(/not connected to a daemon/);
     await expect(client.listProjects()).rejects.toThrow(/not connected to a daemon/);
+    await expect(client.listDirectories()).rejects.toThrow(/not connected to a daemon/);
+    await expect(client.registerProject("/repo")).rejects.toThrow(/not connected to a daemon/);
+    await expect(client.removeProject(asProjectId("prj_repo"))).rejects.toThrow(/not connected to a daemon/);
   });
 });
 
@@ -467,7 +530,6 @@ describe("WsTransport", () => {
             currentSeq: 0,
             deviceId: "device_tokyo",
             deviceDisplayName: "Tokyo VPS",
-            projectSlug: "scorel",
           }));
         }
         if (message.type === "ping") {
@@ -486,7 +548,6 @@ describe("WsTransport", () => {
       expect(connected).toMatchObject({
         deviceId: "device_tokyo",
         deviceDisplayName: "Tokyo VPS",
-        projectSlug: "scorel",
       });
       await expect(pong).resolves.toEqual({ type: "pong", requestId: "req_ping" });
     } finally {

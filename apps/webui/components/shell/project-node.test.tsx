@@ -26,7 +26,7 @@ describe("ProjectNode", () => {
         <ProjectNode
           deviceId="dev-1"
           project={{
-            projectSlug: "alpha",
+            projectId: "alpha",
             displayName: "Alpha",
             sessionCount: 4,
           }}
@@ -40,12 +40,12 @@ describe("ProjectNode", () => {
     expect(screen.queryByRole("link", { name: /Alpha/ })).toBeNull();
   });
 
-  it("falls back to the projectSlug when displayName is missing", () => {
+  it("falls back to the projectId when displayName is missing", () => {
     render(
       <ul>
         <ProjectNode
           deviceId="dev-1"
-          project={{ projectSlug: "raw-slug" }}
+          project={{ projectId: "raw-slug" }}
         />
       </ul>,
     );
@@ -58,7 +58,7 @@ describe("ProjectNode", () => {
         <ProjectNode
           deviceId="dev-1"
           project={{
-            projectSlug: "alpha",
+            projectId: "alpha",
             sessions: {
               older: { sessionId: "older", title: "Older", updatedAt: 100 },
               newer: { sessionId: "newer", title: "Newer", updatedAt: 500 },
@@ -78,7 +78,7 @@ describe("ProjectNode", () => {
         <ProjectNode
           deviceId="dev-1"
           project={{
-            projectSlug: "alpha",
+            projectId: "alpha",
             displayName: "Alpha",
             sessions: {
               s1: { sessionId: "s1", title: "S1", updatedAt: 1 },
@@ -96,7 +96,7 @@ describe("ProjectNode", () => {
       <ul>
         <ProjectNode
           deviceId="dev-1"
-          project={{ projectSlug: "alpha", displayName: "Alpha" }}
+          project={{ projectId: "alpha", displayName: "Alpha" }}
         />
       </ul>,
     );
@@ -113,7 +113,7 @@ describe("ProjectNode", () => {
         <ProjectNode
           deviceId="dev-1"
           project={{
-            projectSlug: "alpha",
+            projectId: "alpha",
             displayName: "Alpha",
             sessions: { s1: { sessionId: "s1", title: "S1", updatedAt: 1 } },
           }}
@@ -140,7 +140,7 @@ describe("ProjectNode", () => {
         <ProjectNode
           deviceId="dev-1"
           project={{
-            projectSlug: "alpha",
+            projectId: "alpha",
             displayName: "Alpha",
             sessions: { s1: { sessionId: "s1", title: "S1", updatedAt: 1 } },
           }}
@@ -161,7 +161,7 @@ describe("ProjectNode", () => {
       <ul>
         <ProjectNode
           deviceId="dev-1"
-          project={{ projectSlug: "alpha", displayName: "Alpha" }}
+          project={{ projectId: "alpha", displayName: "Alpha" }}
           onSelect={onSelect}
         />
       </ul>,
@@ -176,7 +176,7 @@ describe("ProjectNode", () => {
       <ul>
         <ProjectNode
           deviceId="dev-1"
-          project={{ projectSlug: "alpha", displayName: "Alpha" }}
+          project={{ projectId: "alpha", displayName: "Alpha" }}
           onSelect={onSelect}
           offline
         />
@@ -190,7 +190,7 @@ describe("ProjectNode", () => {
       <ul>
         <ProjectNode
           deviceId="dev-1"
-          project={{ projectSlug: "alpha", displayName: "Alpha" }}
+          project={{ projectId: "alpha", displayName: "Alpha" }}
         />
       </ul>,
     );
@@ -205,7 +205,7 @@ describe("ProjectNode", () => {
       <ul>
         <ProjectNode
           deviceId="dev-1"
-          project={{ projectSlug: "alpha", displayName: "Alpha" }}
+          project={{ projectId: "alpha", displayName: "Alpha" }}
         />
       </ul>,
     );
@@ -221,10 +221,10 @@ describe("ProjectNode", () => {
     expect(editBtn.getAttribute("title")).toBe("在 Alpha 中开始新对话");
   });
 
-  it("✏ button labels fall back to projectSlug when displayName is missing", () => {
+  it("✏ button labels fall back to projectId when displayName is missing", () => {
     render(
       <ul>
-        <ProjectNode deviceId="dev-1" project={{ projectSlug: "raw-slug" }} />
+        <ProjectNode deviceId="dev-1" project={{ projectId: "raw-slug" }} />
       </ul>,
     );
     const editBtn = screen.getByTestId("project-new-chat-raw-slug");
@@ -239,7 +239,7 @@ describe("ProjectNode", () => {
         <ProjectNode
           deviceId="dev-1"
           project={{
-            projectSlug: "alpha",
+            projectId: "alpha",
             displayName: "Alpha",
             sessions: { s1: { sessionId: "s1", title: "S1", updatedAt: 1 } },
           }}

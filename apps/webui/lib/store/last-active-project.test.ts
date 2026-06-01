@@ -5,7 +5,7 @@ import {
   writeLastActiveProject,
 } from "./last-active-project";
 
-const KEY = "scorel.ui.last-active-project";
+const KEY = "scorel.ui.v2.last-active-project";
 
 beforeEach(() => {
   if (typeof window !== "undefined") window.localStorage.clear();
@@ -25,7 +25,7 @@ describe("last-active-project store", () => {
     expect(readLastActiveProject(undefined)).toBeUndefined();
   });
 
-  it("round-trips a single (deviceId, projectSlug) pair", () => {
+  it("round-trips a single (deviceId, projectId) pair", () => {
     writeLastActiveProject("dev1", "alpha");
     expect(readLastActiveProject("dev1")).toBe("alpha");
   });
@@ -62,7 +62,7 @@ describe("last-active-project store", () => {
     expect(readLastActiveProject("dev1")).toBeUndefined();
   });
 
-  it("ignores empty deviceId or projectSlug on write", () => {
+  it("ignores empty deviceId or projectId on write", () => {
     writeLastActiveProject("", "alpha");
     writeLastActiveProject("dev1", "");
     expect(window.localStorage.getItem(KEY)).toBeNull();

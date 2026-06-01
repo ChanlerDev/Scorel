@@ -437,9 +437,9 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
-| M6.1 | [`S0048`](spec/ship/S0048-device-level-host-project-registry.md) | Device-level Host + Project Registry + project-aware Runtime | Planned |
+| M6.1 | [`S0048`](spec/ship/S0048-device-level-host-project-registry.md) | Device-level Host + Project Registry + project-aware Runtime | Done |
 
-**Status**: Planned
+**Status**: Done
 
 ---
 
@@ -570,7 +570,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0045`](spec/ship/S0045-webui-card-sidebar-and-session-fixes.md) | 单卡片 sidebar + 整行 toggle + 时间 hint + 删 SessionHeader/外壳 + transport guard | Done |
 | [`S0046`](spec/ship/S0046-webui-empty-composer-and-lazy-session.md) | 空态主区大 composer + project picker + lazy session 创建 | Done |
 | [`S0047`](spec/ship/S0047-webui-project-hover-newchat-and-dynamic-greeting.md) | Project 行 hover ✏ 新建会话按钮 + EmptyComposer H1 动态 project 名 | Done |
-| [`S0048`](spec/ship/S0048-device-level-host-project-registry.md) | Device-level Host、持久 Project Registry、project-aware Runtime | Planned |
+| [`S0048`](spec/ship/S0048-device-level-host-project-registry.md) | Device-level Host、持久 Project Registry、project-aware Runtime | Done |
 | [`S0049`](spec/ship/S0049-webui-add-project-directory-browser.md) | WebUI 添加项目、Device 目录浏览、projectId 路由切换 | Planned |
 
 ---

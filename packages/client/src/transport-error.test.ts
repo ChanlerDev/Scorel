@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   asClientId,
+  asDeviceId,
   asRequestId,
   asSessionId,
   type ClientMessage,
@@ -22,7 +23,7 @@ import { DaemonClient, TransportDisconnectedError } from "./index.js";
  */
 class DeadTransport implements DaemonTransport {
   async connect(_params: ConnectParams): Promise<ConnectResult> {
-    return { clientId: asClientId("client_dead"), currentSeq: 0 as ConnectResult["currentSeq"] };
+    return { clientId: asClientId("client_dead"), currentSeq: 0 as ConnectResult["currentSeq"], deviceId: asDeviceId("device_dead") };
   }
   send(_message: ClientMessage): void {
     throw new Error("WsTransport is not connected");
@@ -41,6 +42,7 @@ class HalfDeadTransport implements DaemonTransport {
     return {
       clientId: asClientId("client_dead"),
       currentSeq: 0 as ConnectResult["currentSeq"],
+      deviceId: asDeviceId("device_dead"),
     };
   }
   send(_message: ClientMessage): void {

@@ -192,7 +192,7 @@ interface ScorelHost {
 
   listDirectories(path?: string): Promise<DirectoryListing>;
   registerProject(workDir: string): Promise<HostProject>;
-  listProjects(): Promise<HostProjectSummary[]>;
+  listProjects(): Promise<HostProject[]>;
   removeProject(projectId: ProjectId): Promise<void>;
 
   createSession(meta: SessionMeta): Promise<SessionId>;
@@ -206,18 +206,11 @@ type DirectoryEntry = {
 };
 
 type DirectoryListing = {
-  currentPath: string;
+  path: string;
   parentPath?: string;
   entries: DirectoryEntry[];
 };
 
-type HostProjectSummary = {
-  projectId: ProjectId;
-  displayName: string;
-  workDir: string;
-  sessionCount: number;
-  lastSeenAt?: number;
-};
 ```
 
 当前可信用户模型允许完整目录浏览。`listDirectories()` 不做 ACL 或根目录限制，但必须：
@@ -237,15 +230,15 @@ type HostProjectSummary = {
 type ClientRequestMap = {
   list_directories: {
     request: { path?: string };
-    response: { currentPath: string; parentPath?: string; entries: DirectoryEntry[] };
+    response: { path: string; parentPath?: string; entries: DirectoryEntry[] };
   };
   register_project: {
     request: { workDir: string };
-    response: { project: HostProjectSummary };
+    response: { project: HostProject };
   };
   list_projects: {
     request: {};
-    response: { projects: HostProjectSummary[] };
+    response: { projects: HostProject[] };
   };
   remove_project: {
     request: { projectId: ProjectId };

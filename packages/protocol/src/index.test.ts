@@ -4,6 +4,7 @@ import {
   asClientId,
   asDeviceId,
   asEventId,
+  asProjectId,
   asRequestId,
   asSeq,
   asSessionId,
@@ -11,17 +12,22 @@ import {
   protocolPackageName,
   protocolVersion,
   type ClientRequest,
+  type CreateSessionMeta,
   type DaemonMessage,
-  type DaemonProjectSummary,
+  type DirectoryListing,
+  type ErrorCode,
+  type HostProject,
   type ResponseFor,
   type ScorelEvent,
+  type SessionHeaderEvent,
+  type SessionMeta,
   type SessionSummary,
 } from "@scorel/protocol";
 
 describe("@scorel/protocol", () => {
   it("has a public entrypoint", () => {
     expect(protocolPackageName).toBe("@scorel/protocol");
-    expect(protocolVersion).toBe(1);
+    expect(protocolVersion).toBe(2);
   });
 
   it("pairs request and response data by request type", () => {
@@ -128,7 +134,7 @@ describe("@scorel/protocol", () => {
     expect(response.data.throughSeq).toBe(2);
   });
 
-  it("models daemon connection identity for remote project cache scope", () => {
+  it("models connected handshake with device identity only", () => {
     const message = {
       type: "connected",
       clientId: asClientId("client_1"),
@@ -136,11 +142,9 @@ describe("@scorel/protocol", () => {
       currentSeq: asSeq(0),
       deviceId: asDeviceId("device_tokyo"),
       deviceDisplayName: "Tokyo VPS",
-      projectSlug: "scorel",
     } satisfies DaemonMessage;
 
     expect(message.deviceId).toBe("device_tokyo");
-    expect(message.projectSlug).toBe("scorel");
   });
 
   it("round-trips cancel request and response", () => {
@@ -160,46 +164,127 @@ describe("@scorel/protocol", () => {
     expect(response.data.sessionId).toBe("ses_cancel");
   });
 
-  it("round-trips list_sessions with projectSlug filter and limit clamp", () => {
+  it("round-trips list_sessions with projectId filter and limit clamp", () => {
     const request = {
       type: "list_sessions",
       requestId: asRequestId("req_list_sessions"),
-      projectSlug: "Users-test-repo",
+      projectId: asProjectId("prj_repo"),
       limit: 50,
     } satisfies ClientRequest<"list_sessions">;
 
     const summary: SessionSummary = {
       sessionId: asSessionId("ses_alpha"),
+      projectId: asProjectId("prj_repo"),
       title: "Alpha",
       model: "test-model",
       updatedAt: 5,
       currentSeq: asSeq(7),
-      projectSlug: "Users-test-repo",
     };
     const response = okResponse(request, { sessions: [summary] }) satisfies ResponseFor<typeof request>;
 
     expect(response.requestType).toBe("list_sessions");
-    expect(response.data.sessions[0].projectSlug).toBe("Users-test-repo");
+    expect(response.data.sessions[0].projectId).toBe("prj_repo");
     expect(request.limit).toBe(50);
   });
 
-  it("round-trips list_projects with DaemonProjectSummary entries", () => {
+  it("round-trips list_projects with Registry HostProject entries", () => {
     const request = {
       type: "list_projects",
       requestId: asRequestId("req_list_projects"),
     } satisfies ClientRequest<"list_projects">;
 
-    const project: DaemonProjectSummary = {
-      projectSlug: "Users-test-repo",
+    const project: HostProject = {
+      projectId: asProjectId("prj_repo"),
       displayName: "repo",
-      workDirHint: "/Users/test/repo",
-      sessionCount: 3,
-      lastSeenAt: 99,
+      workDir: "/Users/test/repo",
+      createdAt: 90,
+      updatedAt: 99,
     };
     const response = okResponse(request, { projects: [project] }) satisfies ResponseFor<typeof request>;
 
     expect(response.requestType).toBe("list_projects");
     expect(response.data.projects[0].displayName).toBe("repo");
-    expect(response.data.projects[0].sessionCount).toBe(3);
+    expect(response.data.projects[0].workDir).toBe("/Users/test/repo");
+  });
+
+  it("requires project identity in session metadata", () => {
+    const meta: CreateSessionMeta = { projectId: asProjectId("prj_repo"), title: "Repo session" };
+    const request = {
+      type: "create_session",
+      requestId: asRequestId("req_create_session"),
+      meta,
+    } satisfies ClientRequest<"create_session">;
+
+    expect(request.meta.projectId).toBe("prj_repo");
+
+    const missingProjectId: ClientRequest<"create_session"> = {
+      type: "create_session",
+      requestId: asRequestId("req_invalid"),
+      // @ts-expect-error projectId is mandatory for every new session.
+      meta: {},
+    };
+    expect(missingProjectId.meta).toEqual({});
+  });
+
+  it("round-trips project identity in session headers", () => {
+    const meta: SessionMeta = { projectId: asProjectId("prj_repo") };
+    const event: SessionHeaderEvent = {
+      type: "session_header",
+      protocolVersion: 2,
+      id: asEventId("evt_header"),
+      parentId: null,
+      seq: asSeq(0),
+      sessionId: asSessionId("ses_repo"),
+      clientId: asClientId("cli_repo"),
+      ts: 1,
+      meta,
+    };
+
+    expect(event.meta.projectId).toBe("prj_repo");
+  });
+
+  it("exposes structured project registry and filesystem errors", () => {
+    const errorCodes = [
+      "project_not_found",
+      "project_has_sessions",
+      "filesystem_error",
+    ] satisfies ErrorCode[];
+
+    expect(errorCodes).toEqual(["project_not_found", "project_has_sessions", "filesystem_error"]);
+  });
+
+  it("round-trips directory listing and project registry requests", () => {
+    const listing: DirectoryListing = {
+      path: "/Users/test",
+      parentPath: "/Users",
+      entries: [{ name: "repo", path: "/Users/test/repo", kind: "directory" }],
+    };
+    const listDirectories = {
+      type: "list_directories",
+      requestId: asRequestId("req_list_directories"),
+      path: "/Users/test",
+    } satisfies ClientRequest<"list_directories">;
+    const registerProject = {
+      type: "register_project",
+      requestId: asRequestId("req_register_project"),
+      workDir: "/Users/test/repo",
+    } satisfies ClientRequest<"register_project">;
+    const removeProject = {
+      type: "remove_project",
+      requestId: asRequestId("req_remove_project"),
+      projectId: asProjectId("prj_repo"),
+    } satisfies ClientRequest<"remove_project">;
+
+    expect(okResponse(listDirectories, listing).data.entries[0].kind).toBe("directory");
+    expect(okResponse(registerProject, {
+      project: {
+        projectId: asProjectId("prj_repo"),
+        displayName: "repo",
+        workDir: "/Users/test/repo",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    }).data.project.projectId).toBe("prj_repo");
+    expect(okResponse(removeProject, { projectId: asProjectId("prj_repo"), removed: true }).data.removed).toBe(true);
   });
 });

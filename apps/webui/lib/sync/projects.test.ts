@@ -7,7 +7,7 @@ import {
   syncProjects,
 } from "./projects";
 import type { DaemonClient } from "@scorel/client";
-import type { DaemonProjectSummary } from "@scorel/protocol";
+import { asProjectId, type HostProject } from "@scorel/protocol";
 
 class FakeStorage implements StorageLike {
   private map = new Map<string, string>();
@@ -34,20 +34,21 @@ function freshStore(): { store: DevicesStore; raw: FakeStorage } {
   return { store: new DevicesStore(browser), raw };
 }
 
-function fakeProjects(): DaemonProjectSummary[] {
+function fakeProjects(): HostProject[] {
   return [
     {
-      projectSlug: "alpha",
+      projectId: asProjectId("alpha"),
       displayName: "Alpha",
-      workDirHint: "/Users/x/alpha",
-      sessionCount: 2,
-      lastSeenAt: 1000,
+      workDir: "/Users/x/alpha",
+      createdAt: 1,
+      updatedAt: 1000,
     },
     {
-      projectSlug: "beta",
+      projectId: asProjectId("beta"),
       displayName: "Beta",
-      sessionCount: 0,
-      lastSeenAt: 500,
+      workDir: "/Users/x/beta",
+      createdAt: 2,
+      updatedAt: 500,
     },
   ];
 }
@@ -80,11 +81,11 @@ describe("syncProjects", () => {
     });
     expect(projects).toHaveLength(2);
     const stored = store.get(device.id);
-    expect(stored?.projects?.map((p) => p.projectSlug)).toEqual([
+    expect(stored?.projects?.map((p) => p.projectId)).toEqual([
       "alpha",
       "beta",
     ]);
-    expect(stored?.projects?.[0]?.workDirHint).toBe("/Users/x/alpha");
+    expect(stored?.projects?.[0]?.workDir).toBe("/Users/x/alpha");
     expect(stored?.projectsFetchedAt).toBeTypeOf("number");
   });
 
@@ -96,7 +97,7 @@ describe("syncProjects", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Old Alpha" },
+      { projectId: "alpha", displayName: "Old Alpha" },
     ]);
     store.setProjectSessions(device.id, "alpha", {
       session_1: { sessionId: "session_1", title: "Cached", updatedAt: 1 },
@@ -104,7 +105,7 @@ describe("syncProjects", () => {
 
     const client = {
       listProjects: vi.fn().mockResolvedValue([
-        { projectSlug: "alpha", displayName: "Alpha v2", sessionCount: 1, lastSeenAt: 2 },
+        { projectId: asProjectId("alpha"), displayName: "Alpha v2", workDir: "/Users/x/alpha", createdAt: 1, updatedAt: 2 },
       ]),
     } as unknown as DaemonClient;
 
@@ -122,7 +123,7 @@ describe("syncProjects", () => {
       token: "t",
     });
     store.setProjects(device.id, [
-      { projectSlug: "cached", displayName: "Cached" },
+      { projectId: "cached", displayName: "Cached" },
     ]);
     const client = {
       listProjects: vi.fn().mockRejectedValue(new Error("boom")),
@@ -131,7 +132,7 @@ describe("syncProjects", () => {
     await expect(
       syncProjects({ client, store, deviceId: device.id }),
     ).rejects.toThrow(/boom/);
-    expect(store.get(device.id)?.projects?.[0]?.projectSlug).toBe("cached");
+    expect(store.get(device.id)?.projects?.[0]?.projectId).toBe("cached");
   });
 
   it("dedupes concurrent calls per deviceId", async () => {
@@ -141,10 +142,10 @@ describe("syncProjects", () => {
       link: "wss://h",
       token: "t",
     });
-    let resolveCall: (value: DaemonProjectSummary[]) => void = () => {};
+    let resolveCall: (value: HostProject[]) => void = () => {};
     const listProjects = vi.fn().mockImplementation(
       () =>
-        new Promise<DaemonProjectSummary[]>((resolve) => {
+        new Promise<HostProject[]>((resolve) => {
           resolveCall = resolve;
         }),
     );

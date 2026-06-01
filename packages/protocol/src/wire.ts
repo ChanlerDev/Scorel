@@ -1,8 +1,10 @@
-import type { ClientId, DeviceId, EventId, RequestId, Seq, SessionId } from "./ids.js";
+import type { ClientId, DeviceId, EventId, ProjectId, RequestId, Seq, SessionId } from "./ids.js";
 import type {
-  DaemonProjectSummary,
+  CreateSessionMeta,
   DaemonStatus,
+  DirectoryListing,
   ErrorCode,
+  HostProject,
   PersistentEvent,
   ScorelEvent,
   SessionMeta,
@@ -16,7 +18,7 @@ export type SendMessageOptions = {
 
 export type ClientRequestMap = {
   create_session: {
-    request: { sessionId?: SessionId; meta?: Partial<SessionMeta> };
+    request: { sessionId?: SessionId; meta: CreateSessionMeta };
     response: { sessionId: SessionId };
   };
   load_session: {
@@ -30,12 +32,24 @@ export type ClientRequestMap = {
     };
   };
   list_sessions: {
-    request: { projectSlug?: string; limit?: number };
+    request: { projectId?: ProjectId; limit?: number };
     response: { sessions: SessionSummary[] };
   };
   list_projects: {
     request: Record<never, never>;
-    response: { projects: DaemonProjectSummary[] };
+    response: { projects: HostProject[] };
+  };
+  list_directories: {
+    request: { path?: string };
+    response: DirectoryListing;
+  };
+  register_project: {
+    request: { workDir: string };
+    response: { project: HostProject };
+  };
+  remove_project: {
+    request: { projectId: ProjectId };
+    response: { projectId: ProjectId; removed: boolean };
   };
   cancel: {
     request: { sessionId: SessionId };
@@ -106,9 +120,8 @@ export type DaemonMessage =
       clientId: ClientId;
       sessionId?: SessionId;
       currentSeq?: Seq;
-      deviceId?: DeviceId;
+      deviceId: DeviceId;
       deviceDisplayName?: string;
-      projectSlug?: string;
     }
   | { type: "disconnected"; reason: string }
   | { type: "pong"; requestId?: RequestId }

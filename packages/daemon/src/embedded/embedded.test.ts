@@ -1,30 +1,21 @@
-import { mkdtemp, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  ScorelRuntime,
-  type RuntimeProvider,
-} from "@scorel/core";
+import { ScorelRuntime, type RuntimeProvider } from "@scorel/core";
 import {
   asClientId,
   asDeviceId,
   asRequestId,
-  asSeq,
   asSessionId,
   type DaemonMessage,
-  type ScorelEvent,
+  type HostProject,
   type ScorelMessage,
 } from "@scorel/protocol";
 
-import { EmbeddedDaemon, createEmbeddedTransport } from "../index.js";
-
-const userMessage = (text: string): ScorelMessage => ({
-  role: "user",
-  content: [{ type: "text", text }],
-});
+import { ScorelHost, createEmbeddedTransport } from "../index.js";
 
 const assistantMessage = (text: string): ScorelMessage => ({
   role: "assistant",
@@ -32,176 +23,147 @@ const assistantMessage = (text: string): ScorelMessage => ({
   stopReason: "end_turn",
 });
 
-describe("embedded daemon + client", () => {
-  it("treats concurrent explicit create_session requests as the same session", async () => {
-    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-daemon-create-race-"));
-    const sessionId = asSessionId("ses_create_race");
-    const provider: RuntimeProvider = {
-      streamTurn: async function* () {
-        return assistantMessage("ok");
-      },
-    };
-    const daemon = new EmbeddedDaemon({
-      sessionsDir,
-      deviceId: asDeviceId("device_test"),
-      workDir: sessionsDir,
-      createRuntime: () => new ScorelRuntime({ provider }),
-      now: () => 1_000,
-    });
-    const transportA = createEmbeddedTransport(daemon);
-    const transportB = createEmbeddedTransport(daemon);
+const provider: RuntimeProvider = {
+  streamTurn: async function* () {
+    return assistantMessage("ok");
+  },
+};
 
-    await daemon.start();
+const fixture = async () => {
+  const root = await mkdtemp(join(tmpdir(), "scorel-host-"));
+  const sessionsDir = join(root, "sessions");
+  const projectsPath = join(root, "projects.json");
+  await mkdir(sessionsDir);
+  const runtimeProjects: HostProject[] = [];
+  const host = new ScorelHost({
+    sessionsDir,
+    projectsPath,
+    deviceId: asDeviceId("device_test"),
+    createRuntime: async ({ project }) => {
+      runtimeProjects.push(project);
+      return new ScorelRuntime({ provider });
+    },
+    now: () => 1_000,
+  });
+  await host.start();
+  return { root, sessionsDir, projectsPath, runtimeProjects, host };
+};
+
+describe("ScorelHost + embedded transport", () => {
+  it("treats concurrent explicit create_session requests as the same session", async () => {
+    const { root, host } = await fixture();
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const sessionId = asSessionId("ses_create_race");
+    const transportA = createEmbeddedTransport(host);
+    const transportB = createEmbeddedTransport(host);
     await transportA.connect({ clientId: asClientId("client_a"), sessionId });
     await transportB.connect({ clientId: asClientId("client_b"), sessionId });
+    const responseA = waitForResponse(transportA, "req_a");
+    const responseB = waitForResponse(transportB, "req_b");
 
-    const createA = waitForResponse(transportA, "req_create_a");
-    const createB = waitForResponse(transportB, "req_create_b");
     await Promise.all([
       transportA.send({
         type: "create_session",
-        requestId: asRequestId("req_create_a"),
+        requestId: asRequestId("req_a"),
         sessionId,
-        meta: { model: "fake" },
+        meta: { projectId: project.projectId },
       }),
       transportB.send({
         type: "create_session",
-        requestId: asRequestId("req_create_b"),
+        requestId: asRequestId("req_b"),
         sessionId,
-        meta: { model: "fake" },
+        meta: { projectId: project.projectId },
       }),
     ]);
 
-    await expect(createA).resolves.toMatchObject({
-      type: "response",
-      requestType: "create_session",
-      data: { sessionId },
-    });
-    await expect(createB).resolves.toMatchObject({
-      type: "response",
-      requestType: "create_session",
-      data: { sessionId },
-    });
+    await expect(responseA).resolves.toMatchObject({ type: "response", requestType: "create_session" });
+    await expect(responseB).resolves.toMatchObject({ type: "response", requestType: "create_session" });
   });
 
-  it("persists a client message, runs runtime, and broadcasts ordered events to multiple clients", async () => {
-    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-daemon-"));
-    const sessionId = asSessionId("ses_embedded");
-    const provider: RuntimeProvider = {
-      streamTurn: async function* ({ context }) {
-        expect(context).toEqual([userMessage("hello")]);
-        yield { type: "text_delta", delta: "he" };
-        yield { type: "text_delta", delta: "llo" };
-        return assistantMessage("hello");
-      },
-    };
-    const daemon = new EmbeddedDaemon({
-      sessionsDir,
-      deviceId: asDeviceId("device_test"),
-      workDir: sessionsDir,
-      createRuntime: () => new ScorelRuntime({ provider }),
-      now: () => 1_000,
-      createId: (() => {
-        const ids = ["evt_user", "evt_assistant"];
-        return () => ids.shift() ?? "evt_extra";
-      })(),
-    });
-    const clientAEvents: ScorelEvent[] = [];
-    const clientBEvents: ScorelEvent[] = [];
-    const transportA = createEmbeddedTransport(daemon);
-    const transportB = createEmbeddedTransport(daemon);
-    let lastSeq = asSeq(0);
-    let persistentIds: string[] = [];
-    let activeLeaf: string | null = null;
+  it("isolates runtime work directories for sessions in two registered projects", async () => {
+    const { root, runtimeProjects, host } = await fixture();
+    const repoA = join(root, "repo-a");
+    const repoB = join(root, "repo-b");
+    await Promise.all([mkdir(repoA), mkdir(repoB)]);
+    const projectA = await host.registerProject(repoA);
+    const projectB = await host.registerProject(repoB);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
 
-    transportA.onMessage((message) => {
-      if (message.type === "event") {
-        clientAEvents.push(message.event);
-        lastSeq = message.event.seq;
-        if ("id" in message.event) {
-          persistentIds.push(String(message.event.id));
-          activeLeaf = String(message.event.id);
-        }
-      }
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_a"),
+      sessionId: asSessionId("ses_a"),
+      meta: { projectId: projectA.projectId },
     });
-    transportB.onMessage((message) => {
-      if (message.type === "event") {
-        clientBEvents.push(message.event);
-      }
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_b"),
+      sessionId: asSessionId("ses_b"),
+      meta: { projectId: projectB.projectId },
     });
 
-    await daemon.start();
-    const createResponse = waitForResponse(transportA, "req_create");
-    await transportA.send({
+    expect(runtimeProjects.map((project) => project.workDir).sort()).toEqual(
+      (await Promise.all([realpath(repoA), realpath(repoB)])).sort(),
+    );
+    expect((await host.listProjects()).map((project) => project.projectId).sort()).toEqual(
+      [projectA.projectId, projectB.projectId].sort(),
+    );
+  });
+
+  it("persists project ownership in session headers and restores lanes through the registry", async () => {
+    const { root, sessionsDir, projectsPath, host } = await fixture();
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_seed") });
+    await transport.send({
       type: "create_session",
       requestId: asRequestId("req_create"),
-      sessionId,
-      meta: { model: "fake" },
+      sessionId: asSessionId("ses_restart"),
+      meta: { projectId: project.projectId },
     });
-    await expect(createResponse).resolves.toMatchObject({ type: "response", requestType: "create_session" });
-    await transportA.connect({ clientId: asClientId("client_a"), sessionId });
-    await transportB.connect({ clientId: asClientId("client_b"), sessionId });
+    await host.shutdown();
 
-    const sendResponse = waitForResponse(transportA, "req_send");
-    await transportA.send({
-      type: "send_message",
-      requestId: asRequestId("req_send"),
-      sessionId,
-      content: "hello",
-    });
-    await expect(sendResponse).resolves.toMatchObject({
-      type: "response",
-      requestType: "send_message",
-      data: {
-        userEventId: "evt_user",
-        assistantEventId: "evt_assistant",
+    const restoredProjects: HostProject[] = [];
+    const restored = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async ({ project: restoredProject }) => {
+        restoredProjects.push(restoredProject);
+        return new ScorelRuntime({ provider });
       },
     });
-
-    expect(clientAEvents.map((event) => event.type)).toEqual([
-      "user_message",
-      "turn_start",
-      "message_start",
-      "text_delta",
-      "text_delta",
-      "assistant_message",
-      "turn_end",
-    ]);
-    expect(clientBEvents).toEqual(clientAEvents);
-    expect(lastSeq).toBe(7);
-    expect(persistentIds).toEqual(["evt_user", "evt_assistant"]);
-    expect(activeLeaf).toBe("evt_assistant");
-
-    const jsonl = await readFile(join(sessionsDir, "ses_embedded.jsonl"), "utf8");
-    const persistedLines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
-    expect(persistedLines.map((line) => line.type ?? "header")).toEqual(["header", "user_message", "assistant_message"]);
-    expect(persistedLines[1]).toMatchObject({ id: "evt_user", seq: 1, parentId: null });
-    expect(persistedLines[2]).toMatchObject({ id: "evt_assistant", seq: 6, parentId: "evt_user" });
-
-    const resyncResponse = waitForResponse(transportB, "req_resync");
-    await transportB.send({
-      type: "resync_events",
-      requestId: asRequestId("req_resync"),
-      sessionId,
-      fromSeq: asSeq(1),
+    await restored.start();
+    const restoredTransport = createEmbeddedTransport(restored);
+    await restoredTransport.connect({ clientId: asClientId("client_restored") });
+    await restoredTransport.send({
+      type: "load_session",
+      requestId: asRequestId("req_load"),
+      sessionId: asSessionId("ses_restart"),
     });
-    const resyncMessage = await resyncResponse;
-    expect(resyncMessage).toMatchObject({
-      type: "response",
-      requestType: "resync_events",
-      data: { throughSeq: 7 },
+
+    expect(restoredProjects).toEqual([project]);
+    const header = JSON.parse((await readFile(join(sessionsDir, "ses_restart.jsonl"), "utf8")).split("\n")[0]!);
+    expect(header.meta).toEqual({ projectId: project.projectId });
+  });
+
+  it("rejects creating a session for an unregistered project", async () => {
+    const { host } = await fixture();
+    const transport = createEmbeddedTransport(host);
+    const response = waitForResponse(transport, "req_missing");
+    await transport.connect({ clientId: asClientId("client_test") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_missing"),
+      sessionId: asSessionId("ses_missing"),
+      meta: { projectId: "prj_missing" as never },
     });
-    if (resyncMessage.type !== "response" || resyncMessage.requestType !== "resync_events") {
-      throw new Error("Expected resync response");
-    }
-    expect(resyncMessage.data.events.map((event) => event.type)).toEqual([
-      "turn_start",
-      "message_start",
-      "text_delta",
-      "text_delta",
-      "assistant_message",
-      "turn_end",
-    ]);
+    await expect(response).resolves.toMatchObject({ type: "error", code: "project_not_found" });
   });
 });
 

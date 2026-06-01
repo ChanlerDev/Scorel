@@ -32,7 +32,6 @@ describe("/api/local-daemon", () => {
         port: 7777,
         wsUrl: "ws://127.0.0.1:7777",
         token: "tk",
-        cwd: "/Users/me/Scorel",
         pid: 42,
         startedAt: 1,
         stoppedAt: null,
@@ -46,7 +45,6 @@ describe("/api/local-daemon", () => {
       ok: true,
       wsUrl: "ws://127.0.0.1:7777",
       token: "tk",
-      cwd: "/Users/me/Scorel",
       host: "127.0.0.1",
       port: 7777,
     });

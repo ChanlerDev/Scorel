@@ -27,7 +27,7 @@ let _pool: ConnectionPool | null = null;
 const _projectsSyncError = new Map<string, string | undefined>();
 const _projectsSyncListeners = new Map<string, Set<() => void>>();
 
-// Per (deviceId, projectSlug) sync error tracking — same model.
+// Per (deviceId, projectId) sync error tracking — same model.
 const _sessionsSyncError = new Map<string, string | undefined>();
 const _sessionsSyncListeners = new Map<string, Set<() => void>>();
 
@@ -41,16 +41,16 @@ function isTransportDisconnectedMessage(message: string): boolean {
   return message.startsWith("disconnected:") || /transport_disconnected/.test(message);
 }
 
-function sessionsKey(deviceId: string, projectSlug: string): string {
-  return `${deviceId} ${projectSlug}`;
+function sessionsKey(deviceId: string, projectId: string): string {
+  return `${deviceId} ${projectId}`;
 }
 
 function setSessionsSyncError(
   deviceId: string,
-  projectSlug: string,
+  projectId: string,
   message: string | undefined,
 ): void {
-  const key = sessionsKey(deviceId, projectSlug);
+  const key = sessionsKey(deviceId, projectId);
   if (message === undefined) {
     if (!_sessionsSyncError.has(key)) return;
     _sessionsSyncError.delete(key);
@@ -107,10 +107,10 @@ export type UseConnectionResult = {
   /** Re-run `list_projects` against the current managed client. No-op when
    * the device is not currently connected. */
   syncProjectsNow(): Promise<void>;
-  /** Re-run `list_sessions({projectSlug})` against the current managed
+  /** Re-run `list_sessions({projectId})` against the current managed
    * client. No-op when not connected. Updates the per-project error map
    * consumed by `useSessionsSyncError`. */
-  syncSessionsNow(projectSlug: string): Promise<void>;
+  syncSessionsNow(projectId: string): Promise<void>;
 };
 
 export function useConnection(device: Device): UseConnectionResult {
@@ -204,24 +204,24 @@ export function useConnection(device: Device): UseConnectionResult {
   }, [device.id, managed, store]);
 
   const syncSessionsNow = useCallback(
-    async (projectSlug: string): Promise<void> => {
+    async (projectId: string): Promise<void> => {
       if (!managed) return;
       if (managed.state.name !== "connected") return;
       if (_disconnectStop.has(device.id)) return;
-      setSessionsSyncError(device.id, projectSlug, undefined);
+      setSessionsSyncError(device.id, projectId, undefined);
       try {
         await syncSessions({
           client: managed.client,
           store,
           deviceId: device.id,
-          projectSlug,
+          projectId,
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         if (isTransportDisconnectedMessage(message)) {
           _disconnectStop.add(device.id);
         }
-        setSessionsSyncError(device.id, projectSlug, message);
+        setSessionsSyncError(device.id, projectId, message);
       }
     },
     [device.id, managed, store],
@@ -265,15 +265,15 @@ export function useProjectsSyncError(deviceId: string): string | undefined {
 }
 
 /** Hook: subscribe to the most recent `syncSessions` error for a (device,
- * projectSlug). Pass `undefined` projectSlug to short-circuit. */
+ * projectId). Pass `undefined` projectId to short-circuit. */
 export function useSessionsSyncError(
   deviceId: string,
-  projectSlug: string | undefined,
+  projectId: string | undefined,
 ): string | undefined {
   return useSyncExternalStore<string | undefined>(
     (listener) => {
-      if (!projectSlug) return () => {};
-      const key = sessionsKey(deviceId, projectSlug);
+      if (!projectId) return () => {};
+      const key = sessionsKey(deviceId, projectId);
       let set = _sessionsSyncListeners.get(key);
       if (!set) {
         set = new Set();
@@ -288,8 +288,8 @@ export function useSessionsSyncError(
       };
     },
     () =>
-      projectSlug
-        ? _sessionsSyncError.get(sessionsKey(deviceId, projectSlug))
+      projectId
+        ? _sessionsSyncError.get(sessionsKey(deviceId, projectId))
         : undefined,
     () => undefined,
   );

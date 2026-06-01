@@ -25,6 +25,7 @@ class FakeTransport implements DaemonTransport {
   static defaultIdentity: ConnectResult = {
     clientId: asClientId("client_fake"),
     currentSeq: asSeq(0),
+    deviceId: asDeviceId("device_fake"),
   };
 
   closed = false;
@@ -174,11 +175,11 @@ describe("ConnectionPool", () => {
       remoteIdentity: {
         deviceId: "device_remote",
         deviceDisplayName: "Remote A",
-        projectSlug: undefined,
+        projectId: undefined,
       },
     });
     expect(captured).toEqual([
-      { deviceId: "device_remote", deviceDisplayName: "Remote A", projectSlug: undefined },
+      { deviceId: "device_remote", deviceDisplayName: "Remote A", projectId: undefined },
     ]);
   });
 
@@ -275,6 +276,7 @@ describe("ConnectionPool", () => {
         result: {
           clientId: asClientId("client_x"),
           currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_fake"),
         },
       },
     ];
@@ -299,6 +301,7 @@ describe("ConnectionPool", () => {
         result: {
           clientId: asClientId("client_x"),
           currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_fake"),
         },
       },
     ];
@@ -329,6 +332,7 @@ describe("ConnectionPool", () => {
         result: {
           clientId: asClientId("client_x"),
           currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_fake"),
         },
       },
     ];
@@ -356,6 +360,7 @@ describe("ConnectionPool", () => {
         result: {
           clientId: asClientId("client_x"),
           currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_fake"),
         },
       },
     ];

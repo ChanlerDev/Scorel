@@ -12,7 +12,7 @@
 // daemon to already be connected — see `lib/connection/pool.ts`.
 
 import type { DaemonClient } from "@scorel/client";
-import type { DaemonProjectSummary } from "@scorel/protocol";
+import type { HostProject } from "@scorel/protocol";
 
 import type { DeviceProject } from "../domain/devices";
 import type { DevicesStore } from "../store/devices";
@@ -23,11 +23,11 @@ export type SyncProjectsArgs = {
   deviceId: string;
 };
 
-const inflight = new Map<string, Promise<DaemonProjectSummary[]>>();
+const inflight = new Map<string, Promise<HostProject[]>>();
 
 export async function syncProjects(
   args: SyncProjectsArgs,
-): Promise<DaemonProjectSummary[]> {
+): Promise<HostProject[]> {
   const existing = inflight.get(args.deviceId);
   if (existing) return existing;
 
@@ -49,15 +49,14 @@ export async function syncProjects(
   return promise;
 }
 
-function toDeviceProject(summary: DaemonProjectSummary): DeviceProject {
-  const out: DeviceProject = {
-    projectSlug: summary.projectSlug,
+function toDeviceProject(summary: HostProject): DeviceProject {
+  return {
+    projectId: summary.projectId,
     displayName: summary.displayName,
-    sessionCount: summary.sessionCount,
-    lastSeenAt: summary.lastSeenAt,
+    workDir: summary.workDir,
+    createdAt: summary.createdAt,
+    updatedAt: summary.updatedAt,
   };
-  if (summary.workDirHint !== undefined) out.workDirHint = summary.workDirHint;
-  return out;
 }
 
 // Test seam: clear the in-flight dedupe map between cases.

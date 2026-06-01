@@ -29,7 +29,7 @@ import type {
   SessionSummary,
   Unsubscribe,
 } from "@scorel/protocol";
-import { asClientId, asDeviceId, asSeq, asSessionId } from "@scorel/protocol";
+import { asClientId, asDeviceId, asProjectId, asSeq, asSessionId } from "@scorel/protocol";
 
 let listSessionsImpl: () => Promise<SessionSummary[]> = async () => [];
 let listSessionsCalls = 0;
@@ -39,7 +39,7 @@ let createSessionImpl: () => Promise<{ sessionId: string }> = async () => ({
 });
 let createSessionCalls = 0;
 let createSessionLastMeta:
-  | { projectSlug?: string; title?: string; model?: string }
+  | { projectId?: string; title?: string; model?: string }
   | undefined;
 
 class FakeTransport implements DaemonTransport {
@@ -96,7 +96,7 @@ class FakeTransport implements DaemonTransport {
       createSessionCalls += 1;
       const m = message as {
         requestId: string;
-        meta?: { projectSlug?: string; title?: string; model?: string };
+        meta?: { projectId?: string; title?: string; model?: string };
       };
       createSessionLastMeta = m.meta;
       const requestId = m.requestId;
@@ -174,7 +174,7 @@ beforeEach(() => {
   listSessionsImpl = async () => [];
   listProjectsImpl = async () => [
     {
-      projectSlug: "alpha",
+      projectId: "alpha",
       displayName: "Alpha",
       sessionCount: 0,
       lastSeenAt: 0,
@@ -200,7 +200,7 @@ describe("ProjectPage", () => {
   it("renders 'Device not found' when no matching device", () => {
     render(
       <ProjectPage
-        params={{ deviceId: "missing", projectSlug: "alpha" }}
+        params={{ deviceId: "missing", projectId: "alpha" }}
       />,
     );
     expect(screen.getByText(/Device not found/)).toBeTruthy();
@@ -209,7 +209,7 @@ describe("ProjectPage", () => {
   it("renders cached sessions immediately while triggering a refresh", async () => {
     const { device, store } = seedDevice();
     store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Alpha" },
+      { projectId: "alpha", displayName: "Alpha" },
     ]);
     store.setProjectSessions(device.id, "alpha", {
       cached: { sessionId: "cached", title: "Cached Session", updatedAt: 1 },
@@ -220,13 +220,13 @@ describe("ProjectPage", () => {
         title: "Fresh Session",
         updatedAt: 2,
         currentSeq: asSeq(1),
-        projectSlug: "alpha",
+        projectId: asProjectId("alpha"),
       },
     ];
     installPool(store);
 
     render(
-      <ProjectPage params={{ deviceId: device.id, projectSlug: "alpha" }} />,
+      <ProjectPage params={{ deviceId: device.id, projectId: "alpha" }} />,
     );
     // Cached session visible right away.
     expect(screen.getByText("Cached Session")).toBeTruthy();
@@ -241,13 +241,13 @@ describe("ProjectPage", () => {
   it("renders an empty-state message when project has no sessions", async () => {
     const { device, store } = seedDevice();
     store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Alpha" },
+      { projectId: "alpha", displayName: "Alpha" },
     ]);
     listSessionsImpl = async () => [];
     installPool(store);
 
     render(
-      <ProjectPage params={{ deviceId: device.id, projectSlug: "alpha" }} />,
+      <ProjectPage params={{ deviceId: device.id, projectId: "alpha" }} />,
     );
     await act(async () => {
       for (let i = 0; i < 10; i += 1) await Promise.resolve();
@@ -258,7 +258,7 @@ describe("ProjectPage", () => {
   it("renders an error banner on listSessions failure with retry button", async () => {
     const { device, store } = seedDevice();
     store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Alpha" },
+      { projectId: "alpha", displayName: "Alpha" },
     ]);
     listSessionsImpl = async () => {
       throw new Error("boom");
@@ -266,7 +266,7 @@ describe("ProjectPage", () => {
     installPool(store);
 
     render(
-      <ProjectPage params={{ deviceId: device.id, projectSlug: "alpha" }} />,
+      <ProjectPage params={{ deviceId: device.id, projectId: "alpha" }} />,
     );
     await act(async () => {
       for (let i = 0; i < 10; i += 1) await Promise.resolve();
@@ -278,12 +278,12 @@ describe("ProjectPage", () => {
   it("New Chat navigates to the empty composer carrying device + project (S0046)", async () => {
     const { device, store } = seedDevice();
     store.setProjects(device.id, [
-      { projectSlug: "alpha", displayName: "Alpha" },
+      { projectId: "alpha", displayName: "Alpha" },
     ]);
     installPool(store);
 
     render(
-      <ProjectPage params={{ deviceId: device.id, projectSlug: "alpha" }} />,
+      <ProjectPage params={{ deviceId: device.id, projectId: "alpha" }} />,
     );
     // Wait for connect + initial sync to settle.
     await act(async () => {
@@ -309,7 +309,7 @@ describe("ProjectPage", () => {
     // Cache must be untouched.
     const project = store
       .get(device.id)
-      ?.projects?.find((p) => p.projectSlug === "alpha");
+      ?.projects?.find((p) => p.projectId === "alpha");
     expect(project?.sessions?.session_new).toBeUndefined();
   });
 });

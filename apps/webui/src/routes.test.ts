@@ -33,8 +33,8 @@ function pageFileToRoute(file: string): string {
 const EXPECTED_ROUTES = new Set([
   "/",
   "/devices/:deviceId",
-  "/devices/:deviceId/projects/:projectSlug",
-  "/devices/:deviceId/projects/:projectSlug/sessions/:sessionId",
+  "/devices/:deviceId/projects/:projectId",
+  "/devices/:deviceId/projects/:projectId/sessions/:sessionId",
   "/settings",
   "/settings/devices/:deviceId",
 ]);

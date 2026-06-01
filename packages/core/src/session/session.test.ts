@@ -8,6 +8,7 @@ import {
   asClientId,
   asDeviceId,
   asEventId,
+  asProjectId,
   asSeq,
   asSessionId,
   type PersistentEvent,
@@ -17,6 +18,7 @@ import {
 import { buildContext, createSession, loadSession, sessionLogFilePath, SessionStoreError } from "./index.js";
 
 const meta: SessionMeta = {
+  projectId: asProjectId("prj_test"),
   model: "test-model",
 };
 
@@ -144,7 +146,7 @@ describe("session core", () => {
     await expect(
       session.append({
         type: "session_header",
-        protocolVersion: 1,
+        protocolVersion: 2,
         id: asEventId("evt_header"),
         parentId: asEventId("evt_1"),
         seq: asSeq(2),
@@ -164,6 +166,25 @@ describe("session core", () => {
     });
     await expect(session.append(assistantEvent("evt_3", "evt_1", 1, "old seq"))).rejects.toMatchObject({
       code: "non_monotonic_seq",
+    });
+  });
+
+  it("rejects pre-S0048 headers without meta.projectId", async () => {
+    const sessionsDir = await tempRoot();
+    await writeFile(
+      join(sessionsDir, "legacy.jsonl"),
+      `${JSON.stringify({
+        version: 1,
+        sessionId: "ses_legacy",
+        deviceId: "device_test",
+        createdAt: 1_000,
+        meta: { ["project" + "Slug"]: "legacy" },
+      })}\n`,
+    );
+
+    await expect(loadSession({ filePath: join(sessionsDir, "legacy.jsonl") })).rejects.toMatchObject({
+      code: "invalid_header",
+      message: "Session header is missing meta.projectId",
     });
   });
 });

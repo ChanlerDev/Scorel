@@ -14,12 +14,12 @@ import type {
   DeviceSessionSummary,
 } from "../../../../../lib/domain/devices";
 
-type Params = { deviceId: string; projectSlug: string };
+type Params = { deviceId: string; projectId: string };
 
 export default function ProjectPage({ params }: { params: Params }) {
   const { devices } = useDevices();
   const deviceId = decodeURIComponent(params.deviceId);
-  const projectSlug = decodeURIComponent(params.projectSlug);
+  const projectId = decodeURIComponent(params.projectId);
   const device = devices.find((d) => d.id === deviceId);
 
   if (!device) {
@@ -36,25 +36,25 @@ export default function ProjectPage({ params }: { params: Params }) {
   }
 
   return (
-    <ProjectView device={device} projectSlug={projectSlug} />
+    <ProjectView device={device} projectId={projectId} />
   );
 }
 
 function ProjectView({
   device,
-  projectSlug,
+  projectId,
 }: {
   device: Device;
-  projectSlug: string;
+  projectId: string;
 }) {
   const { state, syncSessionsNow } = useConnection(device);
-  const error = useSessionsSyncError(device.id, projectSlug);
-  const project = device.projects?.find((p) => p.projectSlug === projectSlug);
+  const error = useSessionsSyncError(device.id, projectId);
+  const project = device.projects?.find((p) => p.projectId === projectId);
 
   useEffect(() => {
     if (state.name !== "connected") return;
-    void syncSessionsNow(projectSlug);
-  }, [state.name, projectSlug, syncSessionsNow]);
+    void syncSessionsNow(projectId);
+  }, [state.name, projectId, syncSessionsNow]);
 
   const sessions = sortSessions(project?.sessions);
 
@@ -65,16 +65,16 @@ function ProjectView({
           {device.name} · {device.link}
         </p>
         <h1 className="text-lg font-semibold text-text">
-          {project?.displayName ?? projectSlug}
+          {project?.displayName ?? projectId}
         </h1>
-        {project?.workDirHint ? (
-          <p className="text-xs text-faint">{project.workDirHint}</p>
+        {project?.workDir ? (
+          <p className="text-xs text-faint">{project.workDir}</p>
         ) : null}
       </header>
 
       <NewChatButton
         deviceId={device.id}
-        projectSlug={projectSlug}
+        projectId={projectId}
         variant="page"
       />
 
@@ -84,7 +84,7 @@ function ProjectView({
           <button
             type="button"
             onClick={() => {
-              void syncSessionsNow(projectSlug);
+              void syncSessionsNow(projectId);
             }}
             disabled={state.name !== "connected"}
             className="rounded-md border border-status-err bg-surface-raised px-2 py-1 text-xs font-medium text-status-err hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-60"
@@ -110,7 +110,7 @@ function ProjectView({
             <SessionRow
               key={session.sessionId}
               deviceId={device.id}
-              projectSlug={projectSlug}
+              projectId={projectId}
               session={session}
             />
           ))}
@@ -122,15 +122,15 @@ function ProjectView({
 
 function SessionRow({
   deviceId,
-  projectSlug,
+  projectId,
   session,
 }: {
   deviceId: string;
-  projectSlug: string;
+  projectId: string;
   session: DeviceSessionSummary;
 }) {
   const href = `/devices/${encodeURIComponent(deviceId)}/projects/${encodeURIComponent(
-    projectSlug,
+    projectId,
   )}/sessions/${encodeURIComponent(session.sessionId)}`;
   const label = session.title?.trim() || session.sessionId;
   return (

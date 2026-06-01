@@ -11,7 +11,7 @@ describe("SessionNode", () => {
       <ul>
         <SessionNode
           deviceId="dev-1"
-          projectSlug="my project"
+          projectId="my project"
           session={{
             sessionId: "session/abc",
             title: "Hello",
@@ -32,7 +32,7 @@ describe("SessionNode", () => {
       <ul>
         <SessionNode
           deviceId="dev-1"
-          projectSlug="alpha"
+          projectId="alpha"
           session={{ sessionId: "session_xyz", updatedAt: 1 }}
         />
       </ul>,
@@ -45,7 +45,7 @@ describe("SessionNode", () => {
       <ul>
         <SessionNode
           deviceId="dev-1"
-          projectSlug="alpha"
+          projectId="alpha"
           session={{ sessionId: "s", title: "Active", updatedAt: 1 }}
           isActive
         />
@@ -64,7 +64,7 @@ describe("SessionNode", () => {
       <ul>
         <SessionNode
           deviceId="dev-1"
-          projectSlug="alpha"
+          projectId="alpha"
           session={{
             sessionId: "s",
             title: "Active",
@@ -81,7 +81,7 @@ describe("SessionNode", () => {
       <ul>
         <SessionNode
           deviceId="dev-1"
-          projectSlug="alpha"
+          projectId="alpha"
           session={{ sessionId: "s", title: "Active" }}
         />
       </ul>,
@@ -107,7 +107,7 @@ describe("SessionNode 1-minute interval", () => {
       <ul>
         <SessionNode
           deviceId="dev-1"
-          projectSlug="alpha"
+          projectId="alpha"
           session={{ sessionId: "s", title: "Active", updatedAt }}
         />
       </ul>,

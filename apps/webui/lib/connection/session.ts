@@ -75,6 +75,7 @@ export type SessionAttachOptions = {
   client: DaemonClient;
   scopeKey: string;
   sessionId: SessionId;
+  projectId: string;
   attachCache: AttachCache;
   onState: (snapshot: SessionAttachSnapshot) => void;
 };
@@ -99,7 +100,7 @@ export type SessionAttachSnapshot = {
   /** Identity of the daemon we're attached to (diagnostic). */
   remoteDeviceId?: string;
   /** Project this session belongs to (diagnostic). */
-  projectSlug?: string;
+  projectId?: string;
   /** Session id this controller is attached to. */
   sessionId: string;
 };
@@ -122,7 +123,7 @@ function nextPendingId(): string {
 export function createSessionAttachController(
   opts: SessionAttachOptions,
 ): SessionAttachController {
-  const { client, scopeKey, sessionId, attachCache, onState } = opts;
+  const { client, scopeKey, sessionId, projectId, attachCache, onState } = opts;
 
   let state = emptyProjectorState();
   let unsubscribe: (() => void) | undefined;
@@ -146,12 +147,12 @@ export function createSessionAttachController(
 
   function readClientIdentity(): {
     remoteDeviceId?: string;
-    projectSlug?: string;
+    projectId?: string;
   } {
     const identity = client.connectionIdentity;
     return {
       ...(identity.deviceId ? { remoteDeviceId: String(identity.deviceId) } : {}),
-      ...(identity.projectSlug ? { projectSlug: identity.projectSlug } : {}),
+      projectId,
     };
   }
 
@@ -168,7 +169,7 @@ export function createSessionAttachController(
       persistentLastSeq,
       streamLastSeq,
       ...(identity.remoteDeviceId ? { remoteDeviceId: identity.remoteDeviceId } : {}),
-      ...(identity.projectSlug ? { projectSlug: identity.projectSlug } : {}),
+      projectId: identity.projectId,
       sessionId: String(sessionId),
     });
   }
@@ -303,6 +304,10 @@ export function createSessionAttachController(
     try {
       if (client.sessionId !== sessionId) {
         await client.connect(sessionId);
+      }
+      const loaded = await client.loadSession(sessionId);
+      if (String(loaded.meta.projectId) !== projectId) {
+        throw new Error(`Session project mismatch: expected ${projectId}, got ${loaded.meta.projectId}`);
       }
       const resync = await client.resync({
         persistentLastSeq: persistentAnchor,
