@@ -73,6 +73,7 @@ type Entry = {
   device: Device;
   client: DaemonClient;
   state: ConnectionState;
+  refCount: number;
   retryAttempt: number;
   retryHandle?: unknown;
   idleHandle?: unknown;
@@ -124,6 +125,7 @@ export class ConnectionPool {
         this.#clearTimeout(entry.idleHandle);
         entry.idleHandle = undefined;
       }
+      entry.refCount += 1;
       // Refresh device snapshot (link/token may have changed via Settings).
       entry.device = device;
       if (onIdentity) entry.identityListeners.add(onIdentity);
@@ -137,6 +139,7 @@ export class ConnectionPool {
     }
 
     entry = this.#createEntry(device);
+    entry.refCount = 1;
     this.#entries.set(device.id, entry);
     if (onIdentity) entry.identityListeners.add(onIdentity);
     // Kick off the connect. Any errors propagate to subscribers via state.
@@ -149,6 +152,12 @@ export class ConnectionPool {
   release(deviceId: string): void {
     const entry = this.#entries.get(deviceId);
     if (!entry) return;
+    if (entry.refCount > 0) {
+      entry.refCount -= 1;
+    }
+    if (entry.refCount > 0) {
+      return;
+    }
     if (entry.idleHandle !== undefined) {
       this.#clearTimeout(entry.idleHandle);
     }
@@ -173,6 +182,10 @@ export class ConnectionPool {
 
   state(deviceId: string): ConnectionState {
     return this.#entries.get(deviceId)?.state ?? IDLE;
+  }
+
+  hasEntry(deviceId: string): boolean {
+    return this.#entries.has(deviceId);
   }
 
   /**
@@ -207,6 +220,7 @@ export class ConnectionPool {
       device,
       client,
       state: IDLE,
+      refCount: 0,
       retryAttempt: 0,
       listeners: new Set(),
       identityListeners: new Set(),

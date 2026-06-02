@@ -34,6 +34,14 @@ type ProjectOption = {
   displayName?: string;
 };
 
+type ProjectPickerProps = {
+  projects: ProjectOption[];
+  activeProjectId: string | undefined;
+  onProjectChange: (projectId: string) => void;
+  testId: string;
+  className: string;
+};
+
 export function EmptyComposer({
   routeDeviceId,
   routeProjectId,
@@ -147,9 +155,6 @@ export function EmptyComposer({
   const greetingProject = projects.find((p) => p.projectId === projectId);
   const greetingLabel =
     greetingProject?.displayName ?? greetingProject?.projectId;
-  const greetingText = greetingLabel
-    ? `我们应该在 ${greetingLabel} 中构建什么?`
-    : "我们应该构建什么?";
 
   return (
     <div
@@ -161,7 +166,21 @@ export function EmptyComposer({
           className="greeting text-center"
           data-testid="empty-composer-greeting"
         >
-          {greetingText}
+          {greetingLabel ? (
+            <>
+              <span>我们应该在 </span>
+              <ProjectPicker
+                projects={projects}
+                activeProjectId={projectId}
+                onProjectChange={handleProjectChange}
+                testId="empty-composer-title-project-select"
+                className="appearance-none bg-transparent px-0 text-center font-inherit text-inherit underline-offset-4 hover:underline focus-visible:outline-none disabled:cursor-text"
+              />
+              <span> 中构建什么?</span>
+            </>
+          ) : (
+            "我们应该构建什么?"
+          )}
         </h1>
         <Composer
           onSend={handleSend}
@@ -172,7 +191,7 @@ export function EmptyComposer({
         />
         <PickerRow
           projects={projects}
-          activeSlug={projectId}
+          activeProjectId={projectId}
           onProjectChange={handleProjectChange}
         />
       </div>
@@ -182,14 +201,13 @@ export function EmptyComposer({
 
 function PickerRow({
   projects,
-  activeSlug,
+  activeProjectId,
   onProjectChange,
 }: {
   projects: ProjectOption[];
-  activeSlug: string | undefined;
+  activeProjectId: string | undefined;
   onProjectChange: (slug: string) => void;
 }): JSX.Element {
-  const single = projects.length <= 1;
   return (
     <div
       data-testid="empty-composer-picker"
@@ -197,26 +215,13 @@ function PickerRow({
     >
       <label className="flex items-center gap-1 text-muted">
         <span aria-hidden>📁</span>
-        <select
-          data-testid="empty-composer-project-select"
-          value={activeSlug ?? ""}
-          onChange={(e) => onProjectChange(e.target.value)}
-          disabled={single}
-          aria-label="选择项目"
+        <ProjectPicker
+          projects={projects}
+          activeProjectId={activeProjectId}
+          onProjectChange={onProjectChange}
           className="rounded-sm bg-transparent text-text outline-none focus-visible:outline-2 focus-visible:outline-text disabled:cursor-default"
-        >
-          {projects.length === 0 ? (
-            <option value="" disabled>
-              (no projects)
-            </option>
-          ) : (
-            projects.map((p) => (
-              <option key={p.projectId} value={p.projectId}>
-                {p.displayName ?? p.projectId}
-              </option>
-            ))
-          )}
-        </select>
+          testId="empty-composer-project-select"
+        />
       </label>
       <button
         type="button"
@@ -239,5 +244,37 @@ function PickerRow({
         <span aria-hidden>▾</span>
       </button>
     </div>
+  );
+}
+
+function ProjectPicker({
+  projects,
+  activeProjectId,
+  onProjectChange,
+  testId,
+  className,
+}: ProjectPickerProps): JSX.Element {
+  const single = projects.length <= 1;
+  return (
+    <select
+      data-testid={testId}
+      value={activeProjectId ?? ""}
+      onChange={(e) => onProjectChange(e.target.value)}
+      disabled={single}
+      aria-label="选择项目"
+      className={className}
+    >
+      {projects.length === 0 ? (
+        <option value="" disabled>
+          (no projects)
+        </option>
+      ) : (
+        projects.map((p) => (
+          <option key={p.projectId} value={p.projectId}>
+            {p.displayName ?? p.projectId}
+          </option>
+        ))
+      )}
+    </select>
   );
 }

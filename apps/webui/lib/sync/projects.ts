@@ -11,14 +11,17 @@
 // the connection lifecycle. `client.listProjects()` requires the underlying
 // daemon to already be connected — see `lib/connection/pool.ts`.
 
-import type { DaemonClient } from "@scorel/client";
 import type { HostProject } from "@scorel/protocol";
 
 import type { DeviceProject } from "../domain/devices";
 import type { DevicesStore } from "../store/devices";
 
+export type ProjectsClient = {
+  listProjects(): Promise<HostProject[]>;
+};
+
 export type SyncProjectsArgs = {
-  client: DaemonClient;
+  client: ProjectsClient;
   store: DevicesStore;
   deviceId: string;
 };

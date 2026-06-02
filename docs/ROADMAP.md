@@ -11,7 +11,7 @@ Scorel 是一个 **可回放、可恢复、可远程控制的 AI Agent 工作台
 推进顺序：
 
 ```text
-Design Baseline → CLI Alpha → Safe Coding CLI → Remote Control → WebUI → Device-level Host → WebUI Project Management → GUI → SSH Remote Device → HTTP API → Ecosystem
+Design Baseline → CLI Alpha → Safe Coding CLI → Remote Control → WebUI → Project-first Host + WebUI Project Management → GUI → SSH Remote Device → HTTP API → Ecosystem
 ```
 
 ---
@@ -422,9 +422,9 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M6: Device-level Host
+## M6: Project-first Host And WebUI Project Management
 
-**Goal**: 一个 Device 只有一个逻辑 Host。Host 持久管理多个 Project，Session 和 Runtime 通过稳定 `projectId` 绑定到 canonical 工作目录。
+**Goal**: 一个 Device 只有一个逻辑 Host。Host 持久管理多个 Project，Session 和 Runtime 通过稳定 `projectId` 绑定到 canonical 工作目录；WebUI 可以通过该 Host 浏览目录、注册 Project，并按 Project 懒加载 Session。
 
 **Done when**:
 
@@ -432,32 +432,22 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - `projectId` 取代 `projectSlug` 和 `workDirHint`。
 - 同一个 WS Host 可注册两个真实仓库，并在两个 Project 下分别执行 Session。
 - CLI embedded Host、WS Host、WebUI、未来 GUI 和 HTTP API 共享同一个 Host contract。
+- WebUI 侧边栏可以添加 Project：选择 Device、浏览该 Device 文件夹、注册工作空间。
+- WebUI 展示该 Host Registry 中的全部 Project。
+- Session 继续按 Project 懒加载。
 
 **Steps**:
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
 | M6.1 | [`S0048`](spec/ship/S0048-device-level-host-project-registry.md) | Device-level Host + Project Registry + project-aware Runtime | Done |
-
-**Status**: Done
-
----
-
-## M7: WebUI Project Management
-
-**Goal**: WebUI 侧边栏可以添加 Project：选择 Device、浏览该 Device 文件夹、注册工作空间，并展示该 Host Registry 中的全部 Project；Session 继续按 Project 懒加载。
-
-**Steps**:
-
-| Step | Spec | Goal | Status |
-|---|---|---|---|
-| M7.1 | [`S0049`](spec/ship/S0049-webui-add-project-directory-browser.md) | WebUI 添加项目 + Host 目录浏览 + projectId 路由切换 | Planned |
+| M6.2 | [`S0049`](spec/ship/S0049-webui-add-project-directory-browser.md) | WebUI 添加项目 + Host 目录浏览 + projectId 路由切换 | Planned |
 
 **Status**: Planned
 
 ---
 
-## M8: GUI
+## M7: GUI
 
 **Goal**: 提供 Project-first desktop GUI，统一管理本地和远程 Device 上的 Project。
 
@@ -472,7 +462,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M9: SSH Remote Device
+## M8: SSH Remote Device
 
 **Goal**: GUI 可通过 SSH 添加远程 Device，并在远端安装、启动或连接 Scorel Host。
 
@@ -487,7 +477,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M10: HTTP API
+## M9: HTTP API
 
 **Goal**: 提供纯 HTTP 集成，不要求调用方使用 GUI 或 WebSocket SDK。
 
@@ -505,7 +495,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 
 ---
 
-## M11: Ecosystem
+## M10: Ecosystem
 
 **Goal**: Scorel 可以通过 MCP、extensions、channels 接入外部工作流。
 

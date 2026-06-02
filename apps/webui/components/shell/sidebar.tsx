@@ -1,18 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useParams } from "next/navigation";
-import { useSyncExternalStore } from "react";
+import { usePathname, useParams, useRouter } from "next/navigation";
+import { useState } from "react";
 
 import type { Device } from "../../lib/domain/devices";
 import { useDevices } from "../../lib/store/use-devices";
 import {
   getConnectionPool,
   getDevicesStoreInstance,
+  useConnection,
 } from "../../lib/connection/use-connection";
-import { IDLE, type ConnectionState } from "../../lib/connection/state";
-import { useCollapsed } from "../../lib/store/use-collapsed";
+import type { ConnectionState } from "../../lib/connection/state";
+import {
+  setCollapsedState,
+  useCollapsed,
+} from "../../lib/store/use-collapsed";
+import { syncProjects } from "../../lib/sync/projects";
 import { syncSessions } from "../../lib/sync/sessions";
+import { AddProjectDialog, type AddProjectDialogRegistered } from "./add-project-dialog";
 import { DeviceStatus } from "./device-status";
 import { ProjectNode } from "./project-node";
 
@@ -94,11 +100,7 @@ function DeviceTree({
   activeSessionId?: string;
 }): JSX.Element {
   const pool = getConnectionPool();
-  const state = useSyncExternalStore<ConnectionState>(
-    (listener) => pool.subscribe(device.id, listener),
-    () => pool.state(device.id),
-    () => IDLE,
-  );
+  const { state, managed } = useConnection(device);
 
   const projects = device.projects ?? [];
   const offline = isOffline(state);
@@ -110,7 +112,10 @@ function DeviceTree({
     deviceId: string,
     projectId: string,
   ): void => {
-    const client = pool.peekClient(deviceId);
+    const client =
+      managed?.state.name === "connected"
+        ? managed.client
+        : pool.peekClient(deviceId);
     if (!client) return;
     const store = getDevicesStoreInstance();
     void syncSessions({ client, store, deviceId, projectId }).catch(() => {
@@ -181,12 +186,14 @@ function DeviceTree({
 }
 
 export function Sidebar() {
-  const { devices } = useDevices();
+  const router = useRouter();
+  const { devices, store } = useDevices();
   const params = useParams<{
     deviceId?: string;
     projectId?: string;
     sessionId?: string;
   }>();
+  const [dialogOpen, setDialogOpen] = useState(false);
   const pathname = usePathname();
   const activeDeviceId = params?.deviceId
     ? decodeURIComponent(params.deviceId)
@@ -199,6 +206,19 @@ export function Sidebar() {
     : undefined;
   const isHomeRoute = pathname === "/" || pathname === undefined;
 
+  async function handleRegistered({
+    deviceId,
+    client,
+    project,
+  }: AddProjectDialogRegistered): Promise<void> {
+    await syncProjects({ client, store, deviceId });
+    setCollapsedState(`device:${deviceId}`, false);
+    setCollapsedState(`project:${deviceId}/${project.projectId}`, false);
+    router.push(
+      `/devices/${encodeURIComponent(deviceId)}/projects/${encodeURIComponent(project.projectId)}`,
+    );
+  }
+
   return (
     <aside className="w-[280px] shrink-0 bg-surface flex flex-col">
       {/* Segment 1: top fixed action rows */}
@@ -210,8 +230,18 @@ export function Sidebar() {
       </div>
 
       {/* Segment 2: middle device / project tree */}
-      <div className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wide text-faint">
-        Devices
+      <div className="flex items-center justify-between gap-2 px-3 pt-4 pb-1">
+        <div className="text-xs font-medium uppercase tracking-wide text-faint">
+          Devices
+        </div>
+        <button
+          type="button"
+          onClick={() => setDialogOpen(true)}
+          data-testid="add-project-button"
+          className="rounded-sm px-2 py-1 text-xs font-medium text-text hover:bg-surface-hover"
+        >
+          添加项目
+        </button>
       </div>
       <div className="flex-1 overflow-auto px-3 pb-3 text-sm text-text">
         {devices.length === 0 ? (
@@ -246,6 +276,13 @@ export function Sidebar() {
         <SettingsLink />
         <DisabledRow icon="☀" label="主题" />
       </div>
+      <AddProjectDialog
+        open={dialogOpen}
+        devices={devices}
+        initialDeviceId={activeDeviceId}
+        onClose={() => setDialogOpen(false)}
+        onRegistered={handleRegistered}
+      />
     </aside>
   );
 }

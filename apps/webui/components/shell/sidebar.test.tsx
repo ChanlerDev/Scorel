@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type {
+  ClientMessage,
+  ConnectParams,
+  ConnectResult,
+  DaemonMessage,
+  DaemonTransport,
+  Unsubscribe,
+} from "@scorel/protocol";
+import { asClientId, asDeviceId, asSeq } from "@scorel/protocol";
 
 // Mock next/navigation hooks: jsdom can't run the real Next router. We
 // re-export the hook surface we use (useParams + usePathname + useRouter)
@@ -18,6 +27,66 @@ function setParams(p: Record<string, string | string[]>): void {
 function setPathname(p: string): void {
   _pathname = p;
 }
+
+const syncProjectsMock = vi.fn();
+let _dialogResult: {
+  deviceId: string;
+  client: {
+    listProjects: ReturnType<typeof vi.fn>;
+    registerProject: ReturnType<typeof vi.fn>;
+    listDirectories: ReturnType<typeof vi.fn>;
+    removeProject: ReturnType<typeof vi.fn>;
+  };
+  project: {
+    projectId: string;
+    displayName: string;
+    workDir: string;
+    createdAt: number;
+    updatedAt: number;
+  };
+} | null = null;
+
+vi.mock("../../lib/sync/projects", async () => {
+  const actual = await vi.importActual<typeof import("../../lib/sync/projects")>(
+    "../../lib/sync/projects",
+  );
+  return {
+    ...actual,
+    syncProjects: (...args: Parameters<typeof actual.syncProjects>) =>
+      syncProjectsMock(...args),
+  };
+});
+
+vi.mock("./add-project-dialog", () => ({
+  AddProjectDialog: (props: {
+    open: boolean;
+    devices: Array<{ name: string }>;
+    onClose(): void;
+    onRegistered(input: NonNullable<typeof _dialogResult>): Promise<void>;
+  }) => {
+    if (!props.open) return null;
+    return (
+      <div data-testid="add-project-dialog-mock">
+        <div data-testid="add-project-dialog-device-count">
+          {props.devices.length}
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (_dialogResult) {
+              void props.onRegistered(_dialogResult);
+            }
+          }}
+        >
+          完成添加项目
+        </button>
+        <button type="button" onClick={props.onClose}>
+          关闭对话框
+        </button>
+      </div>
+    );
+  },
+}));
 
 import { Sidebar } from "./sidebar";
 import {
@@ -43,9 +112,78 @@ class IdleTransport {
   }
 }
 
+class ImmediateTransport implements DaemonTransport {
+  closed = false;
+  #handlers = new Set<(message: DaemonMessage) => void>();
+
+  async connect(_params: ConnectParams): Promise<ConnectResult> {
+    return {
+      clientId: asClientId("client_sidebar"),
+      currentSeq: asSeq(0),
+      deviceId: asDeviceId("device_sidebar"),
+      deviceDisplayName: "Tokyo Remote",
+    };
+  }
+
+  send(_message: ClientMessage): void {}
+
+  onMessage(handler: (message: DaemonMessage) => void): Unsubscribe {
+    this.#handlers.add(handler);
+    return () => this.#handlers.delete(handler);
+  }
+
+  close(): void {
+    this.closed = true;
+    this.#handlers.clear();
+  }
+}
+
+class ErrorTransport implements DaemonTransport {
+  closed = false;
+  #handlers = new Set<(message: DaemonMessage) => void>();
+
+  async connect(): Promise<ConnectResult> {
+    throw new Error("auth_failed");
+  }
+
+  send(_message: ClientMessage): void {}
+
+  onMessage(handler: (message: DaemonMessage) => void): Unsubscribe {
+    this.#handlers.add(handler);
+    return () => this.#handlers.delete(handler);
+  }
+
+  close(): void {
+    this.closed = true;
+    this.#handlers.clear();
+  }
+}
+
 function freshPool(): { pool: ConnectionPool; store: DevicesStore } {
   const pool = new ConnectionPool({
     createTransport: () => new IdleTransport() as unknown as never,
+    setTimeoutFn: () => 0,
+    clearTimeoutFn: () => {},
+  });
+  const store = createDevicesStore();
+  __setConnectionPoolForTests(pool, store);
+  return { pool, store };
+}
+
+function freshConnectedPool(): { pool: ConnectionPool; store: DevicesStore } {
+  const pool = new ConnectionPool({
+    createTransport: () => new ImmediateTransport(),
+    setTimeoutFn: () => 0,
+    clearTimeoutFn: () => {},
+  });
+  const store = createDevicesStore();
+  __setConnectionPoolForTests(pool, store);
+  return { pool, store };
+}
+
+function freshErrorPool(): { pool: ConnectionPool; store: DevicesStore } {
+  const pool = new ConnectionPool({
+    createTransport: () => new ErrorTransport(),
     setTimeoutFn: () => 0,
     clearTimeoutFn: () => {},
   });
@@ -58,6 +196,8 @@ beforeEach(() => {
   setParams({});
   setPathname("/");
   _push.mockReset();
+  syncProjectsMock.mockReset();
+  _dialogResult = null;
   __resetConnectionForTests();
   __resetDevicesStoreForTests();
   if (typeof window !== "undefined") window.localStorage.clear();
@@ -98,6 +238,7 @@ describe("Sidebar", () => {
     expect(
       settingsLinks.some((el) => el.textContent?.includes("Settings")),
     ).toBe(true);
+    expect(screen.getByTestId("add-project-button")).toBeTruthy();
   });
 
   it("New Chat row is active on the home route", () => {
@@ -222,8 +363,8 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("link", { name: /Hello/ })).toBeNull();
   });
 
-  it("flags an offline tint when device has lastConnectedAt and is not currently connected", () => {
-    const { store } = freshPool();
+  it("flags an offline tint when reconnect fails and the device has lastConnectedAt", async () => {
+    const { store } = freshErrorPool();
     const device = store.create({
       name: "Tokyo",
       link: "wss://h",
@@ -234,8 +375,33 @@ describe("Sidebar", () => {
       { projectId: "alpha", displayName: "Alpha" },
     ]);
     render(<Sidebar />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(screen.getByText("offline")).toBeTruthy();
     expect(screen.getByText("Alpha")).toBeTruthy();
+  });
+
+  it("auto-connects devices after mount so refresh does not leave them idle", async () => {
+    const { store } = freshConnectedPool();
+    const device = store.create({
+      name: "Tokyo",
+      link: "wss://h",
+      token: "t",
+    });
+    syncProjectsMock.mockResolvedValue([]);
+
+    render(<Sidebar />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(syncProjectsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceId: device.id }),
+    );
+    expect(screen.getByRole("status", { name: /Connected as Tokyo Remote/ })).toBeTruthy();
   });
 
   it("does not render a top-of-bottom-segment divider (S0045 single card)", () => {
@@ -248,5 +414,183 @@ describe("Sidebar", () => {
     expect(aside).not.toBeNull();
     const offenders = aside?.querySelectorAll(".border-t, .border-r");
     expect(offenders?.length ?? 0).toBe(0);
+  });
+
+  it("opens the add project dialog from the sidebar action", () => {
+    freshPool();
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("add-project-button"));
+    expect(screen.getByTestId("add-project-dialog-mock")).toBeTruthy();
+  });
+
+  it("syncs projects after registration and navigates to the project route", async () => {
+    const { store } = freshPool();
+    const device = store.create({ name: "Tokyo", link: "wss://h", token: "t" });
+    const client = {
+      listProjects: vi.fn(),
+      listDirectories: vi.fn(),
+      registerProject: vi.fn(),
+      removeProject: vi.fn(),
+    };
+    _dialogResult = {
+      deviceId: device.id,
+      client,
+      project: {
+        projectId: "new-project",
+        displayName: "New Project",
+        workDir: "/repo/new-project",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    };
+    syncProjectsMock.mockImplementation(async ({ store, deviceId }) => {
+      store.setProjects(deviceId, [
+        { projectId: "new-project", displayName: "New Project" },
+        { projectId: "shared-project", displayName: "Shared Project" },
+      ]);
+      return [];
+    });
+
+    render(<Sidebar />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-project-button"));
+    });
+    const completeButton = await screen.findByRole("button", {
+      name: "完成添加项目",
+    });
+    await act(async () => {
+      fireEvent.click(completeButton);
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+
+    expect(syncProjectsMock).toHaveBeenCalledTimes(1);
+    expect(syncProjectsMock.mock.calls[0]?.[0]).toMatchObject({
+      client,
+      deviceId: device.id,
+    });
+    expect(client.removeProject).not.toHaveBeenCalled();
+    expect(screen.getByText("New Project")).toBeTruthy();
+    expect(screen.getByText("Shared Project")).toBeTruthy();
+    expect(_push).toHaveBeenCalledWith(
+      `/devices/${encodeURIComponent(device.id)}/projects/new-project`,
+    );
+  });
+
+  it("does not append a project locally before syncProjects resolves", async () => {
+    const { store } = freshPool();
+    const device = store.create({ name: "Tokyo", link: "wss://h", token: "t" });
+    store.setProjects(device.id, [{ projectId: "cached", displayName: "Cached" }]);
+    const client = {
+      listProjects: vi.fn(),
+      listDirectories: vi.fn(),
+      registerProject: vi.fn(),
+      removeProject: vi.fn(),
+    };
+    _dialogResult = {
+      deviceId: device.id,
+      client,
+      project: {
+        projectId: "new-project",
+        displayName: "New Project",
+        workDir: "/repo/new-project",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    };
+
+    let resolveSync!: () => void;
+    syncProjectsMock.mockImplementation(
+      ({ store, deviceId }: { store: DevicesStore; deviceId: string }) =>
+        new Promise((resolve) => {
+          resolveSync = () => {
+            store.setProjects(deviceId, [
+              { projectId: "cached", displayName: "Cached" },
+              { projectId: "new-project", displayName: "New Project" },
+            ]);
+            resolve([]);
+          };
+        }),
+    );
+
+    render(<Sidebar />);
+
+    fireEvent.click(screen.getByTestId("add-project-button"));
+    const completeButton = await screen.findByRole("button", {
+      name: "完成添加项目",
+    });
+    fireEvent.click(completeButton);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(store.get(device.id)?.projects?.map((project) => project.projectId)).toEqual([
+      "cached",
+    ]);
+    expect(screen.queryByText("New Project")).toBeNull();
+
+    await act(async () => {
+      resolveSync();
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+
+    expect(store.get(device.id)?.projects?.map((project) => project.projectId)).toEqual([
+      "cached",
+      "new-project",
+    ]);
+  });
+
+  it("expands a collapsed device and new project after successful registration", async () => {
+    const { store } = freshPool();
+    const device = store.create({ name: "Tokyo", link: "wss://h", token: "t" });
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(
+        "scorel.ui.collapsed",
+        JSON.stringify({
+          [`device:${device.id}`]: true,
+          [`project:${device.id}/new-project`]: true,
+        }),
+      );
+    }
+    const client = {
+      listProjects: vi.fn(),
+      listDirectories: vi.fn(),
+      registerProject: vi.fn(),
+      removeProject: vi.fn(),
+    };
+    _dialogResult = {
+      deviceId: device.id,
+      client,
+      project: {
+        projectId: "new-project",
+        displayName: "New Project",
+        workDir: "/repo/new-project",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    };
+    syncProjectsMock.mockImplementation(async ({ store, deviceId }) => {
+      store.setProjects(deviceId, [
+        { projectId: "new-project", displayName: "New Project" },
+      ]);
+      return [];
+    });
+
+    render(<Sidebar />);
+    expect(screen.queryByText("New Project")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-project-button"));
+    });
+    const completeButton = await screen.findByRole("button", {
+      name: "完成添加项目",
+    });
+    await act(async () => {
+      fireEvent.click(completeButton);
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+
+    expect(screen.getByText("New Project")).toBeTruthy();
   });
 });

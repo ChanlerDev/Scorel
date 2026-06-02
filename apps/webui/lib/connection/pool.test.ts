@@ -353,6 +353,70 @@ describe("ConnectionPool", () => {
     expect(pool.state(device.id).name).toBe("idle");
   });
 
+  it("waits for the last consumer to release before scheduling idle teardown", async () => {
+    FakeTransport.behaviors = [
+      {
+        kind: "ok",
+        result: {
+          clientId: asClientId("client_x"),
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_fake"),
+        },
+      },
+    ];
+    const clock = new FakeClock();
+    const pool = new ConnectionPool({
+      createTransport: (link, token) => new FakeTransport(link, token),
+      setTimeoutFn: clock.set,
+      clearTimeoutFn: clock.clear,
+      idleReleaseMs: 1_000,
+    });
+    const device = makeDevice();
+    pool.acquire(device);
+    pool.acquire(device);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    pool.release(device.id);
+    expect(clock.tasks.size).toBe(0);
+    expect(pool.hasEntry(device.id)).toBe(true);
+
+    pool.release(device.id);
+    expect(clock.tasks.size).toBe(1);
+    clock.flushNext();
+    expect(pool.hasEntry(device.id)).toBe(false);
+  });
+
+  it("tracks whether a device entry currently exists", async () => {
+    FakeTransport.behaviors = [
+      {
+        kind: "ok",
+        result: {
+          clientId: asClientId("client_x"),
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_fake"),
+        },
+      },
+    ];
+    const clock = new FakeClock();
+    const pool = new ConnectionPool({
+      createTransport: (link, token) => new FakeTransport(link, token),
+      setTimeoutFn: clock.set,
+      clearTimeoutFn: clock.clear,
+      idleReleaseMs: 1_000,
+    });
+    const device = makeDevice();
+
+    expect(pool.hasEntry(device.id)).toBe(false);
+    pool.acquire(device);
+    expect(pool.hasEntry(device.id)).toBe(true);
+    await Promise.resolve();
+    await Promise.resolve();
+    pool.release(device.id);
+    clock.flushNext();
+    expect(pool.hasEntry(device.id)).toBe(false);
+  });
+
   it("shutdown closes all clients and clears entries", async () => {
     FakeTransport.behaviors = [
       {

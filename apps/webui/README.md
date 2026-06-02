@@ -93,12 +93,30 @@ The daemon prints its connection link on startup, e.g. `ws://127.0.0.1:18789` or
    - `Name` — anything, used for sidebar display only.
    - `Link` — the daemon's `ws://` or `wss://` URL.
    - `Token` — same string passed to `--token`.
-4. Sidebar dot turns green once the WebSocket handshake completes; the project tree populates from `list_projects`.
+4. Sidebar dot turns green once the WebSocket handshake completes; the project tree populates from `list_projects` and reflects the complete Host Project Registry for that Device.
 
-### 3. Start chatting
+Configured Devices auto-connect when the WebUI mounts, so a page refresh re-establishes daemon connectivity and repopulates sidebar state instead of leaving the device idle until a deeper route is opened.
+
+### 3. Add Projects from the sidebar (S0049)
+
+Once a Device is connected, the sidebar's **添加项目** action browses the target Device Host filesystem and registers a working directory through daemon APIs:
+
+1. Click **添加项目** in the sidebar.
+2. If there is one Device, the dialog browses it immediately. If there are multiple Devices, pick one first.
+3. Navigate using only the Host-returned directory entries and `parentPath`.
+4. Click **选择当前目录** to call `registerProject(workDir)`.
+
+Important behavior:
+
+- Browsing happens on the target Device Host, not in the browser's local filesystem.
+- Registration is idempotent for the same canonical directory; repeated registration reuses the same `projectId`.
+- After registration, the WebUI re-runs `list_projects` and refreshes from Host truth instead of locally appending a guessed project row.
+- Ordinary WebUI does not expose `remove_project`.
+
+### 4. Start chatting
 
 1. Click into a project in the sidebar.
-2. Click **+ New Chat**. The WebUI calls `create_session({ projectId })` on the daemon, navigates to `/devices/:id/projects/:slug/sessions/:sessionId`, and opens an empty chatbox.
+2. Click **+ New Chat**. The WebUI calls `create_session({ projectId })` on the daemon, navigates to `/devices/:id/projects/:projectId/sessions/:sessionId`, and opens an empty chatbox.
 3. Send a prompt. Streaming text + tool calls render live. The session JSONL is written under `~/.scorel/sessions/...` on the daemon host.
 4. Optional: open `scorel attach --remote ws://… --session <id>` in another terminal to watch the same session from the CLI.
 
@@ -131,6 +149,10 @@ visuals (S0044). M5.5's warm-paper + ink-blue + Newsreader serif palette
 - **Codex-semantic placeholders** — unimplemented buttons (sidebar Search/Plugins/Automation, theme toggle, composer attach/voice/model picker) render with the native `disabled` attribute plus the `.btn-disabled` class (`opacity 0.4 + cursor-not-allowed + pointer-events: none`), no tooltip. Visible-but-inert is the product honesty signal.
 
 Sidebar layout: top fixed actions (`+ 新对话` active + 3 grayed) → middle device/project tree with per-row ▸/▾ collapse persisted to `localStorage["scorel.ui.collapsed"]` → bottom fixed `Settings` link + grayed theme toggle. The main area has no topbar; populated chat shows transcript only, empty home shows a centered greeting.
+
+The sidebar's **添加项目** dialog lives in the same shell layer and reuses the existing connection pool. Successful registration auto-expands the target Device / Project nodes and routes to `/devices/:deviceId/projects/:projectId`.
+
+On the empty home state, the greeting line's inline project label is the same project picker as the footer row: changing either one updates the shared route-backed selection.
 
 Composer: a 24px pill with `Message Scorel…` placeholder, three grayed placeholders on the action row (`⊕`, `model ▾`, `🎤`), and a circular black send button (`↑`) that swaps to a red cancel (`■`) while a turn is in flight. The textarea auto-resizes up to ~5 lines.
 

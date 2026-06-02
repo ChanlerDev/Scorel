@@ -112,9 +112,12 @@ describe("EmptyComposer", () => {
       { projectId: "beta", displayName: "Beta" },
     ]);
     render(<EmptyComposer />);
-    expect(
-      screen.getByText("我们应该在 Alpha 中构建什么?"),
-    ).toBeTruthy();
+    expect(screen.getByText("我们应该在")).toBeTruthy();
+    expect(screen.getByText("中构建什么?")).toBeTruthy();
+    const titleSelect = screen.getByTestId(
+      "empty-composer-title-project-select",
+    ) as HTMLSelectElement;
+    expect(titleSelect.value).toBe("alpha");
     const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
     expect(input.placeholder).toBe("随心输入");
     expect(screen.getByTestId("empty-composer-picker")).toBeTruthy();
@@ -231,6 +234,41 @@ describe("EmptyComposer", () => {
       window.localStorage.getItem("scorel.ui.v2.last-active-project") ?? "{}",
     ) as Record<string, string>;
     expect(persisted[device.id]).toBe("alpha");
+  });
+
+  it("title project picker and bottom project picker share the same route-backed selection", async () => {
+    const { store } = freshPool();
+    const device = store.create({
+      name: "Tokyo",
+      link: "wss://h",
+      token: "t",
+    });
+    store.setProjects(device.id, [
+      { projectId: "alpha", displayName: "Alpha" },
+      { projectId: "beta", displayName: "Beta" },
+    ]);
+    const { rerender } = render(<EmptyComposer />);
+
+    const titleSelect = screen.getByTestId(
+      "empty-composer-title-project-select",
+    ) as HTMLSelectElement;
+    fireEvent.change(titleSelect, { target: { value: "beta" } });
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) await Promise.resolve();
+    });
+
+    const arg = _replace.mock.calls.at(-1)?.[0] as string;
+    _searchString = arg.startsWith("/?") ? arg.slice(2) : "";
+    rerender(<EmptyComposer />);
+
+    const bottomSelect = screen.getByTestId(
+      "empty-composer-project-select",
+    ) as HTMLSelectElement;
+    expect(bottomSelect.value).toBe("beta");
+    const rerenderedTitleSelect = screen.getByTestId(
+      "empty-composer-title-project-select",
+    ) as HTMLSelectElement;
+    expect(rerenderedTitleSelect.value).toBe("beta");
   });
 
   it("disables the project select when the device has only one project", () => {

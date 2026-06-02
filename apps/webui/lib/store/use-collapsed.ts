@@ -23,6 +23,12 @@ function emit(): void {
   for (const listener of listeners) listener();
 }
 
+function commit(next: Record<string, boolean>): void {
+  snapshot = next;
+  writeCollapsed(next);
+  emit();
+}
+
 const SSR_SNAPSHOT: Record<string, boolean> = {};
 
 export function useCollapsed(id: string): [boolean, () => void] {
@@ -40,11 +46,16 @@ export function useCollapsed(id: string): [boolean, () => void] {
   const toggle = (): void => {
     const current = getSnapshot();
     const next = { ...current, [id]: !current[id] };
-    snapshot = next;
-    writeCollapsed(next);
-    emit();
+    commit(next);
   };
   return [collapsed, toggle];
+}
+
+export function setCollapsedState(id: string, collapsed: boolean): void {
+  const current = getSnapshot();
+  if (Boolean(current[id]) === collapsed) return;
+  const next = { ...current, [id]: collapsed };
+  commit(next);
 }
 
 // Test seam: drop the cached snapshot so the next `getSnapshot` re-reads
