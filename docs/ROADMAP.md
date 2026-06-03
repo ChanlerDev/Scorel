@@ -441,13 +441,38 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | Step | Spec | Goal | Status |
 |---|---|---|---|
 | M6.1 | [`S0048`](spec/ship/S0048-device-level-host-project-registry.md) | Device-level Host + Project Registry + project-aware Runtime | Done |
-| M6.2 | [`S0049`](spec/ship/S0049-webui-add-project-directory-browser.md) | WebUI 添加项目 + Host 目录浏览 + projectId 路由切换 | Planned |
+| M6.2 | [`S0049`](spec/ship/S0049-webui-add-project-directory-browser.md) | WebUI 添加项目 + Host 目录浏览 + projectId 路由切换 | Done |
+
+**Status**: Done
+
+---
+
+## M7: Agent Runtime Quality
+
+**Goal**: 提升 Scorel 作为 coding agent 的任务成功率、稳定性与上下文对齐质量。该阶段聚焦 harness definition 与 runtime guidance semantics，而不是新增新的产品壳。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M7.1 | [`S0050`](spec/ship/S0050-instruction-snapshot-and-agents-assembly.md) | 冻结 session-scoped instruction snapshot，并把 AGENTS.md assembly 正式接入 runtime system prompt | Planned |
+| M7.2 | [`S0051`](spec/ship/S0051-harness-item-and-system-reminder.md) | 增加 harness item 与 `<system-reminder>` LM/display conversion，支持 steer 注入 | Planned |
+| M7.3 | [`S0052`](spec/ship/S0052-follow-up-queue-and-dual-loop.md) | 用 queue control event 实现 follow-up outer loop 与 steer inner loop | Planned |
+| M7.4 | [`S0053`](spec/ship/S0053-skill-index-and-skill-tool.md) | 建立 session-scoped Skill index，并暴露 Skill tool | Planned |
+
+**Candidate scope**:
+
+- 定义稳定的 harness input assembly：system prompt、tool contract、用户 prompt 与项目级指令的装配顺序、优先级与裁剪规则。
+- 增加 `AGENTS.md` / 项目真相源 / 决策记录支持，让 agent 更稳定读取当前任务边界与项目约束。
+- 收敛 `<system-reminder>` 等 runtime guidance 语义：来源、注入时机、注入位置、合并规则、预算控制，以及不污染 tool result 语义的约束。
+- 用 append-only control events 表达 follow-up queue、Skill index 等 runtime state，避免 daemon-only memory 丢失状态。
+- Skill V1 只做显式 Skill tool 与 session-scoped index；不做自动 Skill 搜索/排序。
 
 **Status**: Planned
 
 ---
 
-## M7: GUI
+## M8: GUI
 
 **Goal**: 提供 Project-first desktop GUI，统一管理本地和远程 Device 上的 Project。
 
@@ -462,7 +487,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M8: SSH Remote Device
+## M9: SSH Remote Device
 
 **Goal**: GUI 可通过 SSH 添加远程 Device，并在远端安装、启动或连接 Scorel Host。
 
@@ -477,7 +502,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M9: HTTP API
+## M10: HTTP API
 
 **Goal**: 提供纯 HTTP 集成，不要求调用方使用 GUI 或 WebSocket SDK。
 
@@ -495,7 +520,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 
 ---
 
-## M10: Ecosystem
+## M11: Ecosystem
 
 **Goal**: Scorel 可以通过 MCP、extensions、channels 接入外部工作流。
 
@@ -561,7 +586,11 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0046`](spec/ship/S0046-webui-empty-composer-and-lazy-session.md) | 空态主区大 composer + project picker + lazy session 创建 | Done |
 | [`S0047`](spec/ship/S0047-webui-project-hover-newchat-and-dynamic-greeting.md) | Project 行 hover ✏ 新建会话按钮 + EmptyComposer H1 动态 project 名 | Done |
 | [`S0048`](spec/ship/S0048-device-level-host-project-registry.md) | Device-level Host、持久 Project Registry、project-aware Runtime | Done |
-| [`S0049`](spec/ship/S0049-webui-add-project-directory-browser.md) | WebUI 添加项目、Device 目录浏览、projectId 路由切换 | Planned |
+| [`S0049`](spec/ship/S0049-webui-add-project-directory-browser.md) | WebUI 添加项目、Device 目录浏览、projectId 路由切换 | Done |
+| [`S0050`](spec/ship/S0050-instruction-snapshot-and-agents-assembly.md) | 冻结 instruction snapshot，并把 AGENTS.md assembly 接入 runtime system prompt | Planned |
+| [`S0051`](spec/ship/S0051-harness-item-and-system-reminder.md) | harness item 与 `<system-reminder>` LM/display conversion | Planned |
+| [`S0052`](spec/ship/S0052-follow-up-queue-and-dual-loop.md) | follow-up queue control events 与 outer/inner 双 loop | Planned |
+| [`S0053`](spec/ship/S0053-skill-index-and-skill-tool.md) | session-scoped Skill index 与 Skill tool | Planned |
 
 ---
 
