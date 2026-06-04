@@ -75,6 +75,39 @@ reasoning = true
     });
   });
 
+  it("loads custom pi-ai compatibility overrides", async () => {
+    const cwd = await mkProject(`
+[model]
+type = "custom"
+api = "openai-completions"
+provider = "openai-compatible"
+id = "reasoning-model"
+baseUrl = "https://llm.example.test/v1"
+apiKeyEnv = "SCOREL_API_KEY"
+contextWindow = 400000
+maxTokens = 128000
+reasoning = true
+supportsDeveloperRole = true
+`);
+
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).resolves.toEqual({
+      model: {
+        type: "custom",
+        api: "openai-completions",
+        provider: "openai-compatible",
+        id: "reasoning-model",
+        baseUrl: "https://llm.example.test/v1",
+        apiKey: "chanleramp",
+        contextWindow: 400000,
+        maxTokens: 128000,
+        reasoning: true,
+        compat: {
+          supportsDeveloperRole: true,
+        },
+      },
+    });
+  });
+
   it("rejects real model config when the API key env var is missing", async () => {
     const cwd = await mkProject(`
 [model]

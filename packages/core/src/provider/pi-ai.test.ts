@@ -8,7 +8,7 @@ import { createPiAiProvider, resolvePiAiModel } from "./pi-ai.js";
 import type { AgentTool } from "../tools/index.js";
 
 describe("createPiAiProvider", () => {
-  it("uses pi-ai model metadata and streaming protocol instead of a hand-rolled provider", async () => {
+  it("uses systemPrompt as a system message for custom OpenAI-compatible completions by default", async () => {
     const server = await startOpenAiCompletionsServer();
     const provider = createPiAiProvider({
       model: resolvePiAiModel({
@@ -47,12 +47,66 @@ describe("createPiAiProvider", () => {
       expect(server.requests[0]).toMatchObject({
         model: "gpt-5.4-mini",
         stream: true,
+        messages: [
+          {
+            role: "system",
+            content: "You are Scorel.",
+          },
+          {
+            role: "user",
+            content: "read README",
+          },
+        ],
         tools: [
           {
             type: "function",
             function: {
               name: "Read",
             },
+          },
+        ],
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("allows custom OpenAI-compatible completions to opt into developer role support", async () => {
+    const server = await startOpenAiCompletionsServer();
+    const provider = createPiAiProvider({
+      model: resolvePiAiModel({
+        type: "custom",
+        provider: "scorel-test",
+        id: "gpt-5.4-mini",
+        baseUrl: server.baseUrl,
+        api: "openai-completions",
+        apiKey: "chanleramp",
+        contextWindow: 400000,
+        maxTokens: 128000,
+        reasoning: true,
+        compat: { supportsDeveloperRole: true },
+      }),
+      apiKey: "chanleramp",
+    });
+
+    try {
+      await collectProvider(provider.streamTurn({
+        context: [user("read README")],
+        systemPrompt: "You are Scorel.",
+        tools: [readTool],
+        signal: new AbortController().signal,
+        options: {},
+      }));
+
+      expect(server.requests[0]).toMatchObject({
+        messages: [
+          {
+            role: "developer",
+            content: "You are Scorel.",
+          },
+          {
+            role: "user",
+            content: "read README",
           },
         ],
       });

@@ -66,6 +66,9 @@ export const resolvePiAiModel = (config: BuiltinPiAiModelConfig | CustomPiAiMode
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: config.contextWindow,
       maxTokens: config.maxTokens,
+      ...(config.api === "openai-completions"
+        ? { compat: { supportsDeveloperRole: config.compat?.supportsDeveloperRole ?? false } }
+        : {}),
     } satisfies Model<CustomPiAiApi>;
   }
 

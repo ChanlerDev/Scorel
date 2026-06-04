@@ -23,6 +23,7 @@ export const SCOREL_CONFIG_SCHEMA = {
         "contextWindow",
         "maxTokens",
         "reasoning",
+        "supportsDeveloperRole",
       ],
     },
   },
@@ -48,6 +49,9 @@ export type CustomPiAiModelConfig = {
   contextWindow: number;
   maxTokens: number;
   reasoning: boolean;
+  compat?: {
+    supportsDeveloperRole?: boolean;
+  };
 };
 
 export type ScorelConfig = {
@@ -79,6 +83,7 @@ type RawConfig = {
     contextWindow?: number;
     maxTokens?: number;
     reasoning?: boolean;
+    supportsDeveloperRole?: boolean;
   };
 };
 
@@ -123,6 +128,9 @@ export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promis
         contextWindow: requireNumber(model.contextWindow, "model.contextWindow"),
         maxTokens: requireNumber(model.maxTokens, "model.maxTokens"),
         reasoning: requireBoolean(model.reasoning, "model.reasoning"),
+        ...(model.supportsDeveloperRole === undefined
+          ? {}
+          : { compat: { supportsDeveloperRole: requireBoolean(model.supportsDeveloperRole, "model.supportsDeveloperRole") } }),
         apiKey,
       },
     };
