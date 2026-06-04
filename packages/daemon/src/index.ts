@@ -702,17 +702,30 @@ export class ScorelHost {
   async #handleSendMessage(connection: Connection, request: ClientRequest<"send_message">): Promise<void> {
     const lane = await this.#getLane(request.sessionId);
     if (lane.runtime.running) {
+      const runningBehavior = request.options?.runningBehavior ?? "follow_up";
+      if (runningBehavior === "steer") {
+        await this.#enqueueSteer(lane, connection, request);
+        return;
+      }
       await this.#enqueueFollowUp(lane, connection, request);
       return;
     }
 
+    const ack = request.options?.ack ?? "completed";
     lane.queue = lane.queue.then(async () => {
       await this.#drainFollowUps(lane);
       await this.#runUserTurn(lane, connection.clientId, {
         content: normalizeContent(request.content),
         parentId: request.options?.parentId,
         source: "user",
-        onComplete: (result) => this.#respond(connection, request, result),
+        onAccepted:
+          ack === "accepted"
+            ? (result) => this.#respond(connection, request, { ...result, status: "accepted" })
+            : undefined,
+        onComplete:
+          ack === "completed"
+            ? (result) => this.#respond(connection, request, { ...result, status: "completed" })
+            : undefined,
       });
       await this.#drainFollowUps(lane);
     });
@@ -728,7 +741,8 @@ export class ScorelHost {
       parentId?: EventId | null;
       source: "user" | "follow_up";
       queueItemId?: string;
-      onComplete?: (result: ClientRequestMap["send_message"]["response"]) => void;
+      onAccepted?: (result: Required<Pick<ClientRequestMap["send_message"]["response"], "userEventId" | "assistantEventId">>) => void;
+      onComplete?: (result: Required<Pick<ClientRequestMap["send_message"]["response"], "userEventId" | "assistantEventId">>) => void;
     },
   ): Promise<ClientRequestMap["send_message"]["response"]> {
     const sessionId = lane.session.header.sessionId;
@@ -756,6 +770,8 @@ export class ScorelHost {
       },
     });
     const firstAssistantEventId = asEventId(this.#createId());
+    const accepted = { userEventId, assistantEventId: firstAssistantEventId };
+    input.onAccepted?.(accepted);
     const state: RuntimeEventState = {
       parentId: userEvent.id,
       assistantEventId: firstAssistantEventId,
@@ -783,10 +799,45 @@ export class ScorelHost {
       source: input.source,
     });
     input.onComplete?.(result);
-    return result;
+    return { ...result, status: "completed" };
   }
 
   async #enqueueFollowUp(
+    lane: SessionLane,
+    connection: Connection,
+    request: ClientRequest<"send_message">,
+  ): Promise<void> {
+    const ack = request.options?.ack ?? "completed";
+    const now = this.#now();
+    const item: QueueItem = {
+      id: this.#createId(),
+      content: normalizeContent(request.content),
+      createdAt: now,
+      updatedAt: now,
+      clientId: connection.clientId,
+    };
+    if (ack === "completed") {
+      lane.followUpWaiters.set(item.id, { connection, request });
+    }
+    await this.#appendQueueRewrite(lane, "follow_up", [...lane.session.tree.controlState.queues.follow_up, item], {
+      clientId: connection.clientId,
+      anchorEventId: lane.session.activeLeafId,
+    });
+    await this.#appendDiagnostic(lane.session.header.sessionId, "follow_up_queued", {
+      clientId: connection.clientId,
+      queueItemId: item.id,
+      queueSize: lane.session.tree.controlState.queues.follow_up.length,
+    });
+    if (ack === "accepted") {
+      this.#respond(connection, request, {
+        status: "queued",
+        queue: "follow_up",
+        queueItemId: item.id,
+      });
+    }
+  }
+
+  async #enqueueSteer(
     lane: SessionLane,
     connection: Connection,
     request: ClientRequest<"send_message">,
@@ -799,15 +850,19 @@ export class ScorelHost {
       updatedAt: now,
       clientId: connection.clientId,
     };
-    lane.followUpWaiters.set(item.id, { connection, request });
-    await this.#appendQueueRewrite(lane, "follow_up", [...lane.session.tree.controlState.queues.follow_up, item], {
+    await this.#appendQueueRewrite(lane, "steer", [...lane.session.tree.controlState.queues.steer, item], {
       clientId: connection.clientId,
       anchorEventId: lane.session.activeLeafId,
     });
-    await this.#appendDiagnostic(lane.session.header.sessionId, "follow_up_queued", {
+    await this.#appendDiagnostic(lane.session.header.sessionId, "steer_queued", {
       clientId: connection.clientId,
       queueItemId: item.id,
-      queueSize: lane.session.tree.controlState.queues.follow_up.length,
+      queueSize: lane.session.tree.controlState.queues.steer.length,
+    });
+    this.#respond(connection, request, {
+      status: "queued",
+      queue: "steer",
+      queueItemId: item.id,
     });
   }
 
@@ -827,7 +882,7 @@ export class ScorelHost {
         source: "follow_up",
         queueItemId: item.id,
         onComplete: waiter
-          ? (result) => this.#respond(waiter.connection, waiter.request, result)
+          ? (result) => this.#respond(waiter.connection, waiter.request, { ...result, status: "completed" })
           : undefined,
       });
     }

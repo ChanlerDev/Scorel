@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { RunningMessageBehavior } from "../../lib/store/running-behavior";
 
 export type ComposerProps = {
-  onSend(content: string): void | Promise<void>;
+  onSend(content: string, runningBehavior?: RunningMessageBehavior): void | Promise<void>;
   disabled?: boolean;
   placeholder?: string;
   /** True between turn_start and turn_end. Toggles Send vs Cancel button. */
@@ -17,6 +18,7 @@ export type ComposerProps = {
   /** Display-only model label rendered inside the disabled picker button.
    * The picker is a Codex-semantic placeholder; clicking does nothing. */
   modelLabel?: string;
+  runningBehavior?: RunningMessageBehavior;
 };
 
 // One-line min, ~5-line max. Cap height in pixels rather than `rows` so the
@@ -32,6 +34,7 @@ export function Composer({
   onCancel,
   errorBanner,
   modelLabel = "Default",
+  runningBehavior = "follow_up",
 }: ComposerProps): JSX.Element {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,17 +53,18 @@ export function Composer({
     el.style.height = `${next}px`;
   }, [value]);
 
-  async function submit(): Promise<void> {
+  async function submit(behaviorOverride?: RunningMessageBehavior): Promise<void> {
     if (sendDisabled) return;
+    const submitted = value;
+    const behavior = inFlight ? behaviorOverride ?? runningBehavior : undefined;
+    setValue("");
+    const el = textareaRef.current;
+    if (el) el.style.height = "auto";
     setBusy(true);
     try {
-      await onSend(value);
-      setValue("");
-      // After clearing, snap back to one line. The effect above handles
-      // this on the next render too, but being explicit avoids a frame of
-      // stale height during fast Enter→Enter input.
-      const el = textareaRef.current;
-      if (el) el.style.height = "auto";
+      await onSend(submitted, behavior);
+    } catch (cause) {
+      setValue((current) => (current.length === 0 ? submitted : current));
     } finally {
       setBusy(false);
     }
@@ -74,9 +78,9 @@ export function Composer({
   }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>): void {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
-      void submit();
+      void submit(event.shiftKey ? oppositeBehavior(runningBehavior) : runningBehavior);
       return;
     }
     if (event.key === "Escape") {
@@ -110,7 +114,7 @@ export function Composer({
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
-          disabled={disabled || busy}
+          disabled={disabled}
           rows={1}
         />
         <div className="flex items-center justify-between px-3 pb-2">
@@ -156,18 +160,19 @@ export function Composer({
                   {cancelling ? "Cancelling" : "Cancel"}
                 </span>
               </button>
-            ) : (
-              <button
-                type="submit"
-                data-testid="composer-send"
-                aria-label="Send"
-                className="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-bg hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={sendDisabled}
-              >
-                <span aria-hidden>↑</span>
-                <span className="sr-only">Send</span>
-              </button>
-            )}
+            ) : null}
+            <button
+              type="submit"
+              data-testid="composer-send"
+              aria-label={inFlight ? `Send ${runningBehaviorLabel(runningBehavior)}` : "Send"}
+              className="flex h-7 w-7 items-center justify-center rounded-full bg-accent text-bg hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={sendDisabled}
+            >
+              <span aria-hidden>↑</span>
+              <span className="sr-only">
+                {inFlight ? `Send ${runningBehaviorLabel(runningBehavior)}` : "Send"}
+              </span>
+            </button>
           </div>
         </div>
       </div>
@@ -183,3 +188,9 @@ export function Composer({
     </form>
   );
 }
+
+const oppositeBehavior = (value: RunningMessageBehavior): RunningMessageBehavior =>
+  value === "follow_up" ? "steer" : "follow_up";
+
+const runningBehaviorLabel = (value: RunningMessageBehavior): string =>
+  value === "follow_up" ? "follow up" : "steer";

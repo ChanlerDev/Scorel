@@ -1,11 +1,19 @@
 import { AttachCache } from "./attach-cache";
 import { BrowserStore } from "./browser-store";
 import { DevicesStore } from "./devices";
+import { RunningBehaviorStore } from "./running-behavior";
 
 export { BrowserStore } from "./browser-store";
 export type { StorageLike, BrowserStoreOptions } from "./browser-store";
 export { DevicesStore, DEVICES_KEY } from "./devices";
 export type { CreateDeviceInput, UpdateDevicePatch } from "./devices";
+export {
+  DEFAULT_RUNNING_BEHAVIOR,
+  RUNNING_BEHAVIOR_KEY,
+  RunningBehaviorStore,
+  oppositeRunningBehavior,
+} from "./running-behavior";
+export type { RunningMessageBehavior } from "./running-behavior";
 export { AttachCache } from "./attach-cache";
 export type {
   AttachCacheFile,
@@ -86,3 +94,24 @@ export function __setSharedAttachCacheForTests(cache: AttachCache): void {
   _sharedAttachCache = cache;
 }
 
+let _sharedRunningBehaviorStore: RunningBehaviorStore | null = null;
+
+export function getSharedRunningBehaviorStore(): RunningBehaviorStore {
+  if (_sharedRunningBehaviorStore === null) {
+    _sharedRunningBehaviorStore = new RunningBehaviorStore(
+      new BrowserStore({
+        storage: typeof window === "undefined" ? null : window.localStorage,
+        onQuotaExceeded: quotaLogger,
+      }),
+    );
+  }
+  return _sharedRunningBehaviorStore;
+}
+
+export function __resetSharedRunningBehaviorStoreForTests(): void {
+  _sharedRunningBehaviorStore = null;
+}
+
+export function __setSharedRunningBehaviorStoreForTests(store: RunningBehaviorStore): void {
+  _sharedRunningBehaviorStore = store;
+}

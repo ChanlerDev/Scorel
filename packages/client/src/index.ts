@@ -21,6 +21,8 @@ import {
   type PersistentEvent,
   type ProjectId,
   type ScorelEvent,
+  type SendMessageOptions,
+  type SendMessageResponse,
   type Seq,
   type SessionId,
   type SessionSummary,
@@ -238,8 +240,8 @@ export class DaemonClient {
 
   async sendMessage(
     content: string | ContentBlock[],
-    options?: { parentId?: EventId | null },
-  ): Promise<{ userEventId: EventId; assistantEventId: EventId }> {
+    options?: SendMessageOptions,
+  ): Promise<SendMessageResponse> {
     if (!this.#sessionId) {
       throw new Error("DaemonClient is not connected to a session");
     }

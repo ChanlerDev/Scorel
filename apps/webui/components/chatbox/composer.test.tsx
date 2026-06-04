@@ -51,23 +51,31 @@ describe("Composer", () => {
     expect(button.disabled).toBe(false);
   });
 
-  it("submits on Enter and clears the textarea", async () => {
-    const onSend = vi.fn(async () => {});
+  it("submits on Command+Enter and clears before the send promise resolves", async () => {
+    let resolveSend!: () => void;
+    const onSend = vi.fn(() => new Promise<void>((resolve) => {
+      resolveSend = resolve;
+    }));
     render(<Composer onSend={onSend} />);
     const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hello" } });
-    await act(async () => {
-      fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+    act(() => {
+      fireEvent.keyDown(input, { key: "Enter", metaKey: true });
     });
-    expect(onSend).toHaveBeenCalledWith("hello");
+    expect(onSend).toHaveBeenCalledWith("hello", undefined);
     expect(input.value).toBe("");
+    expect(input.disabled).toBe(false);
+    await act(async () => {
+      resolveSend();
+    });
   });
 
-  it("does not submit on Shift+Enter", () => {
+  it("does not submit on plain Enter or Shift+Enter", () => {
     const onSend = vi.fn();
     render(<Composer onSend={onSend} />);
     const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "line1" } });
+    fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
     expect(onSend).not.toHaveBeenCalled();
   });
@@ -77,7 +85,7 @@ describe("Composer", () => {
     render(<Composer onSend={onSend} />);
     const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "   " } });
-    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true });
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -87,12 +95,38 @@ describe("Composer", () => {
     expect(screen.getByTestId("composer-send")).toBeTruthy();
   });
 
-  it("shows Cancel button when in-flight (and hides Send)", () => {
+  it("shows Cancel and Send buttons when in-flight", () => {
     render(<Composer onSend={() => {}} onCancel={() => {}} inFlight />);
-    expect(screen.queryByTestId("composer-send")).toBeNull();
+    expect(screen.queryByTestId("composer-send")).toBeTruthy();
     const cancel = screen.getByTestId("composer-cancel") as HTMLButtonElement;
     expect(cancel.disabled).toBe(false);
     expect(cancel.getAttribute("aria-label")).toBe("Cancel");
+  });
+
+  it("keeps the textarea editable while in-flight", () => {
+    render(<Composer onSend={() => {}} onCancel={() => {}} inFlight />);
+    const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "next" } });
+    expect(input.value).toBe("next");
+  });
+
+  it("sends the default running behavior with Command+Enter and the opposite with Command+Shift+Enter", async () => {
+    const onSend = vi.fn();
+    render(<Composer onSend={onSend} onCancel={() => {}} inFlight runningBehavior="follow_up" />);
+    const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+
+    fireEvent.change(input, { target: { value: "queue this" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+    });
+    expect(onSend).toHaveBeenLastCalledWith("queue this", "follow_up");
+
+    fireEvent.change(input, { target: { value: "guide this" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter", metaKey: true, shiftKey: true });
+    });
+    expect(onSend).toHaveBeenLastCalledWith("guide this", "steer");
   });
 
   it("flags Cancel as cancelling and disables it", () => {

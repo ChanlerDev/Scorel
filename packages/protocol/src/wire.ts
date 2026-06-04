@@ -6,6 +6,7 @@ import type {
   ErrorCode,
   HostProject,
   PersistentEvent,
+  QueueName,
   ScorelEvent,
   SessionMeta,
   SessionSummary,
@@ -14,6 +15,16 @@ import type { ContentBlock } from "./messages.js";
 
 export type SendMessageOptions = {
   parentId?: EventId | null;
+  ack?: "accepted" | "completed";
+  runningBehavior?: QueueName;
+};
+
+export type SendMessageResponse = {
+  status: "accepted" | "completed" | "queued";
+  userEventId?: EventId;
+  assistantEventId?: EventId;
+  queue?: QueueName;
+  queueItemId?: string;
 };
 
 export type ClientRequestMap = {
@@ -57,7 +68,7 @@ export type ClientRequestMap = {
   };
   send_message: {
     request: { sessionId: SessionId; content: string | ContentBlock[]; options?: SendMessageOptions };
-    response: { userEventId: EventId; assistantEventId: EventId };
+    response: SendMessageResponse;
   };
   get_status: {
     request: { sessionId?: SessionId };

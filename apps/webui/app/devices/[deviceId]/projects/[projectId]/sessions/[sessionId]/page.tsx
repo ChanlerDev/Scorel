@@ -23,7 +23,9 @@ import {
 import { buildConnectionSummary } from "../../../../../../../lib/diagnostics/connection-summary";
 import { computeScopeKey } from "../../../../../../../lib/identity/scope-key";
 import { getSharedAttachCache } from "../../../../../../../lib/store";
+import type { RunningMessageBehavior } from "../../../../../../../lib/store/running-behavior";
 import { useDevices } from "../../../../../../../lib/store/use-devices";
+import { useRunningBehavior } from "../../../../../../../lib/store/use-running-behavior";
 import type { Device } from "../../../../../../../lib/domain/devices";
 import { asSessionId } from "@scorel/protocol";
 
@@ -141,6 +143,7 @@ function Chatbox({
     streamLastSeq: 0,
     sessionId,
   });
+  const { behavior: runningBehavior } = useRunningBehavior();
   const controllerRef = useRef<SessionAttachController | null>(null);
   // S0046: one-shot consumer for the empty-composer's pending prompt. Once
   // the attach controller has finished its initial resync (snapshot.loading
@@ -202,10 +205,10 @@ function Chatbox({
 
   const send = useMemo(
     () =>
-      async (content: string): Promise<void> => {
+      async (content: string, behavior?: RunningMessageBehavior): Promise<void> => {
         const controller = controllerRef.current;
         if (!controller) return;
-        await controller.send(content);
+        await controller.send(content, { runningBehavior: behavior });
       },
     [],
   );
@@ -248,6 +251,7 @@ function Chatbox({
         cancelling={snapshot.cancelling}
         errorBanner={errorBanner}
         disabled={!managed}
+        runningBehavior={runningBehavior}
       />
       {debugSummary ? <DebugPanel summary={debugSummary} /> : null}
     </div>

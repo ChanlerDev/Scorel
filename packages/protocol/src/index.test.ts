@@ -36,14 +36,20 @@ describe("@scorel/protocol", () => {
       requestId: asRequestId("req_1"),
       sessionId: asSessionId("ses_1"),
       content: "hello",
+      options: {
+        ack: "accepted",
+        runningBehavior: "follow_up",
+      },
     } satisfies ClientRequest<"send_message">;
 
     const response = okResponse(request, {
+      status: "accepted",
       userEventId: asEventId("evt_user"),
       assistantEventId: asEventId("evt_assistant"),
     }) satisfies ResponseFor<typeof request>;
 
     expect(response.requestType).toBe("send_message");
+    expect(request.options?.runningBehavior).toBe("follow_up");
     expect(response.data.userEventId).toBe("evt_user");
   });
 

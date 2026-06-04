@@ -5,6 +5,7 @@ import {
   asSeq,
   type PersistentEvent,
   type ScorelEvent,
+  type SendMessageOptions,
   type Seq,
   type SessionId,
 } from "@scorel/protocol";
@@ -108,7 +109,7 @@ export type SessionAttachSnapshot = {
 export type SessionAttachController = {
   start(): Promise<void>;
   stop(): void;
-  send(content: string): Promise<void>;
+  send(content: string, options?: Pick<SendMessageOptions, "runningBehavior">): Promise<void>;
   cancel(): Promise<void>;
 };
 
@@ -349,20 +350,26 @@ export function createSessionAttachController(
     unsubscribe = undefined;
   }
 
-  async function send(content: string): Promise<void> {
+  async function send(content: string, options?: Pick<SendMessageOptions, "runningBehavior">): Promise<void> {
     if (stopped) return;
     if (!content.trim()) return;
-    // Optimistic local user turn so the user sees their input immediately.
-    const placeholderId = nextPendingId();
-    state = appendPendingUserTurn(state, { id: placeholderId, text: content });
-    emit(false);
+    const shouldAppendPendingUserTurn = !inFlight;
+    const placeholderId = shouldAppendPendingUserTurn ? nextPendingId() : undefined;
+    if (placeholderId) {
+      // Optimistic local user turn so the user sees their input immediately.
+      state = appendPendingUserTurn(state, { id: placeholderId, text: content });
+      emit(false);
+    }
     try {
-      await client.sendMessage(content);
+      await client.sendMessage(content, {
+        ack: "accepted",
+        runningBehavior: options?.runningBehavior,
+      });
     } catch (cause) {
       // Drop the placeholder on failure and surface the error.
       state = {
         ...state,
-        turns: state.turns.filter((t) => t.id !== placeholderId),
+        turns: placeholderId ? state.turns.filter((t) => t.id !== placeholderId) : state.turns,
       };
       error = classifyError(cause, "send_failed");
       emit(false);

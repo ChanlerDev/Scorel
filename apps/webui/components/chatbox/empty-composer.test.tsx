@@ -321,7 +321,7 @@ describe("EmptyComposer", () => {
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hello world" } });
     await act(async () => {
-      fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+      fireEvent.keyDown(input, { key: "Enter", metaKey: true });
       for (let i = 0; i < 10; i += 1) await Promise.resolve();
     });
     expect(stub).toHaveBeenCalledWith(
@@ -361,7 +361,7 @@ describe("EmptyComposer", () => {
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "fail me" } });
     await act(async () => {
-      fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+      fireEvent.keyDown(input, { key: "Enter", metaKey: true });
       for (let i = 0; i < 10; i += 1) await Promise.resolve();
     });
     expect(_push).not.toHaveBeenCalled();
@@ -397,7 +397,7 @@ describe("EmptyComposer", () => {
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     await act(async () => {
-      fireEvent.keyDown(input, { key: "Enter", shiftKey: false });
+      fireEvent.keyDown(input, { key: "Enter", metaKey: true });
       for (let i = 0; i < 5; i += 1) await Promise.resolve();
     });
     expect(stub).not.toHaveBeenCalled();

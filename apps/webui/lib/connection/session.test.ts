@@ -10,6 +10,8 @@ import {
   type EventId,
   type PersistentEvent,
   type ScorelEvent,
+  type SendMessageOptions,
+  type SendMessageResponse,
   type Seq,
   type SessionId,
   type Unsubscribe,
@@ -56,6 +58,7 @@ class FakeDaemonClient {
   connectCalls = 0;
   resyncCalls: Array<{ persistentLastSeq?: Seq; streamLastSeq?: Seq }> = [];
   sentMessages: string[] = [];
+  sentMessageOptions: Array<SendMessageOptions | undefined> = [];
   cancelCalls = 0;
   cancelImpl: () => Promise<{ sessionId: SessionId; cancelled: boolean }> = async () => ({
     sessionId: this.sessionId ?? SESSION_ID,
@@ -112,9 +115,12 @@ class FakeDaemonClient {
 
   async sendMessage(
     content: string,
-  ): Promise<{ userEventId: EventId; assistantEventId: EventId }> {
+    options?: SendMessageOptions,
+  ): Promise<SendMessageResponse> {
     this.sentMessages.push(content);
+    this.sentMessageOptions.push(options);
     return {
+      status: "accepted",
       userEventId: asEventId("evt_user_1"),
       assistantEventId: asEventId("evt_a_1"),
     };
@@ -337,6 +343,30 @@ describe("createSessionAttachController", () => {
     expect(final.state.turns).toHaveLength(1);
     expect(final.state.turns[0]?.id).toBe("evt_u_1");
     expect((final.state.turns[0] as { pending?: boolean }).pending).toBeUndefined();
+  });
+
+  it("send: running behavior is forwarded without creating a user bubble while in-flight", async () => {
+    const fake = new FakeDaemonClient();
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      projectId: "prj_test",
+      attachCache: makeAttachCache(),
+      onState: (snapshot) => snapshots.push(snapshot),
+    });
+    await controller.start();
+    for (const sub of fake.subscribers) sub(turnStart(5));
+    snapshots.length = 0;
+
+    await controller.send("guide current run", { runningBehavior: "steer" });
+
+    expect(fake.sentMessages).toEqual(["guide current run"]);
+    expect(fake.sentMessageOptions).toEqual([
+      { ack: "accepted", runningBehavior: "steer" },
+    ]);
+    expect(snapshots).toHaveLength(0);
   });
 
   it("send: empty/whitespace input is ignored", async () => {

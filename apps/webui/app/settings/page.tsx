@@ -3,10 +3,13 @@
 import { useState } from "react";
 import { DeviceForm } from "../../components/settings/device-form";
 import { DeviceList } from "../../components/settings/device-list";
+import { useRunningBehavior } from "../../lib/store/use-running-behavior";
+import type { RunningMessageBehavior } from "../../lib/store/running-behavior";
 import { useDevices } from "../../lib/store/use-devices";
 
 export default function SettingsPage() {
   const { store } = useDevices();
+  const { behavior, store: behaviorStore } = useRunningBehavior();
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,6 +57,36 @@ export default function SettingsPage() {
       ) : null}
 
       <DeviceList />
+
+      <section className="space-y-3 border-t border-subtle pt-6">
+        <div>
+          <h2 className="text-md font-semibold text-text">Running behavior</h2>
+          <p className="mt-1 text-sm text-muted">
+            Command+Enter sends with this behavior while a run is active. Command+Shift+Enter sends the opposite.
+          </p>
+        </div>
+        <div className="inline-flex rounded-md border border-subtle bg-bg p-1">
+          {runningBehaviorOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={
+                option.value === behavior
+                  ? "rounded px-3 py-1.5 text-sm font-medium text-bg bg-accent"
+                  : "rounded px-3 py-1.5 text-sm font-medium text-muted hover:text-text"
+              }
+              onClick={() => behaviorStore.set(option.value)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
+
+const runningBehaviorOptions: Array<{ value: RunningMessageBehavior; label: string }> = [
+  { value: "follow_up", label: "Follow up" },
+  { value: "steer", label: "Steer" },
+];

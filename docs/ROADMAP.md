@@ -459,6 +459,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M7.2 | [`S0051`](spec/ship/S0051-harness-item-and-system-reminder.md) | 增加 harness item 与 `<system-reminder>` LM/display conversion，支持 steer 注入 | Done |
 | M7.3 | [`S0052`](spec/ship/S0052-follow-up-queue-and-dual-loop.md) | 用 queue control event 实现 follow-up outer loop 与 steer inner loop | Done |
 | M7.4 | [`S0053`](spec/ship/S0053-skill-index-and-skill-tool.md) | 建立 session-scoped Skill index，并暴露 Skill tool | Done |
+| M7.5 | [`S0054`](spec/ship/S0054-webui-running-message-behavior.md) | WebUI 运行中发送支持 follow-up / steer 行为选择和 accepted ack | Done |
 
 **Candidate scope**:
 
@@ -591,6 +592,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0051`](spec/ship/S0051-harness-item-and-system-reminder.md) | harness item 与 `<system-reminder>` LM/display conversion | Done |
 | [`S0052`](spec/ship/S0052-follow-up-queue-and-dual-loop.md) | follow-up queue control events 与 outer/inner 双 loop | Done |
 | [`S0053`](spec/ship/S0053-skill-index-and-skill-tool.md) | session-scoped Skill index 与 Skill tool | Done |
+| [`S0054`](spec/ship/S0054-webui-running-message-behavior.md) | WebUI running send follow-up / steer 行为选择 | Done |
 
 ---
 

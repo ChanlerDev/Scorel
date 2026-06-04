@@ -275,6 +275,140 @@ describe("ScorelHost + embedded transport", () => {
     expect(followUpUser?.message?.meta?.queueItemId).toEqual(expect.any(String));
   });
 
+  it("can acknowledge an idle send after the daemon accepts the user message", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-accepted-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const repo = join(root, "repo");
+    await Promise.all([mkdir(sessionsDir), mkdir(repo)]);
+    const release = deferred<void>();
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () =>
+        new ScorelRuntime({
+          provider: {
+            streamTurn: async function* () {
+              await release.promise;
+              return assistantMessage("ok");
+            },
+          },
+        }),
+      now: () => 1_000,
+    });
+    await host.start();
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_accepted"),
+      meta: { projectId: project.projectId },
+    });
+
+    const response = waitForResponse(transport, "req_send");
+    void transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send"),
+      sessionId: asSessionId("ses_accepted"),
+      content: "first",
+      options: { ack: "accepted" },
+    });
+
+    await expect(response).resolves.toMatchObject({
+      type: "response",
+      requestType: "send_message",
+      data: { status: "accepted", userEventId: expect.any(String), assistantEventId: expect.any(String) },
+    });
+    const eventsBeforeRelease = (await readFile(join(sessionsDir, "ses_accepted.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .slice(1)
+      .map((line) => JSON.parse(line) as { type: string });
+    expect(eventsBeforeRelease.some((event) => event.type === "user_message")).toBe(true);
+    expect(eventsBeforeRelease.some((event) => event.type === "assistant_message")).toBe(false);
+
+    release.resolve();
+    for (let i = 0; i < 50; i += 1) {
+      const text = await readFile(join(sessionsDir, "ses_accepted.jsonl"), "utf8");
+      if (text.includes("\"assistant_message\"")) {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(await readFile(join(sessionsDir, "ses_accepted.jsonl"), "utf8")).toContain("\"assistant_message\"");
+  });
+
+  it("queues a running steer request separately from follow-up", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-steer-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const repo = join(root, "repo");
+    await Promise.all([mkdir(sessionsDir), mkdir(repo)]);
+    const release = deferred<void>();
+    let providerCall = 0;
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () =>
+        new ScorelRuntime({
+          provider: {
+            streamTurn: async function* () {
+              providerCall += 1;
+              await release.promise;
+              return assistantMessage("ok");
+            },
+          },
+        }),
+      now: () => 1_000,
+    });
+    await host.start();
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_steer"),
+      meta: { projectId: project.projectId },
+    });
+    void transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_first"),
+      sessionId: asSessionId("ses_steer"),
+      content: "first",
+    });
+    await eventually(() => expect(providerCall).toBe(1));
+
+    const steerResponse = waitForResponse(transport, "req_steer");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_steer"),
+      sessionId: asSessionId("ses_steer"),
+      content: "guide current run",
+      options: { ack: "accepted", runningBehavior: "steer" },
+    });
+
+    await expect(steerResponse).resolves.toMatchObject({
+      type: "response",
+      requestType: "send_message",
+      data: { status: "queued", queue: "steer", queueItemId: expect.any(String) },
+    });
+    const events = (await readFile(join(sessionsDir, "ses_steer.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .slice(1)
+      .map((line) => JSON.parse(line) as { type: string; queue?: string; items?: unknown[] });
+    const queueEvent = events.find((event) => event.type === "queue_update" && event.queue === "steer");
+    expect(queueEvent?.items).toHaveLength(1);
+    expect(events.some((event) => event.type === "queue_update" && event.queue === "follow_up")).toBe(false);
+
+    release.resolve();
+  });
+
   it("syncs skill index before a user turn and registers the Skill tool", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-skills-"));
     const sessionsDir = join(root, "sessions");

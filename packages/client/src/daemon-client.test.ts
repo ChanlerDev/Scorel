@@ -98,12 +98,14 @@ describe("DaemonClient", () => {
       requestId: asRequestId("req_1"),
       ok: true,
       data: {
+        status: "completed",
         userEventId: asEventId("evt_user"),
         assistantEventId: asEventId("evt_assistant"),
       },
     });
 
     await expect(pending).resolves.toEqual({
+      status: "completed",
       userEventId: "evt_user",
       assistantEventId: "evt_assistant",
     });

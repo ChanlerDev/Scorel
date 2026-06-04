@@ -709,7 +709,11 @@ describe("@scorel/app-cli", () => {
             requestType: "send_message",
             requestId: message.requestId,
             ok: true,
-            data: { userEventId: asEventId("evt_log_user"), assistantEventId: asEventId("evt_log_assistant") },
+            data: {
+              status: "completed" as const,
+              userEventId: asEventId("evt_log_user"),
+              assistantEventId: asEventId("evt_log_assistant"),
+            },
           };
         }
         return undefined;
