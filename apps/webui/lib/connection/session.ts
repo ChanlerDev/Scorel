@@ -125,6 +125,8 @@ function nextPendingId(): string {
 
 type PendingSendAcceptance = {
   content: string;
+  persistentAnchor: number;
+  streamAnchor: number;
   runningBehavior?: NonNullable<SendMessageOptions["runningBehavior"]>;
   resolve: () => void;
   reject: (cause: unknown) => void;
@@ -266,6 +268,8 @@ export function createSessionAttachController(
     const promise = new Promise<void>((resolve, reject) => {
       pending = {
         content,
+        persistentAnchor: persistentLastSeq,
+        streamAnchor: streamLastSeq,
         ...(runningBehavior ? { runningBehavior } : {}),
         resolve,
         reject,
@@ -273,6 +277,10 @@ export function createSessionAttachController(
       pendingAcceptances = [...pendingAcceptances, pending];
     });
     return { pending, promise };
+  }
+
+  function isPendingAcceptance(pending: PendingSendAcceptance): boolean {
+    return pendingAcceptances.includes(pending);
   }
 
   function settlePendingAcceptance(pending: PendingSendAcceptance, cause?: unknown): void {
@@ -286,9 +294,9 @@ export function createSessionAttachController(
   }
 
   function resolveAcceptedSends(event: ScorelEvent): void {
-    const accepted = pendingAcceptances.filter((pending) => isAcceptedByEvent(event, pending, String(client.clientId)));
-    for (const pending of accepted) {
-      settlePendingAcceptance(pending);
+    const accepted = pendingAcceptances.find((pending) => isAcceptedByEvent(event, pending, String(client.clientId)));
+    if (accepted) {
+      settlePendingAcceptance(accepted);
     }
   }
 
@@ -416,6 +424,18 @@ export function createSessionAttachController(
     try {
       void client.sendMessage(content, {
         runningBehavior: options?.runningBehavior,
+      }).then(async () => {
+        if (!isPendingAcceptance(acceptance.pending)) return;
+        await client.resync({
+          persistentLastSeq: asSeq(acceptance.pending.persistentAnchor),
+          streamLastSeq: asSeq(acceptance.pending.streamAnchor),
+        });
+        if (isPendingAcceptance(acceptance.pending)) {
+          settlePendingAcceptance(
+            acceptance.pending,
+            new Error("send_message completed without matching persistent event"),
+          );
+        }
       }).catch((cause) => {
         settlePendingAcceptance(acceptance.pending, cause);
       });
@@ -458,6 +478,7 @@ function isAcceptedByEvent(
   pending: PendingSendAcceptance,
   clientId: string,
 ): boolean {
+  if (Number(event.seq) <= pending.persistentAnchor) return false;
   if (pending.runningBehavior) {
     return (
       event.type === "queue_update" &&

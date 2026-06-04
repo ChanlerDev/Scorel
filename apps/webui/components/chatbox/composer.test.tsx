@@ -1,15 +1,32 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { asClientId, type QueueName } from "@scorel/protocol";
 
 import { Composer } from "./composer";
+import type { QueuePreviewItem } from "../../lib/events/projector";
 
 afterEach(() => cleanup());
+
+const queued = (
+  id: string,
+  queue: QueueName,
+  text: string,
+): QueuePreviewItem => ({
+  id,
+  queue,
+  text,
+  content: [{ type: "text", text }],
+  createdAt: 1,
+  updatedAt: 1,
+  clientId: asClientId("client_test"),
+});
 
 describe("Composer", () => {
   it("renders the pill with Message Scorel… placeholder + 4 buttons", () => {
     render(<Composer onSend={() => {}} />);
     const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
     expect(input.placeholder).toBe("Message Scorel…");
+    expect(input.className).toContain("focus-visible:outline-none");
     // Three placeholders + send.
     const attach = screen.getByTestId(
       "composer-attach",
@@ -22,6 +39,68 @@ describe("Composer", () => {
       expect(btn.className).toContain("btn-disabled");
     }
     expect(send.disabled).toBe(true);
+  });
+
+  it("renders queued follow-up and steer items above the input", () => {
+    render(
+      <Composer
+        onSend={() => {}}
+        queuedItems={[
+          queued("follow_1", "follow_up", "run tests next"),
+          queued("steer_1", "steer", "focus on the UI"),
+        ]}
+      />,
+    );
+    const strip = screen.getByTestId("composer-queue-strip");
+    expect(strip.textContent).toContain("Follow up");
+    expect(strip.textContent).toContain("run tests next");
+    expect(strip.textContent).toContain("Steer");
+    expect(strip.textContent).toContain("focus on the UI");
+    expect(screen.getByTestId("composer-queue-toggle-follow_1")).toBeTruthy();
+    expect(screen.getByTestId("composer-queue-edit-follow_1")).toBeTruthy();
+    expect(screen.getByTestId("composer-queue-delete-follow_1")).toBeTruthy();
+  });
+
+  it("persists queued item switch, edit, and delete rewrites", async () => {
+    const onRewriteQueue = vi.fn();
+    render(
+      <Composer
+        onSend={() => {}}
+        onRewriteQueue={onRewriteQueue}
+        queuedItems={[
+          queued("follow_1", "follow_up", "revise tests"),
+          queued("steer_1", "steer", "focus UI"),
+        ]}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("composer-queue-toggle-follow_1"));
+      await Promise.resolve();
+    });
+    expect(onRewriteQueue).toHaveBeenNthCalledWith(1, "follow_up", []);
+    expect(onRewriteQueue).toHaveBeenNthCalledWith(
+      2,
+      "steer",
+      expect.arrayContaining([expect.objectContaining({ id: "follow_1" })]),
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("composer-queue-edit-steer_1"));
+      await Promise.resolve();
+    });
+    const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    expect(input.value).toBe("focus UI");
+    expect(onRewriteQueue).toHaveBeenLastCalledWith(
+      "steer",
+      [],
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("composer-queue-delete-follow_1"));
+      await Promise.resolve();
+    });
+    expect(onRewriteQueue).toHaveBeenLastCalledWith("follow_up", []);
   });
 
   it("renders the model label inside the picker (defaults to Default)", () => {
@@ -68,6 +147,27 @@ describe("Composer", () => {
     await act(async () => {
       resolveSend();
     });
+  });
+
+  it("restores failed submitted text without dropping a newer draft", async () => {
+    let rejectSend!: (cause: Error) => void;
+    const onSend = vi.fn(() => new Promise<void>((_resolve, reject) => {
+      rejectSend = reject;
+    }));
+    render(<Composer onSend={onSend} />);
+    const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "long failed draft" } });
+    act(() => {
+      fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+    });
+    expect(input.value).toBe("");
+
+    fireEvent.change(input, { target: { value: "new draft" } });
+    await act(async () => {
+      rejectSend(new Error("send failed"));
+    });
+
+    expect(input.value).toBe("long failed draft\n\nnew draft");
   });
 
   it("does not submit on plain Enter or Shift+Enter", () => {

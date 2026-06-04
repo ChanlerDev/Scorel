@@ -237,6 +237,55 @@ describe("daemon protocol boundary", () => {
     });
   });
 
+  it("rewrites queue state through the wire contract", async () => {
+    const { root, sessionsDir, host, transport } = await fixture();
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const messages: DaemonMessage[] = [];
+    transport.onMessage((message) => messages.push(message));
+    await transport.connect({ clientId: asClientId("client_queue") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_queue"),
+      meta: { projectId: project.projectId },
+    });
+    const item = {
+      id: "queue_item_1",
+      content: [{ type: "text" as const, text: "next" }],
+      createdAt: 1,
+      updatedAt: 2,
+      clientId: asClientId("client_queue"),
+    };
+
+    await transport.send({
+      type: "rewrite_queue",
+      requestId: asRequestId("req_queue"),
+      sessionId: asSessionId("ses_queue"),
+      queue: "follow_up",
+      items: [item],
+    });
+
+    expect(response(messages, "req_queue")).toMatchObject({
+      type: "response",
+      requestType: "rewrite_queue",
+      data: { sessionId: "ses_queue", queue: "follow_up", items: [item] },
+    });
+    const events = (await readFile(join(sessionsDir, "ses_queue.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .slice(1)
+      .map((line) => JSON.parse(line) as { type: string; queue?: string; items?: unknown[] });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "queue_update",
+        queue: "follow_up",
+        items: [expect.objectContaining({ id: "queue_item_1" })],
+      }),
+    );
+  });
+
   it("falls back to persistent events after the live resync buffer is released", async () => {
     const { root, host, transport } = await fixture();
     const repo = join(root, "repo");

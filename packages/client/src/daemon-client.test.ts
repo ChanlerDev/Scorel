@@ -317,6 +317,46 @@ describe("DaemonClient", () => {
     await expect(pending).resolves.toEqual({ sessionId: "ses_cancel", cancelled: true });
   });
 
+  it("rewrites a session queue through the daemon", async () => {
+    const transport = new MemoryTransport();
+    const client = new DaemonClient(transport, {
+      clientId: asClientId("client_test"),
+      createRequestId: () => asRequestId("req_queue"),
+    });
+    const item = {
+      id: "queue_item_1",
+      content: [{ type: "text" as const, text: "next" }],
+      createdAt: 1,
+      updatedAt: 2,
+      clientId: asClientId("client_test"),
+    };
+
+    await client.connect(asSessionId("ses_queue"));
+    const pending = client.rewriteQueue("follow_up", [item]);
+
+    expect(transport.sent.at(-1)).toMatchObject({
+      type: "rewrite_queue",
+      requestId: "req_queue",
+      sessionId: "ses_queue",
+      queue: "follow_up",
+      items: [item],
+    });
+
+    transport.emit({
+      type: "response",
+      requestType: "rewrite_queue",
+      requestId: asRequestId("req_queue"),
+      ok: true,
+      data: {
+        sessionId: asSessionId("ses_queue"),
+        queue: "follow_up",
+        items: [item],
+      },
+    });
+
+    await expect(pending).resolves.toEqual([item]);
+  });
+
   it("connects without a session id and captures identity from the daemon handshake", async () => {
     class IdentityTransport extends MemoryTransport {
       lastParams: ConnectParams | undefined;

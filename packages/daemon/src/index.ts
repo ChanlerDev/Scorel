@@ -575,6 +575,9 @@ export class ScorelHost {
       case "send_message":
         await this.#handleSendMessage(connection, message);
         break;
+      case "rewrite_queue":
+        await this.#handleRewriteQueue(connection, message);
+        break;
       case "resync_events":
         this.#respond(connection, message, await this.#resyncEvents(message.sessionId, {
           persistentLastSeq: message.persistentLastSeq ?? message.fromSeq,
@@ -723,6 +726,24 @@ export class ScorelHost {
     });
 
     await lane.queue;
+  }
+
+  async #handleRewriteQueue(connection: Connection, request: ClientRequest<"rewrite_queue">): Promise<void> {
+    const lane = await this.#getLane(request.sessionId);
+    await this.#appendQueueRewrite(lane, request.queue, request.items, {
+      clientId: connection.clientId,
+      anchorEventId: lane.session.activeLeafId,
+    });
+    await this.#appendDiagnostic(request.sessionId, "queue_rewritten", {
+      clientId: connection.clientId,
+      queue: request.queue,
+      queueSize: request.items.length,
+    });
+    this.#respond(connection, request, {
+      sessionId: request.sessionId,
+      queue: request.queue,
+      items: request.items,
+    });
   }
 
   async #runUserTurn(

@@ -6,6 +6,7 @@ import type {
   ErrorCode,
   HostProject,
   PersistentEvent,
+  QueueItem,
   QueueName,
   ScorelEvent,
   SessionMeta,
@@ -68,6 +69,10 @@ export type ClientRequestMap = {
   send_message: {
     request: { sessionId: SessionId; content: string | ContentBlock[]; options?: SendMessageOptions };
     response: SendMessageResponse;
+  };
+  rewrite_queue: {
+    request: { sessionId: SessionId; queue: QueueName; items: QueueItem[] };
+    response: { sessionId: SessionId; queue: QueueName; items: QueueItem[] };
   };
   get_status: {
     request: { sessionId?: SessionId };

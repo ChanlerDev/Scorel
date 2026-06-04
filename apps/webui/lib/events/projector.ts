@@ -1,6 +1,8 @@
 import type {
   EventId,
   PersistentEvent,
+  QueueItem,
+  QueueName,
   ScorelEvent,
   StopReason,
 } from "@scorel/protocol";
@@ -65,8 +67,14 @@ export type Turn =
   | { id: string; kind: "tool"; parts: TurnPart[] }
   | { id: string; kind: "harness"; label: string; parts: Extract<TurnPart, { kind: "text" }>[] };
 
+export type QueuePreviewItem = QueueItem & {
+  queue: QueueName;
+  text: string;
+};
+
 export type ProjectorState = {
   turns: Turn[];
+  queues: Record<QueueName, QueuePreviewItem[]>;
   /** Set of event seq numbers already projected. Used for idempotency. */
   appliedSeqs: Set<number>;
   /**
@@ -81,6 +89,7 @@ export type ProjectorState = {
 export function emptyProjectorState(): ProjectorState {
   return {
     turns: [],
+    queues: { follow_up: [], steer: [] },
     appliedSeqs: new Set(),
   };
 }
@@ -97,6 +106,7 @@ export function projectEvent(state: ProjectorState, event: ScorelEvent): Project
   }
   const next: ProjectorState = {
     turns: state.turns,
+    queues: state.queues,
     appliedSeqs: new Set(state.appliedSeqs).add(seq),
     inFlightAssistantId: state.inFlightAssistantId,
   };
@@ -112,6 +122,8 @@ export function projectEvent(state: ProjectorState, event: ScorelEvent): Project
       return appendToolResult(next, event);
     case "harness_item":
       return appendHarnessItem(next, event);
+    case "queue_update":
+      return updateQueue(next, event);
     case "message_start":
       if (event.role !== "assistant") return next;
       return startInFlightAssistant(next, String(event.eventId));
@@ -318,6 +330,23 @@ function appendHarnessItem(
   };
 }
 
+function updateQueue(
+  state: ProjectorState,
+  event: Extract<PersistentEvent, { type: "queue_update" }>,
+): ProjectorState {
+  return {
+    ...state,
+    queues: {
+      ...state.queues,
+      [event.queue]: event.items.map((item) => ({
+        ...item,
+        queue: event.queue,
+        text: textFromContent(item.content as ContentBlock[]),
+      })),
+    },
+  };
+}
+
 function startInFlightAssistant(
   state: ProjectorState,
   eventId: string,
@@ -443,4 +472,11 @@ export function appendPendingUserTurn(
 /** Find the in-flight assistant id for tests. */
 export function getInFlightAssistantId(state: ProjectorState): EventId | undefined {
   return state.inFlightAssistantId as EventId | undefined;
+}
+
+function textFromContent(blocks: ContentBlock[]): string {
+  return blocks
+    .filter((block): block is Extract<ContentBlock, { type: "text" }> => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
 }

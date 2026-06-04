@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useParams, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { Device } from "../../lib/domain/devices";
 import { useDevices } from "../../lib/store/use-devices";
@@ -16,6 +16,7 @@ import {
   setCollapsedState,
   useCollapsed,
 } from "../../lib/store/use-collapsed";
+import { subscribeAddProjectDialog } from "../../lib/shell/add-project-event";
 import { syncProjects } from "../../lib/sync/projects";
 import { syncSessions } from "../../lib/sync/sessions";
 import { AddProjectDialog, type AddProjectDialogRegistered } from "./add-project-dialog";
@@ -205,6 +206,11 @@ export function Sidebar() {
     ? decodeURIComponent(params.sessionId)
     : undefined;
   const isHomeRoute = pathname === "/" || pathname === undefined;
+
+  useEffect(
+    () => subscribeAddProjectDialog(() => setDialogOpen(true)),
+    [],
+  );
 
   async function handleRegistered({
     deviceId,

@@ -74,7 +74,7 @@ export function DeviceForm({ initial, onSubmit, onCancel, submitLabel }: DeviceF
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={() => setTouched((t) => ({ ...t, name: true }))}
-          className="w-full rounded-md border border-subtle bg-surface-raised px-3 py-2 text-sm text-text"
+          className="w-full rounded-md border border-subtle bg-surface-raised px-3 py-2 text-sm text-text outline-none transition focus-visible:border-border-strong"
           aria-invalid={touched.name && !!errors.name}
           aria-describedby={errors.name ? "device-name-error" : undefined}
         />
@@ -96,7 +96,7 @@ export function DeviceForm({ initial, onSubmit, onCancel, submitLabel }: DeviceF
           placeholder="wss://host:9876"
           onChange={(e) => setLink(e.target.value)}
           onBlur={() => setTouched((t) => ({ ...t, link: true }))}
-          className="w-full rounded-md border border-subtle bg-surface-raised px-3 py-2 text-sm font-mono text-text"
+          className="w-full rounded-md border border-subtle bg-surface-raised px-3 py-2 text-sm font-mono text-text outline-none transition focus-visible:border-border-strong"
           aria-invalid={touched.link && !!errors.link}
           aria-describedby={errors.link ? "device-link-error" : undefined}
         />
@@ -117,7 +117,7 @@ export function DeviceForm({ initial, onSubmit, onCancel, submitLabel }: DeviceF
           value={token}
           onChange={(e) => setToken(e.target.value)}
           onBlur={() => setTouched((t) => ({ ...t, token: true }))}
-          className="w-full rounded-md border border-subtle bg-surface-raised px-3 py-2 text-sm font-mono text-text"
+          className="w-full rounded-md border border-subtle bg-surface-raised px-3 py-2 text-sm font-mono text-text outline-none transition focus-visible:border-border-strong"
           aria-invalid={touched.token && !!errors.token}
           aria-describedby={errors.token ? "device-token-error" : undefined}
         />

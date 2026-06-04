@@ -114,17 +114,30 @@ describe("EmptyComposer", () => {
     render(<EmptyComposer />);
     expect(screen.getByText("我们应该在")).toBeTruthy();
     expect(screen.getByText("中构建什么?")).toBeTruthy();
-    const titleSelect = screen.getByTestId(
-      "empty-composer-title-project-select",
-    ) as HTMLSelectElement;
-    expect(titleSelect.value).toBe("alpha");
+    const titlePicker = screen.getByTestId(
+      "empty-composer-title-project-picker",
+    );
+    expect(titlePicker.textContent).toContain("Alpha");
+    const titleButton = screen.getByTestId(
+      "empty-composer-title-project-picker-button",
+    );
+    expect(titleButton.tagName).toBe("BUTTON");
+    expect(titleButton.className).toContain("inline-text-control");
+    expect(titleButton.className).not.toContain("ring-");
+    expect(
+      screen.queryByTestId("empty-composer-title-project-select"),
+    ).toBeNull();
     const input = screen.getByTestId("composer-input") as HTMLTextAreaElement;
     expect(input.placeholder).toBe("随心输入");
     expect(screen.getByTestId("empty-composer-picker")).toBeTruthy();
-    const select = screen.getByTestId(
-      "empty-composer-project-select",
-    ) as HTMLSelectElement;
-    expect(select.value).toBe("alpha");
+    const toolbarPicker = screen.getByTestId("empty-composer-project-picker");
+    expect(toolbarPicker.textContent).toContain("Alpha");
+    const toolbarButton = screen.getByTestId(
+      "empty-composer-project-picker-button",
+    ) as HTMLButtonElement;
+    expect(toolbarButton.tagName).toBe("BUTTON");
+    expect(toolbarButton.disabled).toBe(false);
+    expect(screen.queryByTestId("empty-composer-project-select")).toBeNull();
     // Mode + branch placeholders are present and disabled.
     const mode = screen.getByTestId(
       "empty-composer-mode",
@@ -156,10 +169,9 @@ describe("EmptyComposer", () => {
     );
     _searchString = `device=${encodeURIComponent(device.id)}&project=gamma`;
     render(<EmptyComposer routeProjectId="alpha" />);
-    const select = screen.getByTestId(
-      "empty-composer-project-select",
-    ) as HTMLSelectElement;
-    expect(select.value).toBe("gamma");
+    expect(
+      screen.getByTestId("empty-composer-project-picker").textContent,
+    ).toContain("gamma");
   });
 
   it("falls back to localStorage when URL has no project query", () => {
@@ -178,10 +190,9 @@ describe("EmptyComposer", () => {
       JSON.stringify({ [device.id]: "beta" }),
     );
     render(<EmptyComposer />);
-    const select = screen.getByTestId(
-      "empty-composer-project-select",
-    ) as HTMLSelectElement;
-    expect(select.value).toBe("beta");
+    expect(
+      screen.getByTestId("empty-composer-project-picker").textContent,
+    ).toContain("beta");
   });
 
   it("falls back to first project when localStorage points at unknown slug", () => {
@@ -200,13 +211,12 @@ describe("EmptyComposer", () => {
       JSON.stringify({ [device.id]: "ghost" }),
     );
     render(<EmptyComposer />);
-    const select = screen.getByTestId(
-      "empty-composer-project-select",
-    ) as HTMLSelectElement;
-    expect(select.value).toBe("alpha");
+    expect(
+      screen.getByTestId("empty-composer-project-picker").textContent,
+    ).toContain("alpha");
   });
 
-  it("changing the project select calls router.replace and writes localStorage", async () => {
+  it("changing the project from the toolbar picker calls router.replace and writes localStorage", async () => {
     const { store } = freshPool();
     const device = store.create({
       name: "Tokyo",
@@ -218,10 +228,13 @@ describe("EmptyComposer", () => {
       { projectId: "beta" },
     ]);
     render(<EmptyComposer />);
-    const select = screen.getByTestId(
-      "empty-composer-project-select",
-    ) as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "beta" } });
+    fireEvent.click(screen.getByTestId("empty-composer-project-picker-button"));
+    expect(
+      screen.getByTestId("empty-composer-project-picker-listbox"),
+    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByTestId("empty-composer-project-picker-option-beta"),
+    );
     await act(async () => {
       for (let i = 0; i < 5; i += 1) await Promise.resolve();
     });
@@ -249,10 +262,22 @@ describe("EmptyComposer", () => {
     ]);
     const { rerender } = render(<EmptyComposer />);
 
-    const titleSelect = screen.getByTestId(
-      "empty-composer-title-project-select",
-    ) as HTMLSelectElement;
-    fireEvent.change(titleSelect, { target: { value: "beta" } });
+    fireEvent.click(
+      screen.getByTestId("empty-composer-title-project-picker-button"),
+    );
+    expect(
+      screen.getByTestId("empty-composer-title-project-picker-listbox"),
+    ).toBeTruthy();
+    const search = screen.getByTestId(
+      "empty-composer-title-project-picker-search",
+    ) as HTMLInputElement;
+    fireEvent.change(search, { target: { value: "bet" } });
+    expect(
+      screen.queryByTestId("empty-composer-title-project-picker-option-alpha"),
+    ).toBeNull();
+    fireEvent.click(
+      screen.getByTestId("empty-composer-title-project-picker-option-beta"),
+    );
     await act(async () => {
       for (let i = 0; i < 5; i += 1) await Promise.resolve();
     });
@@ -261,17 +286,52 @@ describe("EmptyComposer", () => {
     _searchString = arg.startsWith("/?") ? arg.slice(2) : "";
     rerender(<EmptyComposer />);
 
-    const bottomSelect = screen.getByTestId(
-      "empty-composer-project-select",
-    ) as HTMLSelectElement;
-    expect(bottomSelect.value).toBe("beta");
-    const rerenderedTitleSelect = screen.getByTestId(
-      "empty-composer-title-project-select",
-    ) as HTMLSelectElement;
-    expect(rerenderedTitleSelect.value).toBe("beta");
+    expect(
+      screen.getByTestId("empty-composer-project-picker").textContent,
+    ).toContain("Beta");
+    expect(
+      screen.getByTestId("empty-composer-title-project-picker").textContent,
+    ).toContain("Beta");
+    expect(
+      screen.queryByTestId("empty-composer-title-project-picker-listbox"),
+    ).toBeNull();
   });
 
-  it("disables the project select when the device has only one project", () => {
+  it("project picker menu uses a scrollable options window and can request adding a project", () => {
+    const { store } = freshPool();
+    const device = store.create({
+      name: "Tokyo",
+      link: "wss://h",
+      token: "t",
+    });
+    store.setProjects(
+      device.id,
+      Array.from({ length: 12 }, (_, index) => ({
+        projectId: `project-${index}`,
+        displayName: `Project ${index}`,
+      })),
+    );
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+
+    render(<EmptyComposer />);
+    fireEvent.click(screen.getByTestId("empty-composer-project-picker-button"));
+
+    const options = screen.getByTestId("empty-composer-project-picker-options");
+    expect(options.className).toContain("max-h-44");
+    expect(options.className).toContain("overflow-y-auto");
+    fireEvent.click(
+      screen.getByTestId("empty-composer-project-picker-add-project"),
+    );
+
+    expect(
+      screen.queryByTestId("empty-composer-project-picker-listbox"),
+    ).toBeNull();
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "scorel:add-project" }),
+    );
+  });
+
+  it("disables the project picker triggers when the device has only one project", () => {
     const { store } = freshPool();
     const device = store.create({
       name: "Tokyo",
@@ -280,10 +340,20 @@ describe("EmptyComposer", () => {
     });
     store.setProjects(device.id, [{ projectId: "alpha" }]);
     render(<EmptyComposer />);
-    const select = screen.getByTestId(
-      "empty-composer-project-select",
-    ) as HTMLSelectElement;
-    expect(select.disabled).toBe(true);
+    expect(
+      (
+        screen.getByTestId(
+          "empty-composer-project-picker-button",
+        ) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
+    expect(
+      (
+        screen.getByTestId(
+          "empty-composer-title-project-picker-button",
+        ) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
   });
 
   it("Send disabled when picker has no project (zero-project device)", () => {

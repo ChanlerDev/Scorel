@@ -424,6 +424,17 @@ describe("Sidebar", () => {
     expect(screen.getByTestId("add-project-dialog-mock")).toBeTruthy();
   });
 
+  it("opens the add project dialog from the shared shell event", () => {
+    freshPool();
+    render(<Sidebar />);
+
+    act(() => {
+      window.dispatchEvent(new Event("scorel:add-project"));
+    });
+
+    expect(screen.getByTestId("add-project-dialog-mock")).toBeTruthy();
+  });
+
   it("syncs projects after registration and navigates to the project route", async () => {
     const { store } = freshPool();
     const device = store.create({ name: "Tokyo", link: "wss://h", token: "t" });

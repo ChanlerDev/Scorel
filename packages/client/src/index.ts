@@ -20,6 +20,8 @@ import {
   type HostProject,
   type PersistentEvent,
   type ProjectId,
+  type QueueItem,
+  type QueueName,
   type ScorelEvent,
   type SendMessageOptions,
   type SendMessageResponse,
@@ -253,6 +255,17 @@ export class DaemonClient {
       throw new Error("DaemonClient is not connected to a session");
     }
     return this.#request("cancel", { sessionId: this.#sessionId });
+  }
+
+  async rewriteQueue(queue: QueueName, items: QueueItem[]): Promise<QueueItem[]> {
+    if (!this.#sessionId) {
+      throw new Error("DaemonClient is not connected to a session");
+    }
+    return (await this.#request("rewrite_queue", {
+      sessionId: this.#sessionId,
+      queue,
+      items,
+    })).items;
   }
 
   async listSessions(filter?: { projectId?: ProjectId; limit?: number }): Promise<SessionSummary[]> {

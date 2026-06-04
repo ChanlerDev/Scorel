@@ -194,11 +194,38 @@ function harnessItem(
   };
 }
 
+function queueUpdate(
+  id: string,
+  queue: "follow_up" | "steer",
+  items: Array<{ id: string; text: string }>,
+): ScorelEvent {
+  return {
+    type: "queue_update",
+    id: asEventId(id),
+    parentId: null,
+    seq: asSeq(seq()),
+    sessionId: SESSION_ID,
+    clientId: CLIENT_ID,
+    ts: 0,
+    queue,
+    operation: "rewrite",
+    anchorEventId: null,
+    items: items.map((item) => ({
+      id: item.id,
+      content: [{ type: "text", text: item.text }] as ContentBlock[],
+      createdAt: 0,
+      updatedAt: 0,
+      clientId: CLIENT_ID,
+    })),
+  };
+}
+
 describe("projector", () => {
   it("starts empty", () => {
     reset();
     const s = emptyProjectorState();
     expect(s.turns).toEqual([]);
+    expect(s.queues).toEqual({ follow_up: [], steer: [] });
     expect(s.appliedSeqs.size).toBe(0);
   });
 
@@ -329,6 +356,22 @@ describe("projector", () => {
     reset();
     const s = projectEvent(emptyProjectorState(), harnessItem("evt_harness", "secret", "hidden"));
     expect(s.turns).toEqual([]);
+  });
+
+  it("projects queue_update into queue preview state", () => {
+    reset();
+    let s = emptyProjectorState();
+    s = projectEvent(s, queueUpdate("evt_q_1", "follow_up", [
+      { id: "item_1", text: "first" },
+      { id: "item_2", text: "second" },
+    ]));
+    expect(s.queues.follow_up.map((item) => item.text)).toEqual(["first", "second"]);
+    expect(s.queues.steer).toEqual([]);
+
+    s = projectEvent(s, queueUpdate("evt_q_2", "follow_up", [
+      { id: "item_2", text: "second" },
+    ]));
+    expect(s.queues.follow_up.map((item) => item.text)).toEqual(["second"]);
   });
 
   it("text_delta without prior message_start synthesizes the assistant turn", () => {

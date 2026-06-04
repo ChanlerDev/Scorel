@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   getConnectionPool,
@@ -12,6 +12,7 @@ import {
   readLastActiveProject,
   writeLastActiveProject,
 } from "../../lib/store/last-active-project";
+import { requestAddProjectDialog } from "../../lib/shell/add-project-event";
 import { useDevices } from "../../lib/store/use-devices";
 import { createSessionForProject } from "../../lib/sync/session-create";
 import { Composer } from "./composer";
@@ -34,12 +35,12 @@ type ProjectOption = {
   displayName?: string;
 };
 
-type ProjectPickerProps = {
+type ProjectPickerMenuProps = {
   projects: ProjectOption[];
   activeProjectId: string | undefined;
   onProjectChange: (projectId: string) => void;
   testId: string;
-  className: string;
+  variant: "title" | "toolbar";
 };
 
 export function EmptyComposer({
@@ -169,12 +170,12 @@ export function EmptyComposer({
           {greetingLabel ? (
             <>
               <span>我们应该在 </span>
-              <ProjectPicker
+              <ProjectPickerMenu
                 projects={projects}
                 activeProjectId={projectId}
                 onProjectChange={handleProjectChange}
-                testId="empty-composer-title-project-select"
-                className="appearance-none bg-transparent px-0 text-center font-inherit text-inherit underline-offset-4 hover:underline focus-visible:outline-none disabled:cursor-text"
+                testId="empty-composer-title-project-picker"
+                variant="title"
               />
               <span> 中构建什么?</span>
             </>
@@ -213,16 +214,13 @@ function PickerRow({
       data-testid="empty-composer-picker"
       className="mx-auto flex max-w-3xl items-center justify-center gap-3 text-sm"
     >
-      <label className="flex items-center gap-1 text-muted">
-        <span aria-hidden>📁</span>
-        <ProjectPicker
-          projects={projects}
-          activeProjectId={activeProjectId}
-          onProjectChange={onProjectChange}
-          className="rounded-sm bg-transparent text-text outline-none focus-visible:outline-2 focus-visible:outline-text disabled:cursor-default"
-          testId="empty-composer-project-select"
-        />
-      </label>
+      <ProjectPickerMenu
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onProjectChange={onProjectChange}
+        testId="empty-composer-project-picker"
+        variant="toolbar"
+      />
       <button
         type="button"
         disabled
@@ -247,34 +245,148 @@ function PickerRow({
   );
 }
 
-function ProjectPicker({
+function ProjectPickerMenu({
   projects,
   activeProjectId,
   onProjectChange,
   testId,
-  className,
-}: ProjectPickerProps): JSX.Element {
+  variant,
+}: ProjectPickerMenuProps): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const listboxId = useId();
+  const activeProject = projects.find((p) => p.projectId === activeProjectId);
+  const label = activeProject?.displayName ?? activeProject?.projectId ?? "";
   const single = projects.length <= 1;
+  const filteredProjects = projects.filter((project) => {
+    const optionLabel = project.displayName ?? project.projectId;
+    return optionLabel.toLowerCase().includes(query.trim().toLowerCase());
+  });
+  const triggerClass =
+    variant === "title"
+      ? "inline-text-control rounded-sm bg-transparent px-1 font-inherit text-inherit underline-offset-4 hover:underline"
+      : "inline-flex items-center gap-1 rounded-pill bg-surface-raised px-3 py-2 text-muted outline-none transition hover:text-text focus-visible:bg-surface-raised focus-visible:text-text";
+  const menuClass =
+    variant === "title"
+      ? "absolute left-1/2 top-full z-20 mt-2 w-72 max-w-[calc(100vw-2rem)] -translate-x-1/2 overflow-hidden rounded-md border border-subtle bg-bg text-left text-base font-normal shadow-lg"
+      : "absolute left-0 top-full z-20 mt-2 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-subtle bg-bg text-left text-base font-normal shadow-lg";
+
+  useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) setQuery("");
+  }, [open]);
+
   return (
-    <select
+    <span
+      ref={rootRef}
       data-testid={testId}
-      value={activeProjectId ?? ""}
-      onChange={(e) => onProjectChange(e.target.value)}
-      disabled={single}
-      aria-label="选择项目"
-      className={className}
+      className={
+        variant === "title"
+          ? "relative inline-flex align-baseline"
+          : "relative inline-flex"
+      }
     >
-      {projects.length === 0 ? (
-        <option value="" disabled>
-          (no projects)
-        </option>
-      ) : (
-        projects.map((p) => (
-          <option key={p.projectId} value={p.projectId}>
-            {p.displayName ?? p.projectId}
-          </option>
-        ))
-      )}
-    </select>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        disabled={single}
+        data-testid={`${testId}-button`}
+        onClick={() => {
+          if (!single) setOpen((value) => !value);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setOpen(false);
+        }}
+        className={triggerClass}
+      >
+        {variant === "toolbar" ? <span aria-hidden>📁</span> : null}
+        {label}
+        {variant === "toolbar" && !single ? <span aria-hidden>▾</span> : null}
+      </button>
+      {open ? (
+        <span
+          id={listboxId}
+          role="listbox"
+          aria-label="选择项目"
+          data-testid={`${testId}-listbox`}
+          className={menuClass}
+        >
+          <label className="mx-3 mt-3 flex items-center gap-2 border-b border-subtle pb-2 text-sm text-muted">
+            <span aria-hidden>⌕</span>
+            <input
+              data-testid={`${testId}-search`}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索项目"
+              className="min-w-0 flex-1 bg-transparent text-text outline-none placeholder:text-muted"
+            />
+          </label>
+          <span
+            data-testid={`${testId}-options`}
+            className="mx-2 mt-2 flex max-h-44 flex-col overflow-y-auto pr-1"
+          >
+            {filteredProjects.map((project, index) => {
+              const optionLabel = project.displayName ?? project.projectId;
+              const selected = project.projectId === activeProjectId;
+              return (
+                <button
+                  key={`${project.projectId}:${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  data-testid={`${testId}-option-${project.projectId}`}
+                  onClick={() => {
+                    setOpen(false);
+                    onProjectChange(project.projectId);
+                  }}
+                  className="flex items-center justify-between rounded-sm px-3 py-2 text-left text-sm text-text outline-none transition hover:bg-surface-raised focus-visible:bg-surface-raised"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span aria-hidden>📁</span>
+                    <span className={selected ? "font-medium" : undefined}>
+                      {optionLabel}
+                    </span>
+                  </span>
+                  {selected ? <span aria-hidden>✓</span> : null}
+                </button>
+              );
+            })}
+            {filteredProjects.length === 0 ? (
+              <span className="px-3 py-2 text-sm text-muted">没有匹配项目</span>
+            ) : null}
+          </span>
+          <span className="mt-2 block border-t border-subtle px-2 py-2">
+            <button
+              type="button"
+              data-testid={`${testId}-add-project`}
+              onClick={() => {
+                setOpen(false);
+                requestAddProjectDialog();
+              }}
+              className="flex w-full items-center justify-between rounded-sm px-3 py-2 text-left text-sm font-medium text-text outline-none transition hover:bg-surface-raised focus-visible:bg-surface-raised"
+            >
+              <span className="flex items-center gap-2">
+                <span aria-hidden>📁+</span>
+                <span>添加项目</span>
+              </span>
+              <span aria-hidden className="text-muted">
+                ›
+              </span>
+            </button>
+          </span>
+        </span>
+      ) : null}
+    </span>
   );
 }

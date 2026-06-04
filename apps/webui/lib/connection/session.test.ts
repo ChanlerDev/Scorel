@@ -404,6 +404,58 @@ describe("createSessionAttachController", () => {
     await sendPromise;
   });
 
+  it("send: request completion resync recovers a missed persistent acceptance event", async () => {
+    const fake = new FakeDaemonClient();
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      projectId: "prj_test",
+      attachCache: makeAttachCache(),
+      onState: (snapshot) => snapshots.push(snapshot),
+    });
+    await controller.start();
+    fake.resyncResult = {
+      mode: "stream_resume",
+      throughSeq: asSeq(1),
+      events: [userMessage("evt_recovered_user", 1, "lost live event")],
+    };
+
+    await controller.send("lost live event");
+
+    expect(fake.resyncCalls.at(-1)).toEqual({
+      persistentLastSeq: asSeq(0),
+      streamLastSeq: asSeq(0),
+    });
+    expect(snapshots.at(-1)?.state.turns[0]?.id).toBe("evt_recovered_user");
+    expect(snapshots.at(-1)?.error).toBeUndefined();
+  });
+
+  it("send: request completion without live or resynced acceptance fails instead of hanging", async () => {
+    const fake = new FakeDaemonClient();
+    const snapshots: SessionAttachSnapshot[] = [];
+    const controller = createSessionAttachController({
+      client: fake.asClient(),
+      scopeKey: "scope_a",
+      sessionId: SESSION_ID,
+      projectId: "prj_test",
+      attachCache: makeAttachCache(),
+      onState: (snapshot) => snapshots.push(snapshot),
+    });
+    await controller.start();
+    fake.resyncResult = {
+      mode: "stream_resume",
+      throughSeq: asSeq(0),
+      events: [],
+    };
+
+    await expect(controller.send("never accepted")).rejects.toThrow(
+      "send_message completed without matching persistent event",
+    );
+    expect(snapshots.at(-1)?.error?.reason).toBe("send_failed");
+  });
+
   it("send: empty/whitespace input is ignored", async () => {
     const fake = new FakeDaemonClient();
     const controller = createSessionAttachController({

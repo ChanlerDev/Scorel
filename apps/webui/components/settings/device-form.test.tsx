@@ -13,9 +13,16 @@ describe("DeviceForm", () => {
         onCancel={() => {}}
       />
     );
-    expect(screen.getByLabelText("Name")).toBeTruthy();
-    expect(screen.getByLabelText("Link")).toBeTruthy();
-    expect(screen.getByLabelText("Token")).toBeTruthy();
+    const fields = [
+      screen.getByLabelText("Name"),
+      screen.getByLabelText("Link"),
+      screen.getByLabelText("Token"),
+    ];
+    for (const field of fields) {
+      expect(field).toBeTruthy();
+      expect(field.className).toContain("outline-none");
+      expect(field.className).toContain("focus-visible:border-border-strong");
+    }
     expect((screen.getByText("Save") as HTMLButtonElement).type).toBe("submit");
     expect(screen.getByText("Cancel")).toBeTruthy();
   });

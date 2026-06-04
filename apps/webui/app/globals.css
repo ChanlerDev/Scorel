@@ -83,6 +83,15 @@ body {
   border-radius: var(--radius-sm);
 }
 
+:where(input, textarea, select):focus-visible {
+  outline: none;
+}
+
+.inline-text-control:focus-visible {
+  outline: none;
+  text-decoration: underline;
+}
+
 /* Disabled placeholder buttons (Codex semantic): visible but inert. */
 .btn-disabled {
   opacity: 0.4;

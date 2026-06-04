@@ -18,6 +18,7 @@ import {
 } from "../../../../../../../lib/connection/session";
 import {
   emptyProjectorState,
+  type QueuePreviewItem,
   type ProjectorState,
 } from "../../../../../../../lib/events/projector";
 import { buildConnectionSummary } from "../../../../../../../lib/diagnostics/connection-summary";
@@ -27,7 +28,7 @@ import type { RunningMessageBehavior } from "../../../../../../../lib/store/runn
 import { useDevices } from "../../../../../../../lib/store/use-devices";
 import { useRunningBehavior } from "../../../../../../../lib/store/use-running-behavior";
 import type { Device } from "../../../../../../../lib/domain/devices";
-import { asSessionId } from "@scorel/protocol";
+import { asSessionId, type QueueItem } from "@scorel/protocol";
 
 type Params = { deviceId: string; projectId: string; sessionId: string };
 
@@ -222,6 +223,16 @@ function Chatbox({
     [],
   );
 
+  const rewriteQueue = useMemo(
+    () =>
+      async (queue: RunningMessageBehavior, items: QueuePreviewItem[]): Promise<void> => {
+        const client = managed?.client;
+        if (!client) return;
+        await client.rewriteQueue(queue, items.map(toQueueItem));
+      },
+    [managed],
+  );
+
   const errorBanner =
     snapshot.error?.reason === "cancel_failed"
       ? `${snapshot.error.reason}: ${snapshot.error.message}`
@@ -230,6 +241,7 @@ function Chatbox({
   const debugSummary = debugEnabled
     ? buildConnectionSummary({ device, connectionState, snapshot })
     : null;
+  const queues = snapshot.state.queues ?? { follow_up: [], steer: [] };
 
   // S0045: no card outer. Transcript + composer flow directly inside the
   // main area's `bg-bg`.
@@ -252,6 +264,8 @@ function Chatbox({
         errorBanner={errorBanner}
         disabled={!managed}
         runningBehavior={runningBehavior}
+        queuedItems={[...queues.follow_up, ...queues.steer]}
+        onRewriteQueue={rewriteQueue}
       />
       {debugSummary ? <DebugPanel summary={debugSummary} /> : null}
     </div>
@@ -278,3 +292,14 @@ function ChatboxBody({ snapshot }: { snapshot: SessionAttachSnapshot }): JSX.Ele
 
 // Type guard helper for ProjectorState if downstream consumers want it.
 export type { ProjectorState };
+
+function toQueueItem(item: QueuePreviewItem): QueueItem {
+  return {
+    id: item.id,
+    content: item.content,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    clientId: item.clientId,
+    data: item.data,
+  };
+}
