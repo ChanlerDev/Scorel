@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ScorelMessage } from "@scorel/protocol";
 
-import { ScorelRuntime, type RuntimeProvider, type RuntimeProviderTurn } from "./index.js";
+import { ScorelRuntime, type RuntimeProvider, type RuntimeProviderTurn, type RuntimeTurnOptions } from "./index.js";
 import { defineTool } from "../tools/index.js";
 
 const userMessage = (text: string): ScorelMessage => ({
@@ -16,9 +16,13 @@ const assistantMessage = (text: string): ScorelMessage => ({
   stopReason: "end_turn",
 });
 
-const collect = async (runtime: ScorelRuntime, context: ScorelMessage[] = [userMessage("hi")]) => {
+const collect = async (
+  runtime: ScorelRuntime,
+  context: ScorelMessage[] = [userMessage("hi")],
+  options: RuntimeTurnOptions = {},
+) => {
   const events = [];
-  for await (const event of runtime.executeTurn(context, "system", {})) {
+  for await (const event of runtime.executeTurn(context, "system", options)) {
     events.push(event);
   }
   return events;
@@ -180,6 +184,46 @@ describe("ScorelRuntime", () => {
           isError: false,
         },
       ],
+    });
+  });
+
+  it("can refresh context after tool execution before the next provider turn", async () => {
+    const providerCalls: ScorelMessage[][] = [];
+    const provider: RuntimeProvider = {
+      streamTurn: async function* ({ context }) {
+        providerCalls.push(context);
+        if (providerCalls.length === 1) {
+          return {
+            role: "assistant",
+            content: [{ type: "tool_call", toolCallId: "call_1", toolName: "echo", args: { text: "ok" } }],
+            stopReason: "tool_call",
+          };
+        }
+        return assistantMessage("done");
+      },
+    };
+    const runtime = new ScorelRuntime({ provider });
+    runtime.registerTool(
+      defineTool({
+        name: "echo",
+        description: "Echo text",
+        execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      }),
+    );
+
+    await collect(runtime, [userMessage("hi")], {
+      refreshContext: (context) => [
+        ...context,
+        {
+          role: "user",
+          content: [{ type: "text", text: "<system-reminder>\nsteer\n</system-reminder>" }],
+        },
+      ],
+    });
+
+    expect(providerCalls[1]?.at(-1)).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "<system-reminder>\nsteer\n</system-reminder>" }],
     });
   });
 });

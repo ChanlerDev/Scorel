@@ -12,6 +12,7 @@ import {
   asSeq,
   asSessionId,
   type PersistentEvent,
+  type QueueItem,
   type SessionMeta,
 } from "@scorel/protocol";
 
@@ -94,6 +95,20 @@ const harnessItemEvent = (
     content,
     visibility: "display",
   },
+});
+
+const queueUpdateEvent = (id: string, seq: number, items: QueueItem[]): PersistentEvent => ({
+  type: "queue_update",
+  id: asEventId(id),
+  parentId: null,
+  seq: asSeq(seq),
+  sessionId,
+  clientId,
+  ts: 1_000 + seq,
+  queue: "follow_up",
+  operation: "rewrite",
+  items,
+  anchorEventId: null,
 });
 
 const instructionSnapshotEvent = (id: string, seq: number): PersistentEvent => ({
@@ -263,6 +278,42 @@ describe("session core", () => {
     expect(original && "message" in original ? original.message : undefined).toEqual(
       "message" in expectedOriginal ? expectedOriginal.message : undefined,
     );
+  });
+
+  it("replays queue updates as control state outside the conversation tree", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+    const item = {
+      id: "queue_1",
+      content: [{ type: "text" as const, text: "next" }],
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      clientId,
+    };
+
+    await session.append(userEvent("evt_1", null, 1, "hello"));
+    await session.append(queueUpdateEvent("evt_queue", 2, [item]));
+    await session.append(assistantEvent("evt_2", "evt_1", 3, "hi"));
+
+    expect(session.tree.getLeaves()).toEqual(["evt_2"]);
+    expect(session.tree.controlState.queues.follow_up).toEqual([item]);
+    expect(buildContext(session.tree, asEventId("evt_2")).map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+
+    const loaded = await loadSession({ sessionsDir, sessionId });
+    expect(loaded.tree.controlState.queues.follow_up).toEqual([item]);
+    expect(loaded.tree.getPath(asEventId("evt_2"))).toEqual(["evt_1", "evt_2"]);
   });
 
   it("tracks branch leaves and builds context for the selected leaf", async () => {

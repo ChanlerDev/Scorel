@@ -84,6 +84,8 @@ describe("@scorel/protocol", () => {
           return input.snapshot.cwd;
         case "harness_item":
           return input.item.kind;
+        case "queue_update":
+          return input.queue;
         case "turn_start":
           return "turn_start";
         case "turn_end":

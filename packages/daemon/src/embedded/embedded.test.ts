@@ -202,6 +202,74 @@ describe("ScorelHost + embedded transport", () => {
     expect(providerTurns[0]?.systemPrompt).toContain("Workspace cwd:");
   });
 
+  it("queues send_message as follow-up while a turn is running and consumes it after the final leaf", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-follow-up-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const repo = join(root, "repo");
+    await Promise.all([mkdir(sessionsDir), mkdir(repo)]);
+    const releases = [deferred<void>(), deferred<void>()];
+    let providerCall = 0;
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () =>
+        new ScorelRuntime({
+          provider: {
+            streamTurn: async function* () {
+              const release = releases[providerCall++]!;
+              await release.promise;
+              return assistantMessage(`ok ${providerCall}`);
+            },
+          },
+        }),
+      now: () => 1_000,
+    });
+    await host.start();
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_follow"),
+      meta: { projectId: project.projectId },
+    });
+    const firstResponse = waitForResponse(transport, "req_first");
+    const secondResponse = waitForResponse(transport, "req_second");
+    void transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_first"),
+      sessionId: asSessionId("ses_follow"),
+      content: "first",
+    });
+    await eventually(() => expect(providerCall).toBe(1));
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_second"),
+      sessionId: asSessionId("ses_follow"),
+      content: "second",
+    });
+
+    releases[0]!.resolve();
+    await expect(firstResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    await eventually(() => expect(providerCall).toBe(2));
+    releases[1]!.resolve();
+    await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const events = (await readFile(join(sessionsDir, "ses_follow.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .slice(1)
+      .map((line) => JSON.parse(line) as { type: string; message?: { meta?: Record<string, unknown> }; parentId?: string; id?: string });
+    const followUpUser = events.find((event) => event.type === "user_message" && event.message?.meta?.source === "follow_up");
+    const firstAssistant = events.find((event) => event.type === "assistant_message");
+    expect(events.some((event) => event.type === "queue_update")).toBe(true);
+    expect(followUpUser?.parentId).toBe(firstAssistant?.id);
+    expect(followUpUser?.message?.meta?.queueItemId).toEqual(expect.any(String));
+  });
+
   it("rejects creating a session for an unregistered project", async () => {
     const { host } = await fixture();
     const transport = createEmbeddedTransport(host);
@@ -225,3 +293,25 @@ const waitForResponse = (transport: ReturnType<typeof createEmbeddedTransport>, 
       }
     });
   });
+
+const deferred = <T>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((innerResolve) => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
+};
+
+const eventually = async (assertion: () => void): Promise<void> => {
+  let lastError: unknown;
+  for (let i = 0; i < 50; i += 1) {
+    try {
+      assertion();
+      return;
+    } catch (cause) {
+      lastError = cause;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  throw lastError;
+};

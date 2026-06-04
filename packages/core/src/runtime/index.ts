@@ -8,7 +8,9 @@ import type {
 
 import type { AgentTool, ToolResult } from "../tools/index.js";
 
-export type RuntimeTurnOptions = Record<string, never>;
+export type RuntimeTurnOptions = {
+  refreshContext?: (context: ScorelMessage[]) => ScorelMessage[] | Promise<ScorelMessage[]>;
+};
 
 export type ProviderStreamChunk = {
   type: "text_delta";
@@ -126,7 +128,8 @@ export class ScorelRuntime {
           return;
         }
 
-        nextContext = [...nextContext, assistant, ...toolMessages];
+        const contextAfterTools = [...nextContext, assistant, ...toolMessages];
+        nextContext = options.refreshContext ? await options.refreshContext(contextAfterTools) : contextAfterTools;
       }
 
       yield { type: "turn_end", stopReason: "cancelled" };

@@ -8,6 +8,8 @@ import {
   type HarnessItemEvent,
   type InstructionSnapshot,
   type PersistentEvent,
+  type QueueItem,
+  type QueueName,
   type ScorelMessage,
   type ToolResultContentBlock,
   type Seq,
@@ -20,6 +22,7 @@ type ConversationPersistentEvent = MessagePersistentEvent | HarnessItemEvent;
 
 export type SessionControlState = {
   instructionSnapshot?: InstructionSnapshot;
+  queues: Record<QueueName, QueueItem[]>;
 };
 
 export type SessionHeader = {
@@ -74,7 +77,12 @@ export class SessionTree implements Iterable<PersistentEvent> {
   #conversationOrder: EventId[] = [];
   #rootId: EventId | null = null;
   #currentSeq = asSeq(0);
-  readonly controlState: SessionControlState = {};
+  readonly controlState: SessionControlState = {
+    queues: {
+      follow_up: [],
+      steer: [],
+    },
+  };
 
   get rootId(): EventId | null {
     return this.#rootId;
@@ -196,6 +204,8 @@ export class SessionTree implements Iterable<PersistentEvent> {
   #applyControlEvent(event: PersistentEvent): void {
     if (event.type === "instruction_snapshot") {
       this.controlState.instructionSnapshot = event.snapshot;
+    } else if (event.type === "queue_update") {
+      this.controlState.queues[event.queue] = [...event.items];
     }
   }
 }
@@ -358,7 +368,8 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
     value.type !== "assistant_message" &&
     value.type !== "tool_result" &&
     value.type !== "instruction_snapshot" &&
-    value.type !== "harness_item"
+    value.type !== "harness_item" &&
+    value.type !== "queue_update"
   ) {
     throw new SessionStoreError("invalid_event", "Unsupported session event type");
   }
@@ -382,6 +393,9 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
   }
   if (value.type === "harness_item" && !isHarnessItem(value.item)) {
     throw new SessionStoreError("invalid_event", "harness_item is missing item payload");
+  }
+  if (value.type === "queue_update" && !isQueueUpdate(value)) {
+    throw new SessionStoreError("invalid_event", "queue_update is missing queue payload");
   }
 }
 
@@ -410,6 +424,21 @@ const isHarnessItem = (value: unknown): boolean =>
   typeof value.origin === "string" &&
   typeof value.content === "string" &&
   (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
+
+const isQueueUpdate = (value: Record<string, unknown>): boolean =>
+  (value.queue === "follow_up" || value.queue === "steer") &&
+  value.operation === "rewrite" &&
+  Array.isArray(value.items) &&
+  (value.anchorEventId === null || typeof value.anchorEventId === "string") &&
+  value.items.every(
+    (item) =>
+      isRecord(item) &&
+      typeof item.id === "string" &&
+      Array.isArray(item.content) &&
+      typeof item.createdAt === "number" &&
+      typeof item.updatedAt === "number" &&
+      typeof item.clientId === "string",
+  );
 
 const appendHarnessItemToContext = (messages: ScorelMessage[], event: HarnessItemEvent): void => {
   const reminder = renderSystemReminder(event.item.content);

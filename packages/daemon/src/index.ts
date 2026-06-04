@@ -44,6 +44,8 @@ import {
   type HostProject,
   type PersistentEvent,
   type ProjectId,
+  type QueueItem,
+  type QueueName,
   type ScorelEvent,
   type Seq,
   type SessionId,
@@ -403,6 +405,7 @@ type SessionLane = {
   project: HostProject;
   runtime: ScorelRuntime;
   queue: Promise<unknown>;
+  followUpWaiters: Map<string, { connection: Connection; request: ClientRequest<"send_message"> }>;
 };
 
 type PersistentEventInput =
@@ -410,7 +413,8 @@ type PersistentEventInput =
   | Omit<Extract<PersistentEvent, { type: "assistant_message" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "tool_result" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "instruction_snapshot" }>, "seq">
-  | Omit<Extract<PersistentEvent, { type: "harness_item" }>, "seq">;
+  | Omit<Extract<PersistentEvent, { type: "harness_item" }>, "seq">
+  | Omit<Extract<PersistentEvent, { type: "queue_update" }>, "seq">;
 
 type TransientEventInput =
   | Omit<Extract<TransientEvent, { type: "turn_start" }>, "seq">
@@ -689,47 +693,186 @@ export class ScorelHost {
 
   async #handleSendMessage(connection: Connection, request: ClientRequest<"send_message">): Promise<void> {
     const lane = await this.#getLane(request.sessionId);
+    if (lane.runtime.running) {
+      await this.#enqueueFollowUp(lane, connection, request);
+      return;
+    }
+
     lane.queue = lane.queue.then(async () => {
-      await this.#appendDiagnostic(request.sessionId, "send_message_started", {
-        clientId: connection.clientId,
-        activeLeafId: lane.session.activeLeafId,
-      });
-      const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, connection.clientId);
-      const userEventId = asEventId(this.#createId());
-      const content = typeof request.content === "string" ? [{ type: "text" as const, text: request.content }] : request.content;
-      const userEvent = await this.#appendPersistent(lane, {
-        type: "user_message",
-        id: userEventId,
+      await this.#drainFollowUps(lane);
+      await this.#runUserTurn(lane, connection.clientId, {
+        content: normalizeContent(request.content),
         parentId: request.options?.parentId ?? lane.session.activeLeafId,
-        sessionId: request.sessionId,
-        clientId: connection.clientId,
-        ts: this.#now(),
-        message: { role: "user", content },
+        source: "user",
+        onComplete: (result) => this.#respond(connection, request, result),
       });
-      const firstAssistantEventId = asEventId(this.#createId());
-      const state: RuntimeEventState = {
-        parentId: userEvent.id,
-        assistantEventId: firstAssistantEventId,
-        finalAssistantEventId: firstAssistantEventId,
-      };
-
-      for await (const rawEvent of lane.runtime.executeTurn(
-        buildContext(lane.session.tree, userEvent.id),
-        renderSystemPrompt(instructionSnapshot),
-        {},
-      )) {
-        await this.#handleRuntimeEvent(lane, connection.clientId, state, rawEvent);
-      }
-
-      await this.#appendDiagnostic(request.sessionId, "send_message_finished", {
-        clientId: connection.clientId,
-        userEventId,
-        assistantEventId: state.finalAssistantEventId,
-      });
-      this.#respond(connection, request, { userEventId, assistantEventId: state.finalAssistantEventId });
+      await this.#drainFollowUps(lane);
     });
 
     await lane.queue;
+  }
+
+  async #runUserTurn(
+    lane: SessionLane,
+    clientId: ClientId,
+    input: {
+      content: ScorelMessage["content"];
+      parentId: EventId | null;
+      source: "user" | "follow_up";
+      queueItemId?: string;
+      onComplete?: (result: ClientRequestMap["send_message"]["response"]) => void;
+    },
+  ): Promise<ClientRequestMap["send_message"]["response"]> {
+    const sessionId = lane.session.header.sessionId;
+    await this.#appendDiagnostic(sessionId, "send_message_started", {
+      clientId,
+      activeLeafId: lane.session.activeLeafId,
+      source: input.source,
+    });
+    const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, clientId);
+    const userEventId = asEventId(this.#createId());
+    const userEvent = await this.#appendPersistent(lane, {
+      type: "user_message",
+      id: userEventId,
+      parentId: input.parentId,
+      sessionId,
+      clientId,
+      ts: this.#now(),
+      message: {
+        role: "user",
+        content: input.content,
+        ...(input.source === "follow_up"
+          ? { meta: { source: "follow_up", queueItemId: input.queueItemId } }
+          : {}),
+      },
+    });
+    const firstAssistantEventId = asEventId(this.#createId());
+    const state: RuntimeEventState = {
+      parentId: userEvent.id,
+      assistantEventId: firstAssistantEventId,
+      finalAssistantEventId: firstAssistantEventId,
+    };
+
+    for await (const rawEvent of lane.runtime.executeTurn(
+      buildContext(lane.session.tree, userEvent.id),
+      renderSystemPrompt(instructionSnapshot),
+      {
+        refreshContext: async () => {
+          await this.#consumeSteer(lane, clientId, state);
+          return buildContext(lane.session.tree, lane.session.activeLeafId ?? state.parentId);
+        },
+      },
+    )) {
+      await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
+    }
+
+    const result = { userEventId, assistantEventId: state.finalAssistantEventId };
+    await this.#appendDiagnostic(sessionId, "send_message_finished", {
+      clientId,
+      userEventId,
+      assistantEventId: state.finalAssistantEventId,
+      source: input.source,
+    });
+    input.onComplete?.(result);
+    return result;
+  }
+
+  async #enqueueFollowUp(
+    lane: SessionLane,
+    connection: Connection,
+    request: ClientRequest<"send_message">,
+  ): Promise<void> {
+    const now = this.#now();
+    const item: QueueItem = {
+      id: this.#createId(),
+      content: normalizeContent(request.content),
+      createdAt: now,
+      updatedAt: now,
+      clientId: connection.clientId,
+    };
+    lane.followUpWaiters.set(item.id, { connection, request });
+    await this.#appendQueueRewrite(lane, "follow_up", [...lane.session.tree.controlState.queues.follow_up, item], {
+      clientId: connection.clientId,
+      anchorEventId: lane.session.activeLeafId,
+    });
+    await this.#appendDiagnostic(lane.session.header.sessionId, "follow_up_queued", {
+      clientId: connection.clientId,
+      queueItemId: item.id,
+      queueSize: lane.session.tree.controlState.queues.follow_up.length,
+    });
+  }
+
+  async #drainFollowUps(lane: SessionLane): Promise<void> {
+    while (lane.session.tree.controlState.queues.follow_up.length > 0) {
+      const item = lane.session.tree.controlState.queues.follow_up[0]!;
+      const remaining = lane.session.tree.controlState.queues.follow_up.slice(1);
+      await this.#appendQueueRewrite(lane, "follow_up", remaining, {
+        clientId: item.clientId,
+        anchorEventId: lane.session.activeLeafId,
+      });
+      const waiter = lane.followUpWaiters.get(item.id);
+      lane.followUpWaiters.delete(item.id);
+      await this.#runUserTurn(lane, item.clientId, {
+        content: item.content,
+        parentId: lane.session.activeLeafId,
+        source: "follow_up",
+        queueItemId: item.id,
+        onComplete: waiter
+          ? (result) => this.#respond(waiter.connection, waiter.request, result)
+          : undefined,
+      });
+    }
+  }
+
+  async #consumeSteer(lane: SessionLane, clientId: ClientId, state: RuntimeEventState): Promise<void> {
+    const item = lane.session.tree.controlState.queues.steer[0];
+    if (!item) {
+      return;
+    }
+    await this.#appendQueueRewrite(lane, "steer", lane.session.tree.controlState.queues.steer.slice(1), {
+      clientId,
+      anchorEventId: state.parentId,
+    });
+    const content = item.content
+      .filter((block): block is Extract<ScorelMessage["content"][number], { type: "text" }> => block.type === "text")
+      .map((block) => block.text)
+      .join("\n");
+    const harnessEvent = await this.#appendPersistent(lane, {
+      type: "harness_item",
+      id: asEventId(this.#createId()),
+      parentId: state.parentId,
+      sessionId: lane.session.header.sessionId,
+      clientId: item.clientId,
+      ts: this.#now(),
+      item: {
+        kind: "steer",
+        origin: "user",
+        content,
+        visibility: "display",
+        data: { queueItemId: item.id },
+      },
+    });
+    state.parentId = harnessEvent.id;
+  }
+
+  async #appendQueueRewrite(
+    lane: SessionLane,
+    queue: QueueName,
+    items: QueueItem[],
+    options: { clientId: ClientId; anchorEventId: EventId | null },
+  ): Promise<void> {
+    await this.#appendPersistent(lane, {
+      type: "queue_update",
+      id: asEventId(this.#createId()),
+      parentId: null,
+      sessionId: lane.session.header.sessionId,
+      clientId: options.clientId,
+      ts: this.#now(),
+      queue,
+      operation: "rewrite",
+      items,
+      anchorEventId: options.anchorEventId,
+    });
   }
 
   async #handleCancel(connection: Connection, request: ClientRequest<"cancel">): Promise<void> {
@@ -1045,6 +1188,7 @@ export class ScorelHost {
       project,
       runtime,
       queue: Promise.resolve(),
+      followUpWaiters: new Map(),
     };
     this.#sessions.set(sessionId, lane);
     this.#seqs.set(sessionId, Number(loaded.currentSeq));
@@ -1089,6 +1233,7 @@ export class ScorelHost {
       project,
       runtime,
       queue: Promise.resolve(),
+      followUpWaiters: new Map(),
     };
   }
 
@@ -1213,6 +1358,9 @@ const hasContinuousCoverage = (events: ScorelEvent[], expectedFirstSeq: number):
 
 const countContentBlocks = (message: ScorelMessage, type: string): number =>
   message.content.filter((block) => block.type === type).length;
+
+const normalizeContent = (content: string | ScorelMessage["content"]): ScorelMessage["content"] =>
+  typeof content === "string" ? [{ type: "text", text: content }] : content;
 
 const shortStack = (error: Error): string | undefined => error.stack?.split("\n").slice(0, 3).join(" | ");
 

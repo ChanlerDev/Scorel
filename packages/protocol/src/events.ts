@@ -98,13 +98,33 @@ export type HarnessItemEvent = PersistentEventBase & {
   item: HarnessItem;
 };
 
+export type QueueName = "follow_up" | "steer";
+
+export type QueueItem = {
+  id: string;
+  content: ScorelMessage["content"];
+  createdAt: number;
+  updatedAt: number;
+  clientId: ClientId;
+  data?: Record<string, unknown>;
+};
+
+export type QueueUpdateEvent = PersistentEventBase & {
+  type: "queue_update";
+  queue: QueueName;
+  operation: "rewrite";
+  items: QueueItem[];
+  anchorEventId: EventId | null;
+};
+
 export type PersistentEvent =
   | SessionHeaderEvent
   | UserMessageEvent
   | AssistantMessageEvent
   | ToolResultEvent
   | InstructionSnapshotEvent
-  | HarnessItemEvent;
+  | HarnessItemEvent
+  | QueueUpdateEvent;
 
 export type TransientEventBase = {
   seq: Seq;
