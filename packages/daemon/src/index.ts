@@ -9,12 +9,14 @@ import { listSessionSummaries } from "./projects/sessions.js";
 import {
   ScorelRuntime,
   buildContext,
+  buildInstructionSnapshot,
   corePackageName,
   createCodingTools,
   createPiAiProvider,
   createSession,
   loadScorelConfig,
   loadSession,
+  renderSystemPrompt,
   resolvePiAiModel,
   sessionLogFilePath,
   scorelSessionsDir,
@@ -406,7 +408,8 @@ type SessionLane = {
 type PersistentEventInput =
   | Omit<Extract<PersistentEvent, { type: "user_message" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "assistant_message" }>, "seq">
-  | Omit<Extract<PersistentEvent, { type: "tool_result" }>, "seq">;
+  | Omit<Extract<PersistentEvent, { type: "tool_result" }>, "seq">
+  | Omit<Extract<PersistentEvent, { type: "instruction_snapshot" }>, "seq">;
 
 type TransientEventInput =
   | Omit<Extract<TransientEvent, { type: "turn_start" }>, "seq">
@@ -690,6 +693,7 @@ export class ScorelHost {
         clientId: connection.clientId,
         activeLeafId: lane.session.activeLeafId,
       });
+      const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, connection.clientId);
       const userEventId = asEventId(this.#createId());
       const content = typeof request.content === "string" ? [{ type: "text" as const, text: request.content }] : request.content;
       const userEvent = await this.#appendPersistent(lane, {
@@ -708,7 +712,11 @@ export class ScorelHost {
         finalAssistantEventId: firstAssistantEventId,
       };
 
-      for await (const rawEvent of lane.runtime.executeTurn(buildContext(lane.session.tree, userEvent.id), undefined, {})) {
+      for await (const rawEvent of lane.runtime.executeTurn(
+        buildContext(lane.session.tree, userEvent.id),
+        renderSystemPrompt(instructionSnapshot),
+        {},
+      )) {
         await this.#handleRuntimeEvent(lane, connection.clientId, state, rawEvent);
       }
 
@@ -885,6 +893,32 @@ export class ScorelHost {
     await lane.session.append(withSeq);
     this.#recordAndBroadcast(lane.session.header.sessionId, withSeq);
     return withSeq;
+  }
+
+  async #ensureInstructionSnapshot(lane: SessionLane, clientId: ClientId) {
+    const existing = lane.session.tree.controlState.instructionSnapshot;
+    if (existing) {
+      return existing;
+    }
+
+    const snapshot = await buildInstructionSnapshot({
+      cwd: lane.project.workDir,
+      now: this.#now,
+    });
+    await this.#appendPersistent(lane, {
+      type: "instruction_snapshot",
+      id: asEventId(this.#createId()),
+      parentId: null,
+      sessionId: lane.session.header.sessionId,
+      clientId,
+      ts: this.#now(),
+      snapshot,
+    });
+    await this.#appendDiagnostic(lane.session.header.sessionId, "instruction_snapshot_created", {
+      clientId,
+      sections: snapshot.sections.length,
+    });
+    return snapshot;
   }
 
   #broadcastTransient(sessionId: SessionId, event: TransientEventInput): TransientEvent {

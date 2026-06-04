@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, readFile, realpath } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { ScorelRuntime, type RuntimeProvider } from "@scorel/core";
+import { ScorelRuntime, type RuntimeProvider, type RuntimeProviderTurn } from "@scorel/core";
 import {
   asClientId,
   asDeviceId,
@@ -150,6 +150,56 @@ describe("ScorelHost + embedded transport", () => {
     expect(restoredProjects).toEqual([project]);
     const header = JSON.parse((await readFile(join(sessionsDir, "ses_restart.jsonl"), "utf8")).split("\n")[0]!);
     expect(header.meta).toEqual({ projectId: project.projectId });
+  });
+
+  it("writes an instruction snapshot before the first user message and passes it as systemPrompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-instructions-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const repo = join(root, "repo");
+    await mkdir(join(repo, ".git"), { recursive: true });
+    await mkdir(sessionsDir);
+    await writeFile(join(repo, "AGENTS.md"), "Always say repo-rule.");
+    const providerTurns: RuntimeProviderTurn[] = [];
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () =>
+        new ScorelRuntime({
+          provider: {
+            streamTurn: async function* (turn) {
+              providerTurns.push(turn);
+              return assistantMessage("ok");
+            },
+          },
+        }),
+      now: () => 1_000,
+    });
+    await host.start();
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_instruction"),
+      meta: { projectId: project.projectId },
+    });
+    const response = waitForResponse(transport, "req_send");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send"),
+      sessionId: asSessionId("ses_instruction"),
+      content: "hello",
+    });
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const lines = (await readFile(join(sessionsDir, "ses_instruction.jsonl"), "utf8")).trim().split("\n");
+    const events = lines.slice(1).map((line) => JSON.parse(line) as { type: string; snapshot?: unknown });
+    expect(events.map((event) => event.type).slice(0, 2)).toEqual(["instruction_snapshot", "user_message"]);
+    expect(providerTurns[0]?.systemPrompt).toContain("Always say repo-rule.");
+    expect(providerTurns[0]?.systemPrompt).toContain("Workspace cwd:");
   });
 
   it("rejects creating a session for an unregistered project", async () => {

@@ -45,7 +45,41 @@ export type ToolResultEvent = PersistentEventBase & {
   message: ScorelMessage & { role: "tool_result" };
 };
 
-export type PersistentEvent = SessionHeaderEvent | UserMessageEvent | AssistantMessageEvent | ToolResultEvent;
+export type InstructionSectionKind = "baseline" | "agents" | "memory" | "workspace" | "environment" | "time";
+
+export type InstructionSource = {
+  sourceType: "builtin" | "agents_md" | "memory";
+  path?: string;
+  scope?: "global_user" | "project";
+  priority?: number;
+  content?: string;
+};
+
+export type InstructionSection = {
+  kind: InstructionSectionKind;
+  frozenAt: number;
+  sources?: InstructionSource[];
+  renderedBlock: string;
+  data?: Record<string, unknown>;
+};
+
+export type InstructionSnapshot = {
+  version: 1;
+  cwd: string;
+  sections: InstructionSection[];
+};
+
+export type InstructionSnapshotEvent = PersistentEventBase & {
+  type: "instruction_snapshot";
+  snapshot: InstructionSnapshot;
+};
+
+export type PersistentEvent =
+  | SessionHeaderEvent
+  | UserMessageEvent
+  | AssistantMessageEvent
+  | ToolResultEvent
+  | InstructionSnapshotEvent;
 
 export type TransientEventBase = {
   seq: Seq;

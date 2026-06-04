@@ -5,6 +5,7 @@ import {
   asSeq,
   type DeviceId,
   type EventId,
+  type InstructionSnapshot,
   type PersistentEvent,
   type ScorelMessage,
   type Seq,
@@ -13,6 +14,11 @@ import {
 } from "@scorel/protocol";
 
 type MessagePersistentEvent = Extract<PersistentEvent, { message: ScorelMessage }>;
+type ConversationPersistentEvent = MessagePersistentEvent;
+
+export type SessionControlState = {
+  instructionSnapshot?: InstructionSnapshot;
+};
 
 export type SessionHeader = {
   version: 1;
@@ -61,16 +67,19 @@ type MutableTreeNode = {
 
 export class SessionTree implements Iterable<PersistentEvent> {
   #nodes = new Map<EventId, MutableTreeNode>();
+  #events = new Map<EventId, PersistentEvent>();
   #order: EventId[] = [];
+  #conversationOrder: EventId[] = [];
   #rootId: EventId | null = null;
   #currentSeq = asSeq(0);
+  readonly controlState: SessionControlState = {};
 
   get rootId(): EventId | null {
     return this.#rootId;
   }
 
   get size(): number {
-    return this.#nodes.size;
+    return this.#events.size;
   }
 
   get currentSeq(): Seq {
@@ -89,27 +98,34 @@ export class SessionTree implements Iterable<PersistentEvent> {
   }
 
   has(id: EventId): boolean {
-    return this.#nodes.has(id);
+    return this.#events.has(id);
   }
 
   append(event: PersistentEvent): void {
     this.assertCanAppend(event);
+
+    this.#events.set(event.id, event);
+    this.#order.push(event.id);
+    this.#currentSeq = event.seq;
+    this.#applyControlEvent(event);
+
+    if (!isConversationEvent(event)) {
+      return;
+    }
 
     if (event.parentId !== null) {
       this.#nodes.get(event.parentId)?.children.push(event.id);
     } else {
       this.#rootId = event.id;
     }
-
     this.#nodes.set(event.id, { event, children: [] });
-    this.#order.push(event.id);
-    this.#currentSeq = event.seq;
+    this.#conversationOrder.push(event.id);
   }
 
   assertCanAppend(event: PersistentEvent): void {
     assertTreeEvent(event);
 
-    if (this.#nodes.has(event.id)) {
+    if (this.#events.has(event.id)) {
       throw new SessionStoreError("duplicate_event_id", `Duplicate event id: ${event.id}`);
     }
 
@@ -118,6 +134,10 @@ export class SessionTree implements Iterable<PersistentEvent> {
         "non_monotonic_seq",
         `Event seq ${String(event.seq)} must be greater than ${String(this.#currentSeq)}`,
       );
+    }
+
+    if (!isConversationEvent(event)) {
+      return;
     }
 
     if (event.parentId === null) {
@@ -133,7 +153,7 @@ export class SessionTree implements Iterable<PersistentEvent> {
   }
 
   getLeaves(): EventId[] {
-    return this.#order.filter((id) => this.#nodes.get(id)?.children.length === 0);
+    return this.#conversationOrder.filter((id) => this.#nodes.get(id)?.children.length === 0);
   }
 
   getChildren(id: EventId): EventId[] {
@@ -159,15 +179,21 @@ export class SessionTree implements Iterable<PersistentEvent> {
   }
 
   getBranchPoints(): EventId[] {
-    return this.#order.filter((id) => (this.#nodes.get(id)?.children.length ?? 0) > 1);
+    return this.#conversationOrder.filter((id) => (this.#nodes.get(id)?.children.length ?? 0) > 1);
   }
 
   *[Symbol.iterator](): Iterator<PersistentEvent> {
     for (const id of this.#order) {
-      const node = this.#nodes.get(id);
-      if (node) {
-        yield node.event;
+      const event = this.#events.get(id);
+      if (event) {
+        yield event;
       }
+    }
+  }
+
+  #applyControlEvent(event: PersistentEvent): void {
+    if (event.type === "instruction_snapshot") {
+      this.controlState.instructionSnapshot = event.snapshot;
     }
   }
 }
@@ -319,21 +345,46 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
   if (
     value.type !== "user_message" &&
     value.type !== "assistant_message" &&
-    value.type !== "tool_result"
+    value.type !== "tool_result" &&
+    value.type !== "instruction_snapshot"
   ) {
-    throw new SessionStoreError("invalid_event", "Unsupported M1 session event type");
+    throw new SessionStoreError("invalid_event", "Unsupported session event type");
   }
   if (
     typeof value.id !== "string" ||
     (value.parentId !== null && typeof value.parentId !== "string") ||
     typeof value.seq !== "number" ||
     typeof value.clientId !== "string" ||
-    typeof value.ts !== "number" ||
+    typeof value.ts !== "number"
+  ) {
+    throw new SessionStoreError("invalid_event", "Event is missing required base fields");
+  }
+  if (
+    (value.type === "user_message" || value.type === "assistant_message" || value.type === "tool_result") &&
     !isRecord(value.message)
   ) {
-    throw new SessionStoreError("invalid_event", "Event is missing required M1 fields");
+    throw new SessionStoreError("invalid_event", "Message event is missing message payload");
+  }
+  if (value.type === "instruction_snapshot" && !isInstructionSnapshot(value.snapshot)) {
+    throw new SessionStoreError("invalid_event", "instruction_snapshot is missing snapshot payload");
   }
 }
+
+const isConversationEvent = (event: PersistentEvent): event is ConversationPersistentEvent =>
+  event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result";
+
+const isInstructionSnapshot = (value: unknown): value is InstructionSnapshot => {
+  if (!isRecord(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
+    return false;
+  }
+  return value.sections.every(
+    (section) =>
+      isRecord(section) &&
+      typeof section.kind === "string" &&
+      typeof section.frozenAt === "number" &&
+      typeof section.renderedBlock === "string",
+  );
+};
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

@@ -54,6 +54,28 @@ const assistantEvent = (id: string, parentId: string, seq: number, content: stri
   },
 });
 
+const instructionSnapshotEvent = (id: string, seq: number): PersistentEvent => ({
+  type: "instruction_snapshot",
+  id: asEventId(id),
+  parentId: null,
+  seq: asSeq(seq),
+  sessionId,
+  clientId,
+  ts: 1_000 + seq,
+  snapshot: {
+    version: 1,
+    cwd: "/repo",
+    sections: [
+      { kind: "baseline", frozenAt: 1_000, renderedBlock: "base" },
+      { kind: "agents", frozenAt: 1_000, renderedBlock: "agents" },
+      { kind: "memory", frozenAt: 1_000, renderedBlock: "memory" },
+      { kind: "workspace", frozenAt: 1_000, renderedBlock: "workspace" },
+      { kind: "environment", frozenAt: 1_000, renderedBlock: "env" },
+      { kind: "time", frozenAt: 1_000, renderedBlock: "time" },
+    ],
+  },
+});
+
 const tempRoot = () => mkdtemp(join(tmpdir(), "scorel-session-"));
 
 describe("session core", () => {
@@ -91,6 +113,47 @@ describe("session core", () => {
       { role: "user", content: [{ type: "text", text: "hello" }] },
       { role: "assistant", content: [{ type: "text", text: "hi" }] },
     ]);
+  });
+
+  it("persists instruction snapshots without adding them to the conversation context", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    await session.append(instructionSnapshotEvent("evt_snapshot", 1));
+    await session.append(userEvent("evt_1", null, 2, "hello"));
+    await session.append(assistantEvent("evt_2", "evt_1", 3, "hi"));
+
+    expect(session.activeLeafId).toBe("evt_2");
+    expect(session.tree.controlState.instructionSnapshot?.sections.map((section) => section.kind)).toEqual([
+      "baseline",
+      "agents",
+      "memory",
+      "workspace",
+      "environment",
+      "time",
+    ]);
+    expect(buildContext(session.tree, asEventId("evt_2")).map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+    ]);
+
+    const loaded = await loadSession({ sessionsDir, sessionId });
+    expect([...loaded.tree].map((event) => event.type)).toEqual([
+      "instruction_snapshot",
+      "user_message",
+      "assistant_message",
+    ]);
+    expect(loaded.tree.getPath(asEventId("evt_2"))).toEqual(["evt_1", "evt_2"]);
+    expect(loaded.tree.controlState.instructionSnapshot?.cwd).toBe("/repo");
   });
 
   it("tracks branch leaves and builds context for the selected leaf", async () => {
