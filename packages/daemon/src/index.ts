@@ -409,7 +409,8 @@ type PersistentEventInput =
   | Omit<Extract<PersistentEvent, { type: "user_message" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "assistant_message" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "tool_result" }>, "seq">
-  | Omit<Extract<PersistentEvent, { type: "instruction_snapshot" }>, "seq">;
+  | Omit<Extract<PersistentEvent, { type: "instruction_snapshot" }>, "seq">
+  | Omit<Extract<PersistentEvent, { type: "harness_item" }>, "seq">;
 
 type TransientEventInput =
   | Omit<Extract<TransientEvent, { type: "turn_start" }>, "seq">

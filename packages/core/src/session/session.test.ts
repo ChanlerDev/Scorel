@@ -54,6 +54,48 @@ const assistantEvent = (id: string, parentId: string, seq: number, content: stri
   },
 });
 
+const toolResultEvent = (id: string, parentId: string, seq: number, content: string): PersistentEvent => ({
+  type: "tool_result",
+  id: asEventId(id),
+  parentId: asEventId(parentId),
+  seq: asSeq(seq),
+  sessionId,
+  clientId,
+  ts: 1_000 + seq,
+  message: {
+    role: "tool_result",
+    content: [
+      {
+        type: "tool_result",
+        toolCallId: "call_1",
+        toolName: "Read",
+        result: { content: [{ type: "text", text: content }] },
+      },
+    ],
+  },
+});
+
+const harnessItemEvent = (
+  id: string,
+  parentId: string,
+  seq: number,
+  content: string,
+): PersistentEvent => ({
+  type: "harness_item",
+  id: asEventId(id),
+  parentId: asEventId(parentId),
+  seq: asSeq(seq),
+  sessionId,
+  clientId,
+  ts: 1_000 + seq,
+  item: {
+    kind: "steer",
+    origin: "user",
+    content,
+    visibility: "display",
+  },
+});
+
 const instructionSnapshotEvent = (id: string, seq: number): PersistentEvent => ({
   type: "instruction_snapshot",
   id: asEventId(id),
@@ -154,6 +196,73 @@ describe("session core", () => {
     ]);
     expect(loaded.tree.getPath(asEventId("evt_2"))).toEqual(["evt_1", "evt_2"]);
     expect(loaded.tree.controlState.instructionSnapshot?.cwd).toBe("/repo");
+  });
+
+  it("converts harness items into system-reminder meta user messages without a tool result", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    await session.append(userEvent("evt_1", null, 1, "hello"));
+    await session.append(harnessItemEvent("evt_2", "evt_1", 2, "focus on tests"));
+
+    expect(buildContext(session.tree, asEventId("evt_2"))).toEqual([
+      { role: "user", content: [{ type: "text", text: "hello" }] },
+      {
+        role: "user",
+        content: [{ type: "text", text: "<system-reminder>\nfocus on tests\n</system-reminder>" }],
+        meta: {
+          source: "harness_item",
+          harnessKind: "steer",
+          harnessOrigin: "user",
+        },
+      },
+    ]);
+  });
+
+  it("merges harness items into the latest tool result when possible", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    await session.append(userEvent("evt_1", null, 1, "hello"));
+    await session.append(toolResultEvent("evt_2", "evt_1", 2, "file content"));
+    await session.append(harnessItemEvent("evt_3", "evt_2", 3, "do not edit yet"));
+
+    const context = buildContext(session.tree, asEventId("evt_3"));
+    expect(context).toHaveLength(2);
+    const toolResult = context[1]?.content[0];
+    expect(toolResult?.type).toBe("tool_result");
+    if (toolResult?.type !== "tool_result") {
+      throw new Error("expected tool result");
+    }
+    expect(toolResult.result).toEqual({
+      content: [
+        { type: "text", text: "file content" },
+        { type: "text", text: "\n\n<system-reminder>\ndo not edit yet\n</system-reminder>" },
+      ],
+    });
+    const original = session.tree.get(asEventId("evt_2"))?.event;
+    const expectedOriginal = toolResultEvent("evt_2", "evt_1", 2, "file content");
+    expect(original && "message" in original ? original.message : undefined).toEqual(
+      "message" in expectedOriginal ? expectedOriginal.message : undefined,
+    );
   });
 
   it("tracks branch leaves and builds context for the selected leaf", async () => {

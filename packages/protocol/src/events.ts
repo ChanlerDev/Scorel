@@ -74,12 +74,37 @@ export type InstructionSnapshotEvent = PersistentEventBase & {
   snapshot: InstructionSnapshot;
 };
 
+export type HarnessItemKind =
+  | "attachment"
+  | "skill_listing"
+  | "skill_delta"
+  | "memory"
+  | "date_change"
+  | "steer"
+  | "runtime_notice";
+
+export type HarnessItemOrigin = "user" | "system" | "tool" | "skill";
+
+export type HarnessItem = {
+  kind: HarnessItemKind;
+  origin: HarnessItemOrigin;
+  content: string;
+  visibility: "display" | "hidden" | "compact";
+  data?: Record<string, unknown>;
+};
+
+export type HarnessItemEvent = PersistentEventBase & {
+  type: "harness_item";
+  item: HarnessItem;
+};
+
 export type PersistentEvent =
   | SessionHeaderEvent
   | UserMessageEvent
   | AssistantMessageEvent
   | ToolResultEvent
-  | InstructionSnapshotEvent;
+  | InstructionSnapshotEvent
+  | HarnessItemEvent;
 
 export type TransientEventBase = {
   seq: Seq;

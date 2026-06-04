@@ -19,6 +19,8 @@ import type {
  *                                      If matches `inFlightAssistantId`, replace the in-flight streamed turn.
  * - Persistent `tool_result`         → append a tool_result part to the most recent assistant turn whose
  *                                      tool_call's id matches; if no match, push a standalone tool turn.
+ * - Persistent `harness_item`        → hidden items are skipped; compact/display items become lightweight
+ *                                      harness turns, never normal user turns.
  * - Transient `message_start`        → start an assistant turn with empty text, streaming=true.
  * - Transient `text_delta`           → append delta to the in-flight assistant turn's first text part.
  * - Transient `message_end`          → mark assistant turn streaming=false.
@@ -60,7 +62,8 @@ export type Turn =
       streaming: boolean;
       stopReason?: StopReason;
     }
-  | { id: string; kind: "tool"; parts: TurnPart[] };
+  | { id: string; kind: "tool"; parts: TurnPart[] }
+  | { id: string; kind: "harness"; label: string; parts: Extract<TurnPart, { kind: "text" }>[] };
 
 export type ProjectorState = {
   turns: Turn[];
@@ -107,6 +110,8 @@ export function projectEvent(state: ProjectorState, event: ScorelEvent): Project
       return upsertAssistantPersistent(next, event);
     case "tool_result":
       return appendToolResult(next, event);
+    case "harness_item":
+      return appendHarnessItem(next, event);
     case "message_start":
       if (event.role !== "assistant") return next;
       return startInFlightAssistant(next, String(event.eventId));
@@ -288,6 +293,31 @@ function appendToolResult(
   return { ...state, turns: [...state.turns, standalone] };
 }
 
+function appendHarnessItem(
+  state: ProjectorState,
+  event: Extract<PersistentEvent, { type: "harness_item" }>,
+): ProjectorState {
+  if (event.item.visibility === "hidden") {
+    return state;
+  }
+  if (state.turns.some((turn) => turn.id === String(event.id))) {
+    return state;
+  }
+  const label = event.item.kind === "steer" && event.item.origin === "user" ? "Steer" : "Harness";
+  return {
+    ...state,
+    turns: [
+      ...state.turns,
+      {
+        id: String(event.id),
+        kind: "harness",
+        label,
+        parts: [{ kind: "text", text: event.item.content }],
+      },
+    ],
+  };
+}
+
 function startInFlightAssistant(
   state: ProjectorState,
   eventId: string,
@@ -382,6 +412,9 @@ function appendError(state: ProjectorState, message: string, code?: string): Pro
   }
   const turns = [...state.turns];
   const latest = turns[turns.length - 1]!;
+  if (latest.kind === "harness") {
+    return state;
+  }
   const part: TurnPart = code
     ? { kind: "error", message, code }
     : { kind: "error", message };

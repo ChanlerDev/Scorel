@@ -82,6 +82,8 @@ describe("@scorel/protocol", () => {
           return input.message.role;
         case "instruction_snapshot":
           return input.snapshot.cwd;
+        case "harness_item":
+          return input.item.kind;
         case "turn_start":
           return "turn_start";
         case "turn_end":

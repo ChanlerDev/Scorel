@@ -66,6 +66,20 @@ function transcriptTickKey(turns: Turn[]): string {
 function TurnView({ turn }: { turn: Turn }): JSX.Element {
   if (turn.kind === "user") return <TurnUser turn={turn} />;
   if (turn.kind === "assistant") return <TurnAssistant turn={turn} />;
+  if (turn.kind === "harness") {
+    const text = turn.parts.map((part) => part.text).join("\n");
+    return (
+      <article
+        data-testid="turn-harness"
+        className="mx-4 rounded-md border border-border bg-subtle px-3 py-2 text-sm text-muted"
+      >
+        <header className="mb-1 text-xs uppercase tracking-wide">
+          {turn.label}
+        </header>
+        <p className="whitespace-pre-wrap">{text}</p>
+      </article>
+    );
+  }
   // standalone tool turn
   return (
     <article

@@ -5,16 +5,18 @@ import {
   asSeq,
   type DeviceId,
   type EventId,
+  type HarnessItemEvent,
   type InstructionSnapshot,
   type PersistentEvent,
   type ScorelMessage,
+  type ToolResultContentBlock,
   type Seq,
   type SessionId,
   type SessionMeta,
 } from "@scorel/protocol";
 
 type MessagePersistentEvent = Extract<PersistentEvent, { message: ScorelMessage }>;
-type ConversationPersistentEvent = MessagePersistentEvent;
+type ConversationPersistentEvent = MessagePersistentEvent | HarnessItemEvent;
 
 export type SessionControlState = {
   instructionSnapshot?: InstructionSnapshot;
@@ -290,11 +292,20 @@ export const loadSession = async (options: LoadSessionOptions): Promise<JsonlSes
 };
 
 export const buildContext = (tree: SessionTree, leafId: EventId): ScorelMessage[] =>
-  tree
-    .getPath(leafId)
-    .map((id) => tree.get(id)?.event)
-    .filter((event): event is MessagePersistentEvent => event !== undefined && "message" in event)
-    .map((event) => event.message);
+  tree.getPath(leafId).reduce<ScorelMessage[]>((messages, id) => {
+    const event = tree.get(id)?.event;
+    if (!event) {
+      return messages;
+    }
+    if ("message" in event) {
+      messages.push(cloneMessage(event.message));
+      return messages;
+    }
+    if (event.type === "harness_item") {
+      appendHarnessItemToContext(messages, event);
+    }
+    return messages;
+  }, []);
 
 const parseJsonLine = (line: string, lineNumber: number): unknown => {
   try {
@@ -346,7 +357,8 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
     value.type !== "user_message" &&
     value.type !== "assistant_message" &&
     value.type !== "tool_result" &&
-    value.type !== "instruction_snapshot"
+    value.type !== "instruction_snapshot" &&
+    value.type !== "harness_item"
   ) {
     throw new SessionStoreError("invalid_event", "Unsupported session event type");
   }
@@ -368,10 +380,16 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
   if (value.type === "instruction_snapshot" && !isInstructionSnapshot(value.snapshot)) {
     throw new SessionStoreError("invalid_event", "instruction_snapshot is missing snapshot payload");
   }
+  if (value.type === "harness_item" && !isHarnessItem(value.item)) {
+    throw new SessionStoreError("invalid_event", "harness_item is missing item payload");
+  }
 }
 
 const isConversationEvent = (event: PersistentEvent): event is ConversationPersistentEvent =>
-  event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result";
+  event.type === "user_message" ||
+  event.type === "assistant_message" ||
+  event.type === "tool_result" ||
+  event.type === "harness_item";
 
 const isInstructionSnapshot = (value: unknown): value is InstructionSnapshot => {
   if (!isRecord(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
@@ -385,6 +403,75 @@ const isInstructionSnapshot = (value: unknown): value is InstructionSnapshot => 
       typeof section.renderedBlock === "string",
   );
 };
+
+const isHarnessItem = (value: unknown): boolean =>
+  isRecord(value) &&
+  typeof value.kind === "string" &&
+  typeof value.origin === "string" &&
+  typeof value.content === "string" &&
+  (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
+
+const appendHarnessItemToContext = (messages: ScorelMessage[], event: HarnessItemEvent): void => {
+  const reminder = renderSystemReminder(event.item.content);
+  const last = messages.at(-1);
+  if (last?.role === "tool_result" && appendReminderToToolResult(last, reminder)) {
+    return;
+  }
+  messages.push({
+    role: "user",
+    content: [{ type: "text", text: reminder }],
+    meta: {
+      source: "harness_item",
+      harnessKind: event.item.kind,
+      harnessOrigin: event.item.origin,
+    },
+  });
+};
+
+const appendReminderToToolResult = (message: ScorelMessage, reminder: string): boolean => {
+  for (let i = message.content.length - 1; i >= 0; i -= 1) {
+    const block = message.content[i];
+    if (block?.type !== "tool_result" || !isToolResultWithContent(block.result)) {
+      continue;
+    }
+    const mergedResult = {
+      ...block.result,
+      content: [...block.result.content, { type: "text" as const, text: `\n\n${reminder}` }],
+    };
+    message.content[i] = {
+      ...block,
+      result: mergedResult,
+    } satisfies ToolResultContentBlock;
+    return true;
+  }
+  return false;
+};
+
+const isToolResultWithContent = (value: unknown): value is { content: unknown[] } =>
+  isRecord(value) && Array.isArray(value.content);
+
+const renderSystemReminder = (content: string): string =>
+  `<system-reminder>\n${content}\n</system-reminder>`;
+
+const cloneMessage = (message: ScorelMessage): ScorelMessage => ({
+  ...message,
+  content: message.content.map((block) => {
+    if (block.type !== "tool_result" || !isRecord(block.result)) {
+      return { ...block };
+    }
+    const content = Array.isArray(block.result.content)
+      ? { content: block.result.content.map((item) => (isRecord(item) ? { ...item } : item)) }
+      : {};
+    return {
+      ...block,
+      result: {
+        ...block.result,
+        ...content,
+      },
+    };
+  }),
+  ...(message.meta ? { meta: { ...message.meta } } : {}),
+});
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

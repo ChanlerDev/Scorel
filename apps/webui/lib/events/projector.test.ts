@@ -172,6 +172,28 @@ function errorEvent(message: string): ScorelEvent {
   };
 }
 
+function harnessItem(
+  id: string,
+  content: string,
+  visibility: "display" | "hidden" | "compact",
+): ScorelEvent {
+  return {
+    type: "harness_item",
+    id: asEventId(id),
+    parentId: null,
+    seq: asSeq(seq()),
+    sessionId: SESSION_ID,
+    clientId: CLIENT_ID,
+    ts: 0,
+    item: {
+      kind: "steer",
+      origin: "user",
+      content,
+      visibility,
+    },
+  };
+}
+
 describe("projector", () => {
   it("starts empty", () => {
     reset();
@@ -288,6 +310,24 @@ describe("projector", () => {
   it("error with no turns is silently ignored", () => {
     reset();
     const s = projectEvent(emptyProjectorState(), errorEvent("noop"));
+    expect(s.turns).toEqual([]);
+  });
+
+  it("projects visible harness items without making them user turns", () => {
+    reset();
+    const s = projectEvent(emptyProjectorState(), harnessItem("evt_harness", "keep tests focused", "display"));
+    expect(s.turns).toHaveLength(1);
+    expect(s.turns[0]).toEqual({
+      id: "evt_harness",
+      kind: "harness",
+      label: "Steer",
+      parts: [{ kind: "text", text: "keep tests focused" }],
+    });
+  });
+
+  it("hides hidden harness items from the normal transcript", () => {
+    reset();
+    const s = projectEvent(emptyProjectorState(), harnessItem("evt_harness", "secret", "hidden"));
     expect(s.turns).toEqual([]);
   });
 
