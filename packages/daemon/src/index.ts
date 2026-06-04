@@ -12,12 +12,18 @@ import {
   buildInstructionSnapshot,
   corePackageName,
   createCodingTools,
+  createSkillTool,
+  diffSkillIndex,
   createPiAiProvider,
   createSession,
+  hasSkillIndexDelta,
   loadScorelConfig,
   loadSession,
+  renderSkillDelta,
+  renderSkillListing,
   renderSystemPrompt,
   resolvePiAiModel,
+  scanSkillIndex,
   sessionLogFilePath,
   scorelSessionsDir,
   type ScorelConfig,
@@ -414,7 +420,9 @@ type PersistentEventInput =
   | Omit<Extract<PersistentEvent, { type: "tool_result" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "instruction_snapshot" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "harness_item" }>, "seq">
-  | Omit<Extract<PersistentEvent, { type: "queue_update" }>, "seq">;
+  | Omit<Extract<PersistentEvent, { type: "queue_update" }>, "seq">
+  | Omit<Extract<PersistentEvent, { type: "skill_index_snapshot" }>, "seq">
+  | Omit<Extract<PersistentEvent, { type: "skill_index_delta" }>, "seq">;
 
 type TransientEventInput =
   | Omit<Extract<TransientEvent, { type: "turn_start" }>, "seq">
@@ -702,7 +710,7 @@ export class ScorelHost {
       await this.#drainFollowUps(lane);
       await this.#runUserTurn(lane, connection.clientId, {
         content: normalizeContent(request.content),
-        parentId: request.options?.parentId ?? lane.session.activeLeafId,
+        parentId: request.options?.parentId,
         source: "user",
         onComplete: (result) => this.#respond(connection, request, result),
       });
@@ -717,7 +725,7 @@ export class ScorelHost {
     clientId: ClientId,
     input: {
       content: ScorelMessage["content"];
-      parentId: EventId | null;
+      parentId?: EventId | null;
       source: "user" | "follow_up";
       queueItemId?: string;
       onComplete?: (result: ClientRequestMap["send_message"]["response"]) => void;
@@ -730,11 +738,12 @@ export class ScorelHost {
       source: input.source,
     });
     const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, clientId);
+    await this.#syncSkillIndex(lane, clientId);
     const userEventId = asEventId(this.#createId());
     const userEvent = await this.#appendPersistent(lane, {
       type: "user_message",
       id: userEventId,
-      parentId: input.parentId,
+      parentId: input.parentId === undefined ? lane.session.activeLeafId : input.parentId,
       sessionId,
       clientId,
       ts: this.#now(),
@@ -1065,6 +1074,64 @@ export class ScorelHost {
     return snapshot;
   }
 
+  async #syncSkillIndex(lane: SessionLane, clientId: ClientId): Promise<void> {
+    const entries = await scanSkillIndex({ cwd: lane.project.workDir });
+    if (!lane.session.tree.controlState.skillIndexInitialized) {
+      await this.#appendPersistent(lane, {
+        type: "skill_index_snapshot",
+        id: asEventId(this.#createId()),
+        parentId: null,
+        sessionId: lane.session.header.sessionId,
+        clientId,
+        ts: this.#now(),
+        anchorEventId: lane.session.activeLeafId,
+        entries,
+      });
+      await this.#appendSkillHarness(lane, clientId, "skill_listing", renderSkillListing(entries));
+      return;
+    }
+
+    const delta = diffSkillIndex(lane.session.tree.controlState.skillIndex, entries);
+    if (!hasSkillIndexDelta(delta)) {
+      return;
+    }
+    await this.#appendPersistent(lane, {
+      type: "skill_index_delta",
+      id: asEventId(this.#createId()),
+      parentId: null,
+      sessionId: lane.session.header.sessionId,
+      clientId,
+      ts: this.#now(),
+      anchorEventId: lane.session.activeLeafId,
+      added: delta.added,
+      changed: delta.changed,
+      removed: delta.removed,
+    });
+    await this.#appendSkillHarness(lane, clientId, "skill_delta", renderSkillDelta(delta));
+  }
+
+  async #appendSkillHarness(
+    lane: SessionLane,
+    clientId: ClientId,
+    kind: "skill_listing" | "skill_delta",
+    content: string,
+  ): Promise<void> {
+    await this.#appendPersistent(lane, {
+      type: "harness_item",
+      id: asEventId(this.#createId()),
+      parentId: lane.session.activeLeafId,
+      sessionId: lane.session.header.sessionId,
+      clientId,
+      ts: this.#now(),
+      item: {
+        kind,
+        origin: "system",
+        content,
+        visibility: "hidden",
+      },
+    });
+  }
+
   #broadcastTransient(sessionId: SessionId, event: TransientEventInput): TransientEvent {
     const withSeq = { ...event, seq: this.#nextSeq(sessionId) } as TransientEvent;
     this.#recordAndBroadcast(sessionId, withSeq);
@@ -1190,6 +1257,7 @@ export class ScorelHost {
       queue: Promise.resolve(),
       followUpWaiters: new Map(),
     };
+    this.#registerLaneTools(lane);
     this.#sessions.set(sessionId, lane);
     this.#seqs.set(sessionId, Number(loaded.currentSeq));
     return lane;
@@ -1228,13 +1296,24 @@ export class ScorelHost {
       projectId: project.projectId,
       workDir: project.workDir,
     });
-    return {
+    const lane = {
       session,
       project,
       runtime,
       queue: Promise.resolve(),
       followUpWaiters: new Map(),
     };
+    this.#registerLaneTools(lane);
+    return lane;
+  }
+
+  #registerLaneTools(lane: SessionLane): void {
+    lane.runtime.registerTool(
+      createSkillTool({
+        getEntry: (name) => lane.session.tree.controlState.skillIndex[name],
+        listNames: () => Object.keys(lane.session.tree.controlState.skillIndex).sort(),
+      }),
+    );
   }
 
   #respond<TRequest extends ClientRequest>(

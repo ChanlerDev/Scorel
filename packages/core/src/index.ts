@@ -10,4 +10,5 @@ export * from "./instructions/index.js";
 export * from "./provider/pi-ai.js";
 export * from "./runtime/index.js";
 export * from "./session/index.js";
+export * from "./skills/index.js";
 export * from "./tools/index.js";

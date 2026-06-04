@@ -86,6 +86,10 @@ describe("@scorel/protocol", () => {
           return input.item.kind;
         case "queue_update":
           return input.queue;
+        case "skill_index_snapshot":
+          return String(input.entries.length);
+        case "skill_index_delta":
+          return String(input.added.length + input.changed.length + input.removed.length);
         case "turn_start":
           return "turn_start";
         case "turn_end":

@@ -117,6 +117,34 @@ export type QueueUpdateEvent = PersistentEventBase & {
   anchorEventId: EventId | null;
 };
 
+export type SkillIndexEntry = {
+  name: string;
+  path: string;
+  scope: "user" | "project";
+  description: string;
+  displayName?: string;
+  mtimeMs: number;
+  size: number;
+  contentHash: string;
+  priority: number;
+  shadowed?: boolean;
+  diagnostics?: string[];
+};
+
+export type SkillIndexSnapshotEvent = PersistentEventBase & {
+  type: "skill_index_snapshot";
+  anchorEventId: EventId | null;
+  entries: SkillIndexEntry[];
+};
+
+export type SkillIndexDeltaEvent = PersistentEventBase & {
+  type: "skill_index_delta";
+  anchorEventId: EventId | null;
+  added: SkillIndexEntry[];
+  changed: SkillIndexEntry[];
+  removed: { name: string; previousPath: string }[];
+};
+
 export type PersistentEvent =
   | SessionHeaderEvent
   | UserMessageEvent
@@ -124,7 +152,9 @@ export type PersistentEvent =
   | ToolResultEvent
   | InstructionSnapshotEvent
   | HarnessItemEvent
-  | QueueUpdateEvent;
+  | QueueUpdateEvent
+  | SkillIndexSnapshotEvent
+  | SkillIndexDeltaEvent;
 
 export type TransientEventBase = {
   seq: Seq;

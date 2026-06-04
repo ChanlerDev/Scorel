@@ -455,10 +455,10 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 | Step | Spec | Goal | Status |
 |---|---|---|---|
-| M7.1 | [`S0050`](spec/ship/S0050-instruction-snapshot-and-agents-assembly.md) | 冻结 session-scoped instruction snapshot，并把 AGENTS.md assembly 正式接入 runtime system prompt | Planned |
-| M7.2 | [`S0051`](spec/ship/S0051-harness-item-and-system-reminder.md) | 增加 harness item 与 `<system-reminder>` LM/display conversion，支持 steer 注入 | Planned |
-| M7.3 | [`S0052`](spec/ship/S0052-follow-up-queue-and-dual-loop.md) | 用 queue control event 实现 follow-up outer loop 与 steer inner loop | Planned |
-| M7.4 | [`S0053`](spec/ship/S0053-skill-index-and-skill-tool.md) | 建立 session-scoped Skill index，并暴露 Skill tool | Planned |
+| M7.1 | [`S0050`](spec/ship/S0050-instruction-snapshot-and-agents-assembly.md) | 冻结 session-scoped instruction snapshot，并把 AGENTS.md assembly 正式接入 runtime system prompt | Done |
+| M7.2 | [`S0051`](spec/ship/S0051-harness-item-and-system-reminder.md) | 增加 harness item 与 `<system-reminder>` LM/display conversion，支持 steer 注入 | Done |
+| M7.3 | [`S0052`](spec/ship/S0052-follow-up-queue-and-dual-loop.md) | 用 queue control event 实现 follow-up outer loop 与 steer inner loop | Done |
+| M7.4 | [`S0053`](spec/ship/S0053-skill-index-and-skill-tool.md) | 建立 session-scoped Skill index，并暴露 Skill tool | Done |
 
 **Candidate scope**:
 
@@ -468,7 +468,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - 用 append-only control events 表达 follow-up queue、Skill index 等 runtime state，避免 daemon-only memory 丢失状态。
 - Skill V1 只做显式 Skill tool 与 session-scoped index；不做自动 Skill 搜索/排序。
 
-**Status**: Planned
+**Status**: Done
 
 ---
 
@@ -587,10 +587,10 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0047`](spec/ship/S0047-webui-project-hover-newchat-and-dynamic-greeting.md) | Project 行 hover ✏ 新建会话按钮 + EmptyComposer H1 动态 project 名 | Done |
 | [`S0048`](spec/ship/S0048-device-level-host-project-registry.md) | Device-level Host、持久 Project Registry、project-aware Runtime | Done |
 | [`S0049`](spec/ship/S0049-webui-add-project-directory-browser.md) | WebUI 添加项目、Device 目录浏览、projectId 路由切换 | Done |
-| [`S0050`](spec/ship/S0050-instruction-snapshot-and-agents-assembly.md) | 冻结 instruction snapshot，并把 AGENTS.md assembly 接入 runtime system prompt | Planned |
-| [`S0051`](spec/ship/S0051-harness-item-and-system-reminder.md) | harness item 与 `<system-reminder>` LM/display conversion | Planned |
-| [`S0052`](spec/ship/S0052-follow-up-queue-and-dual-loop.md) | follow-up queue control events 与 outer/inner 双 loop | Planned |
-| [`S0053`](spec/ship/S0053-skill-index-and-skill-tool.md) | session-scoped Skill index 与 Skill tool | Planned |
+| [`S0050`](spec/ship/S0050-instruction-snapshot-and-agents-assembly.md) | 冻结 instruction snapshot，并把 AGENTS.md assembly 接入 runtime system prompt | Done |
+| [`S0051`](spec/ship/S0051-harness-item-and-system-reminder.md) | harness item 与 `<system-reminder>` LM/display conversion | Done |
+| [`S0052`](spec/ship/S0052-follow-up-queue-and-dual-loop.md) | follow-up queue control events 与 outer/inner 双 loop | Done |
+| [`S0053`](spec/ship/S0053-skill-index-and-skill-tool.md) | session-scoped Skill index 与 Skill tool | Done |
 
 ---
 

@@ -197,7 +197,12 @@ describe("ScorelHost + embedded transport", () => {
 
     const lines = (await readFile(join(sessionsDir, "ses_instruction.jsonl"), "utf8")).trim().split("\n");
     const events = lines.slice(1).map((line) => JSON.parse(line) as { type: string; snapshot?: unknown });
-    expect(events.map((event) => event.type).slice(0, 2)).toEqual(["instruction_snapshot", "user_message"]);
+    expect(events.map((event) => event.type).slice(0, 4)).toEqual([
+      "instruction_snapshot",
+      "skill_index_snapshot",
+      "harness_item",
+      "user_message",
+    ]);
     expect(providerTurns[0]?.systemPrompt).toContain("Always say repo-rule.");
     expect(providerTurns[0]?.systemPrompt).toContain("Workspace cwd:");
   });
@@ -268,6 +273,71 @@ describe("ScorelHost + embedded transport", () => {
     expect(events.some((event) => event.type === "queue_update")).toBe(true);
     expect(followUpUser?.parentId).toBe(firstAssistant?.id);
     expect(followUpUser?.message?.meta?.queueItemId).toEqual(expect.any(String));
+  });
+
+  it("syncs skill index before a user turn and registers the Skill tool", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-skills-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const repo = join(root, "repo");
+    await mkdir(join(repo, ".scorel", "skills", "verify"), { recursive: true });
+    await mkdir(sessionsDir);
+    await writeFile(join(repo, ".scorel", "skills", "verify", "SKILL.md"), "---\ndescription: verify repo\n---\nRun checks.");
+    const providerTurns: RuntimeProviderTurn[] = [];
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () =>
+        new ScorelRuntime({
+          provider: {
+            streamTurn: async function* (turn) {
+              providerTurns.push(turn);
+              return assistantMessage("ok");
+            },
+          },
+        }),
+      now: () => 1_000,
+    });
+    await host.start();
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_skills"),
+      meta: { projectId: project.projectId },
+    });
+    const response = waitForResponse(transport, "req_send");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send"),
+      sessionId: asSessionId("ses_skills"),
+      content: "hello",
+    });
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const events = (await readFile(join(sessionsDir, "ses_skills.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .slice(1)
+      .map((line) => JSON.parse(line) as { type: string; entries?: Array<{ name: string }>; item?: { kind: string } });
+    expect(events.map((event) => event.type).slice(0, 4)).toEqual([
+      "instruction_snapshot",
+      "skill_index_snapshot",
+      "harness_item",
+      "user_message",
+    ]);
+    expect(events.find((event) => event.type === "skill_index_snapshot")?.entries?.map((entry) => entry.name)).toEqual([
+      "verify",
+    ]);
+    expect(events.find((event) => event.type === "harness_item")?.item?.kind).toBe("skill_listing");
+    expect(providerTurns[0]?.context[0]?.content[0]).toEqual({
+      type: "text",
+      text: "<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n- verify: verify repo\n</system-reminder>",
+    });
+    expect(providerTurns[0]?.tools.map((tool) => tool.name)).toContain("Skill");
   });
 
   it("rejects creating a session for an unregistered project", async () => {

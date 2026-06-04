@@ -11,6 +11,7 @@ import {
   type QueueItem,
   type QueueName,
   type ScorelMessage,
+  type SkillIndexEntry,
   type ToolResultContentBlock,
   type Seq,
   type SessionId,
@@ -23,6 +24,8 @@ type ConversationPersistentEvent = MessagePersistentEvent | HarnessItemEvent;
 export type SessionControlState = {
   instructionSnapshot?: InstructionSnapshot;
   queues: Record<QueueName, QueueItem[]>;
+  skillIndexInitialized: boolean;
+  skillIndex: Record<string, SkillIndexEntry>;
 };
 
 export type SessionHeader = {
@@ -82,6 +85,8 @@ export class SessionTree implements Iterable<PersistentEvent> {
       follow_up: [],
       steer: [],
     },
+    skillIndexInitialized: false,
+    skillIndex: {},
   };
 
   get rootId(): EventId | null {
@@ -206,6 +211,22 @@ export class SessionTree implements Iterable<PersistentEvent> {
       this.controlState.instructionSnapshot = event.snapshot;
     } else if (event.type === "queue_update") {
       this.controlState.queues[event.queue] = [...event.items];
+    } else if (event.type === "skill_index_snapshot") {
+      this.controlState.skillIndexInitialized = true;
+      this.controlState.skillIndex = Object.fromEntries(event.entries.map((entry) => [entry.name, entry]));
+    } else if (event.type === "skill_index_delta") {
+      this.controlState.skillIndexInitialized = true;
+      const next = { ...this.controlState.skillIndex };
+      for (const entry of event.added) {
+        next[entry.name] = entry;
+      }
+      for (const entry of event.changed) {
+        next[entry.name] = entry;
+      }
+      for (const removed of event.removed) {
+        delete next[removed.name];
+      }
+      this.controlState.skillIndex = next;
     }
   }
 }
@@ -369,7 +390,9 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
     value.type !== "tool_result" &&
     value.type !== "instruction_snapshot" &&
     value.type !== "harness_item" &&
-    value.type !== "queue_update"
+    value.type !== "queue_update" &&
+    value.type !== "skill_index_snapshot" &&
+    value.type !== "skill_index_delta"
   ) {
     throw new SessionStoreError("invalid_event", "Unsupported session event type");
   }
@@ -396,6 +419,12 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
   }
   if (value.type === "queue_update" && !isQueueUpdate(value)) {
     throw new SessionStoreError("invalid_event", "queue_update is missing queue payload");
+  }
+  if (value.type === "skill_index_snapshot" && !isSkillIndexSnapshot(value)) {
+    throw new SessionStoreError("invalid_event", "skill_index_snapshot is missing entries");
+  }
+  if (value.type === "skill_index_delta" && !isSkillIndexDelta(value)) {
+    throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
   }
 }
 
@@ -439,6 +468,33 @@ const isQueueUpdate = (value: Record<string, unknown>): boolean =>
       typeof item.updatedAt === "number" &&
       typeof item.clientId === "string",
   );
+
+const isSkillIndexSnapshot = (value: Record<string, unknown>): boolean =>
+  (value.anchorEventId === null || typeof value.anchorEventId === "string") &&
+  Array.isArray(value.entries) &&
+  value.entries.every(isSkillIndexEntry);
+
+const isSkillIndexDelta = (value: Record<string, unknown>): boolean =>
+  (value.anchorEventId === null || typeof value.anchorEventId === "string") &&
+  Array.isArray(value.added) &&
+  Array.isArray(value.changed) &&
+  Array.isArray(value.removed) &&
+  value.added.every(isSkillIndexEntry) &&
+  value.changed.every(isSkillIndexEntry) &&
+  value.removed.every(
+    (item) => isRecord(item) && typeof item.name === "string" && typeof item.previousPath === "string",
+  );
+
+const isSkillIndexEntry = (value: unknown): value is SkillIndexEntry =>
+  isRecord(value) &&
+  typeof value.name === "string" &&
+  typeof value.path === "string" &&
+  (value.scope === "user" || value.scope === "project") &&
+  typeof value.description === "string" &&
+  typeof value.mtimeMs === "number" &&
+  typeof value.size === "number" &&
+  typeof value.contentHash === "string" &&
+  typeof value.priority === "number";
 
 const appendHarnessItemToContext = (messages: ScorelMessage[], event: HarnessItemEvent): void => {
   const reminder = renderSystemReminder(event.item.content);

@@ -316,6 +316,67 @@ describe("session core", () => {
     expect(loaded.tree.getPath(asEventId("evt_2"))).toEqual(["evt_1", "evt_2"]);
   });
 
+  it("replays skill index snapshot and delta into session control state", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+    const verifyEntry = {
+      name: "verify",
+      path: "/repo/.scorel/skills/verify/SKILL.md",
+      scope: "project" as const,
+      description: "Run checks",
+      mtimeMs: 1,
+      size: 10,
+      contentHash: "hash1",
+      priority: 100,
+    };
+    const commitEntry = {
+      ...verifyEntry,
+      name: "commit",
+      path: "/repo/.scorel/skills/commit/SKILL.md",
+      description: "Commit changes",
+      contentHash: "hash2",
+    };
+
+    await session.append({
+      type: "skill_index_snapshot",
+      id: asEventId("evt_skills_1"),
+      parentId: null,
+      seq: asSeq(1),
+      sessionId,
+      clientId,
+      ts: 1_001,
+      anchorEventId: null,
+      entries: [verifyEntry],
+    });
+    await session.append({
+      type: "skill_index_delta",
+      id: asEventId("evt_skills_2"),
+      parentId: null,
+      seq: asSeq(2),
+      sessionId,
+      clientId,
+      ts: 1_002,
+      anchorEventId: null,
+      added: [commitEntry],
+      changed: [],
+      removed: [{ name: "verify", previousPath: verifyEntry.path }],
+    });
+
+    expect(Object.keys(session.tree.controlState.skillIndex).sort()).toEqual(["commit"]);
+    const loaded = await loadSession({ sessionsDir, sessionId });
+    expect(loaded.tree.controlState.skillIndexInitialized).toBe(true);
+    expect(Object.keys(loaded.tree.controlState.skillIndex)).toEqual(["commit"]);
+  });
+
   it("tracks branch leaves and builds context for the selected leaf", async () => {
     const sessionsDir = await tempRoot();
     const session = await createSession({

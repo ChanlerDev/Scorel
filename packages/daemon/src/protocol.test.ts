@@ -262,8 +262,8 @@ describe("daemon protocol boundary", () => {
       type: "resync_events",
       requestId: asRequestId("req_resync"),
       sessionId: asSessionId("ses_resync"),
-      persistentLastSeq: asSeq(2),
-      streamLastSeq: asSeq(2),
+      persistentLastSeq: asSeq(4),
+      streamLastSeq: asSeq(4),
     });
 
     expect(response(messages, "req_resync")).toMatchObject({

@@ -240,6 +240,11 @@ const toolParameters = (name: string): Tool["parameters"] => {
           }),
         ),
       });
+    case "Skill":
+      return Type.Object({
+        name: Type.String(),
+        args: Type.Optional(Type.String()),
+      });
     default:
       return Type.Object({});
   }
