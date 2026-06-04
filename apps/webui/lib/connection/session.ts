@@ -62,7 +62,9 @@ export type SessionError =
  *   stop()   — unsubscribe (the underlying client connection is pool-managed).
  *   send()   — call client.sendMessage; insert an optimistic local user turn
  *              keyed by a placeholder id that is replaced when the daemon
- *              echoes the persistent user_message back.
+ *              echoes the persistent user_message back. The send promise
+ *              resolves from the matching persistent user_message/queue_update,
+ *              not from a request-level accepted acknowledgement.
  *   cancel() — best-effort dispatch of `client.cancel()`; sets
  *              `cancelling=true` until the next `turn_end` (or daemon error)
  *              so the composer can render an optimistic "Cancelling…" state.
@@ -121,6 +123,13 @@ function nextPendingId(): string {
   return `${PENDING_USER_PREFIX}${Date.now().toString(36)}_${pendingCounter}`;
 }
 
+type PendingSendAcceptance = {
+  content: string;
+  runningBehavior?: NonNullable<SendMessageOptions["runningBehavior"]>;
+  resolve: () => void;
+  reject: (cause: unknown) => void;
+};
+
 export function createSessionAttachController(
   opts: SessionAttachOptions,
 ): SessionAttachController {
@@ -135,6 +144,7 @@ export function createSessionAttachController(
   let cancelling = false;
   let persistentLastSeq = 0;
   let streamLastSeq = 0;
+  let pendingAcceptances: PendingSendAcceptance[] = [];
   // Until `start()` returns we suppress the live-subscribe handler from
   // emitting (resync's dispatched events will pass through here, but we
   // want a single batched emit at the end of start() rather than one per
@@ -245,6 +255,43 @@ export function createSessionAttachController(
     }
   }
 
+  function waitForPersistentAcceptance(
+    content: string,
+    runningBehavior?: SendMessageOptions["runningBehavior"],
+  ): {
+    pending: PendingSendAcceptance;
+    promise: Promise<void>;
+  } {
+    let pending!: PendingSendAcceptance;
+    const promise = new Promise<void>((resolve, reject) => {
+      pending = {
+        content,
+        ...(runningBehavior ? { runningBehavior } : {}),
+        resolve,
+        reject,
+      };
+      pendingAcceptances = [...pendingAcceptances, pending];
+    });
+    return { pending, promise };
+  }
+
+  function settlePendingAcceptance(pending: PendingSendAcceptance, cause?: unknown): void {
+    if (!pendingAcceptances.includes(pending)) return;
+    pendingAcceptances = pendingAcceptances.filter((candidate) => candidate !== pending);
+    if (cause) {
+      pending.reject(cause);
+      return;
+    }
+    pending.resolve();
+  }
+
+  function resolveAcceptedSends(event: ScorelEvent): void {
+    const accepted = pendingAcceptances.filter((pending) => isAcceptedByEvent(event, pending, String(client.clientId)));
+    for (const pending of accepted) {
+      settlePendingAcceptance(pending);
+    }
+  }
+
   // Coalesce text_delta snapshots into one emit per animation frame. Other
   // event kinds (turn_*, message_*, persistent assistant_message, errors)
   // flush synchronously and cancel any pending frame so the final state
@@ -260,6 +307,7 @@ export function createSessionAttachController(
     persistEvent(event);
     trackInFlight(event);
     trackSeq(event);
+    resolveAcceptedSends(event);
     if (initializing) return;
     if (event.type === "text_delta") {
       deltaBatcher.schedule();
@@ -346,6 +394,10 @@ export function createSessionAttachController(
   function stop(): void {
     stopped = true;
     deltaBatcher.cancel();
+    for (const pending of pendingAcceptances) {
+      pending.reject(new Error("Session attach stopped before send acceptance"));
+    }
+    pendingAcceptances = [];
     unsubscribe?.();
     unsubscribe = undefined;
   }
@@ -360,11 +412,14 @@ export function createSessionAttachController(
       state = appendPendingUserTurn(state, { id: placeholderId, text: content });
       emit(false);
     }
+    const acceptance = waitForPersistentAcceptance(content, options?.runningBehavior);
     try {
-      await client.sendMessage(content, {
-        ack: "accepted",
+      void client.sendMessage(content, {
         runningBehavior: options?.runningBehavior,
+      }).catch((cause) => {
+        settlePendingAcceptance(acceptance.pending, cause);
       });
+      await acceptance.promise;
     } catch (cause) {
       // Drop the placeholder on failure and surface the error.
       state = {
@@ -396,6 +451,37 @@ export function createSessionAttachController(
   }
 
   return { start, stop, send, cancel };
+}
+
+function isAcceptedByEvent(
+  event: ScorelEvent,
+  pending: PendingSendAcceptance,
+  clientId: string,
+): boolean {
+  if (pending.runningBehavior) {
+    return (
+      event.type === "queue_update" &&
+      event.queue === pending.runningBehavior &&
+      String(event.clientId) === clientId &&
+      event.items.some(
+        (item) =>
+          String(item.clientId) === clientId &&
+          textFromContent(item.content) === pending.content,
+      )
+    );
+  }
+  return (
+    event.type === "user_message" &&
+    String(event.clientId) === clientId &&
+    textFromContent(event.message.content) === pending.content
+  );
+}
+
+function textFromContent(content: Array<{ type: string; text?: string }>): string {
+  return content
+    .filter((block): block is { type: "text"; text: string } => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
 }
 
 function highestSeq(events: PersistentEvent[]): Seq {

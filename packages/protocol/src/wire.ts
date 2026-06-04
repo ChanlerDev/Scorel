@@ -15,12 +15,11 @@ import type { ContentBlock } from "./messages.js";
 
 export type SendMessageOptions = {
   parentId?: EventId | null;
-  ack?: "accepted" | "completed";
   runningBehavior?: QueueName;
 };
 
 export type SendMessageResponse = {
-  status: "accepted" | "completed" | "queued";
+  status: "completed" | "queued";
   userEventId?: EventId;
   assistantEventId?: EventId;
   queue?: QueueName;

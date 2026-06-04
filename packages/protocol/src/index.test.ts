@@ -37,13 +37,12 @@ describe("@scorel/protocol", () => {
       sessionId: asSessionId("ses_1"),
       content: "hello",
       options: {
-        ack: "accepted",
         runningBehavior: "follow_up",
       },
     } satisfies ClientRequest<"send_message">;
 
     const response = okResponse(request, {
-      status: "accepted",
+      status: "completed",
       userEventId: asEventId("evt_user"),
       assistantEventId: asEventId("evt_assistant"),
     }) satisfies ResponseFor<typeof request>;

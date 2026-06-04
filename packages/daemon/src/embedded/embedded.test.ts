@@ -275,7 +275,7 @@ describe("ScorelHost + embedded transport", () => {
     expect(followUpUser?.message?.meta?.queueItemId).toEqual(expect.any(String));
   });
 
-  it("can acknowledge an idle send after the daemon accepts the user message", async () => {
+  it("broadcasts a durable user_message before completing an idle send request", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-accepted-"));
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
@@ -314,23 +314,29 @@ describe("ScorelHost + embedded transport", () => {
       requestId: asRequestId("req_send"),
       sessionId: asSessionId("ses_accepted"),
       content: "first",
-      options: { ack: "accepted" },
     });
 
-    await expect(response).resolves.toMatchObject({
-      type: "response",
-      requestType: "send_message",
-      data: { status: "accepted", userEventId: expect.any(String), assistantEventId: expect.any(String) },
-    });
-    const eventsBeforeRelease = (await readFile(join(sessionsDir, "ses_accepted.jsonl"), "utf8"))
-      .trim()
-      .split("\n")
-      .slice(1)
-      .map((line) => JSON.parse(line) as { type: string });
+    let eventsBeforeRelease: Array<{ type: string }> = [];
+    for (let i = 0; i < 50; i += 1) {
+      eventsBeforeRelease = (await readFile(join(sessionsDir, "ses_accepted.jsonl"), "utf8"))
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { type: string });
+      if (eventsBeforeRelease.some((event) => event.type === "user_message")) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
     expect(eventsBeforeRelease.some((event) => event.type === "user_message")).toBe(true);
     expect(eventsBeforeRelease.some((event) => event.type === "assistant_message")).toBe(false);
 
     release.resolve();
+    await expect(response).resolves.toMatchObject({
+      type: "response",
+      requestType: "send_message",
+      data: { status: "completed", userEventId: expect.any(String), assistantEventId: expect.any(String) },
+    });
     for (let i = 0; i < 50; i += 1) {
       const text = await readFile(join(sessionsDir, "ses_accepted.jsonl"), "utf8");
       if (text.includes("\"assistant_message\"")) {
@@ -389,7 +395,7 @@ describe("ScorelHost + embedded transport", () => {
       requestId: asRequestId("req_steer"),
       sessionId: asSessionId("ses_steer"),
       content: "guide current run",
-      options: { ack: "accepted", runningBehavior: "steer" },
+      options: { runningBehavior: "steer" },
     });
 
     await expect(steerResponse).resolves.toMatchObject({

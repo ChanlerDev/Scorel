@@ -54,6 +54,7 @@ type ResyncResponse = {
 };
 
 class FakeDaemonClient {
+  clientId = CLIENT_ID;
   sessionId: SessionId | null = null;
   connectCalls = 0;
   resyncCalls: Array<{ persistentLastSeq?: Seq; streamLastSeq?: Seq }> = [];
@@ -120,7 +121,7 @@ class FakeDaemonClient {
     this.sentMessages.push(content);
     this.sentMessageOptions.push(options);
     return {
-      status: "accepted",
+      status: "completed",
       userEventId: asEventId("evt_user_1"),
       assistantEventId: asEventId("evt_a_1"),
     };
@@ -148,6 +149,35 @@ function userMessage(id: string, seq: number, text: string): PersistentEvent {
     clientId: CLIENT_ID,
     ts: 0,
     message: { role: "user", content: [{ type: "text", text }] as ContentBlock[] },
+  };
+}
+
+function queueUpdate(
+  id: string,
+  seq: number,
+  queue: "follow_up" | "steer",
+  text: string,
+): PersistentEvent {
+  return {
+    type: "queue_update",
+    id: asEventId(id),
+    parentId: null,
+    seq: asSeq(seq),
+    sessionId: SESSION_ID,
+    clientId: CLIENT_ID,
+    ts: 0,
+    queue,
+    operation: "rewrite",
+    anchorEventId: null,
+    items: [
+      {
+        id: "item_1",
+        content: [{ type: "text", text }] as ContentBlock[],
+        createdAt: 0,
+        updatedAt: 0,
+        clientId: CLIENT_ID,
+      },
+    ],
   };
 }
 
@@ -328,7 +358,7 @@ describe("createSessionAttachController", () => {
     });
     await controller.start();
     snapshots.length = 0;
-    await controller.send("hello there");
+    const sendPromise = controller.send("hello there");
     // Right after send: optimistic turn is present and pending.
     const optimistic = snapshots.at(-1)!;
     const optimisticTurn = optimistic.state.turns[0]!;
@@ -339,6 +369,7 @@ describe("createSessionAttachController", () => {
     for (const sub of fake.subscribers) {
       sub(userMessage("evt_u_1", 1, "hello there"));
     }
+    await sendPromise;
     const final = snapshots.at(-1)!;
     expect(final.state.turns).toHaveLength(1);
     expect(final.state.turns[0]?.id).toBe("evt_u_1");
@@ -360,13 +391,17 @@ describe("createSessionAttachController", () => {
     for (const sub of fake.subscribers) sub(turnStart(5));
     snapshots.length = 0;
 
-    await controller.send("guide current run", { runningBehavior: "steer" });
+    const sendPromise = controller.send("guide current run", { runningBehavior: "steer" });
 
     expect(fake.sentMessages).toEqual(["guide current run"]);
     expect(fake.sentMessageOptions).toEqual([
-      { ack: "accepted", runningBehavior: "steer" },
+      { runningBehavior: "steer" },
     ]);
     expect(snapshots).toHaveLength(0);
+    for (const sub of fake.subscribers) {
+      sub(queueUpdate("evt_q_1", 6, "steer", "guide current run"));
+    }
+    await sendPromise;
   });
 
   it("send: empty/whitespace input is ignored", async () => {
