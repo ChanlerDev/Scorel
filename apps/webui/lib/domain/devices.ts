@@ -3,12 +3,30 @@ export type Device = {
   name: string;
   link: string;
   token: string;
+  connectors?: DeviceConnector[];
   createdAt: number;
   lastConnectedAt?: number;
   remoteIdentity?: { deviceId: string; deviceDisplayName?: string };
   projects?: DeviceProject[];
   projectsFetchedAt?: number;
 };
+
+export type DirectWsConnector = {
+  id: string;
+  kind: "direct_ws";
+  url: string;
+  token: string;
+};
+
+export type RelayConnector = {
+  id: string;
+  kind: "relay";
+  relayUrl: string;
+  deviceId: string;
+  clientId: string;
+};
+
+export type DeviceConnector = DirectWsConnector | RelayConnector;
 
 export type DeviceProject = {
   projectId: string;

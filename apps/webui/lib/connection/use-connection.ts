@@ -8,6 +8,7 @@ import { syncSessions } from "../sync/sessions";
 import {
   __setSharedDevicesStoreForTests,
   getSharedDevicesStore,
+  getSharedClientIdentityStore,
   type DevicesStore,
 } from "../store";
 import { ConnectionPool, type ManagedConnection } from "./pool";
@@ -78,7 +79,9 @@ function setProjectsSyncError(deviceId: string, message: string | undefined): vo
 
 function getPool(): ConnectionPool {
   if (_pool === null) {
-    _pool = new ConnectionPool();
+    _pool = new ConnectionPool({
+      createClientId: () => String(getSharedClientIdentityStore().getOrCreate()),
+    });
   }
   return _pool;
 }
@@ -117,6 +120,7 @@ export function useConnection(device: Device): UseConnectionResult {
   const pool = getPool();
   const store = getDevicesStore();
   const [managed, setManaged] = useState<ManagedConnection | null>(null);
+  const connectorKey = JSON.stringify(device.connectors ?? []);
 
   useEffect(() => {
     const managedConn = pool.acquire(device, (identity: ConnectionIdentity) => {
@@ -179,7 +183,7 @@ export function useConnection(device: Device): UseConnectionResult {
       pool.release(device.id);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [device.id, device.link, device.token]);
+  }, [device.id, device.link, device.token, connectorKey]);
 
   const state = useSyncExternalStore(
     (listener) => pool.subscribe(device.id, listener),

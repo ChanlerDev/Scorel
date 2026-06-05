@@ -45,6 +45,9 @@ describe("DevicesStore", () => {
     });
     expect(d.id).toBeTruthy();
     expect(d.createdAt).toBeTypeOf("number");
+    expect(d.connectors).toEqual([
+      { id: "direct:wss://localhost:9876", kind: "direct_ws", url: "wss://localhost:9876", token: "abc" },
+    ]);
     expect(devices.list()).toHaveLength(1);
     expect(devices.list()[0]).toEqual(d);
     expect(devices.get(d.id)).toEqual(d);
@@ -119,6 +122,51 @@ describe("DevicesStore", () => {
     expect(updated?.name).toBe("B");
     expect(updated?.link).toBe("ws://other");
     expect(updated?.token).toBe("tok2");
+    expect(updated?.connectors?.[0]).toEqual({
+      id: "direct:ws://other",
+      kind: "direct_ws",
+      url: "ws://other",
+      token: "tok2",
+    });
+  });
+
+  it("adds a Relay connector and creates a relay-backed Device", () => {
+    const { devices } = freshStore();
+    const created = devices.addRelayConnector({
+      name: "Laptop",
+      relayUrl: "ws://relay.test",
+      deviceId: "device_laptop",
+      clientId: "client_web",
+    });
+
+    expect(created).toMatchObject({
+      name: "Laptop",
+      remoteIdentity: { deviceId: "device_laptop" },
+      connectors: [
+        {
+          kind: "relay",
+          relayUrl: "ws://relay.test",
+          deviceId: "device_laptop",
+          clientId: "client_web",
+        },
+      ],
+    });
+  });
+
+  it("merges Relay connector into an existing Device with the same remoteIdentity.deviceId", () => {
+    const { devices } = freshStore();
+    const direct = devices.create({ name: "Direct", link: "ws://host", token: "tok" });
+    devices.markIdentity(direct.id, { deviceId: "device_laptop", deviceDisplayName: "Laptop" });
+
+    const merged = devices.addRelayConnector({
+      relayUrl: "ws://relay.test",
+      deviceId: "device_laptop",
+      clientId: "client_web",
+    });
+
+    expect(merged.id).toBe(direct.id);
+    expect(devices.list()).toHaveLength(1);
+    expect(merged.connectors?.map((connector) => connector.kind)).toEqual(["direct_ws", "relay"]);
   });
 
   it("update returns undefined for missing id", () => {

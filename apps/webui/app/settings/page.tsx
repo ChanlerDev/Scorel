@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { DeviceForm } from "../../components/settings/device-form";
 import { DeviceList } from "../../components/settings/device-list";
+import { RelayPairingPanel } from "../../components/settings/relay-pairing-panel";
 import { useRunningBehavior } from "../../lib/store/use-running-behavior";
 import type { RunningMessageBehavior } from "../../lib/store/running-behavior";
 import { useDevices } from "../../lib/store/use-devices";
@@ -57,6 +58,7 @@ export default function SettingsPage() {
       ) : null}
 
       <DeviceList />
+      <RelayPairingPanel store={store} />
 
       <section className="space-y-3 border-t border-subtle pt-6">
         <div>

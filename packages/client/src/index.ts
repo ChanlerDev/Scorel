@@ -35,6 +35,7 @@ export const clientPackageName = "@scorel/client" as const;
 export const clientProtocolDependency = protocolPackageName;
 export const clientProtocolVersion = protocolVersion;
 export type ClientDaemonTransport = DaemonTransport;
+export { RelayTransport, type RelayTransportOptions } from "./relay-transport.js";
 
 /**
  * Public marker error for "the underlying transport tried to write while not

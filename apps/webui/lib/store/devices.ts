@@ -2,7 +2,9 @@ import { BrowserStore } from "./browser-store";
 import { normalizeLink } from "../domain/link";
 import type {
   Device,
+  DeviceConnector,
   DeviceProject,
+  RelayConnector,
   DeviceSessionSummary,
 } from "../domain/devices";
 
@@ -20,6 +22,13 @@ export type CreateDeviceInput = {
 };
 
 export type UpdateDevicePatch = Partial<Omit<Device, "id" | "createdAt">>;
+
+export type AddRelayConnectorInput = {
+  name?: string;
+  relayUrl: string;
+  deviceId: string;
+  clientId: string;
+};
 
 function validateName(name: unknown): string {
   if (typeof name !== "string") throw new Error("invalid name");
@@ -58,7 +67,7 @@ export class DevicesStore {
   list(): Device[] {
     if (this.#snapshot === null) {
       const raw = this.#store.get<Device[]>(DEVICES_KEY) ?? [];
-      this.#snapshot = Array.isArray(raw) ? raw : [];
+      this.#snapshot = Array.isArray(raw) ? raw.map(normalizeStoredDevice) : [];
     }
     return this.#snapshot;
   }
@@ -81,6 +90,7 @@ export class DevicesStore {
       name,
       link,
       token,
+      connectors: [directConnector(link, token)],
       createdAt: Date.now(),
     };
     const next = [...this.list(), device];
@@ -98,6 +108,10 @@ export class DevicesStore {
     if (patch.name !== undefined) next.name = validateName(patch.name);
     if (patch.link !== undefined) next.link = validateLinkOrThrow(patch.link);
     if (patch.token !== undefined) next.token = validateToken(patch.token);
+    if (patch.link !== undefined || patch.token !== undefined) {
+      next.connectors = upsertDirectConnector(next.connectors ?? [], next.link, next.token);
+    }
+    if (patch.connectors !== undefined) next.connectors = patch.connectors;
     if (patch.lastConnectedAt !== undefined) next.lastConnectedAt = patch.lastConnectedAt;
     if (patch.remoteIdentity !== undefined) next.remoteIdentity = patch.remoteIdentity;
     if (patch.projects !== undefined) next.projects = patch.projects;
@@ -130,6 +144,42 @@ export class DevicesStore {
       merged.deviceDisplayName = remoteIdentity.deviceDisplayName;
     }
     return this.update(id, { remoteIdentity: merged });
+  }
+
+  addRelayConnector(input: AddRelayConnectorInput): Device {
+    const relayConnector: RelayConnector = {
+      id: `relay:${input.relayUrl}:${input.deviceId}`,
+      kind: "relay",
+      relayUrl: input.relayUrl,
+      deviceId: input.deviceId,
+      clientId: input.clientId,
+    };
+    const existing = this.list().find((device) =>
+      device.remoteIdentity?.deviceId === input.deviceId ||
+      (device.connectors ?? []).some((connector) => connector.kind === "relay" && connector.deviceId === input.deviceId),
+    );
+    if (existing) {
+      const connectors = upsertRelayConnector(existing.connectors ?? [], relayConnector);
+      return this.update(existing.id, {
+        connectors,
+        remoteIdentity: {
+          deviceId: input.deviceId,
+          deviceDisplayName: existing.remoteIdentity?.deviceDisplayName,
+        },
+      }) as Device;
+    }
+    const now = Date.now();
+    const device: Device = {
+      id: typeof globalThis.crypto?.randomUUID === "function" ? globalThis.crypto.randomUUID() : fallbackId(),
+      name: validateName(input.name ?? input.deviceId),
+      link: input.relayUrl,
+      token: "",
+      connectors: [relayConnector],
+      remoteIdentity: { deviceId: input.deviceId },
+      createdAt: now,
+    };
+    this.#commit([...this.list(), device]);
+    return device;
   }
 
   markConnectedAt(id: string, ts: number): Device | undefined {
@@ -211,4 +261,34 @@ function fallbackId(): string {
   const rand = Math.random().toString(16).slice(2, 10);
   const time = Date.now().toString(16);
   return `${time}-${rand}`;
+}
+
+function directConnector(url: string, token: string): DeviceConnector {
+  return {
+    id: `direct:${url}`,
+    kind: "direct_ws",
+    url,
+    token,
+  };
+}
+
+function normalizeStoredDevice(device: Device): Device {
+  const connectors = device.connectors && device.connectors.length > 0
+    ? device.connectors
+    : device.link && device.token
+      ? [directConnector(device.link, device.token)]
+      : [];
+  return { ...device, connectors };
+}
+
+function upsertDirectConnector(connectors: DeviceConnector[], url: string, token: string): DeviceConnector[] {
+  const direct = directConnector(url, token);
+  const withoutDirect = connectors.filter((connector) => connector.kind !== "direct_ws");
+  return [direct, ...withoutDirect];
+}
+
+function upsertRelayConnector(connectors: DeviceConnector[], relay: RelayConnector): DeviceConnector[] {
+  const next = connectors.filter((connector) => !(connector.kind === "relay" && connector.deviceId === relay.deviceId));
+  next.push(relay);
+  return next;
 }

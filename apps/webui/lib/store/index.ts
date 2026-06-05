@@ -1,12 +1,14 @@
 import { AttachCache } from "./attach-cache";
 import { BrowserStore } from "./browser-store";
 import { DevicesStore } from "./devices";
+import { WebUiClientIdentityStore } from "./client-identity";
 import { RunningBehaviorStore } from "./running-behavior";
 
 export { BrowserStore } from "./browser-store";
 export type { StorageLike, BrowserStoreOptions } from "./browser-store";
 export { DevicesStore, DEVICES_KEY } from "./devices";
-export type { CreateDeviceInput, UpdateDevicePatch } from "./devices";
+export { WebUiClientIdentityStore, WEBUI_CLIENT_ID_KEY } from "./client-identity";
+export type { AddRelayConnectorInput, CreateDeviceInput, UpdateDevicePatch } from "./devices";
 export {
   DEFAULT_RUNNING_BEHAVIOR,
   RUNNING_BEHAVIOR_KEY,
@@ -95,6 +97,7 @@ export function __setSharedAttachCacheForTests(cache: AttachCache): void {
 }
 
 let _sharedRunningBehaviorStore: RunningBehaviorStore | null = null;
+let _sharedClientIdentityStore: WebUiClientIdentityStore | null = null;
 
 export function getSharedRunningBehaviorStore(): RunningBehaviorStore {
   if (_sharedRunningBehaviorStore === null) {
@@ -114,4 +117,24 @@ export function __resetSharedRunningBehaviorStoreForTests(): void {
 
 export function __setSharedRunningBehaviorStoreForTests(store: RunningBehaviorStore): void {
   _sharedRunningBehaviorStore = store;
+}
+
+export function getSharedClientIdentityStore(): WebUiClientIdentityStore {
+  if (_sharedClientIdentityStore === null) {
+    _sharedClientIdentityStore = new WebUiClientIdentityStore(
+      new BrowserStore({
+        storage: typeof window === "undefined" ? null : window.localStorage,
+        onQuotaExceeded: quotaLogger,
+      }),
+    );
+  }
+  return _sharedClientIdentityStore;
+}
+
+export function __resetSharedClientIdentityStoreForTests(): void {
+  _sharedClientIdentityStore = null;
+}
+
+export function __setSharedClientIdentityStoreForTests(store: WebUiClientIdentityStore): void {
+  _sharedClientIdentityStore = store;
 }

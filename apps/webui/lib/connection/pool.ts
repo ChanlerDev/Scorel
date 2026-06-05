@@ -14,11 +14,11 @@
 //
 // Out of scope (S0036+): list_projects, list_sessions, session attach.
 
-import { DaemonClient, WsTransport } from "@scorel/client";
+import { DaemonClient, RelayTransport, WsTransport } from "@scorel/client";
 import type { DaemonTransport } from "@scorel/protocol";
 import { asClientId } from "@scorel/protocol";
 
-import type { Device } from "../domain/devices";
+import type { Device, DeviceConnector } from "../domain/devices";
 import { categorize } from "./error";
 import {
   IDLE,
@@ -42,6 +42,7 @@ export type ManagedConnection = {
 
 export type ConnectionPoolOptions = {
   createTransport?: (link: string, token: string) => DaemonTransport;
+  createRelayTransport?: (relayUrl: string, deviceId: string, clientId: string) => DaemonTransport;
   backoffMs?: (attempt: number) => number;
   idleReleaseMs?: number;
   /** Test seam for deterministic clientIds. */
@@ -71,6 +72,8 @@ export const DEFAULT_IDLE_RELEASE_MS = 60_000;
 
 type Entry = {
   device: Device;
+  connectors: DeviceConnector[];
+  connectorIndex: number;
   client: DaemonClient;
   state: ConnectionState;
   refCount: number;
@@ -93,6 +96,7 @@ function nextId(prefix: string): string {
 export class ConnectionPool {
   readonly #entries = new Map<string, Entry>();
   readonly #createTransport: (link: string, token: string) => DaemonTransport;
+  readonly #createRelayTransport: (relayUrl: string, deviceId: string, clientId: string) => DaemonTransport;
   readonly #backoffMs: (attempt: number) => number;
   readonly #idleReleaseMs: number;
   readonly #createClientId: (deviceId: string) => string;
@@ -104,6 +108,14 @@ export class ConnectionPool {
     this.#createTransport =
       opts.createTransport ??
       ((link, token) => new WsTransport({ url: link, token }) as DaemonTransport);
+    this.#createRelayTransport =
+      opts.createRelayTransport ??
+      ((relayUrl, deviceId, clientId) =>
+        new RelayTransport({
+          relayUrl,
+          deviceId: deviceId as never,
+          clientId: asClientId(clientId),
+        }) as DaemonTransport);
     this.#backoffMs = opts.backoffMs ?? DEFAULT_BACKOFF_MS;
     this.#idleReleaseMs = opts.idleReleaseMs ?? DEFAULT_IDLE_RELEASE_MS;
     this.#createClientId = opts.createClientId ?? ((_deviceId) => nextId("webui"));
@@ -212,12 +224,21 @@ export class ConnectionPool {
   // --- internals ---------------------------------------------------------
 
   #createEntry(device: Device): Entry {
-    const transport = this.#createTransport(device.link, device.token);
+    const connectors = connectionCandidates(device);
+    if (connectors.length === 0) {
+      throw new Error("ConnectionPool: device has no connectors");
+    }
+    const connectorIndex = 0;
+    const connector = connectors[connectorIndex] as DeviceConnector;
+    const clientId = this.#clientIdFor(device, connector);
+    const transport = this.#transportFor(connector);
     const client = new DaemonClient(transport, {
-      clientId: asClientId(this.#createClientId(device.id)),
+      clientId: asClientId(clientId),
     });
     return {
       device,
+      connectors,
+      connectorIndex,
       client,
       state: IDLE,
       refCount: 0,
@@ -295,6 +316,10 @@ export class ConnectionPool {
         }
       }
     } catch (err) {
+      if (this.#tryFallbackConnector(entry)) {
+        await this.#runConnect(entry);
+        return;
+      }
       const message = err instanceof Error ? err.message : String(err);
       const categorized = categorize({ message });
       this.#dispatch(entry, {
@@ -383,4 +408,39 @@ export class ConnectionPool {
       }
     }
   }
+
+  #tryFallbackConnector(entry: Entry): boolean {
+    if (entry.connectorIndex + 1 >= entry.connectors.length) {
+      return false;
+    }
+    entry.client.disconnect();
+    entry.connectorIndex += 1;
+    const connector = entry.connectors[entry.connectorIndex] as DeviceConnector;
+    entry.client = new DaemonClient(this.#transportFor(connector), {
+      clientId: asClientId(this.#clientIdFor(entry.device, connector)),
+    });
+    return true;
+  }
+
+  #transportFor(connector: DeviceConnector): DaemonTransport {
+    if (connector.kind === "relay") {
+      return this.#createRelayTransport(connector.relayUrl, connector.deviceId, connector.clientId);
+    }
+    return this.#createTransport(connector.url, connector.token);
+  }
+
+  #clientIdFor(device: Device, connector: DeviceConnector): string {
+    return connector.kind === "relay" ? connector.clientId : this.#createClientId(device.id);
+  }
 }
+
+const connectionCandidates = (device: Device): DeviceConnector[] => {
+  const connectors = device.connectors && device.connectors.length > 0
+    ? device.connectors
+    : device.link && device.token
+      ? [{ id: `direct:${device.link}`, kind: "direct_ws" as const, url: device.link, token: device.token }]
+      : [];
+  const direct = connectors.filter((connector) => connector.kind === "direct_ws");
+  const relay = connectors.filter((connector) => connector.kind === "relay");
+  return [...direct, ...relay];
+};

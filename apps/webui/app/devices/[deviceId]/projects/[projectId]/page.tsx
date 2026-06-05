@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { NewChatButton } from "../../../../../components/shell/new-chat-button";
 import {
@@ -50,9 +50,12 @@ function ProjectView({
   const { state, syncSessionsNow } = useConnection(device);
   const error = useSessionsSyncError(device.id, projectId);
   const project = device.projects?.find((p) => p.projectId === projectId);
+  const previousStateName = useRef(state.name);
 
   useEffect(() => {
-    if (state.name !== "connected") return;
+    const previous = previousStateName.current;
+    previousStateName.current = state.name;
+    if (state.name !== "connected" || previous === "connected") return;
     void syncSessionsNow(projectId);
   }, [state.name, projectId, syncSessionsNow]);
 

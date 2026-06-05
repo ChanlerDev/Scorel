@@ -18,6 +18,8 @@ import {
   createDevicesStore,
   type DevicesStore,
 } from "../../../../../lib/store";
+import { __resetSyncProjectsForTests } from "../../../../../lib/sync/projects";
+import { __resetSyncSessionsForTests } from "../../../../../lib/sync/sessions";
 import { __resetDevicesStoreForTests } from "../../../../../lib/store/use-devices";
 import type { Device } from "../../../../../lib/domain/devices";
 import type {
@@ -185,6 +187,8 @@ beforeEach(() => {
   createSessionImpl = async () => ({ sessionId: "session_new" });
   __resetConnectionForTests();
   __resetDevicesStoreForTests();
+  __resetSyncProjectsForTests();
+  __resetSyncSessionsForTests();
   if (typeof window !== "undefined") window.localStorage.clear();
 });
 
@@ -192,6 +196,8 @@ afterEach(() => {
   cleanup();
   __resetConnectionForTests();
   __resetDevicesStoreForTests();
+  __resetSyncProjectsForTests();
+  __resetSyncSessionsForTests();
   if (typeof window !== "undefined") window.localStorage.clear();
   vi.restoreAllMocks();
 });
@@ -231,9 +237,7 @@ describe("ProjectPage", () => {
     // Cached session visible right away.
     expect(screen.getByText("Cached Session")).toBeTruthy();
     // Wait for the connect promise + the list_sessions request to flush.
-    await act(async () => {
-      for (let i = 0; i < 10; i += 1) await Promise.resolve();
-    });
+    await flushMicrotasks();
     expect(listSessionsCalls).toBe(1);
     expect(screen.getByText("Fresh Session")).toBeTruthy();
   });
@@ -249,9 +253,7 @@ describe("ProjectPage", () => {
     render(
       <ProjectPage params={{ deviceId: device.id, projectId: "alpha" }} />,
     );
-    await act(async () => {
-      for (let i = 0; i < 10; i += 1) await Promise.resolve();
-    });
+    await flushMicrotasks();
     expect(screen.getByText(/No sessions yet/)).toBeTruthy();
   });
 
@@ -313,3 +315,7 @@ describe("ProjectPage", () => {
     expect(project?.sessions?.session_new).toBeUndefined();
   });
 });
+
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 20; i += 1) await Promise.resolve();
+}

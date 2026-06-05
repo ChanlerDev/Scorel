@@ -47,9 +47,10 @@ export const startRelayServer = async (options: RelayServerOptions): Promise<Rel
   server.on("connection", (socket) => {
     socketStates.set(socket, {});
     diagnostics.record("socket_connected");
+    let queue = Promise.resolve();
 
     socket.on("message", (data) => {
-      void (async () => {
+      queue = queue.then(async () => {
         const state = socketStates.get(socket) ?? {};
         const frame = parseFrame(data);
         if (!frame) {
@@ -61,7 +62,7 @@ export const startRelayServer = async (options: RelayServerOptions): Promise<Rel
           return;
         }
         await handleHostFrame({ frame, socket, state, store: options.store, diagnostics, pairing, presence, now });
-      })().catch((cause) => {
+      }).catch((cause) => {
         diagnostics.record("relay_internal_error", {
           error: cause instanceof Error ? cause.message : String(cause),
         });

@@ -81,6 +81,13 @@ function makeDevice(overrides: Partial<Device> = {}): Device {
   };
 }
 
+async function waitForState(managed: { state: ConnectionState }, name: ConnectionState["name"]): Promise<void> {
+  for (let index = 0; index < 10; index += 1) {
+    if (managed.state.name === name) return;
+    await Promise.resolve();
+  }
+}
+
 class FakeClock {
   #handle = 0;
   readonly tasks = new Map<number, { cb: () => void; ms: number }>();
@@ -292,6 +299,76 @@ describe("ConnectionPool", () => {
     expect(managed.state.name).toBe("connected");
     managed.disconnect();
     expect(managed.state.name).toBe("idle");
+  });
+
+  it("uses a relay connector when no direct connector is available", async () => {
+    FakeTransport.behaviors = [
+      {
+        kind: "ok",
+        result: {
+          clientId: asClientId("client_web"),
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_relay"),
+        },
+      },
+    ];
+    const pool = new ConnectionPool({
+      createRelayTransport: (relayUrl, deviceId, clientId) => new FakeTransport(`${relayUrl}/${deviceId}`, clientId),
+    });
+    const managed = pool.acquire(makeDevice({
+      link: "",
+      token: "",
+      connectors: [
+        {
+          id: "relay:device_relay",
+          kind: "relay",
+          relayUrl: "ws://relay",
+          deviceId: "device_relay",
+          clientId: "client_web",
+        },
+      ],
+    }));
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(managed.state.name).toBe("connected");
+    expect(FakeTransport.instances[0]).toMatchObject({
+      url: "ws://relay/device_relay",
+      token: "client_web",
+    });
+  });
+
+  it("falls back from direct WS to Relay connector when the direct connector fails", async () => {
+    FakeTransport.behaviors = [
+      { kind: "error", error: new Error("connect ECONNREFUSED") },
+      {
+        kind: "ok",
+        result: {
+          clientId: asClientId("client_web"),
+          currentSeq: asSeq(0),
+          deviceId: asDeviceId("device_relay"),
+        },
+      },
+    ];
+    const pool = new ConnectionPool({
+      createTransport: (link, token) => new FakeTransport(link, token),
+      createRelayTransport: (relayUrl, deviceId, clientId) => new FakeTransport(`${relayUrl}/${deviceId}`, clientId),
+    });
+    const managed = pool.acquire(makeDevice({
+      connectors: [
+        { id: "direct:ws://direct", kind: "direct_ws", url: "ws://direct", token: "direct-token" },
+        { id: "relay:device_relay", kind: "relay", relayUrl: "ws://relay", deviceId: "device_relay", clientId: "client_web" },
+      ],
+    }));
+
+    await waitForState(managed, "connected");
+
+    expect(managed.state.name).toBe("connected");
+    expect(FakeTransport.instances.map((instance) => instance.url)).toEqual([
+      "ws://direct",
+      "ws://relay/device_relay",
+    ]);
   });
 
   it("release schedules a tear-down after idleReleaseMs and acquire within the window cancels it", async () => {
