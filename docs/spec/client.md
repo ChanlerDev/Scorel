@@ -260,9 +260,13 @@ Relay:
 Relay 只包装路由和授权信息：
 
 ```typescript
+type RelayClientPayload =
+  | ({ type: "connect" } & ConnectParams)
+  | ClientMessage;
+
 type EntryToRelayFrame = {
   deviceId: DeviceId;
-  payload: ClientMessage;
+  payload: RelayClientPayload;
 };
 ```
 

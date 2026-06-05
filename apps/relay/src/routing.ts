@@ -1,4 +1,4 @@
-import type { ClientId, ClientMessage, DaemonMessage, DeviceId, RelayToEntryFrame, RelayToHostFrame } from "@scorel/protocol";
+import type { ClientId, DaemonMessage, DeviceId, RelayClientPayload, RelayToEntryFrame, RelayToHostFrame } from "@scorel/protocol";
 import type { WebSocket } from "ws";
 
 import type { RelayDiagnostics } from "./diagnostics.js";
@@ -16,7 +16,7 @@ export const routeEntryToDevice = async (
     diagnostics: RelayDiagnostics;
     clientId: ClientId;
     deviceId: DeviceId;
-    payload: ClientMessage;
+    payload: RelayClientPayload;
   },
 ): Promise<RelayRouteResult> => {
   if (!(await input.store.isBound({ clientId: input.clientId, deviceId: input.deviceId }))) {

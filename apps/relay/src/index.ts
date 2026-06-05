@@ -10,7 +10,7 @@ import { RelayPairing } from "./pairing.js";
 import { RelayPresence } from "./presence.js";
 import { routeEntryToDevice, routeHostToEntry } from "./routing.js";
 import { FileRelayStore, type RelayStore } from "./store.js";
-import { startRelayServer } from "./server.js";
+import { startRelayServer, type RelayServer } from "./server.js";
 
 export const relayPackageName = "@scorel/relay" as const;
 export const relayProtocolDependency = protocolPackageName;
@@ -25,6 +25,7 @@ export {
   routeEntryToDevice,
   routeHostToEntry,
   startRelayServer,
+  type RelayServer,
   type RelayStore,
 };
 

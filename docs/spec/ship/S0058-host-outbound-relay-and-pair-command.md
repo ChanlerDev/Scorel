@@ -29,7 +29,8 @@ scorel pair <code> --relay <relayUrl>
 
 - Add local Host allowlist storage for authorized `clientId` values.
 - Implement Host relay adapter:
-  - receive `{ clientId, payload: ClientMessage }` frames from Relay
+  - receive `{ clientId, payload: RelayClientPayload }` frames from Relay
+  - handle the existing daemon `connect` handshake as a relay payload so `DaemonClient.connect()` enters the normal Host connection set
   - construct a logical daemon connection context using `clientId`
   - pass payload into the existing Host request handler
   - send `{ clientId, payload: DaemonMessage }` frames back to Relay
@@ -92,7 +93,7 @@ Default location should be under `~/.scorel` and must be documented in the imple
 - `scorel pair <code> --relay <relayUrl>` can redeem a pair session created by Relay.
 - Host stores authorized `clientId` locally after successful pair.
 - Host can connect outbound to Relay and appear online.
-- Relay can send an authorized `ClientMessage` frame to Host.
+- Relay can send an authorized `RelayClientPayload` frame to Host.
 - Host routes that payload through the existing daemon handler.
 - Host sends the resulting `DaemonMessage` frame back through Relay.
 - Unrecognized `clientId` is rejected by Host even if Relay sends a frame.

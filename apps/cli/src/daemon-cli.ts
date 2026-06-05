@@ -7,16 +7,18 @@ import {
   createLocalDaemonState,
   createRealRuntime,
   daemonStateLiveness,
+  loadOrCreateHostDeviceIdentity,
   loadScorelConfig,
   markDaemonStopped,
   readLocalDaemonState,
   removeLocalDaemonState,
   scorelSessionsDir,
+  startHostRelayClient,
   startScorelHostWebSocketServer,
   type DaemonStateLiveness,
+  type HostRelayClient,
   type LocalDaemonState,
 } from "@scorel/daemon";
-import { asDeviceId } from "@scorel/protocol";
 
 export type DaemonCommandIo = {
   output: NodeJS.WritableStream;
@@ -77,6 +79,7 @@ type ServeFlags = {
   port: number;
   token?: string;
   cwd: string;
+  relayUrl?: string;
 };
 
 const runServeCommand = async (
@@ -103,11 +106,12 @@ const runServeCommand = async (
   }
 
   const token = flags.token ?? existing?.token ?? randomUUID();
+  const identity = await loadOrCreateHostDeviceIdentity({ stateDir: options.stateDir });
   const daemon = new ScorelHost({
     sessionsDir: options.sessionsDir ?? scorelSessionsDir(homedir()),
     projectsPath: join(options.stateDir, "projects.json"),
-    deviceId: asDeviceId("device_local"),
-    deviceDisplayName: "Local daemon",
+    deviceId: identity.deviceId,
+    deviceDisplayName: identity.displayName,
     createRuntime: async ({ project }) => createRealRuntime({
       cwd: project.workDir,
       config: await loadScorelConfig({ cwd: project.workDir }),
@@ -138,9 +142,25 @@ const runServeCommand = async (
   await createLocalDaemonState({ stateDir: options.stateDir, ...persistedState });
 
   options.output.write(`scorel daemon serving url=${server.url}\n`);
+  let relayClient: HostRelayClient | undefined;
+  if (flags.relayUrl) {
+    relayClient = await startHostRelayClient({
+      relayUrl: flags.relayUrl,
+      hostService: daemon,
+      deviceId: identity.deviceId,
+      deviceDisplayName: identity.displayName,
+      stateDir: options.stateDir,
+      onDiagnostic: (type) => {
+        if (type === "relay_host_connected") {
+          options.output.write(`scorel daemon relay connected url=${flags.relayUrl} device=${identity.deviceId}\n`);
+        }
+      },
+    });
+  }
 
   const shutdown = async (): Promise<void> => {
     try {
+      relayClient?.close();
       await server.close();
     } finally {
       await daemon.shutdown();
@@ -297,6 +317,7 @@ const parseServeFlags = (argv: string[], defaultCwd: string): ServeFlags => {
   let port = DEFAULT_PORT;
   let cwd = defaultCwd;
   let token: string | undefined;
+  let relayUrl: string | undefined;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--host") {
@@ -322,9 +343,14 @@ const parseServeFlags = (argv: string[], defaultCwd: string): ServeFlags => {
       index += 1;
       continue;
     }
+    if (arg === "--relay") {
+      relayUrl = requireValue(argv, index, "--relay");
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown serve option: ${arg}`);
   }
-  return { host, port, token, cwd };
+  return { host, port, token, cwd, relayUrl };
 };
 
 const parseStatusFlags = (argv: string[]): StatusFlags => {
@@ -356,6 +382,7 @@ const writeDaemonUsage = (output: NodeJS.WritableStream): void => {
   output.write(
     [
       "Usage: scorel daemon serve [--host <h>] [--port <p>] [--token <t>] [--cwd <d>]",
+      "                         [--relay <relay-url>]",
       "       scorel daemon status [--show-token]",
       "       scorel daemon stop",
       "       scorel daemon reset",

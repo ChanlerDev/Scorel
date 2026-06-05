@@ -190,9 +190,13 @@ Presence 只表示在线，不代表授权。
 Entry 发往 Relay：
 
 ```typescript
+type RelayClientPayload =
+  | ({ type: "connect" } & ConnectParams)
+  | ClientMessage;
+
 type EntryToRelayFrame = {
   deviceId: DeviceId;
-  payload: ClientMessage;
+  payload: RelayClientPayload;
 };
 ```
 
@@ -208,7 +212,7 @@ Relay 发往 Host：
 ```typescript
 type RelayToHostFrame = {
   clientId: ClientId;
-  payload: ClientMessage;
+  payload: RelayClientPayload;
 };
 ```
 
@@ -223,7 +227,7 @@ type HostToRelayFrame = {
 
 Relay 再把 payload 发回对应 Entry socket。
 
-`clientId` 是现有 daemon wire / JSONL 字段。它在 Relay 语境中就是 Entry identity。不要为 V1 额外引入 `entryId` 或 `routeId` 字段，除非实现证明现有 `clientId` 无法覆盖多 tab / 多连接的 return path。
+`RelayClientPayload` 包含现有 daemon `connect` handshake 和 `ClientMessage`。Relay 只做外层路由和授权，不解释业务 payload。`clientId` 是现有 daemon wire / JSONL 字段。它在 Relay 语境中就是 Entry identity。不要为 V1 额外引入 `entryId` 或 `routeId` 字段，除非实现证明现有 `clientId` 无法覆盖多 tab / 多连接的 return path。
 
 ---
 

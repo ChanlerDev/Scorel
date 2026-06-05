@@ -1,4 +1,5 @@
 import type { ClientId, DeviceId, RequestId } from "./ids.js";
+import type { ConnectParams } from "./transport.js";
 import type { ClientMessage, DaemonMessage } from "./wire.js";
 
 export type RelayDeviceRecord = {
@@ -27,10 +28,16 @@ export type RelayAuthorizedDevice = RelayDeviceRecord & {
   online: boolean;
 };
 
+export type RelayConnectPayload = ConnectParams & {
+  type: "connect";
+};
+
+export type RelayClientPayload = ClientMessage | RelayConnectPayload;
+
 export type RelayEntryFrame =
   | { type: "entry_hello"; clientId: ClientId; label?: string; publicKey?: string }
   | { type: "create_pair_session"; requestId: RequestId; clientId?: ClientId }
-  | { type: "entry_to_device"; deviceId: DeviceId; payload: ClientMessage }
+  | { type: "entry_to_device"; deviceId: DeviceId; payload: RelayClientPayload }
   | { type: "list_authorized_devices"; requestId: RequestId };
 
 export type RelayHostFrame =
@@ -69,7 +76,7 @@ export type RelayResponse =
 export type RelayToHostFrame = {
   type: "relay_to_host";
   clientId: ClientId;
-  payload: ClientMessage;
+  payload: RelayClientPayload;
 };
 
 export type RelayToEntryFrame = {

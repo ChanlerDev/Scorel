@@ -32,6 +32,7 @@ import {
 } from "@scorel/protocol";
 
 import { runCliDaemon } from "./daemon-cli.js";
+import { runCliPair } from "./relay-cli.js";
 import { runCliUp } from "./up-cli.js";
 import { runCliWebUi } from "./webui-cli.js";
 
@@ -81,6 +82,13 @@ export const runCli = async (
     return runCliDaemon(rest, {
       stateDir: stateDirFromSessionsDir(runOptions.sessionsDir),
       sessionsDir: runOptions.sessionsDir,
+      output: io.output,
+      error: io.error,
+    });
+  }
+  if (command === "pair") {
+    return runCliPair(rest, {
+      stateDir: stateDirFromSessionsDir(runOptions.sessionsDir),
       output: io.output,
       error: io.error,
     });
@@ -855,6 +863,7 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
       "       scorel daemon status [--show-token]",
       "       scorel daemon stop",
       "       scorel daemon reset",
+      "       scorel pair <pair-code> --relay <relay-url>",
       "       scorel webui [--port <p>] [--host <h>]",
       "       scorel up [--daemon-port <p>] [--webui-port <p>] [--cwd <d>]",
       "       scorel logs [--attach] --session <id> [--remote <ws-url>] [--tail <n>]",

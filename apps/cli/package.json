@@ -19,5 +19,8 @@
     "@scorel/daemon": "workspace:*",
     "@scorel/protocol": "workspace:*"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@types/ws": "^8.18.1",
+    "ws": "^8.21.0"
+  }
 }

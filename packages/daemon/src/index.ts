@@ -68,6 +68,19 @@ export const daemonProtocolDependency = protocolPackageName;
 export const daemonProtocolVersion = protocolVersion;
 export type ScorelHostTransport = DaemonTransport;
 export { loadScorelConfig, scorelSessionsDir, type ScorelConfig };
+export {
+  authorizeRelayClient,
+  hostDeviceIdentityPath,
+  hostRelayAuthPath,
+  isRelayClientAuthorized,
+  loadOrCreateHostDeviceIdentity,
+  readHostDeviceIdentity,
+  readHostRelayAuth,
+  type HostDeviceIdentity,
+  type HostRelayAuthFile,
+} from "./relay/auth.js";
+export { redeemRelayPair, type RedeemRelayPairOptions, type RedeemRelayPairResult } from "./relay/pair.js";
+export { startHostRelayClient, type HostRelayClient, type HostRelayClientOptions } from "./relay/host-client.js";
 
 /**
  * On-disk shape of `~/.scorel/daemon.json` (S0043). The unix-socket era schema
