@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm --filter @scorel/app-webui build",
+  "outputDirectory": "apps/webui/.next",
+  "ignoreCommand": "bash scripts/vercel-ignore-webui.sh"
+}
