@@ -4,4 +4,6 @@ packages:
 allowBuilds:
   esbuild: true
 onlyBuiltDependencies:
+  - "@google/genai"
   - esbuild
+  - protobufjs
