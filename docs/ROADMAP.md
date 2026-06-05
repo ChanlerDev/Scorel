@@ -486,7 +486,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M8.2 | [`S0057`](spec/ship/S0057-relay-service-protocol-skeleton.md) | 建立 `apps/relay` 服务骨架、Relay frame 类型、pair/binding/presence/routing 最小真实路径 | Done |
 | M8.3 | [`S0058`](spec/ship/S0058-host-outbound-relay-and-pair-command.md) | 让 Host outbound 连接 Relay，并通过 `scorel pair <code>` 授权 Entry | Done |
 | M8.4 | [`S0059`](spec/ship/S0059-relay-transport-and-hosted-webui-connector.md) | 增加 `RelayTransport` 和 WebUI Relay connector，让 hosted WebUI 通过 Relay 操作 Host | Done |
-| M8.5 | [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | 用真实 Relay + Host + WebUI + LLM provider 验证 M8 端到端闭环 | Planned |
+| M8.5 | [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | 用真实 Relay + Host + WebUI + LLM provider 验证 M8 端到端闭环 | Blocked |
 
 **Candidate scope**:
 
@@ -503,6 +503,12 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - Relay 存储 Project、Session、prompt、tool result 或 replay cache。
 - 用户账号作为 V1 必需条件。
 - Desktop GUI、SSH bootstrap、HTTP API。
+
+**Current verification**:
+
+- S0057-S0059 implementation and full automated verification passed on 2026-06-05.
+- S0060 real provider E2E is blocked locally because `SCOREL_API_KEY` is missing.
+- M8 must not be marked Done until [`S0060 verification`](spec/ship/S0060-relay-hosted-webui-e2e-validation.verification.md) passes with a real provider.
 
 **Status**: Planned
 
@@ -631,10 +637,10 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0054`](spec/ship/S0054-webui-running-message-behavior.md) | WebUI running send follow-up / steer 行为选择 | Done |
 | [`S0055`](spec/ship/S0055-webui-composer-acceptance-and-queue-strip.md) | WebUI composer acceptance recovery 与 running queue strip | Done |
 | [`S0056`](spec/ship/S0056-relay-and-hosted-webui-contract.md) | Relay + Hosted WebUI 抽象合同与下一阶段 roadmap | Done |
-| [`S0057`](spec/ship/S0057-relay-service-protocol-skeleton.md) | Relay service protocol skeleton | Planned |
-| [`S0058`](spec/ship/S0058-host-outbound-relay-and-pair-command.md) | Host outbound Relay connection and `scorel pair` | Planned |
-| [`S0059`](spec/ship/S0059-relay-transport-and-hosted-webui-connector.md) | RelayTransport and hosted WebUI connector | Planned |
-| [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | Relay hosted WebUI real e2e validation | Planned |
+| [`S0057`](spec/ship/S0057-relay-service-protocol-skeleton.md) | Relay service protocol skeleton | Done |
+| [`S0058`](spec/ship/S0058-host-outbound-relay-and-pair-command.md) | Host outbound Relay connection and `scorel pair` | Done |
+| [`S0059`](spec/ship/S0059-relay-transport-and-hosted-webui-connector.md) | RelayTransport and hosted WebUI connector | Done |
+| [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | Relay hosted WebUI real e2e validation | Blocked |
 
 ---
 
