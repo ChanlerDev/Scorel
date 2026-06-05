@@ -36,6 +36,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/protocol
 
+  apps/relay:
+    dependencies:
+      '@scorel/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+
   apps/webui:
     dependencies:
       '@fontsource/jetbrains-mono':

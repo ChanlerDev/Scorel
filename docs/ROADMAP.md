@@ -483,7 +483,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | Step | Spec | Goal | Status |
 |---|---|---|---|
 | M8.1 | [`S0056`](spec/ship/S0056-relay-and-hosted-webui-contract.md) | 锁定 Relay proxy、`deviceId -> clientId` 授权关系、Hosted WebUI 多 Device 连接模型 | Done |
-| M8.2 | [`S0057`](spec/ship/S0057-relay-service-protocol-skeleton.md) | 建立 `apps/relay` 服务骨架、Relay frame 类型、pair/binding/presence/routing 最小真实路径 | Planned |
+| M8.2 | [`S0057`](spec/ship/S0057-relay-service-protocol-skeleton.md) | 建立 `apps/relay` 服务骨架、Relay frame 类型、pair/binding/presence/routing 最小真实路径 | Done |
 | M8.3 | [`S0058`](spec/ship/S0058-host-outbound-relay-and-pair-command.md) | 让 Host outbound 连接 Relay，并通过 `scorel pair <code>` 授权 Entry | Planned |
 | M8.4 | [`S0059`](spec/ship/S0059-relay-transport-and-hosted-webui-connector.md) | 增加 `RelayTransport` 和 WebUI Relay connector，让 hosted WebUI 通过 Relay 操作 Host | Planned |
 | M8.5 | [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | 用真实 Relay + Host + WebUI + LLM provider 验证 M8 端到端闭环 | Planned |
