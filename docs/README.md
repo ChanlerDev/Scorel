@@ -16,6 +16,7 @@
 | Runtime 执行引擎、persist 策略、双队列 | [`spec/runtime.md`](spec/runtime.md) |
 | Daemon 层、协议、transport、同步、并发 | [`spec/daemon.md`](spec/daemon.md) |
 | DaemonClient SDK、Client 侧接口 | [`spec/client.md`](spec/client.md) |
+| Relay proxy、Hosted WebUI 连接、配对与多 Device 路由 | [`spec/relay.md`](spec/relay.md) |
 | Session 存储、JSONL、树、Rewind、压缩 | [`spec/session.md`](spec/session.md) |
 | 工具系统、内置工具、MCP | [`spec/tools.md`](spec/tools.md) |
 | Hooks、Extensions、System Prompt、配置 | [`spec/extensions.md`](spec/extensions.md) |
@@ -30,6 +31,8 @@
 | [`003`](decisions/003-event-runtime.md) | 事件运行时行为：persist 策略、同步算法、双队列 |
 | [`004`](decisions/004-package-boundaries.md) | Protocol / Core / Daemon / Client 包边界 |
 | [`005`](decisions/005-ai-delivery-versioning.md) | AI 交付流程与版本策略 |
+| [`006`](decisions/006-device-host-project-registry.md) | Device-level Host 与 Project Registry |
+| [`007`](decisions/007-relay-proxy-and-entry-routing.md) | Relay 是 proxy + authorization registry，不是 hosted daemon |
 
 ## 文档层次
 

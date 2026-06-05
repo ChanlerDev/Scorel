@@ -474,13 +474,48 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M8: GUI
+## M8: Relay And Hosted WebUI
 
-**Goal**: 提供 Project-first desktop GUI，统一管理本地和远程 Device 上的 Project。
+**Goal**: 让用户打开一个通用 hosted WebUI，通过 Relay 配对并控制本机 Scorel Host；用户不需要暴露公网 daemon，workspace 执行和 Session authority 仍然留在用户 Device。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M8.1 | [`S0056`](spec/ship/S0056-relay-and-hosted-webui-contract.md) | 锁定 Relay proxy、`deviceId -> clientId` 授权关系、Hosted WebUI 多 Device 连接模型 | Done |
+| M8.2 | [`S0057`](spec/ship/S0057-relay-service-protocol-skeleton.md) | 建立 `apps/relay` 服务骨架、Relay frame 类型、pair/binding/presence/routing 最小真实路径 | Planned |
+| M8.3 | [`S0058`](spec/ship/S0058-host-outbound-relay-and-pair-command.md) | 让 Host outbound 连接 Relay，并通过 `scorel pair <code>` 授权 Entry | Planned |
+| M8.4 | [`S0059`](spec/ship/S0059-relay-transport-and-hosted-webui-connector.md) | 增加 `RelayTransport` 和 WebUI Relay connector，让 hosted WebUI 通过 Relay 操作 Host | Planned |
+| M8.5 | [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | 用真实 Relay + Host + WebUI + LLM provider 验证 M8 端到端闭环 | Planned |
+
+**Candidate scope**:
+
+- Relay service 作为 authenticated proxy + authorization registry。
+- Entry-initiated pair code flow：Hosted WebUI 创建 pair session，用户本机执行 `scorel pair <code>` 授权。
+- Host outbound Relay 连接。
+- `RelayTransport` 复用现有 `DaemonTransport` / `DaemonClient` / Host API。
+- WebUI Device registry 支持 direct WS connector 和 Relay connector 聚合。
+- 真实 Host + Relay + WebUI 端到端验证。
+
+**Non-goals**:
+
+- hosted execution。
+- Relay 存储 Project、Session、prompt、tool result 或 replay cache。
+- 用户账号作为 V1 必需条件。
+- Desktop GUI、SSH bootstrap、HTTP API。
+
+**Status**: Planned
+
+---
+
+## M9: GUI
+
+**Goal**: 提供 Project-first desktop GUI，统一管理本地、Relay 和远程 Device 上的 Project。
 
 **Candidate scope**:
 
 - 本地 Project 添加和 Session 管理。
+- Relay Device 添加。
 - 远程 Device 添加。
 - Project-first sidebar。
 - desktop main 管理本地 Host 和远程连接。
@@ -489,7 +524,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M9: SSH Remote Device
+## M10: SSH Remote Device
 
 **Goal**: GUI 可通过 SSH 添加远程 Device，并在远端安装、启动或连接 Scorel Host。
 
@@ -504,7 +539,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M10: HTTP API
+## M11: HTTP API
 
 **Goal**: 提供纯 HTTP 集成，不要求调用方使用 GUI 或 WebSocket SDK。
 
@@ -522,7 +557,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 
 ---
 
-## M11: Ecosystem
+## M12: Ecosystem
 
 **Goal**: Scorel 可以通过 MCP、extensions、channels 接入外部工作流。
 
@@ -594,6 +629,12 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0052`](spec/ship/S0052-follow-up-queue-and-dual-loop.md) | follow-up queue control events 与 outer/inner 双 loop | Done |
 | [`S0053`](spec/ship/S0053-skill-index-and-skill-tool.md) | session-scoped Skill index 与 Skill tool | Done |
 | [`S0054`](spec/ship/S0054-webui-running-message-behavior.md) | WebUI running send follow-up / steer 行为选择 | Done |
+| [`S0055`](spec/ship/S0055-webui-composer-acceptance-and-queue-strip.md) | WebUI composer acceptance recovery 与 running queue strip | Done |
+| [`S0056`](spec/ship/S0056-relay-and-hosted-webui-contract.md) | Relay + Hosted WebUI 抽象合同与下一阶段 roadmap | Done |
+| [`S0057`](spec/ship/S0057-relay-service-protocol-skeleton.md) | Relay service protocol skeleton | Planned |
+| [`S0058`](spec/ship/S0058-host-outbound-relay-and-pair-command.md) | Host outbound Relay connection and `scorel pair` | Planned |
+| [`S0059`](spec/ship/S0059-relay-transport-and-hosted-webui-connector.md) | RelayTransport and hosted WebUI connector | Planned |
+| [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | Relay hosted WebUI real e2e validation | Planned |
 
 ---
 

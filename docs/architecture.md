@@ -12,10 +12,12 @@
 | 规约 | 主题 |
 |---|---|
 | `decisions/006-device-host-project-registry.md` | Device-level Host、Project Registry、UI/API 入口 |
+| `decisions/007-relay-proxy-and-entry-routing.md` | Relay proxy、Entry/Device 授权关系与 Hosted WebUI 连接 |
 | `spec/events.md` | PersistentEvent + TransientEvent |
 | `spec/runtime.md` | ScorelRuntime 执行引擎 |
 | `spec/daemon.md` | Host、Project、Session、transport、广播和重连 |
 | `spec/client.md` | DaemonClient SDK |
+| `spec/relay.md` | Relay proxy、配对、路由与 WebUI 多 Device 聚合 |
 | `spec/session.md` | JSONL、Replay、Rewind、Fork、Compact |
 | `spec/tools.md` | 内置工具与 MCP |
 | `spec/extensions.md` | Hook、Extension、Prompt、Config |
@@ -50,7 +52,8 @@ Scorel 自己做三件事：
 | Session 必须绑定 Project | Runtime 创建时按 `projectId` 解析 cwd 和 config |
 | Daemon 是唯一 Session writer | Entry 不直接写 JSONL，不直接持有 Runtime |
 | Client 是跨端 SDK | reconnect、dual-seq resync、request/response、投影逻辑复用 |
-| Transport 是 adapter | 当前 embedded + WS；后续 SSH stdio proxy、HTTP + SSE |
+| Relay 是 proxy | Relay 只存授权关系和在线路由，不拥有 Project、Session、Runtime 或 JSONL |
+| Transport 是 adapter | 当前 embedded + WS；后续 Relay、SSH stdio proxy、HTTP + SSE |
 | pre-1.0 不保旧兼容 | 错误抽象直接删除，不添加 deprecated alias 或迁移层 |
 
 ---
@@ -62,6 +65,7 @@ Scorel 自己做三件事：
 │ Entry Layer: 纯 UI / IO                                     │
 │  ├── apps/cli      scorel chat / attach / daemon / up        │
 │  ├── apps/webui    Browser UI: Device -> Project -> Session  │
+│  ├── Hosted WebUI  Relay entry for many Devices              │
 │  ├── apps/gui      Desktop UI: Project -> Session            │
 │  ├── apps/im       Telegram / WeCom / Slack                  │
 │  └── HTTP API      REST command + SSE event stream           │
@@ -69,7 +73,7 @@ Scorel 自己做三件事：
 │ DaemonClient / Host Application Service                      │
 │  ├── request / response correlation                          │
 │  ├── reconnect + dual-seq resync                              │
-│  └── transport: embedded | websocket | ssh proxy | http+sse  │
+│  └── transport: embedded | websocket | relay | ssh | http+sse │
 ├──────────────────────────────────────────────────────────────┤
 │ ScorelHost (@scorel/daemon)                                  │
 │  ├── DeviceIdentity                                          │
@@ -158,6 +162,7 @@ packages/
 apps/
 ├── cli/          # 单一 scorel 入口
 ├── webui/        # Browser UI，只依赖 protocol + client
+├── relay/        # 后续：Relay proxy service，不持有 Host 业务状态
 ├── gui/          # 后续：desktop main + renderer
 └── im/           # 后续：channel runner
 ```
@@ -266,7 +271,39 @@ Sidebar Add Project
   -> registerProject(path)
 ```
 
-### 4.3 GUI
+WebUI 可以通过多种 connector 连接同一个 Device：
+
+```text
+Device
+  ├── direct_ws connector
+  └── relay connector
+```
+
+Device 是业务身份；connector 只是可达路径。相同 `deviceId` 通过 direct WS 和 Relay 都可达时，WebUI 应合并为一个 Device。Project 和 Session 仍然通过 Host API 获取，不能从 Relay 获取。
+
+### 4.3 Relay
+
+Relay 是 Hosted WebUI 和用户本机 Host 之间的 proxy：
+
+```text
+Entry/WebUI -> Relay -> Host/Daemon -> Project/Session/Runtime
+```
+
+Relay 持久化：
+
+```text
+deviceId -> allowed clientId
+```
+
+Relay 运行时维护：
+
+```text
+client socket -> Relay -> device socket
+```
+
+Relay 不存 Project、Session、prompt、tool result、Runtime 或 replay cache。Relay 只在 transport 外层增加 `deviceId` 路由和授权检查，payload 仍然是现有 daemon wire message。
+
+### 4.4 GUI
 
 GUI 以后使用 Project-first 聚合：
 
@@ -279,7 +316,7 @@ Project
 - Remote：SSH Device -> `scorel proxy` -> remote Host -> directory picker。
 - Direct WS + token：高级入口，连接已经运行的 Host。
 
-### 4.4 HTTP API
+### 4.5 HTTP API
 
 未来 HTTP 是 Host transport adapter：
 
@@ -300,10 +337,13 @@ HTTP handler 不直接碰 Runtime 或 JSONL。
 |---|---|---|
 | `EmbeddedTransport` | 已有 | CLI 临时 Host |
 | `WsTransport` | 已有 | 本机 WebUI、Direct WS、远端控制 |
+| `RelayTransport` | 后续 | Hosted WebUI / GUI 通过 Relay 连接多 Device |
 | SSH stdio proxy | 后续 | GUI 连接远端 Device |
 | HTTP + SSE | 后续 | 纯 API |
 
 S0043 已删除 Node socket transport。SSH proxy 后续可以转发到 Host control endpoint，但 proxy 自身不持有 Project、Session 或 Runtime。
+
+RelayTransport 后续只实现 routing/authorization transport，不实现 Project、Session、Runtime、replay 或 resync 逻辑。
 
 当前可信用户模型：拥有 token 或 SSH 凭据即拥有 Device 的完整能力。不做细粒度 ACL，但日志不得记录 secret。
 
@@ -328,6 +368,7 @@ S0043 已删除 Node socket transport。SSH proxy 后续可以转发到 Host con
 | Project Registry 丢失 | 无法打开已添加但无 Session 的 workspace | `projects.json` 独立持久化；测试 restart |
 | Host 单点故障 | 所有 client 断连 | JSONL replay；daemon lifecycle；后续 supervisor |
 | WebUI 重复实现投影 | GUI/API 再次复制逻辑 | 可复用逻辑逐步下沉 `@scorel/client` |
+| Relay 膨胀成云端后端 | Workspace authority 被搬离用户 Device | Relay 只存授权关系和在线路由；业务状态仍由 Host 持有 |
 | SSH proxy 边界模糊 | proxy 变成第二套 daemon | proxy 只转发字节，业务只在 Host |
 | HTTP 旁路 | API 与 GUI 行为不一致 | HTTP handler 只调用 Host application service |
 

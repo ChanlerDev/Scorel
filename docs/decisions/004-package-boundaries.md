@@ -18,6 +18,7 @@ packages/
 apps/
   cli/          # 单一 scorel 二进制：chat / attach / daemon / webui / up / logs
   webui/        # browser UI，只依赖 protocol + client
+  relay/        # 未来 Relay proxy service，不持有 Project/Session/Runtime
   gui/          # 未来 desktop 产品入口
   im/           # 未来 IM channel runner
 ```
@@ -89,6 +90,7 @@ Device-level Host 和 Project Registry 细节见 [`ADR-006`](006-device-host-pro
 |---|---|---|
 | `apps/cli` | `@scorel/client`，必要时 `@scorel/daemon` | 当前唯一 Node 产品入口；可启动 embedded Host 或 WS Host |
 | `apps/webui` | `@scorel/protocol` + `@scorel/client` | Device-first browser UI，只通过 WS 连 Host |
+| `apps/relay` | `@scorel/protocol` | 未来 Relay proxy service；只做授权关系、presence 和 daemon wire payload 转发 |
 | `apps/gui` | main: `@scorel/daemon` / `@scorel/client`；renderer: `@scorel/client` | 未来 Project-first desktop UI；main 管本地 Host 和 SSH proxy |
 | `apps/im` | `@scorel/client` 或 Host channel | 后期实现 |
 
@@ -115,10 +117,11 @@ scorel up            # 拉起 WS Host + WebUI
 
 | Adapter | 用途 |
 |---|---|
+| RelayTransport | Hosted WebUI / GUI 通过 Relay 连接多 Device |
 | SSH stdio proxy | GUI 管理远程 Device；安装、启动或连接远端 Scorel |
 | HTTP + SSE | 纯 API 集成 |
 
-HTTP 和 SSH 只映射同一 Host use cases，不复制 Project、Session 或 Runtime 管理逻辑。
+Relay、HTTP 和 SSH 只映射同一 Host use cases，不复制 Project、Session 或 Runtime 管理逻辑。
 
 ## 依赖方向
 

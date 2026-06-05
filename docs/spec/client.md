@@ -16,7 +16,7 @@
 - Session 操作
 - dual-seq resync、transient buffer 和本地 UI state projection
 
-`@scorel/client` 提供 platform-neutral `DaemonClient` 和 browser-safe `WsTransport`。需要直接持有 Host 实例的 embedded adapter 由 `@scorel/daemon` 提供。
+`@scorel/client` 提供 platform-neutral `DaemonClient` 和 browser-safe `WsTransport`。后续 `RelayTransport` 也必须实现同一 `DaemonTransport` contract。需要直接持有 Host 实例的 embedded adapter 由 `@scorel/daemon` 提供。
 
 Client 不持有 Runtime，不自行解释工作目录，不从 URL、display name 或路径 slug 反推 project 身份。
 
@@ -228,6 +228,9 @@ const transport = new WsTransport({ url, token });
 未来新增 adapter：
 
 ```typescript
+// Hosted WebUI / Relay device routing
+const transport = new RelayTransport({ relayUrl, deviceId, clientId });
+
 // GUI-managed remote device
 const transport = await createSshProxyTransport(sshConfig);
 
@@ -238,10 +241,32 @@ const client = new HttpScorelClient({ baseUrl, token });
 规则：
 
 - Embedded 和 WebSocket 是当前已实现 transport。
+- RelayTransport 是后续 hosted WebUI / generic WebUI 的默认远程路径：Entry 和 Host 都连接 Relay，Relay 根据 `deviceId -> clientId` 授权关系转发现有 daemon wire payload。
 - GUI 默认通过 SSH 启动或连接远端 Scorel，再使用 stdio proxy 转发协议。
 - 已经部署好的 Host 可作为高级入口直接使用 WS URL + token。
 - HTTP API 是独立 adapter：命令走 HTTP request，事件走 SSE。它映射同一 Host use cases，不复制业务逻辑。
 - 不恢复 Unix socket transport；S0043 已删除该产品路径。
+
+RelayTransport 不改变 `DaemonClient` 上层语义：
+
+```text
+Direct:
+  DaemonClient -> WsTransport -> Host
+
+Relay:
+  DaemonClient -> RelayTransport -> Relay -> Host relay adapter -> Host
+```
+
+Relay 只包装路由和授权信息：
+
+```typescript
+type EntryToRelayFrame = {
+  deviceId: DeviceId;
+  payload: ClientMessage;
+};
+```
+
+`clientId` 是现有 daemon protocol / JSONL 中的 Entry identity。Relay 文档可用 Entry 解释产品语义，但 V1 不新增单独 `entryId` 字段。
 
 ---
 
@@ -253,6 +278,20 @@ WebUI 只能联机，采用 Device-first：
 Device
   └── Project
         └── Session
+```
+
+WebUI 的 Device 是业务身份，connector 是可达路径。后续同一 Device 可以有多个 connector：
+
+```typescript
+type DeviceConnector =
+  | { kind: "direct_ws"; url: string; token: string }
+  | { kind: "relay"; relayUrl: string; deviceId: DeviceId; clientId: ClientId };
+```
+
+相同 `deviceId` 通过 direct WS 和 Relay 都可达时，应合并为一个 Device。缓存 scope 继续使用：
+
+```text
+deviceId + projectId + sessionId
 ```
 
 GUI 同时管理本地和远程环境，采用 Project-first：
