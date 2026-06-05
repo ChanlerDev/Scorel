@@ -486,7 +486,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M8.2 | [`S0057`](spec/ship/S0057-relay-service-protocol-skeleton.md) | 建立 `apps/relay` 服务骨架、Relay frame 类型、pair/binding/presence/routing 最小真实路径 | Done |
 | M8.3 | [`S0058`](spec/ship/S0058-host-outbound-relay-and-pair-command.md) | 让 Host outbound 连接 Relay，并通过 `scorel pair <code>` 授权 Entry | Done |
 | M8.4 | [`S0059`](spec/ship/S0059-relay-transport-and-hosted-webui-connector.md) | 增加 `RelayTransport` 和 WebUI Relay connector，让 hosted WebUI 通过 Relay 操作 Host | Done |
-| M8.5 | [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | 用真实 Relay + Host + WebUI + LLM provider 验证 M8 端到端闭环 | Blocked |
+| M8.5 | [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | 用真实 Relay + Host + WebUI + LLM provider 验证 M8 端到端闭环 | Done |
 
 **Candidate scope**:
 
@@ -507,10 +507,10 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 **Current verification**:
 
 - S0057-S0059 implementation and full automated verification passed on 2026-06-05.
-- S0060 real provider E2E is blocked locally because `SCOREL_API_KEY` is missing.
-- M8 must not be marked Done until [`S0060 verification`](spec/ship/S0060-relay-hosted-webui-e2e-validation.verification.md) passes with a real provider.
+- S0060 real provider E2E passed on 2026-06-06 with [`pnpm verify:m8-relay`](spec/ship/S0060-relay-hosted-webui-e2e-validation.verification.md).
+- Real validation found and fixed a Relay presence bug where the temporary pair socket could incorrectly mark the daemon Host offline.
 
-**Status**: Planned
+**Status**: Done
 
 ---
 
@@ -640,7 +640,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0057`](spec/ship/S0057-relay-service-protocol-skeleton.md) | Relay service protocol skeleton | Done |
 | [`S0058`](spec/ship/S0058-host-outbound-relay-and-pair-command.md) | Host outbound Relay connection and `scorel pair` | Done |
 | [`S0059`](spec/ship/S0059-relay-transport-and-hosted-webui-connector.md) | RelayTransport and hosted WebUI connector | Done |
-| [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | Relay hosted WebUI real e2e validation | Blocked |
+| [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | Relay hosted WebUI real e2e validation | Done |
 
 ---
 

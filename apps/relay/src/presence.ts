@@ -2,13 +2,19 @@ import type { ClientId, DeviceId } from "@scorel/protocol";
 import type { WebSocket } from "ws";
 
 export class RelayPresence {
-  readonly #devices = new Map<DeviceId, WebSocket>();
+  readonly #devices = new Map<DeviceId, Set<WebSocket>>();
   readonly #clients = new Map<ClientId, Set<WebSocket>>();
 
   setDevice(deviceId: DeviceId, socket: WebSocket): void {
-    this.#devices.set(deviceId, socket);
+    let sockets = this.#devices.get(deviceId);
+    if (!sockets) {
+      sockets = new Set();
+      this.#devices.set(deviceId, sockets);
+    }
+    sockets.add(socket);
     socket.once("close", () => {
-      if (this.#devices.get(deviceId) === socket) {
+      sockets.delete(socket);
+      if (sockets.size === 0) {
         this.#devices.delete(deviceId);
       }
     });
@@ -30,8 +36,8 @@ export class RelayPresence {
   }
 
   deviceSocket(deviceId: DeviceId): WebSocket | undefined {
-    const socket = this.#devices.get(deviceId);
-    return socket?.readyState === socket?.OPEN ? socket : undefined;
+    const sockets = this.#devices.get(deviceId) ?? new Set<WebSocket>();
+    return [...sockets].find((socket) => socket.readyState === socket.OPEN);
   }
 
   clientSockets(clientId: ClientId): WebSocket[] {

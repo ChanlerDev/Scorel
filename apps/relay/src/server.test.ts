@@ -218,6 +218,43 @@ describe("Relay server", () => {
     await expect(nextServerFrame(entryB)).resolves.toMatchObject({ type: "device_to_entry", payload: { type: "pong" } });
   });
 
+  it("keeps a daemon Host online when a second pair socket for the same device closes", async () => {
+    const { url } = await startTestRelay();
+    const entry = await connect(url);
+    const daemonHost = await connect(url);
+    const pairHost = await connect(url);
+    send(entry, { type: "entry_hello", clientId: asClientId("client_web") });
+    send(daemonHost, { type: "host_hello", deviceId: asDeviceId("device_laptop"), label: "Laptop" });
+    send(pairHost, { type: "host_hello", deviceId: asDeviceId("device_laptop"), label: "Laptop" });
+    await pair(entry, pairHost);
+    await closeSocket(pairHost);
+
+    send(entry, { type: "list_authorized_devices", requestId: asRequestId("relay_req_list") });
+    await expect(nextRelayResponse(entry)).resolves.toMatchObject({
+      type: "relay_response",
+      ok: true,
+      data: {
+        devices: [
+          {
+            deviceId: "device_laptop",
+            online: true,
+          },
+        ],
+      },
+    });
+
+    send(entry, {
+      type: "entry_to_device",
+      deviceId: asDeviceId("device_laptop"),
+      payload: { type: "get_status", requestId: asRequestId("req_status") },
+    });
+    await expect(nextServerFrame(daemonHost)).resolves.toMatchObject({
+      type: "relay_to_host",
+      clientId: "client_web",
+      payload: { type: "get_status", requestId: "req_status" },
+    });
+  });
+
   it("does not put daemon payload bodies in diagnostics", async () => {
     const diagnostics = new MemoryRelayDiagnostics();
     const { url } = await startTestRelay({ diagnostics });

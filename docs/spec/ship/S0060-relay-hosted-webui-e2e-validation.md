@@ -88,13 +88,21 @@ Relay must not contain user workspace content.
 
 ## Test Requirements
 
-- Add an executable relay e2e script or documented manual test path that starts:
+- Run the executable relay e2e verifier:
+
+```bash
+pnpm verify:m8-relay
+```
+
+The verifier starts:
+
   - Relay
   - Host outbound Relay connection
   - WebUI
   - real LLM provider configuration
-- Prefer automation for pair/list/create/send/resync where practical.
-- Manual verification is acceptable for browser-only UI steps, but must record exact commands and expected evidence in the spec or an M8 verification note.
+
+It automates pair/list/create/send/resync/storage-audit coverage where practical.
+Manual verification remains acceptable for browser-only UI inspection, but must record exact commands and expected evidence in the spec or an M8 verification note.
 - No mock/fake provider is accepted as M8 completion proof.
 - Run:
 
@@ -103,7 +111,7 @@ pnpm typecheck
 pnpm test
 ```
 
-Plus the real relay hosted WebUI e2e command or manual checklist defined during implementation.
+Plus `pnpm verify:m8-relay`.
 
 ## Affected Paths
 

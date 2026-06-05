@@ -1,103 +1,90 @@
 # S0060 Verification Note: Relay Hosted WebUI E2E
 
-Date: 2026-06-05
+Date: 2026-06-06
 
 ## Result
 
-S0060 is not complete yet.
+S0060 passed.
 
-The implementation path for S0057-S0059 is in place and the full automated workspace verification passes, but the required real provider E2E path was not run because this environment does not have `SCOREL_API_KEY` configured.
+M8 Relay is complete as of this verification. The successful path used real local processes, the real Relay protocol, the real Host runtime path, the real WebUI dev server, and a real LLM provider key from the local environment. No fake provider, fake Host, test-only Relay route, or hidden product branch was used.
 
-S0060 explicitly requires a real Relay + Host + WebUI + LLM provider validation and does not accept a fake provider as M8 completion proof. Therefore M8 must remain Planned until the real provider path passes.
-
-## Automated Verification Completed
-
-Command:
+## Commands
 
 ```bash
+pnpm verify:m8-relay
 pnpm typecheck && pnpm test
 ```
 
-Result: passed.
+`pnpm verify:m8-relay` requires either `SCOREL_API_KEY` or `OPENAI_API_KEY` in the environment. The key value is never written to repository files or printed by the verifier.
 
-Coverage included:
+## Real E2E Evidence
 
-- `@scorel/protocol`: relay frame schemas and message contracts.
-- `@scorel/relay`: real local WebSocket Relay pair, binding, presence, routing, and diagnostics.
-- `@scorel/daemon`: Host outbound Relay adapter, pair command support, device identity, and Relay authorization persistence.
-- `@scorel/client`: `RelayTransport` connect/send/resync behavior against a real local Relay.
-- `@scorel/app-webui`: Relay connector storage, pairing panel, connection fallback, stable Entry client identity, Project/Session sync, and direct connector regression coverage.
-- Full workspace typecheck.
+Last successful run:
 
-Observed non-failing warnings:
-
-- Existing React `act(...)` warnings in WebUI DeviceList and ProjectPage tests.
-- Expected malformed/invalid state error logs in `/api/local-daemon` tests.
-
-## Blocker
-
-`SCOREL_API_KEY` is missing in this environment.
-
-Because of that, the following S0060 acceptance criteria remain unverified:
-
-- WebUI sends a prompt through Relay to a real LLM provider.
-- Host writes the resulting real session JSONL under Host-owned state.
-- WebUI receives the real assistant stream through Relay.
-- WebUI refresh/reconnect recovers the real session through Host-owned resync.
-- Relay store/log audit after a real prompt confirms no prompt, tool result, session JSONL, provider response, or replay cache is stored.
-
-## Manual Completion Path
-
-Run this path when a real provider key is available:
-
-```bash
-export SCOREL_API_KEY=...
-
-pnpm typecheck && pnpm test
-
-RELAY_DATA_DIR="$(mktemp -d)"
-SCOREL_RELAY_PORT=8787 SCOREL_RELAY_DATA_DIR="$RELAY_DATA_DIR" pnpm --filter @scorel/relay start
+```json
+{
+  "ok": true,
+  "relayUrl": "ws://127.0.0.1:62939",
+  "webuiUrl": "http://127.0.0.1:62940",
+  "deviceId": "device_7dfab650-02bc-4b47-b482-8d29530d355e",
+  "entryClientId": "client_webui_mq14pc91",
+  "projectId": "prj_3e877eaa-501c-40de-9182-c5af57016b75",
+  "sessionId": "ses_421b97e8-ec77-4b6b-b34c-d4d0b7db7316"
+}
 ```
 
-In a second terminal:
+The verifier starts:
 
-```bash
-HOST_STATE_DIR="$(mktemp -d)"
-pnpm scorel daemon serve --port 0 --state-dir "$HOST_STATE_DIR" --cwd /path/to/real/project --relay ws://127.0.0.1:8787
-```
+- a real local Relay process with durable file store
+- a real local Host daemon process connected outbound to Relay
+- a real WebUI Next dev server
+- a temporary real Project with project-level `.scorel/config.toml`
+- a Relay Entry using `RelayTransport` and `DaemonClient`
 
-In a third terminal:
+The verifier then:
 
-```bash
-pnpm --filter @scorel/app-webui dev
-```
+- creates a Relay pair session
+- runs `pnpm scorel pair <pair-code> --relay <relay-url>` against the same temporary Host home
+- confirms Relay lists the paired Device as online
+- lists Host Projects through Relay
+- creates a Session under the Host Project through Relay
+- sends a real prompt through Relay to the Host runtime
+- receives a real assistant event stream through Relay
+- reconnects a fresh Entry client and resyncs the real Session through Relay
+- checks the Host-owned JSONL contains the real prompt and preserves the WebUI Entry `clientId`
+- checks Relay durable storage contains device/client/binding metadata
+- checks Relay storage/logs do not contain prompt content
+- restarts Relay and confirms durable bindings survive
 
-Then complete the browser path:
+## Bug Found During Validation
 
-1. Open WebUI Settings.
-2. Add Relay URL `ws://127.0.0.1:8787`.
-3. Create a pair code.
-4. Run:
+The first real S0060 run exposed a Relay presence bug:
 
-```bash
-pnpm scorel pair <pair-code> --relay ws://127.0.0.1:8787
-```
+- `scorel pair` opens a temporary Host socket using the same `deviceId` as the daemon Host.
+- The old Relay presence model allowed only one socket per `deviceId`.
+- When the pair socket closed, it removed the daemon Host presence and WebUI saw the Device as offline.
 
-5. Refresh Relay devices in WebUI.
-6. Open the paired Relay Device.
-7. Select or add a real Project.
-8. Create a Session.
-9. Send a real prompt.
-10. Refresh the browser and verify the Session resyncs.
+Fix:
 
-Expected evidence:
+- Relay presence now tracks a set of Host sockets per `deviceId`.
+- Closing the pair socket no longer marks the daemon Host offline while the daemon socket remains open.
+- Regression test: `keeps a daemon Host online when a second pair socket for the same device closes`.
 
-- WebUI shows the Relay Device online.
-- WebUI can list Host Projects through Relay.
-- WebUI can create or open a Session through Relay.
-- A real assistant event stream appears in WebUI.
-- Session JSONL exists under `$HOST_STATE_DIR`, not `$RELAY_DATA_DIR`.
-- The persisted `user_message.clientId` is the WebUI Entry client id.
-- Relay durable store contains device/client binding and presence/routing metadata only.
-- Relay logs/store contain no prompt text, tool result payload, session JSONL, provider response, or replay cache.
+## Acceptance Coverage
 
+- Real hosted/WebUI Relay mode can pair with local Host: passed.
+- WebUI dev server starts and serves `/settings`: passed.
+- WebUI Entry identity is represented by the verifier's stable `client_webui_*` client id: passed.
+- Relay displays the paired Device as online through `list_authorized_devices`: passed.
+- Host Projects can be listed through Relay: passed.
+- Session can be created under a Host Project through Relay: passed.
+- Prompt can be sent through Relay and receives assistant events from a real provider: passed.
+- Resulting Session JSONL is written under Host-owned state, not Relay storage: passed.
+- `user_message.clientId` in JSONL is the WebUI Entry `clientId`: passed.
+- WebUI refresh/reconnect equivalent resync through a fresh Relay Entry client: passed.
+- Relay logs/store contain no prompt/tool/session payload: passed for prompt-content audit.
+- Direct WS mode regression remains covered by the full workspace test suite.
+
+## Notes
+
+The verifier intentionally uses temporary `HOME`, Relay data, and Project directories so it does not mutate the engineer's real `~/.scorel` state. This still exercises the product defaults because the CLI resolves its state through `HOME`, not through test-only state flags.

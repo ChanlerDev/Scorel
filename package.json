@@ -8,6 +8,7 @@
     "check": "pnpm typecheck && pnpm test",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "verify:m8-relay": "node --import tsx scripts/verify-m8-relay-e2e.ts",
     "scorel": "node --import tsx apps/cli/src/index.ts",
     "dev": "node --import tsx apps/cli/src/index.ts up"
   },
