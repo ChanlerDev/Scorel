@@ -33,6 +33,7 @@ import {
 
 import { runCliDaemon } from "./daemon-cli.js";
 import { runCliPair } from "./relay-cli.js";
+import { runCliRelay } from "./relay-server-cli.js";
 import { runCliUp } from "./up-cli.js";
 import { runCliWebUi } from "./webui-cli.js";
 
@@ -69,7 +70,7 @@ export const runCli = async (
   runOptions: CliRunOptions = {},
 ): Promise<number> => {
   const [command, ...rest] = argv;
-  if (command === "chat") {
+  if (!command || command === "chat") {
     if (rest.includes("--help") || rest.includes("-h")) {
       writeUsage(io.output);
       return 0;
@@ -85,6 +86,17 @@ export const runCli = async (
       output: io.output,
       error: io.error,
     });
+  }
+  if (command === "host") {
+    return runCliDaemon(rest, {
+      stateDir: stateDirFromSessionsDir(runOptions.sessionsDir),
+      sessionsDir: runOptions.sessionsDir,
+      output: io.output,
+      error: io.error,
+    });
+  }
+  if (command === "relay") {
+    return runCliRelay(rest, { output: io.output, error: io.error });
   }
   if (command === "pair") {
     return runCliPair(rest, {
@@ -858,12 +870,15 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
   output.write(
     [
       "Usage: scorel chat [--session <id>] [--cwd <dir>]",
+      "       scorel [--session <id>] [--cwd <dir>]",
       "       scorel attach --session <id> --remote <ws-url> --token <token>",
-      "       scorel daemon serve [--host <h>] [--port <p>] [--token <t>] [--cwd <d>]",
-      "       scorel daemon status [--show-token]",
-      "       scorel daemon stop",
-      "       scorel daemon reset",
-      "       scorel pair <pair-code> --relay <relay-url>",
+      "       scorel host serve [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
+      "                        [--relay <relay-url> | --no-relay] [--replace]",
+      "       scorel host status [--show-token]",
+      "       scorel host stop",
+      "       scorel host reset",
+      "       scorel pair <pair-code> [--relay <relay-url>]",
+      "       scorel relay serve [--host <h>] [--port <p>] [--data-dir <dir>]",
       "       scorel webui [--port <p>] [--host <h>]",
       "       scorel up [--daemon-port <p>] [--webui-port <p>] [--cwd <d>]",
       "       scorel logs [--attach] --session <id> [--remote <ws-url>] [--tail <n>]",

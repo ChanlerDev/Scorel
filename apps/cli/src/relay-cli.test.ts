@@ -42,14 +42,10 @@ afterEach(async () => {
 });
 
 describe("scorel pair CLI", () => {
-  it("requires a pair code and relay URL", async () => {
+  it("requires a pair code but not an explicit relay URL", async () => {
     const missingCode = await runCliForTest(["pair"]);
     expect(missingCode.code).toBe(1);
     expect(missingCode.stderr).toContain("pair code is required");
-
-    const missingRelay = await runCliForTest(["pair", "123456"]);
-    expect(missingRelay.code).toBe(1);
-    expect(missingRelay.stderr).toContain("--relay is required");
   });
 
   it("reports invalid Relay pair responses without mutating allowlist", async () => {
@@ -77,6 +73,26 @@ describe("scorel pair CLI", () => {
     expect(second).toMatchObject({ code: 0 });
     const auth = await readHostRelayAuth(stateDir);
     expect(auth.clients).toEqual([{ clientId: "client_web", createdAt: expect.any(Number) }]);
+  });
+
+  it("uses SCOREL_RELAY_URL as the default relay when --relay is omitted", async () => {
+    const { relay, stateDir } = await relayCliFixture();
+    const entry = await connect(relay.url);
+    send(entry, { type: "entry_hello", clientId: asClientId("client_default_relay") });
+    const code = await createPairCode(entry, "relay_pair_default");
+    const previous = process.env.SCOREL_RELAY_URL;
+    process.env.SCOREL_RELAY_URL = relay.url;
+    try {
+      const result = await runCliForTest(["pair", code], stateDir);
+      expect(result).toMatchObject({ code: 0 });
+      expect(result.stdout).toContain("authorized client=client_default_relay");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.SCOREL_RELAY_URL;
+      } else {
+        process.env.SCOREL_RELAY_URL = previous;
+      }
+    }
   });
 });
 

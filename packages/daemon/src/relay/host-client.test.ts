@@ -110,9 +110,40 @@ describe("Host relay client", () => {
       },
     });
   });
+
+  it("reconnects after the Relay socket is lost", async () => {
+    const diagnostics: string[] = [];
+    const fixture = await relayHostFixture({
+      authorizedClient: asClientId("client_reconnect"),
+      reconnectDelayMs: 10,
+      onDiagnostic: (type) => diagnostics.push(type),
+    });
+    const relayPort = fixture.relay.port;
+    const relayIndex = servers.indexOf(fixture.relay);
+    if (relayIndex >= 0) {
+      servers.splice(relayIndex, 1);
+    }
+    await fixture.relay.close();
+    const restarted = await startRelayServer({
+      host: "127.0.0.1",
+      port: relayPort,
+      store: fixture.store,
+      diagnostics: new MemoryRelayDiagnostics(),
+    });
+    servers.push(restarted);
+    await waitFor(() => diagnostics.filter((type) => type === "relay_host_connected").length >= 2, "relay reconnect");
+
+    const entry = await connect(restarted.url);
+    send(entry, { type: "entry_hello", clientId: asClientId("client_reconnect") });
+    await waitForAuthorizedDeviceOnline(entry, fixture.deviceId);
+  });
 });
 
-const relayHostFixture = async (options: { authorizedClient: ReturnType<typeof asClientId> }) => {
+const relayHostFixture = async (options: {
+  authorizedClient: ReturnType<typeof asClientId>;
+  reconnectDelayMs?: number;
+  onDiagnostic?: (type: string) => void;
+}) => {
   const root = await mkdtemp(join(tmpdir(), "scorel-host-relay-"));
   tempDirs.push(root);
   const store = new FileRelayStore({ dataDir: join(root, "relay") });
@@ -141,6 +172,8 @@ const relayHostFixture = async (options: { authorizedClient: ReturnType<typeof a
     hostService: host,
     deviceId,
     stateDir: root,
+    reconnectDelayMs: options.reconnectDelayMs,
+    onDiagnostic: options.onDiagnostic,
   });
   relayClients.push(relayClient);
   return { root, relay, store, host, relayClient, deviceId };
@@ -181,4 +214,15 @@ const waitForAuthorizedDeviceOnline = async (socket: WebSocket, deviceId: Return
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error(`timed out waiting for ${deviceId} online`);
+};
+
+const waitFor = async (predicate: () => boolean, label: string): Promise<void> => {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 1000) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`timed out waiting for ${label}`);
 };

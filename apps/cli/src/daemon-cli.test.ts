@@ -9,6 +9,7 @@ import {
   createLocalDaemonState,
   readLocalDaemonState,
 } from "@scorel/daemon";
+import { FileRelayStore, MemoryRelayDiagnostics, startRelayServer } from "../../../apps/relay/src/index.js";
 
 import { runCliDaemon } from "./daemon-cli.js";
 
@@ -160,7 +161,7 @@ describe("scorel daemon CLI", () => {
     });
     const out = new StringWritable();
     const err = new StringWritable();
-    const code = await runCliDaemon(["serve", "--port", "0"], { stateDir, output: out, error: err });
+    const code = await runCliDaemon(["serve", "--port", "0", "--no-relay"], { stateDir, output: out, error: err });
     expect(code).toBe(1);
     expect(err.toString()).toContain("already running");
   });
@@ -174,14 +175,14 @@ describe("scorel daemon CLI", () => {
     const out = new StringWritable();
     const err = new StringWritable();
     const abort1 = new AbortController();
-    const serving1 = runCliDaemon(["serve", "--port", "0", "--cwd", cwd], {
+    const serving1 = runCliDaemon(["serve", "--port", "0", "--cwd", cwd, "--no-relay"], {
       stateDir,
       sessionsDir,
       output: out,
       error: err,
       serveSignal: abort1.signal,
     });
-    await waitForText(out, "scorel daemon serving url=ws://127.0.0.1:");
+    await waitForText(out, "scorel host serving url=ws://127.0.0.1:");
     const persistedFirst = await readLocalDaemonState({ stateDir });
     expect(persistedFirst).not.toBeNull();
     abort1.abort();
@@ -193,14 +194,14 @@ describe("scorel daemon CLI", () => {
     const abort2 = new AbortController();
     const out2 = new StringWritable();
     const err2 = new StringWritable();
-    const serving2 = runCliDaemon(["serve", "--port", "0", "--cwd", cwd], {
+    const serving2 = runCliDaemon(["serve", "--port", "0", "--cwd", cwd, "--no-relay"], {
       stateDir,
       sessionsDir,
       output: out2,
       error: err2,
       serveSignal: abort2.signal,
     });
-    await waitForText(out2, "scorel daemon serving url=ws://127.0.0.1:");
+    await waitForText(out2, "scorel host serving url=ws://127.0.0.1:");
     const persistedSecond = await readLocalDaemonState({ stateDir });
     expect(persistedSecond?.token).toBe(persistedFirst!.token);
     expect(persistedSecond?.stoppedAt).toBeNull();
@@ -210,6 +211,38 @@ describe("scorel daemon CLI", () => {
     // reset should clear the file so the next serve generates a new token.
     await runCliDaemon(["reset"], { stateDir, output: new StringWritable(), error: new StringWritable() });
     expect(await readLocalDaemonState({ stateDir })).toBeNull();
+  }, 15_000);
+
+  it("host serve connects to the default relay URL from SCOREL_RELAY_URL", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-host-serve-relay-"));
+    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-host-serve-relay-sessions-"));
+    const cwd = await mkdtemp(join(tmpdir(), "scorel-host-serve-relay-cwd-"));
+    await writeConfig(cwd);
+    const relay = await startRelayServer({
+      host: "127.0.0.1",
+      port: 0,
+      store: new FileRelayStore({ dataDir: join(stateDir, "relay") }),
+      diagnostics: new MemoryRelayDiagnostics(),
+    });
+    const abort = new AbortController();
+    const out = new StringWritable();
+    const err = new StringWritable();
+    const serving = runCliDaemon(["serve", "--port", "0", "--cwd", cwd], {
+      stateDir,
+      sessionsDir,
+      output: out,
+      error: err,
+      serveSignal: abort.signal,
+      env: { ...process.env, SCOREL_RELAY_URL: relay.url },
+    });
+    try {
+      await waitForText(out, "scorel host relay connected url=");
+      expect(out.toString()).toContain("scorel hosted webui https://scorel.channel.dev");
+    } finally {
+      abort.abort();
+      await expect(serving).resolves.toBe(0);
+      await relay.close();
+    }
   }, 15_000);
 
   it("serve overwrites an orphaned state file (dead pid + stoppedAt: null)", async () => {
@@ -233,14 +266,14 @@ describe("scorel daemon CLI", () => {
     const abort = new AbortController();
     const out = new StringWritable();
     const err = new StringWritable();
-    const serving = runCliDaemon(["serve", "--port", "0", "--cwd", cwd], {
+    const serving = runCliDaemon(["serve", "--port", "0", "--cwd", cwd, "--no-relay"], {
       stateDir,
       sessionsDir,
       output: out,
       error: err,
       serveSignal: abort.signal,
     });
-    await waitForText(out, "scorel daemon serving url=ws://127.0.0.1:");
+    await waitForText(out, "scorel host serving url=ws://127.0.0.1:");
     const persisted = await readLocalDaemonState({ stateDir });
     // Token reused from the orphan file (per spec).
     expect(persisted?.token).toBe("orphan-token");

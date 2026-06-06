@@ -20,6 +20,8 @@ import {
   type LocalDaemonState,
 } from "@scorel/daemon";
 
+import { DEFAULT_SCOREL_WEBUI_URL, resolveDefaultRelayUrl } from "./relay-cli.js";
+
 export type DaemonCommandIo = {
   output: NodeJS.WritableStream;
   error: NodeJS.WritableStream;
@@ -35,6 +37,7 @@ export type DaemonCommandOptions = DaemonCommandIo & {
    * signal aborts.
    */
   serveSignal?: AbortSignal;
+  env?: NodeJS.ProcessEnv;
 };
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -80,6 +83,7 @@ type ServeFlags = {
   token?: string;
   cwd: string;
   relayUrl?: string;
+  replace: boolean;
 };
 
 const runServeCommand = async (
@@ -88,7 +92,7 @@ const runServeCommand = async (
 ): Promise<number> => {
   let flags: ServeFlags;
   try {
-    flags = parseServeFlags(argv, options.cwd ?? process.cwd());
+    flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env);
   } catch (cause) {
     options.error.write(`scorel daemon serve error: ${(cause as Error).message}\n`);
     return 1;
@@ -98,10 +102,14 @@ const runServeCommand = async (
   if (existing) {
     const liveness = daemonStateLiveness(existing);
     if (liveness === "running") {
+      if (flags.replace) {
+        await stopRunningDaemon(existing, options);
+      } else {
       options.error.write(
-        `scorel daemon already running pid=${existing.pid} url=${existing.wsUrl}\n`,
+        `scorel host already running pid=${existing.pid} url=${existing.wsUrl}\nUse --replace to stop it and start a new one.\n`,
       );
       return 1;
+      }
     }
   }
 
@@ -141,7 +149,8 @@ const runServeCommand = async (
   };
   await createLocalDaemonState({ stateDir: options.stateDir, ...persistedState });
 
-  options.output.write(`scorel daemon serving url=${server.url}\n`);
+  options.output.write(`scorel host serving url=${server.url}\n`);
+  options.output.write(`scorel host initial project cwd=${flags.cwd}\n`);
   let relayClient: HostRelayClient | undefined;
   if (flags.relayUrl) {
     relayClient = await startHostRelayClient({
@@ -152,7 +161,11 @@ const runServeCommand = async (
       stateDir: options.stateDir,
       onDiagnostic: (type) => {
         if (type === "relay_host_connected") {
-          options.output.write(`scorel daemon relay connected url=${flags.relayUrl} device=${identity.deviceId}\n`);
+          options.output.write(`scorel host relay connected url=${flags.relayUrl} device=${identity.deviceId}\n`);
+          options.output.write(`scorel hosted webui ${DEFAULT_SCOREL_WEBUI_URL}\n`);
+        }
+        if (type === "relay_host_reconnecting") {
+          options.output.write(`scorel host relay reconnecting url=${flags.relayUrl} device=${identity.deviceId}\n`);
         }
       },
     });
@@ -208,8 +221,32 @@ const runServeCommand = async (
     await shutdown();
   }
 
-  options.output.write(`scorel daemon serve stopped reason=${signalReason}\n`);
+  options.output.write(`scorel host serve stopped reason=${signalReason}\n`);
   return 0;
+};
+
+const stopRunningDaemon = async (
+  state: LocalDaemonState,
+  options: DaemonCommandOptions & { stateDir: string },
+): Promise<void> => {
+  try {
+    process.kill(state.pid, "SIGTERM");
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + STOP_GRACE_MS;
+  while (Date.now() < deadline) {
+    await sleep(STOP_POLL_INTERVAL_MS);
+    const refreshed = await readLocalDaemonState({ stateDir: options.stateDir });
+    if (!refreshed || refreshed.stoppedAt !== null || daemonStateLiveness(refreshed) !== "running") {
+      return;
+    }
+  }
+  try {
+    process.kill(state.pid, "SIGKILL");
+  } catch {
+    // The process may have exited after the grace timeout.
+  }
 };
 
 type StatusFlags = {
@@ -312,12 +349,13 @@ const formatStatusLine = (
   return `stopped url=${state.wsUrl} last-pid=${state.pid} stoppedAt=${stoppedAt} liveness=${liveness}`;
 };
 
-const parseServeFlags = (argv: string[], defaultCwd: string): ServeFlags => {
+const parseServeFlags = (argv: string[], defaultCwd: string, env: NodeJS.ProcessEnv): ServeFlags => {
   let host = DEFAULT_HOST;
   let port = DEFAULT_PORT;
   let cwd = defaultCwd;
   let token: string | undefined;
-  let relayUrl: string | undefined;
+  let relayUrl: string | undefined = resolveDefaultRelayUrl(env);
+  let replace = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--host") {
@@ -343,14 +381,27 @@ const parseServeFlags = (argv: string[], defaultCwd: string): ServeFlags => {
       index += 1;
       continue;
     }
+    if (arg === "--project" || arg === "--bootstrap-project") {
+      cwd = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
     if (arg === "--relay") {
       relayUrl = requireValue(argv, index, "--relay");
       index += 1;
       continue;
     }
+    if (arg === "--no-relay") {
+      relayUrl = undefined;
+      continue;
+    }
+    if (arg === "--replace") {
+      replace = true;
+      continue;
+    }
     throw new Error(`Unknown serve option: ${arg}`);
   }
-  return { host, port, token, cwd, relayUrl };
+  return { host, port, token, cwd, relayUrl, replace };
 };
 
 const parseStatusFlags = (argv: string[]): StatusFlags => {
@@ -381,11 +432,12 @@ const sleep = (ms: number): Promise<void> =>
 const writeDaemonUsage = (output: NodeJS.WritableStream): void => {
   output.write(
     [
-      "Usage: scorel daemon serve [--host <h>] [--port <p>] [--token <t>] [--cwd <d>]",
-      "                         [--relay <relay-url>]",
-      "       scorel daemon status [--show-token]",
-      "       scorel daemon stop",
-      "       scorel daemon reset",
+      "Usage: scorel host serve [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
+      "                        [--relay <relay-url> | --no-relay] [--replace]",
+      "       scorel host status [--show-token]",
+      "       scorel host stop",
+      "       scorel host reset",
+      "       scorel daemon ...  # pre-1.0 alias",
     ].join("\n") + "\n",
   );
 };

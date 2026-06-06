@@ -50,7 +50,7 @@ The WebUI never spawns a daemon; you start one separately and add it as a Device
 
 When the WebUI runs on the same host as the daemon, the Settings page detects `~/.scorel/daemon.json` automatically:
 
-1. `pnpm dev` from the repo root brings up both `scorel daemon serve` and `scorel webui` (`scorel up`).
+1. `pnpm dev` from the repo root brings up both `scorel host serve --no-relay` and `scorel webui` (`scorel up`).
 2. Open `http://127.0.0.1:3000/settings`.
 3. A **Detected local daemon** banner appears above the device list with the daemon's `wsUrl`. Click **Use this device** to add it to the BrowserStore and route to its device page.
 
@@ -60,30 +60,30 @@ The detection request hits `GET /api/local-daemon`, a Next App Router server rou
 - It only succeeds when the WebUI server runs on the same machine as the daemon. Hosting the WebUI on a remote machine returns `404 { ok: false }` because the file does not exist there. Acceptable v1.
 - The token returned is the same persistent token CLI / `scorel attach` use; treat the same-origin browser tab as already-trusted with local filesystem access.
 
-### Manual (remote daemons)
+### Manual (direct WS)
 
-For a daemon that lives on another host (e.g. a VPS), add the device by hand:
+For a Host reachable through a direct WebSocket endpoint, add the device by hand:
 
-### 1. Start a daemon
+### 1. Start a Host
 
-In the repo (or anywhere with a Scorel install), pick a working directory and start a remote daemon:
+In the repo (or anywhere with a Scorel install), pick a working directory and start a Host:
 
 ```bash
-scorel daemon serve \
-  --remote \
+scorel host serve \
   --token TOKEN \
   --port 18789 \
-  --cwd /path/to/repo
+  --project /path/to/repo \
+  --no-relay
 ```
 
 Required:
 
-- `--remote` — exposes the WebSocket endpoint (without it, only the local Unix socket is bound).
 - `--token TOKEN` — shared secret. The WebUI sends it back during the WebSocket handshake.
-- `--port` — defaults to a non-fixed port; pin one for the WebUI.
-- `--cwd` — an initial project directory registered during daemon startup. New Chat resolves its project through the Host registry.
+- `--port` — defaults to `7777`; pin one for the WebUI.
+- `--project` — an initial project directory registered during Host startup. New Chat resolves its project through the Host registry.
+- `--no-relay` — keeps this as a direct local/dev Host instead of connecting to the hosted Relay.
 
-The daemon prints its connection link on startup, e.g. `ws://127.0.0.1:18789` or `wss://...`.
+The Host prints its connection link on startup, e.g. `ws://127.0.0.1:18789`.
 
 ### 2. Add the Device in the WebUI
 

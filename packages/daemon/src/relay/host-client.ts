@@ -23,6 +23,7 @@ export type HostRelayClientOptions = {
   stateDir: string;
   createWebSocket?: (url: string) => WebSocket;
   isAuthorized?: (clientId: ClientId) => Promise<boolean>;
+  reconnectDelayMs?: number;
   onDiagnostic?: (type: string, data?: Record<string, unknown>) => void;
 };
 
@@ -31,43 +32,110 @@ export type HostRelayClient = {
 };
 
 export const startHostRelayClient = async (options: HostRelayClientOptions): Promise<HostRelayClient> => {
-  const socket = options.createWebSocket?.(options.relayUrl) ?? new WebSocket(options.relayUrl);
-  const connections = new Map<ClientId, HostConnection>();
-  await waitForOpen(socket);
-  sendHostFrame(socket, {
-    type: "host_hello",
-    deviceId: options.deviceId,
-    label: options.deviceDisplayName,
-  });
-  options.onDiagnostic?.("relay_host_connected", { relayUrl: options.relayUrl, deviceId: options.deviceId });
+  const client = new ReconnectingHostRelayClient(options);
+  await client.start();
+  return client;
+};
 
-  socket.on("message", (data) => {
-    void handleRelayFrame({
-      frame: JSON.parse(data.toString()) as RelayServerFrame,
-      socket,
-      connections,
-      options,
-    }).catch((cause) => {
-      options.onDiagnostic?.("relay_host_error", {
+class ReconnectingHostRelayClient implements HostRelayClient {
+  readonly #options: HostRelayClientOptions;
+  #socket: WebSocket | undefined;
+  #connections = new Map<ClientId, HostConnection>();
+  #closed = false;
+  #reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(options: HostRelayClientOptions) {
+    this.#options = options;
+  }
+
+  async start(): Promise<void> {
+    await this.#connect();
+  }
+
+  close(): void {
+    this.#closed = true;
+    if (this.#reconnectTimer) {
+      clearTimeout(this.#reconnectTimer);
+      this.#reconnectTimer = undefined;
+    }
+    this.#disconnectHostConnections();
+    this.#socket?.close();
+  }
+
+  async #connect(): Promise<void> {
+    if (this.#closed) {
+      return;
+    }
+    const socket = this.#options.createWebSocket?.(this.#options.relayUrl) ?? new WebSocket(this.#options.relayUrl);
+    this.#socket = socket;
+    await waitForOpen(socket);
+    if (this.#closed) {
+      socket.close();
+      return;
+    }
+    sendHostFrame(socket, {
+      type: "host_hello",
+      deviceId: this.#options.deviceId,
+      label: this.#options.deviceDisplayName,
+    });
+    this.#options.onDiagnostic?.("relay_host_connected", { relayUrl: this.#options.relayUrl, deviceId: this.#options.deviceId });
+
+    socket.on("message", (data) => {
+      void handleRelayFrame({
+        frame: JSON.parse(data.toString()) as RelayServerFrame,
+        socket,
+        connections: this.#connections,
+        options: this.#options,
+      }).catch((cause) => {
+        this.#options.onDiagnostic?.("relay_host_error", {
+          error: cause instanceof Error ? cause.message : String(cause),
+        });
+      });
+    });
+    socket.on("error", (cause) => {
+      this.#options.onDiagnostic?.("relay_host_error", {
         error: cause instanceof Error ? cause.message : String(cause),
       });
     });
-  });
 
-  socket.once("close", () => {
-    for (const connection of connections.values()) {
-      options.hostService.disconnect(connection);
+    socket.once("close", () => {
+      if (this.#socket === socket) {
+        this.#socket = undefined;
+      }
+      this.#disconnectHostConnections();
+      this.#options.onDiagnostic?.("relay_host_disconnected", { relayUrl: this.#options.relayUrl, deviceId: this.#options.deviceId });
+      this.#scheduleReconnect();
+    });
+  }
+
+  #disconnectHostConnections(): void {
+    for (const connection of this.#connections.values()) {
+      this.#options.hostService.disconnect(connection);
     }
-    connections.clear();
-    options.onDiagnostic?.("relay_host_disconnected", { relayUrl: options.relayUrl, deviceId: options.deviceId });
-  });
+    this.#connections.clear();
+  }
 
-  return {
-    close() {
-      socket.close();
-    },
-  };
-};
+  #scheduleReconnect(): void {
+    if (this.#closed || this.#reconnectTimer) {
+      return;
+    }
+    const delayMs = this.#options.reconnectDelayMs ?? 1000;
+    this.#options.onDiagnostic?.("relay_host_reconnecting", {
+      relayUrl: this.#options.relayUrl,
+      deviceId: this.#options.deviceId,
+      delayMs,
+    });
+    this.#reconnectTimer = setTimeout(() => {
+      this.#reconnectTimer = undefined;
+      void this.#connect().catch((cause) => {
+        this.#options.onDiagnostic?.("relay_host_error", {
+          error: cause instanceof Error ? cause.message : String(cause),
+        });
+        this.#scheduleReconnect();
+      });
+    }, delayMs);
+  }
+}
 
 const handleRelayFrame = async (
   input: {

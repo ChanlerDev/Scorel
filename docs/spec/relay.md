@@ -137,7 +137,7 @@ Host
 
 配对语义：
 
-- 用户在本机运行 `scorel pair <code>` 是授权动作。
+- 用户在本机运行 `scorel pair <code>` 是授权动作；默认连接官方 Relay，自部署时用 `--relay <url>` 覆盖。
 - Pair code 只用于创建 `deviceId -> clientId` 授权关系。
 - Pair code 不是长期 secret。
 - Pair code 过期或被使用后必须失效。
@@ -367,7 +367,8 @@ packages/
 
 apps/
   cli/
-    src/relay-cli.ts    # scorel pair / relay-related commands
+    src/relay-cli.ts    # scorel pair support
+    src/relay-server-cli.ts # scorel relay serve
   webui/
     ...                 # direct connector + relay connector UI
 ```
@@ -378,7 +379,7 @@ apps/
 - `packages/protocol`：放 Relay frame、record、request/response 类型；保持 browser-safe、零 Node 依赖。
 - `packages/client`：放 `RelayTransport`，实现现有 `DaemonTransport` contract。
 - `packages/daemon`：放 Host outbound Relay adapter；它把 Relay frame 转回现有 Host handler。
-- `apps/cli`：只放命令入口，例如 `scorel pair <code>`。
+- `apps/cli`：只放命令入口，例如 `scorel pair <code>`、`scorel host serve`、`scorel relay serve`。
 - `apps/webui`：只放 connector UI、Device registry 和 `RelayTransport` 使用逻辑。
 
 不要创建顶层 `relay/` 目录。当前 workspace 只约定 `apps/*` 和 `packages/*`；顶层目录会绕开现有 monorepo 边界。

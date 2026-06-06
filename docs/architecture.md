@@ -244,7 +244,7 @@ Client reconnect
 ### 4.1 CLI
 
 ```text
-scorel chat --cwd .
+scorel
   -> temporary embedded Host
   -> register current cwd
   -> create or resume Session under projectId

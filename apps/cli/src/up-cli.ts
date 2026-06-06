@@ -92,6 +92,7 @@ export const runCliUp = async (argv: string[], options: UpCommandOptions): Promi
       String(flags.daemonPort),
       "--cwd",
       flags.cwd,
+      "--no-relay",
     ];
     daemonChild = spawnFn(process.execPath, daemonArgs, {
       cwd: flags.cwd,
@@ -237,7 +238,7 @@ const waitForDaemonReady = (child: ChildProcess, timeoutMs: number): Promise<voi
       if (newlineIndex < 0) {
         return;
       }
-      if (buffer.includes("scorel daemon serving url=")) {
+      if (buffer.includes("scorel daemon serving url=") || buffer.includes("scorel host serving url=")) {
         if (settled) return;
         settled = true;
         cleanup();

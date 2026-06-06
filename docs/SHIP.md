@@ -24,11 +24,18 @@
 
 ```bash
 pnpm install
-pnpm dev          # = scorel up; daemon + WebUI 同时启动
-open http://127.0.0.1:3000
+pnpm scorel       # 在当前目录进入交互式项目会话
 ```
 
-第一次运行后,`~/.scorel/daemon.json` 会写入持久 token;后续 `pnpm dev` 复用同一 token,无需手填。WebUI Settings 页面会通过 `/api/local-daemon` 自动检测并提示 "Use this device"。
+Hosted WebUI 路径：
+
+```bash
+pnpm scorel host serve
+open https://scorel.channel.dev
+pnpm scorel pair <pair-code>
+```
+
+`scorel host serve` 会启动本机 Host、注册当前目录为初始 Project，并默认连接官方 Relay。`scorel up` / `pnpm dev` 只作为本地开发便利入口：本地 Host + 本地 WebUI。
 
 ---
 

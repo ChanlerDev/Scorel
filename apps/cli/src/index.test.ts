@@ -79,6 +79,14 @@ describe("@scorel/app-cli", () => {
     expect(result.stderr).toContain("scorel daemon not configured");
   });
 
+  it("host status routes through the local Host command surface", async () => {
+    const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-host-state-"));
+    const result = await runCliWithInput(["host", "status"], "", testConfig("http://127.0.0.1:1"), sessionsDir);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("scorel daemon not configured");
+  });
+
   it("attach requires a remote URL since the local-socket path was retired", async () => {
     const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-attach-"));
     const result = await runCliWithInput(["attach", "--session", "ses_missing"], "", testConfig("http://127.0.0.1:1"), sessionsDir);
@@ -178,6 +186,30 @@ describe("@scorel/app-cli", () => {
         workDir: canonicalWorkDir,
         displayName: basename(canonicalWorkDir),
       });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("runs interactive chat when scorel has no subcommand", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-default-command-"));
+    const sessionsDir = join(stateDir, "sessions");
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-default-command-workspace-"));
+    const server = await startChatServer([{ content: "Default command response.", tool_calls: [] }]);
+
+    try {
+      const result = await runCliWithCwd(
+        [],
+        "hello from default command\n.exit\n",
+        testConfig(server.baseURL),
+        sessionsDir,
+        workspaceDir,
+      );
+
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain("Default command response.");
+      const registry = JSON.parse(await readFile(join(stateDir, "projects.json"), "utf8")) as { projects: Array<{ workDir: string }> };
+      expect(registry.projects[0]?.workDir).toBe(await realpath(workspaceDir));
     } finally {
       await server.close();
     }
@@ -1105,6 +1137,22 @@ const runCliWithInput = async (
     error: stderr,
   }, { config, sessionsDir });
   return { code, stdout: stdout.toString(), stderr: stderr.toString() };
+};
+
+const runCliWithCwd = async (
+  argv: string[],
+  input: string,
+  config: ScorelConfig,
+  sessionsDir: string,
+  cwd: string,
+): Promise<{ code: number; stdout: string; stderr: string }> => {
+  const previous = process.cwd();
+  process.chdir(cwd);
+  try {
+    return await runCliWithInput(argv, input, config, sessionsDir);
+  } finally {
+    process.chdir(previous);
+  }
 };
 
 const cachedAttachEvents = (sessionId: string, assistantText: string, idPrefix = "evt_cache") => [

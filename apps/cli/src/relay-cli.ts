@@ -3,10 +3,14 @@ import { join } from "node:path";
 
 import { loadOrCreateHostDeviceIdentity, redeemRelayPair } from "@scorel/daemon";
 
+export const DEFAULT_SCOREL_RELAY_URL = "wss://scorel-relay.channel.dev";
+export const DEFAULT_SCOREL_WEBUI_URL = "https://scorel.channel.dev";
+
 export type PairCommandOptions = {
   stateDir?: string;
   output: NodeJS.WritableStream;
   error: NodeJS.WritableStream;
+  env?: NodeJS.ProcessEnv;
 };
 
 const defaultStateDir = (): string => join(homedir(), ".scorel");
@@ -17,7 +21,7 @@ export const runCliPair = async (
 ): Promise<number> => {
   let flags: { pairCode: string; relayUrl: string };
   try {
-    flags = parsePairFlags(argv);
+    flags = parsePairFlags(argv, options.env ?? process.env);
   } catch (cause) {
     options.error.write(`scorel pair error: ${(cause as Error).message}\n`);
     writePairUsage(options.error);
@@ -41,12 +45,15 @@ export const runCliPair = async (
   }
 };
 
-const parsePairFlags = (argv: string[]): { pairCode: string; relayUrl: string } => {
+export const resolveDefaultRelayUrl = (env: NodeJS.ProcessEnv = process.env): string =>
+  env.SCOREL_RELAY_URL?.trim() || DEFAULT_SCOREL_RELAY_URL;
+
+const parsePairFlags = (argv: string[], env: NodeJS.ProcessEnv): { pairCode: string; relayUrl: string } => {
   const pairCode = argv[0];
   if (!pairCode || pairCode.startsWith("-")) {
     throw new Error("pair code is required");
   }
-  let relayUrl: string | undefined;
+  let relayUrl = resolveDefaultRelayUrl(env);
   for (let index = 1; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--relay") {
@@ -55,9 +62,6 @@ const parsePairFlags = (argv: string[]): { pairCode: string; relayUrl: string } 
       continue;
     }
     throw new Error(`Unknown pair option: ${arg}`);
-  }
-  if (!relayUrl) {
-    throw new Error("--relay is required");
   }
   return { pairCode, relayUrl };
 };
@@ -71,5 +75,5 @@ const requireValue = (argv: string[], index: number, flag: string): string => {
 };
 
 const writePairUsage = (output: NodeJS.WritableStream): void => {
-  output.write("Usage: scorel pair <pair-code> --relay <relay-url>\n");
+  output.write("Usage: scorel pair <pair-code> [--relay <relay-url>]\n");
 };

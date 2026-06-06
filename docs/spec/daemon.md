@@ -294,7 +294,7 @@ Project 不属于 connection identity。Client 通过 `list_projects` 获取 Pro
 | Transport | 状态 | 场景 |
 |---|---|---|
 | Embedded | 已有 | `scorel chat` 临时 Host |
-| WebSocket | 已有 | `scorel daemon serve`、WebUI、Direct WS |
+| WebSocket | 已有 | `scorel host serve`、WebUI、Direct WS |
 | SSH stdio proxy | 后续 | GUI 远端 Device |
 | HTTP + SSE | 后续 | 纯 API |
 
@@ -326,7 +326,8 @@ S0043 已删除 Unix socket transport。不要重新引入旧 socket 路径作�
 ### 7.1 CLI Embedded
 
 ```text
-scorel chat --cwd /repo
+cd /repo
+scorel
   -> create temporary Host
   -> registry.register(/repo)
   -> createSession({ projectId })

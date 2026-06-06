@@ -514,6 +514,20 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
+## M8 Follow-up: Hosted Defaults And CLI Command Surface
+
+**Goal**: 把已经部署的 hosted WebUI / Relay 路径变成默认用户路径，并把 CLI 命令从实现名词收敛到产品名词：`scorel` 是正常项目交互入口，`scorel host serve` 启动并注册本机 Host，`scorel pair <code>` 默认走官方 Relay。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M8.F1 | [`S0061`](spec/ship/S0061-hosted-defaults-and-cli-command-surface.md) | hosted defaults、`host serve`、默认 `pair`、`scorel` 交互入口和 Relay operator 命令收口 | Done |
+
+**Status**: Done
+
+---
+
 ## M9: GUI
 
 **Goal**: 提供 Project-first desktop GUI，统一管理本地、Relay 和远程 Device 上的 Project。
@@ -641,6 +655,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0058`](spec/ship/S0058-host-outbound-relay-and-pair-command.md) | Host outbound Relay connection and `scorel pair` | Done |
 | [`S0059`](spec/ship/S0059-relay-transport-and-hosted-webui-connector.md) | RelayTransport and hosted WebUI connector | Done |
 | [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | Relay hosted WebUI real e2e validation | Done |
+| [`S0061`](spec/ship/S0061-hosted-defaults-and-cli-command-surface.md) | Hosted defaults and CLI command surface | Done |
 
 ---
 
