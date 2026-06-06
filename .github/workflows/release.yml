@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: Validate release without committing, tagging, pushing, or publishing
+        required: true
+        default: true
+        type: boolean
+      publish:
+        description: Publish to npm when dry_run is false
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.19.0"
+          cache: pnpm
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Configure git user
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Dry-run release
+        if: ${{ inputs.dry_run == true }}
+        run: pnpm release ${{ inputs.bump }} --dry-run
+
+      - name: Release without npm publish
+        if: ${{ inputs.dry_run == false && inputs.publish == false }}
+        run: pnpm release ${{ inputs.bump }} --no-publish
+
+      - name: Release and publish
+        if: ${{ inputs.dry_run == false && inputs.publish == true }}
+        run: pnpm release ${{ inputs.bump }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

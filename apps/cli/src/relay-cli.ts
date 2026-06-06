@@ -3,8 +3,8 @@ import { join } from "node:path";
 
 import { loadOrCreateHostDeviceIdentity, redeemRelayPair } from "@scorel/daemon";
 
-export const DEFAULT_SCOREL_RELAY_URL = "wss://scorel-relay.channel.dev";
-export const DEFAULT_SCOREL_WEBUI_URL = "https://scorel.channel.dev";
+export const DEFAULT_SCOREL_RELAY_URL = "wss://scorel-relay.chanler.dev";
+export const DEFAULT_SCOREL_WEBUI_URL = "https://scorel.chanler.dev";
 
 export type PairCommandOptions = {
   stateDir?: string;

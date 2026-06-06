@@ -17,8 +17,8 @@ The CLI should expose product concepts instead of implementation leakage:
 
 ## Current Deployment Baseline
 
-- Hosted WebUI: `https://scorel.channel.dev`
-- Relay WebSocket URL: `wss://scorel-relay.channel.dev`
+- Hosted WebUI: `https://scorel.chanler.dev`
+- Relay WebSocket URL: `wss://scorel-relay.chanler.dev`
 
 Self-hosted and development flows can override the Relay URL with `SCOREL_RELAY_URL` or `--relay <url>`.
 
@@ -147,7 +147,7 @@ Runs a Relay service for self-hosting/development. This command maps to the exis
 - `scorel relay serve` can start the Relay service with a file-backed store.
 - `scorel daemon ...` aliases either continue to work or produce a clear pre-1.0 migration message; they must not be the documented primary path.
 - Root README and `docs/SHIP.md` quickstart no longer teach `scorel daemon serve --cwd --relay` as the user-facing hosted path.
-- Hosted WebUI quickstart references `https://scorel.channel.dev`.
+- Hosted WebUI quickstart references `https://scorel.chanler.dev`.
 
 ## Test Requirements
 

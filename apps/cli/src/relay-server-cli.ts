@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { createConsoleRelayDiagnostics, FileRelayStore, startRelayServer, type RelayServer } from "../../../apps/relay/src/index.js";
+import { createConsoleRelayDiagnostics, FileRelayStore, startRelayServer, type RelayServer } from "../../../apps/relay/src/library.js";
 
 export type RelayServerCommandOptions = {
   output: NodeJS.WritableStream;

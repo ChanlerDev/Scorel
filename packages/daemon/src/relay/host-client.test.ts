@@ -18,7 +18,7 @@ import {
   asSeq,
   type RelayServerFrame,
 } from "@scorel/protocol";
-import { FileRelayStore, MemoryRelayDiagnostics, startRelayServer, type RelayServer } from "../../../../apps/relay/src/index.js";
+import { FileRelayStore, MemoryRelayDiagnostics, startRelayServer, type RelayServer } from "../../../../apps/relay/src/library.js";
 
 const servers: RelayServer[] = [];
 const sockets: WebSocket[] = [];

@@ -19,8 +19,8 @@
 **Steps:**
 
 1. Add constants for official hosted URLs:
-   - WebUI origin: `https://scorel.channel.dev`
-   - Relay URL default: `wss://scorel-relay.channel.dev`
+   - WebUI origin: `https://scorel.chanler.dev`
+   - Relay URL default: `wss://scorel-relay.chanler.dev`
 2. Let `SCOREL_RELAY_URL` override the Relay default.
 3. Use the default in pair and host serve paths.
 

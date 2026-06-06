@@ -1,11 +1,36 @@
 {
-  "name": "scorel",
+  "name": "@chanlerdev/scorel",
   "version": "0.0.0",
-  "private": true,
+  "description": "Replayable, recoverable, remotely controllable AI Agent workspace.",
   "type": "module",
   "packageManager": "pnpm@11.1.2",
+  "bin": {
+    "scorel": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "docs/SHIP.md",
+    "docs/ROADMAP.md",
+    "docs/CHANGELOG.md",
+    "docs/spec"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/ChanlerDev/Scorel.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "0.73.1",
+    "ws": "^8.21.0"
+  },
   "scripts": {
+    "build:package": "node scripts/build-package.mjs",
     "check": "pnpm typecheck && pnpm test",
+    "pack:smoke": "node scripts/pack-smoke.mjs",
+    "release": "node scripts/release.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "verify:m8-relay": "node --import tsx scripts/verify-m8-relay-e2e.ts",

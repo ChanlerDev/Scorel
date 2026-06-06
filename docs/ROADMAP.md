@@ -523,6 +523,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | Step | Spec | Goal | Status |
 |---|---|---|---|
 | M8.F1 | [`S0061`](spec/ship/S0061-hosted-defaults-and-cli-command-surface.md) | hosted defaults、`host serve`、默认 `pair`、`scorel` 交互入口和 Relay operator 命令收口 | Done |
+| M8.F2 | [`S0062`](spec/ship/S0062-npm-package-and-release-workflow.md) | 单 public `scorel` npm 包、本地 release 命令和手动 GitHub Actions 发布入口 | Done |
 
 **Status**: Done
 
@@ -656,6 +657,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0059`](spec/ship/S0059-relay-transport-and-hosted-webui-connector.md) | RelayTransport and hosted WebUI connector | Done |
 | [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | Relay hosted WebUI real e2e validation | Done |
 | [`S0061`](spec/ship/S0061-hosted-defaults-and-cli-command-surface.md) | Hosted defaults and CLI command surface | Done |
+| [`S0062`](spec/ship/S0062-npm-package-and-release-workflow.md) | Npm package and release workflow | Done |
 
 ---
 

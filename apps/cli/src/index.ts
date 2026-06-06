@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --import tsx
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, realpath, readdir, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -1030,7 +1030,16 @@ const blocksToText = (blocks: ContentBlock[]): string =>
     .map((block) => block.text)
     .join("");
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+const isCliEntrypoint = async (): Promise<boolean> => {
+  if (!process.argv[1]) return false;
+  const [argvPath, modulePath] = await Promise.all([
+    realpath(process.argv[1]).catch(() => process.argv[1]),
+    realpath(fileURLToPath(import.meta.url)).catch(() => fileURLToPath(import.meta.url)),
+  ]);
+  return argvPath === modulePath;
+};
+
+if (process.env.SCOREL_SKIP_INDEX_ENTRY !== "1" && await isCliEntrypoint()) {
   runCli(process.argv.slice(2)).then((code) => {
     process.exitCode = code;
   });

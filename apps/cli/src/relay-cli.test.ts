@@ -8,7 +8,7 @@ import WebSocket from "ws";
 
 import { readHostRelayAuth } from "@scorel/daemon";
 import { asClientId, asRequestId, type RelayResponse } from "@scorel/protocol";
-import { FileRelayStore, MemoryRelayDiagnostics, startRelayServer, type RelayServer } from "../../../apps/relay/src/index.js";
+import { FileRelayStore, MemoryRelayDiagnostics, startRelayServer, type RelayServer } from "../../../apps/relay/src/library.js";
 
 import { runCli } from "./index.js";
 

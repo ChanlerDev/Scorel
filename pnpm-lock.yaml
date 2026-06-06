@@ -7,6 +7,13 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@mariozechner/pi-ai':
+        specifier: 0.73.1
+        version: 0.73.1(ws@8.21.0)(zod@4.4.3)
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
     devDependencies:
       '@types/node':
         specifier: ^24.10.1

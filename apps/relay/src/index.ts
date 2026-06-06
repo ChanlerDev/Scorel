@@ -3,31 +3,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { protocolPackageName, protocolVersion } from "@scorel/protocol";
+import { createConsoleRelayDiagnostics, FileRelayStore, startRelayServer } from "./library.js";
 
-import { createConsoleRelayDiagnostics, MemoryRelayDiagnostics } from "./diagnostics.js";
-import { RelayPairing } from "./pairing.js";
-import { RelayPresence } from "./presence.js";
-import { routeEntryToDevice, routeHostToEntry } from "./routing.js";
-import { FileRelayStore, type RelayStore } from "./store.js";
-import { startRelayServer, type RelayServer } from "./server.js";
-
-export const relayPackageName = "@scorel/relay" as const;
-export const relayProtocolDependency = protocolPackageName;
-export const relayProtocolVersion = protocolVersion;
-
-export {
-  createConsoleRelayDiagnostics,
-  FileRelayStore,
-  MemoryRelayDiagnostics,
-  RelayPairing,
-  RelayPresence,
-  routeEntryToDevice,
-  routeHostToEntry,
-  startRelayServer,
-  type RelayServer,
-  type RelayStore,
-};
+export * from "./library.js";
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const port = Number(process.env.SCOREL_RELAY_PORT ?? 8787);

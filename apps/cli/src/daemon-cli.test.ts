@@ -9,7 +9,7 @@ import {
   createLocalDaemonState,
   readLocalDaemonState,
 } from "@scorel/daemon";
-import { FileRelayStore, MemoryRelayDiagnostics, startRelayServer } from "../../../apps/relay/src/index.js";
+import { FileRelayStore, MemoryRelayDiagnostics, startRelayServer } from "../../../apps/relay/src/library.js";
 
 import { runCliDaemon } from "./daemon-cli.js";
 
@@ -237,7 +237,7 @@ describe("scorel daemon CLI", () => {
     });
     try {
       await waitForText(out, "scorel host relay connected url=");
-      expect(out.toString()).toContain("scorel hosted webui https://scorel.channel.dev");
+      expect(out.toString()).toContain("scorel hosted webui https://scorel.chanler.dev");
     } finally {
       abort.abort();
       await expect(serving).resolves.toBe(0);

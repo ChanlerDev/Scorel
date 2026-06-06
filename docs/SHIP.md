@@ -31,7 +31,7 @@ Hosted WebUI 路径：
 
 ```bash
 pnpm scorel host serve
-open https://scorel.channel.dev
+open https://scorel.chanler.dev
 pnpm scorel pair <pair-code>
 ```
 
@@ -193,20 +193,27 @@ protocolVersion: 1
 推荐命令形态：
 
 ```bash
+pnpm release patch --dry-run
 pnpm release patch
 pnpm release minor
 pnpm release major
 ```
 
-正式 release 脚本后续实现，职责包括：
+正式 release 脚本职责包括：
 
 - 检查 working tree
 - 执行 check
+- 执行 WebUI production build
+- 构建 public `scorel` npm package
+- 执行 `npm pack` 安装烟雾测试
 - bump 所有 package version
 - 更新 changelog
 - commit `release: vX.Y.Z`
 - tag `vX.Y.Z`
 - push branch + tag
+- publish root `scorel` package to npm
+
+GitHub Actions 提供手动触发入口，默认执行 `patch` dry-run。正式 publish 需要仓库 secret `NPM_TOKEN`，对应 npm 账号当前为 `chanlerdev`。
 
 ---
 

@@ -29,7 +29,7 @@ pnpm scorel host serve
 打开 hosted WebUI：
 
 ```text
-https://scorel.channel.dev
+https://scorel.chanler.dev
 ```
 
 WebUI 给出 pair code 后，在本机执行：
