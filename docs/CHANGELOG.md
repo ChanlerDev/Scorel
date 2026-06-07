@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **release**: Generate changelog notes by default from commit summaries using DeepSeek V4 Flash, with a local preview command and an explicit `--no-generate-notes` escape hatch.
+
 ## 0.0.1 - 2026-06-06
 
 - **release**: Add public `scorel` package build, npm pack smoke, local release command, and manual GitHub Actions release workflow.

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { readFile, writeFile } from "node:fs/promises";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+
+import { generateReleaseNotes, insertReleaseNotes } from "./release-notes.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const packagePaths = [
@@ -16,7 +18,7 @@ const packagePaths = [
 ];
 
 const usage = () => {
-  console.error("Usage: pnpm release <patch|minor|major> [--dry-run] [--no-publish] [--no-push] [--allow-dirty]");
+  console.error("Usage: pnpm release <patch|minor|major> [--dry-run] [--no-publish] [--no-push] [--allow-dirty] [--no-generate-notes]");
 };
 
 const args = process.argv.slice(2);
@@ -24,6 +26,7 @@ const bump = args.find((arg) => !arg.startsWith("-"));
 const dryRun = args.includes("--dry-run");
 const noPublish = args.includes("--no-publish");
 const noPush = args.includes("--no-push");
+const noGenerateNotes = args.includes("--no-generate-notes");
 const allowDirty = args.includes("--allow-dirty") || process.env.SCOREL_RELEASE_ALLOW_DIRTY === "1";
 
 if (!bump || !["patch", "minor", "major"].includes(bump)) {
@@ -103,6 +106,12 @@ const updateChangelog = async (nextVersion) => {
   await writeFile(path, updated);
 };
 
+const updateChangelogWithNotes = async (markdown) => {
+  const path = resolve(root, "docs/CHANGELOG.md");
+  const current = await readFile(path, "utf8");
+  await writeFile(path, insertReleaseNotes(current, markdown));
+};
+
 const publish = () => {
   run("npm", ["publish"]);
 };
@@ -113,8 +122,35 @@ const rootPkg = await readJson("package.json");
 const nextVersion = bumpVersion(rootPkg.version, bump);
 console.log(`release ${bump}: ${rootPkg.version} -> ${nextVersion}${dryRun ? " (dry-run)" : ""}`);
 
+const previousTag = (() => {
+  try {
+    return capture("git", ["describe", "--tags", "--abbrev=0", "--match", "v*"]);
+  } catch {
+    return "";
+  }
+})();
+
+let generatedNotes;
+if (!noGenerateNotes) {
+  console.log(`generating release notes for ${previousTag ? `${previousTag}..HEAD` : "HEAD"} using DeepSeek`);
+  generatedNotes = await generateReleaseNotes({
+    from: previousTag,
+    to: "HEAD",
+    version: nextVersion,
+    allowFallback: dryRun,
+  });
+  if (generatedNotes.fallback) {
+    console.warn(`warning: using fallback release notes preview: ${generatedNotes.error instanceof Error ? generatedNotes.error.message : String(generatedNotes.error)}`);
+  }
+  if (dryRun) {
+    console.log("\nrelease notes preview:\n");
+    console.log(generatedNotes.markdown.trim());
+  }
+}
+
 run("pnpm", ["typecheck"]);
 run("pnpm", ["test"]);
+run("node", ["--test", "scripts/release-notes.test.mjs"]);
 run("pnpm", ["--filter", "@scorel/app-webui", "build"]);
 run("pnpm", ["build:package"]);
 run("pnpm", ["pack:smoke"]);
@@ -125,7 +161,11 @@ if (dryRun) {
 }
 
 await updateVersions(nextVersion);
-await updateChangelog(nextVersion);
+if (generatedNotes) {
+  await updateChangelogWithNotes(generatedNotes.markdown);
+} else {
+  await updateChangelog(nextVersion);
+}
 run("pnpm", ["install", "--lockfile-only"]);
 run("pnpm", ["build:package"]);
 run("pnpm", ["pack:smoke"]);

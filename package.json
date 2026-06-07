@@ -31,6 +31,7 @@
     "check": "pnpm typecheck && pnpm test",
     "pack:smoke": "node scripts/pack-smoke.mjs",
     "release": "node scripts/release.mjs",
+    "release-notes": "node scripts/release-notes.mjs",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "verify:m8-relay": "node --import tsx scripts/verify-m8-relay-e2e.ts",

@@ -514,9 +514,9 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
-## M8 Follow-up: Hosted Defaults And CLI Command Surface
+## M8 Follow-up: Hosted Defaults, CLI Command Surface, And Release Transparency
 
-**Goal**: 把已经部署的 hosted WebUI / Relay 路径变成默认用户路径，并把 CLI 命令从实现名词收敛到产品名词：`scorel` 是正常项目交互入口，`scorel host serve` 启动并注册本机 Host，`scorel pair <code>` 默认走官方 Relay。
+**Goal**: 把已经部署的 hosted WebUI / Relay 路径变成默认用户路径，并把 CLI 命令从实现名词收敛到产品名词：`scorel` 是正常项目交互入口，`scorel host serve` 启动并注册本机 Host，`scorel pair <code>` 默认走官方 Relay。同时让 release changelog 从 commits 自动生成透明、用户可读的更新说明。
 
 **Steps**:
 
@@ -524,6 +524,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 |---|---|---|---|
 | M8.F1 | [`S0061`](spec/ship/S0061-hosted-defaults-and-cli-command-surface.md) | hosted defaults、`host serve`、默认 `pair`、`scorel` 交互入口和 Relay operator 命令收口 | Done |
 | M8.F2 | [`S0062`](spec/ship/S0062-npm-package-and-release-workflow.md) | 单 public `scorel` npm 包、本地 release 命令和手动 GitHub Actions 发布入口 | Done |
+| M8.F3 | [`S0063`](spec/ship/S0063-ai-release-notes.md) | release 默认使用 DeepSeek 从 commits 生成结构化 changelog notes，本地和 GitHub Actions 共用同一路径 | Done |
 
 **Status**: Done
 
@@ -658,6 +659,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0060`](spec/ship/S0060-relay-hosted-webui-e2e-validation.md) | Relay hosted WebUI real e2e validation | Done |
 | [`S0061`](spec/ship/S0061-hosted-defaults-and-cli-command-surface.md) | Hosted defaults and CLI command surface | Done |
 | [`S0062`](spec/ship/S0062-npm-package-and-release-workflow.md) | Npm package and release workflow | Done |
+| [`S0063`](spec/ship/S0063-ai-release-notes.md) | AI release notes from commit summaries | Done |
 
 ---
 
