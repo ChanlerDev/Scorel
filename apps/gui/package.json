@@ -11,13 +11,18 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@base-ui/react": "^1.5.0",
     "@scorel/client": "workspace:*",
     "@scorel/daemon": "workspace:*",
     "@scorel/protocol": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "ws": "^8.21.0"
   },
   "devDependencies": {
     "@scorel/core": "workspace:*",
+    "@types/react": "^18.3.29",
+    "@types/react-dom": "^18.3.7",
     "@types/ws": "^8.18.1",
     "electron": "^42.3.3",
     "vitest": "4.0.13"

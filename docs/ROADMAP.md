@@ -553,7 +553,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.2 | [`S0065`](spec/ship/S0065-gui-electron-shell-and-embedded-host.md) | 建立 `apps/gui` Electron shell、main/renderer 边界和 embedded local Host 连接 | Done |
 | M9.3 | [`S0066`](spec/ship/S0066-gui-local-project-workspace.md) | 实现本地 Project-first workspace：本地 Project 全量展示、Session 列表、新建会话和 chat surface | Done |
 | M9.4 | [`S0067`](spec/ship/S0067-gui-relay-device-and-remote-project-selection.md) | Settings 添加 Relay Device，并让 Add Project 显式选择远程 Project 后加入 GUI Project list | Done |
-| M9.5 | [`S0068`](spec/ship/S0068-gui-codex-app-polish-and-e2e.md) | 对齐 Codex App 风格与交互质量，并完成 local + Relay 真实端到端验证 | Planned |
+| M9.5 | [`S0068`](spec/ship/S0068-gui-codex-app-polish-and-e2e.md) | 对齐 Codex App 风格与交互质量，并完成 local + Relay 真实端到端验证 | Done |
 
 **Not in M9**:
 
@@ -562,7 +562,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - 账号系统、OAuth、细粒度 ACL。
 - 把 GUI 打进 `@chanlerdev/scorel` npm CLI 包或让 `pnpm scorel` 启动 GUI。
 
-**Status**: Planned
+**Status**: Done
 
 ---
 
@@ -684,7 +684,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0065`](spec/ship/S0065-gui-electron-shell-and-embedded-host.md) | GUI Electron shell and embedded local Host | Done |
 | [`S0066`](spec/ship/S0066-gui-local-project-workspace.md) | GUI local Project-first workspace | Done |
 | [`S0067`](spec/ship/S0067-gui-relay-device-and-remote-project-selection.md) | GUI Relay Device and explicit remote Project selection | Done |
-| [`S0068`](spec/ship/S0068-gui-codex-app-polish-and-e2e.md) | GUI Codex App polish and local + Relay e2e | Planned |
+| [`S0068`](spec/ship/S0068-gui-codex-app-polish-and-e2e.md) | GUI Codex App polish and local + Relay e2e | Done |
 
 ---
 

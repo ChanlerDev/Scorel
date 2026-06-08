@@ -66,4 +66,31 @@ describe("GUI local Host service", () => {
       await service.stop();
     }
   });
+
+  it("keeps local transcript events scoped to the opened Session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-workspace-"));
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const service = createGuiLocalHostService({
+      stateDir: root,
+      deviceId: "device_gui_test",
+      createRuntime: async () => new ScorelRuntime({ provider }),
+    });
+
+    await service.start();
+    try {
+      const project = await service.registerLocalProject(repo);
+      const first = await service.createLocalSession(project.projectId);
+      const second = await service.createLocalSession(project.projectId);
+
+      await service.sendLocalMessage(first, "first prompt");
+      const secondEvents = await service.sendLocalMessage(second, "second prompt");
+
+      expect(secondEvents.every((event) => event.sessionId === second)).toBe(true);
+      expect(secondEvents.some((event) => event.type === "user_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "second prompt")).toBe(true);
+      expect(secondEvents.some((event) => event.type === "user_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "first prompt")).toBe(false);
+    } finally {
+      await service.stop();
+    }
+  });
 });

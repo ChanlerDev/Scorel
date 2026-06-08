@@ -40,9 +40,13 @@ Bring the first GUI milestone to a credible Codex App-style desktop experience a
 Run:
 
 ```bash
+pnpm --filter @scorel/app-gui build
 pnpm --filter @scorel/app-gui typecheck
+pnpm --filter @scorel/app-gui test
 pnpm typecheck
 pnpm test
+pnpm pack:smoke
+pnpm verify:m9-gui
 git diff --check
 ```
 
@@ -63,6 +67,33 @@ If browser or screenshot tooling is used for renderer verification, record viewp
 - `docs/ROADMAP.md`
 - `docs/spec/ship/S0068-gui-codex-app-polish-and-e2e.md`
 - optional verification artifact under `docs/spec/ship/`
+
+## Implementation Notes
+
+- The GUI uses the `docs/design.md` token set directly in `apps/gui/src/index.html`.
+- Renderer states now distinguish:
+  - no Project
+  - Project without Session
+  - busy/loading
+  - local Host error
+  - Relay Device online/offline
+  - Relay Device absent before remote browse
+- Composer and Project/Session rows use fixed dimensions, text truncation, focus states, and restrained status chips.
+- The S0067 product model is unchanged: local Projects remain all-visible; remote Projects are still shown only after GUI selection.
+
+## Verification
+
+See [`S0068-gui-e2e-verification.md`](S0068-gui-e2e-verification.md).
+
+Current status:
+
+- GUI polish: complete.
+- Automated local product-path verification: complete.
+- Automated Relay product-path verification: complete.
+- Electron launch smoke: complete.
+- Real-provider GUI e2e: complete.
+
+M9 can be marked Done because all S0064-S0068 specs are complete and `pnpm verify:m9-gui` passed with provider credentials.
 
 ## Risks
 

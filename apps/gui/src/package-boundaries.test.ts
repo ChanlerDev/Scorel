@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 const rootPackagePath = fileURLToPath(new URL("../../../package.json", import.meta.url));
 const srcDir = fileURLToPath(new URL(".", import.meta.url));
 const rendererOwnedDirs = ["shared"];
-const rendererOwnedFiles = ["renderer.ts", "preload.ts"];
+const rendererOwnedFiles = ["renderer.tsx", "preload.ts"];
 
 describe("GUI package boundaries", () => {
   it("keeps apps/gui out of the public CLI package files list", async () => {
@@ -41,7 +41,7 @@ async function tsFiles(dir: string): Promise<string[]> {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...await tsFiles(path));
-    } else if (entry.isFile() && entry.name.endsWith(".ts")) {
+    } else if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) {
       files.push(path);
     }
   }

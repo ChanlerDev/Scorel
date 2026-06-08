@@ -32,7 +32,7 @@ await Promise.all([
     sourcemap: true,
   }),
   build({
-    entryPoints: [join(root, "src/renderer.ts")],
+    entryPoints: [join(root, "src/renderer.tsx")],
     bundle: true,
     platform: "browser",
     target: "es2022",

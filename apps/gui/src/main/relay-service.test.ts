@@ -58,7 +58,7 @@ describe("GUI Relay service", () => {
     expect(pair.expiresAt).toBeGreaterThan(Date.now());
   });
 
-  it("lists authorized Relay Devices and registers only explicitly selected remote Projects", async () => {
+  it("lists authorized Relay Devices, selects remote Projects, and sends prompts through Relay", async () => {
     const fixture = await relayFixture();
     const remoteRoot = await mkdtemp(join(tmpdir(), "scorel-gui-remote-root-"));
     tempDirs.push(remoteRoot);
@@ -73,6 +73,8 @@ describe("GUI Relay service", () => {
       const devices = await service.refreshAuthorizedDevices(fixture.relay.url);
       const listing = await service.listRemoteDirectories("device_remote", remoteRoot);
       const selected = await service.registerRemoteProject("device_remote", repo);
+      const sessionId = await service.createRemoteSession("device_remote", selected.projectId);
+      const events = await service.sendRemoteMessage("device_remote", sessionId, "hello relay gui");
       const snapshot = await serviceStore.load();
 
       expect(devices).toMatchObject([{ deviceId: "device_remote", online: true }]);
@@ -82,6 +84,8 @@ describe("GUI Relay service", () => {
         displayName: "repo",
         workDir: await realpath(repo),
       });
+      expect(events.some((event) => event.type === "user_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "hello relay gui")).toBe(true);
+      expect(events.some((event) => event.type === "assistant_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "ok")).toBe(true);
       expect(snapshot.visibleRemoteProjects).toHaveLength(1);
     } finally {
       service.close();
