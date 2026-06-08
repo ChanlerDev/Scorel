@@ -1,6 +1,7 @@
 import type { PersistentEvent, ScorelEvent, SessionId, SessionSummary } from "@scorel/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { createRafBatcher } from "./chatbox/delta-batch.js";
 import {
   emptyProjectorState,
   projectEvent,
@@ -43,6 +44,45 @@ export function App() {
 
   const attachUnsubRef = useRef<(() => void) | null>(null);
   const currentSessionRef = useRef<string | null>(null);
+  const projectorStateRef = useRef<ProjectorState>(emptyProjectorState());
+  const pendingEventsRef = useRef<ScorelEvent[]>([]);
+  const batcherRef = useRef<ReturnType<typeof createRafBatcher> | null>(null);
+
+  const flushPending = useCallback(() => {
+    const queued = pendingEventsRef.current;
+    if (queued.length === 0) return;
+    pendingEventsRef.current = [];
+    let next = projectorStateRef.current;
+    for (const event of queued) {
+      next = projectEvent(next, event);
+    }
+    projectorStateRef.current = next;
+    setProjectorState(next);
+  }, []);
+
+  useEffect(() => {
+    batcherRef.current = createRafBatcher(flushPending);
+    return () => {
+      batcherRef.current?.cancel();
+      batcherRef.current = null;
+    };
+  }, [flushPending]);
+
+  const ingestEvent = useCallback((event: ScorelEvent): void => {
+    pendingEventsRef.current.push(event);
+    const isTerminal =
+      event.type === "message_end" ||
+      event.type === "turn_end" ||
+      event.type === "assistant_message" ||
+      event.type === "tool_result" ||
+      event.type === "error";
+    if (isTerminal) {
+      batcherRef.current?.cancel();
+      flushPending();
+    } else {
+      batcherRef.current?.schedule();
+    }
+  }, [flushPending]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => projectKey(project) === selectedProjectKey),
@@ -88,6 +128,9 @@ export function App() {
     for (const event of events) {
       next = projectEvent(next, event);
     }
+    projectorStateRef.current = next;
+    pendingEventsRef.current = [];
+    batcherRef.current?.cancel();
     setProjectorState(next);
   }, []);
 
@@ -122,7 +165,7 @@ export function App() {
   useEffect(() => {
     const unsubscribe = window.scorel.onSessionEvent(({ sessionId, event }) => {
       if (sessionId !== currentSessionRef.current) return;
-      setProjectorState((state) => projectEvent(state, event as ScorelEvent));
+      ingestEvent(event as ScorelEvent);
       if (event.type === "message_end" || event.type === "turn_end" || event.type === "assistant_message") {
         setInFlight(false);
       }
@@ -132,7 +175,7 @@ export function App() {
       unsubscribe();
       attachUnsubRef.current = null;
     };
-  }, []);
+  }, [ingestEvent]);
 
   useEffect(() => {
     void (async () => {
@@ -171,10 +214,10 @@ export function App() {
       setSelectedSessionId(sessionId);
       const project = projects.find((candidate) => projectKey(candidate) === key);
       if (!project) return;
-      setProjectorState(emptyProjectorState());
+      loadInitialEvents([]);
       void attachToSession(project, sessionId);
     },
-    [projects, attachToSession],
+    [projects, attachToSession, loadInitialEvents],
   );
 
   const handleAddLocalProject = useCallback(async (): Promise<void> => {
@@ -202,7 +245,7 @@ export function App() {
       const sessionId = await window.scorel.createSession(projectRef(selectedProject));
       await refreshSessionsForProject(selectedProject);
       setSelectedSessionId(sessionId as string);
-      setProjectorState(emptyProjectorState());
+      loadInitialEvents([]);
       await attachToSession(selectedProject, sessionId as string);
       setError(null);
     } catch (cause) {
@@ -210,7 +253,7 @@ export function App() {
     } finally {
       setBusy(false);
     }
-  }, [selectedProject, refreshSessionsForProject, attachToSession]);
+  }, [selectedProject, refreshSessionsForProject, attachToSession, loadInitialEvents]);
 
   const handleSubmitMessage = useCallback(async (): Promise<void> => {
     if (!selectedProject) return;

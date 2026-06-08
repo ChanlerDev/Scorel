@@ -1,5 +1,6 @@
 import { Markdown } from "./Markdown.js";
 import type { Turn, TurnPart } from "./projector.js";
+import { StreamingCursor } from "./StreamingCursor.js";
 import { ToolBlock } from "./tool-blocks/ToolBlock.js";
 
 export type TurnAssistantProps = {
@@ -26,6 +27,7 @@ export function TurnAssistant({ turn }: TurnAssistantProps) {
           resultIndex={resultIndex}
         />
       ))}
+      {turn.streaming ? <StreamingCursor /> : null}
     </article>
   );
 }
