@@ -17,6 +17,7 @@ import {
   type HostProject,
   type PersistentEvent,
   type ProjectId,
+  type ScorelEvent,
   type SessionId,
   type SessionSummary,
 } from "@scorel/protocol";
@@ -30,6 +31,8 @@ export type GuiLocalHostServiceOptions = {
   createRuntime?: RuntimeFactory;
 };
 
+export type GuiLocalSubscriber = (event: ScorelEvent) => void;
+
 export type GuiLocalHostService = {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -38,7 +41,11 @@ export type GuiLocalHostService = {
   listLocalSessions(projectId: string): Promise<SessionSummary[]>;
   createLocalSession(projectId: string): Promise<SessionId>;
   openLocalSession(sessionId: string): Promise<PersistentEvent[]>;
-  sendLocalMessage(sessionId: string, content: string): Promise<PersistentEvent[]>;
+  attachLocalSession(sessionId: string, handler: GuiLocalSubscriber): Promise<{
+    events: PersistentEvent[];
+    unsubscribe: () => void;
+  }>;
+  sendLocalMessage(sessionId: string, content: string): Promise<{ accepted: true }>;
 };
 
 export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): GuiLocalHostService => {
@@ -98,10 +105,19 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
       await client.loadSession(asSessionId(sessionId));
       return client.getEvents().filter((event) => event.sessionId === sessionId);
     },
+    async attachLocalSession(sessionId, handler) {
+      await client.loadSession(asSessionId(sessionId));
+      const filteredHandler: GuiLocalSubscriber = (event) => {
+        if (event.sessionId === sessionId) handler(event);
+      };
+      const unsubscribe = client.subscribe(filteredHandler);
+      const events = client.getEvents().filter((event) => event.sessionId === sessionId);
+      return { events, unsubscribe };
+    },
     async sendLocalMessage(sessionId, content) {
       await client.loadSession(asSessionId(sessionId));
       await client.sendMessage(content);
-      return client.getEvents().filter((event) => event.sessionId === sessionId);
+      return { accepted: true };
     },
   };
 };

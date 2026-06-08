@@ -20,6 +20,9 @@ let guiStore: GuiStore;
 let relayService: GuiRelayService;
 let hostStatus: GuiHostStatus = { state: "starting" };
 let stoppingLocalHost = false;
+let mainWindow: BrowserWindow | null = null;
+
+const sessionSubscriptions = new Map<string, () => void>();
 
 const guiStateDir = (): string => join(homedir(), ".scorel", "gui");
 const guiStorePath = (): string => join(guiStateDir(), "gui-store.json");
@@ -34,6 +37,39 @@ const startLocalHost = async (): Promise<void> => {
   });
   await localHost.start();
   hostStatus = { state: "connected" };
+};
+
+const sessionSubscriptionKey = (sessionId: string): string => sessionId;
+
+const detachSubscription = (sessionId: string): void => {
+  const key = sessionSubscriptionKey(sessionId);
+  const cleanup = sessionSubscriptions.get(key);
+  if (cleanup) {
+    cleanup();
+    sessionSubscriptions.delete(key);
+  }
+};
+
+const attachSubscription = async (project: GuiProjectRef, sessionId: string): Promise<unknown[]> => {
+  detachSubscription(sessionId);
+  const ref = normalizeProjectRef(project);
+  const handler = (event: unknown): void => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) return;
+    window.webContents.send(guiIpcChannels.sessionEvent, { sessionId, event });
+  };
+  if (ref.source === "local") {
+    const { events, unsubscribe } = await requireConnectedLocalHost().attachLocalSession(sessionId, handler);
+    sessionSubscriptions.set(sessionSubscriptionKey(sessionId), unsubscribe);
+    return events;
+  }
+  const { events, unsubscribe } = await relayService.attachRemoteSession(
+    requireRelayDeviceId(ref),
+    sessionId,
+    handler,
+  );
+  sessionSubscriptions.set(sessionSubscriptionKey(sessionId), unsubscribe);
+  return events;
 };
 
 const registerIpc = (): void => {
@@ -86,6 +122,12 @@ const registerIpc = (): void => {
       ? requireConnectedLocalHost().openLocalSession(sessionId)
       : relayService.openRemoteSession(requireRelayDeviceId(ref), sessionId);
   });
+  ipcMain.handle(guiIpcChannels.attachSession, async (_event, project: GuiProjectRef, sessionId: string) =>
+    attachSubscription(project, sessionId),
+  );
+  ipcMain.handle(guiIpcChannels.detachSession, async (_event, sessionId: string) => {
+    detachSubscription(sessionId);
+  });
   ipcMain.handle(guiIpcChannels.sendMessage, async (_event, project: GuiProjectRef, sessionId: string, content: string) => {
     const ref = normalizeProjectRef(project);
     return ref.source === "local"
@@ -107,6 +149,10 @@ const createWindow = async (): Promise<void> => {
       nodeIntegration: false,
     },
   });
+  mainWindow = win;
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+  });
 
   await win.loadFile(join(here, "index.html"));
 };
@@ -116,6 +162,10 @@ registerIpc();
 const stopLocalHost = async (): Promise<void> => {
   if (stoppingLocalHost) return;
   stoppingLocalHost = true;
+  for (const cleanup of sessionSubscriptions.values()) {
+    cleanup();
+  }
+  sessionSubscriptions.clear();
   const host = localHost;
   localHost = null;
   try {

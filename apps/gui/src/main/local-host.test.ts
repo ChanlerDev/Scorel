@@ -57,11 +57,12 @@ describe("GUI local Host service", () => {
         { sessionId, projectId: project.projectId },
       ]);
 
-      const events = await service.sendLocalMessage(sessionId, "hello gui");
+      const ack = await service.sendLocalMessage(sessionId, "hello gui");
+      expect(ack).toEqual({ accepted: true });
 
+      const events = await service.openLocalSession(sessionId);
       expect(events.some((event) => event.type === "user_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "hello gui")).toBe(true);
       expect(events.some((event) => event.type === "assistant_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "ok")).toBe(true);
-      await expect(service.openLocalSession(sessionId)).resolves.toEqual(events);
     } finally {
       await service.stop();
     }
@@ -84,11 +85,44 @@ describe("GUI local Host service", () => {
       const second = await service.createLocalSession(project.projectId);
 
       await service.sendLocalMessage(first, "first prompt");
-      const secondEvents = await service.sendLocalMessage(second, "second prompt");
+      await service.sendLocalMessage(second, "second prompt");
 
+      const secondEvents = await service.openLocalSession(second);
       expect(secondEvents.every((event) => event.sessionId === second)).toBe(true);
       expect(secondEvents.some((event) => event.type === "user_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "second prompt")).toBe(true);
       expect(secondEvents.some((event) => event.type === "user_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "first prompt")).toBe(false);
+    } finally {
+      await service.stop();
+    }
+  });
+
+  it("attaches a session and pushes events to a subscriber", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-workspace-"));
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const service = createGuiLocalHostService({
+      stateDir: root,
+      deviceId: "device_gui_test",
+      createRuntime: async () => new ScorelRuntime({ provider }),
+    });
+
+    await service.start();
+    try {
+      const project = await service.registerLocalProject(repo);
+      const sessionId = await service.createLocalSession(project.projectId);
+      const seen: string[] = [];
+      const { events: backlog, unsubscribe } = await service.attachLocalSession(sessionId, (event) => {
+        seen.push(event.type);
+      });
+      expect(backlog.every((event) => event.sessionId === sessionId)).toBe(true);
+
+      await service.sendLocalMessage(sessionId, "hello gui");
+      // Wait a tick for async runtime events to settle.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(seen).toContain("user_message");
+      expect(seen).toContain("assistant_message");
+      unsubscribe();
     } finally {
       await service.stop();
     }

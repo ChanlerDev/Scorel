@@ -1,6 +1,6 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
-import { guiIpcChannels, type GuiApi } from "./shared/ipc.js";
+import { guiIpcChannels, type GuiApi, type GuiSessionEventPayload } from "./shared/ipc.js";
 
 const api: GuiApi = {
   getHostStatus: () => ipcRenderer.invoke(guiIpcChannels.getHostStatus),
@@ -15,7 +15,18 @@ const api: GuiApi = {
   listSessions: (project) => ipcRenderer.invoke(guiIpcChannels.listSessions, project),
   createSession: (project) => ipcRenderer.invoke(guiIpcChannels.createSession, project),
   openSession: (project, sessionId) => ipcRenderer.invoke(guiIpcChannels.openSession, project, sessionId),
+  attachSession: (project, sessionId) => ipcRenderer.invoke(guiIpcChannels.attachSession, project, sessionId),
+  detachSession: (sessionId) => ipcRenderer.invoke(guiIpcChannels.detachSession, sessionId),
   sendMessage: (project, sessionId, content) => ipcRenderer.invoke(guiIpcChannels.sendMessage, project, sessionId, content),
+  onSessionEvent: (handler) => {
+    const listener = (_event: IpcRendererEvent, payload: GuiSessionEventPayload): void => {
+      handler(payload);
+    };
+    ipcRenderer.on(guiIpcChannels.sessionEvent, listener);
+    return () => {
+      ipcRenderer.off(guiIpcChannels.sessionEvent, listener);
+    };
+  },
 };
 
 contextBridge.exposeInMainWorld("scorel", api);

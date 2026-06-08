@@ -32,13 +32,15 @@ await Promise.all([
     sourcemap: true,
   }),
   build({
-    entryPoints: [join(root, "src/renderer.tsx")],
+    entryPoints: [join(root, "src/renderer/main.tsx")],
     bundle: true,
     platform: "browser",
     target: "es2022",
     format: "iife",
     outfile: join(outdir, "renderer.js"),
     sourcemap: true,
+    loader: { ".css": "css" },
+    jsx: "automatic",
   }),
   cp(join(root, "src/index.html"), join(outdir, "index.html")),
 ]);

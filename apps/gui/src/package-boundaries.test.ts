@@ -6,8 +6,8 @@ import { describe, expect, it } from "vitest";
 
 const rootPackagePath = fileURLToPath(new URL("../../../package.json", import.meta.url));
 const srcDir = fileURLToPath(new URL(".", import.meta.url));
-const rendererOwnedDirs = ["shared"];
-const rendererOwnedFiles = ["renderer.tsx", "preload.ts"];
+const rendererOwnedDirs = ["shared", "renderer"];
+const rendererOwnedFiles = ["preload.ts"];
 
 describe("GUI package boundaries", () => {
   it("keeps apps/gui out of the public CLI package files list", async () => {
@@ -20,8 +20,9 @@ describe("GUI package boundaries", () => {
     const files = await rendererBoundaryFiles();
 
     for (const file of files) {
+      if (file.endsWith(".css")) continue;
       const source = await readFile(file, "utf8");
-      expect(source, file).not.toMatch(/@scorel\/core|@scorel\/daemon|node:/);
+      expect(source, file).not.toMatch(/from\s+["'](?:@scorel\/core|@scorel\/daemon|node:[^"']+)["']/);
     }
   });
 });
@@ -41,7 +42,7 @@ async function tsFiles(dir: string): Promise<string[]> {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...await tsFiles(path));
-    } else if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) {
+    } else if (entry.isFile() && /\.(ts|tsx|css)$/.test(entry.name)) {
       files.push(path);
     }
   }

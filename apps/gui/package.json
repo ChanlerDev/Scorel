@@ -15,8 +15,14 @@
     "@scorel/client": "workspace:*",
     "@scorel/daemon": "workspace:*",
     "@scorel/protocol": "workspace:*",
+    "@shikijs/rehype": "^4.1.0",
+    "lucide-react": "^0.488.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "shiki": "^4.1.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {

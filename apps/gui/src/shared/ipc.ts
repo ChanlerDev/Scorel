@@ -1,4 +1,11 @@
-import type { DirectoryListing, HostProject, PersistentEvent, SessionId, SessionSummary } from "@scorel/protocol";
+import type {
+  DirectoryListing,
+  HostProject,
+  PersistentEvent,
+  ScorelEvent,
+  SessionId,
+  SessionSummary,
+} from "@scorel/protocol";
 
 export type GuiHostStatus = {
   state: "starting" | "connected" | "error";
@@ -48,6 +55,15 @@ export type GuiRelayPairSessionView = {
   expiresAt: number;
 };
 
+export type GuiSendMessageAck = {
+  accepted: true;
+};
+
+export type GuiSessionEventPayload = {
+  sessionId: SessionId;
+  event: ScorelEvent;
+};
+
 export type GuiApi = {
   getHostStatus(): Promise<GuiHostStatus>;
   getSnapshot(): Promise<GuiSnapshot>;
@@ -61,7 +77,10 @@ export type GuiApi = {
   listSessions(project: GuiProjectRef): Promise<SessionSummary[]>;
   createSession(project: GuiProjectRef): Promise<SessionId>;
   openSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
-  sendMessage(project: GuiProjectRef, sessionId: string, content: string): Promise<PersistentEvent[]>;
+  attachSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
+  detachSession(sessionId: string): Promise<void>;
+  sendMessage(project: GuiProjectRef, sessionId: string, content: string): Promise<GuiSendMessageAck>;
+  onSessionEvent(handler: (payload: GuiSessionEventPayload) => void): () => void;
 };
 
 export const guiIpcChannels = {
@@ -77,5 +96,8 @@ export const guiIpcChannels = {
   listSessions: "scorel:listSessions",
   createSession: "scorel:createSession",
   openSession: "scorel:openSession",
+  attachSession: "scorel:attachSession",
+  detachSession: "scorel:detachSession",
   sendMessage: "scorel:sendMessage",
+  sessionEvent: "scorel:sessionEvent",
 } as const;

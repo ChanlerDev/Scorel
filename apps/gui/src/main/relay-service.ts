@@ -8,13 +8,13 @@ import {
   type ClientId,
   type DeviceId,
   type DirectoryListing,
-  type HostProject,
   type PersistentEvent,
   type ProjectId,
   type RelayAuthorizedDevice,
   type RelayEntryFrame,
   type RelayResponse,
   type RelayServerFrame,
+  type ScorelEvent,
   type SessionId,
   type SessionSummary,
 } from "@scorel/protocol";
@@ -32,6 +32,8 @@ export type RelayPairSession = {
   expiresAt: number;
 };
 
+export type GuiRelaySubscriber = (event: ScorelEvent) => void;
+
 export type GuiRelayService = {
   createPairSession(relayUrl?: string): Promise<RelayPairSession>;
   refreshAuthorizedDevices(relayUrl?: string): Promise<GuiRelayDevice[]>;
@@ -40,7 +42,12 @@ export type GuiRelayService = {
   listRemoteSessions(deviceId: string, projectId: string): Promise<SessionSummary[]>;
   createRemoteSession(deviceId: string, projectId: string): Promise<SessionId>;
   openRemoteSession(deviceId: string, sessionId: string): Promise<PersistentEvent[]>;
-  sendRemoteMessage(deviceId: string, sessionId: string, content: string): Promise<PersistentEvent[]>;
+  attachRemoteSession(
+    deviceId: string,
+    sessionId: string,
+    handler: GuiRelaySubscriber,
+  ): Promise<{ events: PersistentEvent[]; unsubscribe: () => void }>;
+  sendRemoteMessage(deviceId: string, sessionId: string, content: string): Promise<{ accepted: true }>;
   close(): void;
 };
 
@@ -122,11 +129,21 @@ export const createGuiRelayService = (store: GuiStore): GuiRelayService => {
       await client.loadSession(asSessionId(sessionId));
       return client.getEvents().filter((event) => event.sessionId === sessionId);
     },
+    async attachRemoteSession(deviceId, sessionId, handler) {
+      const client = await connectedClient(deviceId);
+      await client.loadSession(asSessionId(sessionId));
+      const filteredHandler: GuiRelaySubscriber = (event) => {
+        if (event.sessionId === sessionId) handler(event);
+      };
+      const unsubscribe = client.subscribe(filteredHandler);
+      const events = client.getEvents().filter((event) => event.sessionId === sessionId);
+      return { events, unsubscribe };
+    },
     async sendRemoteMessage(deviceId, sessionId, content) {
       const client = await connectedClient(deviceId);
       await client.loadSession(asSessionId(sessionId));
       await client.sendMessage(content);
-      return client.getEvents().filter((event) => event.sessionId === sessionId);
+      return { accepted: true };
     },
     close() {
       for (const entry of clients.values()) {

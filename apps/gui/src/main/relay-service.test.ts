@@ -74,7 +74,13 @@ describe("GUI Relay service", () => {
       const listing = await service.listRemoteDirectories("device_remote", remoteRoot);
       const selected = await service.registerRemoteProject("device_remote", repo);
       const sessionId = await service.createRemoteSession("device_remote", selected.projectId);
-      const events = await service.sendRemoteMessage("device_remote", sessionId, "hello relay gui");
+      const seen: string[] = [];
+      const { unsubscribe } = await service.attachRemoteSession("device_remote", sessionId, (event) => {
+        seen.push(event.type);
+      });
+      const ack = await service.sendRemoteMessage("device_remote", sessionId, "hello relay gui");
+      expect(ack).toEqual({ accepted: true });
+      const events = await service.openRemoteSession("device_remote", sessionId);
       const snapshot = await serviceStore.load();
 
       expect(devices).toMatchObject([{ deviceId: "device_remote", online: true }]);
@@ -87,6 +93,9 @@ describe("GUI Relay service", () => {
       expect(events.some((event) => event.type === "user_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "hello relay gui")).toBe(true);
       expect(events.some((event) => event.type === "assistant_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "ok")).toBe(true);
       expect(snapshot.visibleRemoteProjects).toHaveLength(1);
+      expect(seen).toContain("user_message");
+      expect(seen).toContain("assistant_message");
+      unsubscribe();
     } finally {
       service.close();
     }
