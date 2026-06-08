@@ -137,7 +137,7 @@ GUI 和 WebUI 的添加流程统一为：
 4. 调用 `registerProject(workDir)`。
 5. Host canonicalize 路径并返回 Project。
 
-本地和远程使用同一套协议。远程 GUI 通过 SSH proxy 接入时，目录浏览仍由远端 Host 完成。
+本地和远程使用同一套 Host API。M9 GUI 远程路径只使用 Relay；M10 SSH proxy 接入时，目录浏览仍由远端 Host 完成。
 
 ### 2.3 Trusted Full Access
 
@@ -231,7 +231,7 @@ const transport = new WsTransport({ url, token });
 // Hosted WebUI / Relay device routing
 const transport = new RelayTransport({ relayUrl, deviceId, clientId });
 
-// GUI-managed remote device
+// M10 GUI-managed SSH remote device
 const transport = await createSshProxyTransport(sshConfig);
 
 // Pure HTTP integration
@@ -241,8 +241,8 @@ const client = new HttpScorelClient({ baseUrl, token });
 规则：
 
 - Embedded 和 WebSocket 是当前已实现 transport。
-- RelayTransport 是后续 hosted WebUI / generic WebUI 的默认远程路径：Entry 和 Host 都连接 Relay，Relay 根据 `deviceId -> clientId` 授权关系转发现有 daemon wire payload。
-- GUI 默认通过 SSH 启动或连接远端 Scorel，再使用 stdio proxy 转发协议。
+- RelayTransport 是 hosted WebUI 和 M9 GUI 的默认远程路径：Entry 和 Host 都连接 Relay，Relay 根据 `deviceId -> clientId` 授权关系转发现有 daemon wire payload。
+- SSH 启动或连接远端 Scorel 属于 M10，通过 stdio proxy 转发协议。
 - 已经部署好的 Host 可作为高级入口直接使用 WS URL + token。
 - HTTP API 是独立 adapter：命令走 HTTP request，事件走 SSE。它映射同一 Host use cases，不复制业务逻辑。
 - 不恢复 Unix socket transport；S0043 已删除该产品路径。
@@ -303,10 +303,16 @@ GUI 同时管理本地和远程环境，采用 Project-first：
 ```text
 Project
   ├── Local Device
-  └── Remote Device
+  └── Relay Device
 ```
 
 两种视图都只使用同一组 Host API。区别只是入口和信息架构，不是后端模型分叉。
+
+GUI 的远程 Project 可见性不同于 WebUI：
+
+- Local Projects：展示 local Host Registry 全集。
+- Relay Projects：只展示用户在 GUI 中显式选择过的 `deviceId + projectId`。
+- GUI 不把远程 Host Registry 全集自动映射成主 Project list。
 
 ---
 

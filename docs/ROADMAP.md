@@ -532,15 +532,35 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ## M9: GUI
 
-**Goal**: 提供 Project-first desktop GUI，统一管理本地、Relay 和远程 Device 上的 Project。
+**Goal**: 提供 Project-first desktop GUI。GUI 是独立桌面 app，不是 hosted WebUI wrapper：本地通过 embedded Host 管理全部本机 Project，远程首版只通过 Relay 添加 Device，并且只有用户在 GUI 中显式选择过的远程 Project 才进入主 Project list。
 
-**Candidate scope**:
+**Done when**:
 
-- 本地 Project 添加和 Session 管理。
-- Relay Device 添加。
-- 远程 Device 添加。
-- Project-first sidebar。
-- desktop main 管理本地 Host 和远程连接。
+- `apps/gui` 成为独立 Electron workspace app；GUI 不进入 public `@chanlerdev/scorel` npm CLI 包。
+- GUI main process 通过 embedded Host 管理本机 Project / Session；renderer 不直接持有 Runtime 或写 JSONL。
+- 本地 Host Registry 中的全部 Project 自动显示在 GUI Project list。
+- Settings 可以通过 Relay 添加 Device；首版不做 SSH 或 direct WS + token。
+- Add Project 可以选择 local 或 Relay Device，并通过目标 Host 的目录浏览注册 Project。
+- 远程 Project 只有被 GUI 显式选择后才显示；GUI 不像 WebUI 一样展示远程 Host Registry 全集。
+- 主界面采用 Codex App 风格的 Project-first 工作台：Project list、Session/chat surface、Settings/Device management。
+- 本地 Project 和 Relay Project 都通过真实 Host、真实 Relay transport、真实 JSONL session 和真实 provider 完成端到端验证。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M9.1 | [`S0064`](spec/ship/S0064-gui-product-intent-and-boundary.md) | 锁定 GUI 产品模型、Electron 分发边界、Project-first 信息架构和 Relay-only remote scope | Done |
+| M9.2 | [`S0065`](spec/ship/S0065-gui-electron-shell-and-embedded-host.md) | 建立 `apps/gui` Electron shell、main/renderer 边界和 embedded local Host 连接 | Planned |
+| M9.3 | [`S0066`](spec/ship/S0066-gui-local-project-workspace.md) | 实现本地 Project-first workspace：本地 Project 全量展示、Session 列表、新建会话和 chat surface | Planned |
+| M9.4 | [`S0067`](spec/ship/S0067-gui-relay-device-and-remote-project-selection.md) | Settings 添加 Relay Device，并让 Add Project 显式选择远程 Project 后加入 GUI Project list | Planned |
+| M9.5 | [`S0068`](spec/ship/S0068-gui-codex-app-polish-and-e2e.md) | 对齐 Codex App 风格与交互质量，并完成 local + Relay 真实端到端验证 | Planned |
+
+**Not in M9**:
+
+- SSH Remote Device、SSH stdio proxy、远端安装或启动 Scorel Host。
+- Direct WS + token 作为 GUI 首版用户路径。
+- 账号系统、OAuth、细粒度 ACL。
+- 把 GUI 打进 `@chanlerdev/scorel` npm CLI 包或让 `pnpm scorel` 启动 GUI。
 
 **Status**: Planned
 
@@ -660,6 +680,11 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0061`](spec/ship/S0061-hosted-defaults-and-cli-command-surface.md) | Hosted defaults and CLI command surface | Done |
 | [`S0062`](spec/ship/S0062-npm-package-and-release-workflow.md) | Npm package and release workflow | Done |
 | [`S0063`](spec/ship/S0063-ai-release-notes.md) | AI release notes from commit summaries | Done |
+| [`S0064`](spec/ship/S0064-gui-product-intent-and-boundary.md) | GUI product intent and Electron boundary | Done |
+| [`S0065`](spec/ship/S0065-gui-electron-shell-and-embedded-host.md) | GUI Electron shell and embedded local Host | Planned |
+| [`S0066`](spec/ship/S0066-gui-local-project-workspace.md) | GUI local Project-first workspace | Planned |
+| [`S0067`](spec/ship/S0067-gui-relay-device-and-remote-project-selection.md) | GUI Relay Device and explicit remote Project selection | Planned |
+| [`S0068`](spec/ship/S0068-gui-codex-app-polish-and-e2e.md) | GUI Codex App polish and local + Relay e2e | Planned |
 
 ---
 

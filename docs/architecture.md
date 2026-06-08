@@ -305,16 +305,18 @@ Relay 不存 Project、Session、prompt、tool result、Runtime 或 replay cache
 
 ### 4.4 GUI
 
-GUI 以后使用 Project-first 聚合：
+GUI 使用 Project-first 聚合：
 
 ```text
 Project
 └── Session
 ```
 
-- Local：系统文件夹选择器 -> local Host。
-- Remote：SSH Device -> `scorel proxy` -> remote Host -> directory picker。
-- Direct WS + token：高级入口，连接已经运行的 Host。
+- Local：系统文件夹选择器 -> embedded local Host。
+- M9 Remote：Relay Device -> remote Host -> directory picker -> GUI-selected Project。
+- M10 Remote：SSH Device -> `scorel proxy` -> remote Host -> directory picker。
+
+GUI 与 WebUI 的信息架构不同：WebUI 连接 Device 后展示该 Host Registry 的全部 Project；GUI 本地展示 local Host Registry 全集，但远程 Project 必须由用户在 GUI 中显式选择后才进入主 Project list。Direct WS + token 不作为 M9 GUI 用户路径。
 
 ### 4.5 HTTP API
 
@@ -337,8 +339,8 @@ HTTP handler 不直接碰 Runtime 或 JSONL。
 |---|---|---|
 | `EmbeddedTransport` | 已有 | CLI 临时 Host |
 | `WsTransport` | 已有 | 本机 WebUI、Direct WS、远端控制 |
-| `RelayTransport` | 后续 | Hosted WebUI / GUI 通过 Relay 连接多 Device |
-| SSH stdio proxy | 后续 | GUI 连接远端 Device |
+| `RelayTransport` | 已有 | Hosted WebUI / M9 GUI 通过 Relay 连接多 Device |
+| SSH stdio proxy | 后续 | M10 GUI 连接远端 Device |
 | HTTP + SSE | 后续 | 纯 API |
 
 S0043 已删除 Node socket transport。SSH proxy 后续可以转发到 Host control endpoint，但 proxy 自身不持有 Project、Session 或 Runtime。
