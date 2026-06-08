@@ -1,5 +1,6 @@
 .alma-snapshots
 node_modules
 dist
+apps/gui/.dist
 *.tsbuildinfo
 .vercel

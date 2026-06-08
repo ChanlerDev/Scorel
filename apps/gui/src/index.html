@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scorel</title>
+    <style>
+      :root {
+        color: #0d0d0d;
+        background: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      #root {
+        display: grid;
+        min-height: 100vh;
+        grid-template-columns: 280px 1fr;
+      }
+
+      .sidebar {
+        background: #f7f7f8;
+        padding: 16px;
+      }
+
+      .brand {
+        margin-bottom: 24px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .section-label,
+      .muted,
+      .status {
+        color: #5d5d5d;
+        font-size: 12px;
+      }
+
+      .project-list {
+        margin: 8px 0 0;
+        padding: 0;
+        list-style: none;
+        font-size: 13px;
+      }
+
+      .project-list li {
+        padding: 8px;
+      }
+
+      .workspace {
+        display: grid;
+        place-content: center;
+        padding: 24px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 30px;
+        font-weight: 600;
+        letter-spacing: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="root"></main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

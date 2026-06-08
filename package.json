@@ -36,7 +36,8 @@
     "test": "pnpm -r test",
     "verify:m8-relay": "node --import tsx scripts/verify-m8-relay-e2e.ts",
     "scorel": "node --import tsx apps/cli/src/index.ts",
-    "dev": "node --import tsx apps/cli/src/index.ts up"
+    "dev": "node --import tsx apps/cli/src/index.ts up",
+    "gui": "pnpm --filter @scorel/app-gui dev"
   },
   "devDependencies": {
     "@types/node": "^24.10.1",

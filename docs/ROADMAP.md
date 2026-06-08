@@ -550,7 +550,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | Step | Spec | Goal | Status |
 |---|---|---|---|
 | M9.1 | [`S0064`](spec/ship/S0064-gui-product-intent-and-boundary.md) | 锁定 GUI 产品模型、Electron 分发边界、Project-first 信息架构和 Relay-only remote scope | Done |
-| M9.2 | [`S0065`](spec/ship/S0065-gui-electron-shell-and-embedded-host.md) | 建立 `apps/gui` Electron shell、main/renderer 边界和 embedded local Host 连接 | Planned |
+| M9.2 | [`S0065`](spec/ship/S0065-gui-electron-shell-and-embedded-host.md) | 建立 `apps/gui` Electron shell、main/renderer 边界和 embedded local Host 连接 | Done |
 | M9.3 | [`S0066`](spec/ship/S0066-gui-local-project-workspace.md) | 实现本地 Project-first workspace：本地 Project 全量展示、Session 列表、新建会话和 chat surface | Planned |
 | M9.4 | [`S0067`](spec/ship/S0067-gui-relay-device-and-remote-project-selection.md) | Settings 添加 Relay Device，并让 Add Project 显式选择远程 Project 后加入 GUI Project list | Planned |
 | M9.5 | [`S0068`](spec/ship/S0068-gui-codex-app-polish-and-e2e.md) | 对齐 Codex App 风格与交互质量，并完成 local + Relay 真实端到端验证 | Planned |
@@ -681,7 +681,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0062`](spec/ship/S0062-npm-package-and-release-workflow.md) | Npm package and release workflow | Done |
 | [`S0063`](spec/ship/S0063-ai-release-notes.md) | AI release notes from commit summaries | Done |
 | [`S0064`](spec/ship/S0064-gui-product-intent-and-boundary.md) | GUI product intent and Electron boundary | Done |
-| [`S0065`](spec/ship/S0065-gui-electron-shell-and-embedded-host.md) | GUI Electron shell and embedded local Host | Planned |
+| [`S0065`](spec/ship/S0065-gui-electron-shell-and-embedded-host.md) | GUI Electron shell and embedded local Host | Done |
 | [`S0066`](spec/ship/S0066-gui-local-project-workspace.md) | GUI local Project-first workspace | Planned |
 | [`S0067`](spec/ship/S0067-gui-relay-device-and-remote-project-selection.md) | GUI Relay Device and explicit remote Project selection | Planned |
 | [`S0068`](spec/ship/S0068-gui-codex-app-polish-and-e2e.md) | GUI Codex App polish and local + Relay e2e | Planned |

@@ -1,0 +1,23 @@
+{
+  "name": "@scorel/app-gui",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./.dist/main.cjs",
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "dev": "pnpm build && electron .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@scorel/client": "workspace:*",
+    "@scorel/daemon": "workspace:*",
+    "@scorel/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@scorel/core": "workspace:*",
+    "electron": "^42.3.3",
+    "vitest": "4.0.13"
+  }
+}

@@ -38,19 +38,29 @@ Create the first `apps/gui` Electron app shell and connect it to the local embed
 Run focused checks for the GUI package plus existing repo checks:
 
 ```bash
+pnpm --filter @scorel/app-gui build
 pnpm --filter @scorel/app-gui typecheck
+pnpm --filter @scorel/app-gui test
 pnpm typecheck
 pnpm test
+pnpm pack:smoke
 git diff --check
 ```
 
-If a GUI smoke command exists after implementation, run it and document the exact command in the implementation notes.
+GUI smoke command:
+
+```bash
+pnpm gui
+```
+
+If GUI smoke cannot run in the current environment, document the limitation in the final handoff.
 
 ## Affected Paths
 
 - `package.json`
 - `pnpm-lock.yaml`
 - `pnpm-workspace.yaml`
+- `.gitignore`
 - `apps/gui/**`
 - `packages/client/**` if bridge/client APIs need small reuse adjustments
 - `docs/ROADMAP.md`
