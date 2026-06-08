@@ -566,6 +566,31 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 
 ---
 
+## M9 Follow-up: GUI Codex App UI Refactor
+
+**Goal**: 把 M9 跑通的 GUI 升级到 Codex App 视觉与交互质量。一刀重构 `apps/gui/src/renderer.tsx`,改为模块化 renderer 树:三段式 sidebar(project 内联展开 sessions)、composer pill + project picker pill 弹层、独立 Add Remote Project modal、独立 Settings view。建立完整 Markdown / streaming / 工具块渲染基础;工具块走 `@scorel/protocol` event-driven 注册表,新工具登记不动主路径。GUI 独立完整实现,后续可考虑 webui 反向复用 GUI 组件(本阶段不动 webui)。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| M9.F1.1 | [`S0069`](spec/ship/S0069-gui-codex-ui-refactor.md) | renderer 骨架 + tokens + lucide icon + 三段式 sidebar + composer pill + project picker + Add Remote Project modal + 独立 Settings view + 基础 markdown(react-markdown + GFM + sanitize + shiki)+ 工具块注册表 + 流式 IPC channel | Planned |
+
+**Not in M9 Follow-up**:
+
+- empty-state plugin recommendation cards(用户明确不做)。
+- 全局 `对话` 历史分组。
+- composer review banner(变更审查 UI)。
+- "不使用项目" picker 选项(GUI 是 Project-first,与 S0064 冲突)。
+- 模型/语音/`完全访问`真实切换(灰按钮占位)。
+- 暗色模式实装。
+- WebUI 反向复用 GUI 组件(产品方向,本阶段不做)。
+- SSH / direct WS + token / HTTP API。
+
+**Status**: Planned
+
+---
+
 ## M10: SSH Remote Device
 
 **Goal**: GUI 可通过 SSH 添加远程 Device，并在远端安装、启动或连接 Scorel Host。
@@ -685,6 +710,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0066`](spec/ship/S0066-gui-local-project-workspace.md) | GUI local Project-first workspace | Done |
 | [`S0067`](spec/ship/S0067-gui-relay-device-and-remote-project-selection.md) | GUI Relay Device and explicit remote Project selection | Done |
 | [`S0068`](spec/ship/S0068-gui-codex-app-polish-and-e2e.md) | GUI Codex App polish and local + Relay e2e | Done |
+| [`S0069`](spec/ship/S0069-gui-codex-ui-refactor.md) | GUI Codex 风一刀重构:模块化 renderer + sidebar inline sessions + project picker + Add Remote modal + Settings view + markdown + 工具块注册表 + 流式 IPC channel | Planned |
 
 ---
 
