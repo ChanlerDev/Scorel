@@ -64,10 +64,16 @@ importers:
       '@scorel/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
     devDependencies:
       '@scorel/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       electron:
         specifier: ^42.3.3
         version: 42.3.3

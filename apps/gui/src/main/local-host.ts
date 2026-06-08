@@ -96,12 +96,12 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     },
     async openLocalSession(sessionId) {
       await client.loadSession(asSessionId(sessionId));
-      return client.getEvents();
+      return client.getEvents().filter((event) => event.sessionId === sessionId);
     },
     async sendLocalMessage(sessionId, content) {
       await client.loadSession(asSessionId(sessionId));
       await client.sendMessage(content);
-      return client.getEvents();
+      return client.getEvents().filter((event) => event.sessionId === sessionId);
     },
   };
 };

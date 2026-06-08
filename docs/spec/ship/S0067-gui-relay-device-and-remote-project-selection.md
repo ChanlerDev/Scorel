@@ -42,7 +42,9 @@ Add the remote half of the GUI product model: Settings can add Relay Devices, an
 Run:
 
 ```bash
+pnpm --filter @scorel/app-gui build
 pnpm --filter @scorel/app-gui typecheck
+pnpm --filter @scorel/app-gui test
 pnpm typecheck
 pnpm test
 git diff --check
@@ -55,6 +57,30 @@ Manual smoke must use:
 - real Relay Device configuration in GUI
 - real remote directory browsing through Relay
 - real remote Project registration
+
+## Implementation Notes
+
+- GUI Settings creates Relay pair codes as the entry client `client_gui`.
+- The existing Host-side pairing path remains authoritative: the remote Host still runs `scorel pair <pair-code>` or the same `redeem_pair` flow to authorize the GUI client.
+- GUI Relay Device records and GUI-visible remote Project selections are stored locally in `~/.scorel/gui/gui-store.json`.
+- Remote Project visibility is explicit:
+  - local Projects are listed from the embedded local Host Registry.
+  - remote Projects are listed only from GUI-selected `deviceId + projectId` records.
+  - `list_projects` from the remote Host is not used as the GUI main Project list.
+- Relay connections are owned by Electron main process through `RelayTransport` and `DaemonClient`; renderer only receives sanitized device/project/session data through IPC.
+
+## Verification
+
+- `pnpm --filter @scorel/app-gui typecheck` passed.
+- `pnpm --filter @scorel/app-gui test` passed.
+- `pnpm --filter @scorel/app-gui build` passed.
+- `pnpm typecheck` passed.
+- `pnpm test` passed.
+- `pnpm pack:smoke` passed.
+- `git diff --check` passed.
+- `pnpm gui` loaded Electron without a main/renderer load error and exited cleanly after SIGTERM.
+- Focused Relay tests use a real local Relay server, a real `HostRelayClient`, real remote directory browsing, and real remote Project registration.
+- Full visual Relay e2e is intentionally left to S0068, which owns Codex App polish and local + Relay end-to-end verification.
 
 ## Affected Paths
 

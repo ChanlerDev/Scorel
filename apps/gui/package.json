@@ -13,10 +13,12 @@
   "dependencies": {
     "@scorel/client": "workspace:*",
     "@scorel/daemon": "workspace:*",
-    "@scorel/protocol": "workspace:*"
+    "@scorel/protocol": "workspace:*",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@scorel/core": "workspace:*",
+    "@types/ws": "^8.18.1",
     "electron": "^42.3.3",
     "vitest": "4.0.13"
   }
