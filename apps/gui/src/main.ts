@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -29,6 +29,28 @@ const registerIpc = (): void => {
     if (hostStatus.state !== "connected") return [];
     return localHost?.listLocalProjects() ?? [];
   });
+  ipcMain.handle(guiIpcChannels.addLocalProject, async () => {
+    const host = requireConnectedLocalHost();
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory", "createDirectory"],
+      title: "Add local Project",
+    });
+    const [workDir] = result.filePaths;
+    if (result.canceled || !workDir) return null;
+    return host.registerLocalProject(workDir);
+  });
+  ipcMain.handle(guiIpcChannels.listLocalSessions, async (_event, projectId: string) =>
+    requireConnectedLocalHost().listLocalSessions(projectId),
+  );
+  ipcMain.handle(guiIpcChannels.createLocalSession, async (_event, projectId: string) =>
+    requireConnectedLocalHost().createLocalSession(projectId),
+  );
+  ipcMain.handle(guiIpcChannels.openLocalSession, async (_event, sessionId: string) =>
+    requireConnectedLocalHost().openLocalSession(sessionId),
+  );
+  ipcMain.handle(guiIpcChannels.sendLocalMessage, async (_event, sessionId: string, content: string) =>
+    requireConnectedLocalHost().sendLocalMessage(sessionId, content),
+  );
 };
 
 const createWindow = async (): Promise<void> => {
@@ -60,6 +82,13 @@ const stopLocalHost = async (): Promise<void> => {
   } finally {
     stoppingLocalHost = false;
   }
+};
+
+const requireConnectedLocalHost = (): GuiLocalHostService => {
+  if (hostStatus.state !== "connected" || !localHost) {
+    throw new Error(hostStatus.message ?? "Scorel local Host is not connected");
+  }
+  return localHost;
 };
 
 app.whenReady().then(async () => {

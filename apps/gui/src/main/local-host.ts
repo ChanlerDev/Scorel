@@ -9,7 +9,17 @@ import {
   ScorelHost,
   type ScorelHostOptions,
 } from "@scorel/daemon";
-import { asClientId, asDeviceId, type HostProject } from "@scorel/protocol";
+import {
+  asClientId,
+  asDeviceId,
+  asProjectId,
+  asSessionId,
+  type HostProject,
+  type PersistentEvent,
+  type ProjectId,
+  type SessionId,
+  type SessionSummary,
+} from "@scorel/protocol";
 
 type RuntimeFactory = ScorelHostOptions["createRuntime"];
 
@@ -25,6 +35,10 @@ export type GuiLocalHostService = {
   stop(): Promise<void>;
   listLocalProjects(): Promise<HostProject[]>;
   registerLocalProject(workDir: string): Promise<HostProject>;
+  listLocalSessions(projectId: string): Promise<SessionSummary[]>;
+  createLocalSession(projectId: string): Promise<SessionId>;
+  openLocalSession(sessionId: string): Promise<PersistentEvent[]>;
+  sendLocalMessage(sessionId: string, content: string): Promise<PersistentEvent[]>;
 };
 
 export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): GuiLocalHostService => {
@@ -73,6 +87,21 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     },
     registerLocalProject(workDir) {
       return client.registerProject(workDir);
+    },
+    listLocalSessions(projectId) {
+      return client.listSessions({ projectId: asProjectId(projectId) as ProjectId });
+    },
+    createLocalSession(projectId) {
+      return client.createSession({ meta: { projectId: asProjectId(projectId) as ProjectId } });
+    },
+    async openLocalSession(sessionId) {
+      await client.loadSession(asSessionId(sessionId));
+      return client.getEvents();
+    },
+    async sendLocalMessage(sessionId, content) {
+      await client.loadSession(asSessionId(sessionId));
+      await client.sendMessage(content);
+      return client.getEvents();
     },
   };
 };

@@ -37,4 +37,33 @@ describe("GUI local Host service", () => {
       await service.stop();
     }
   });
+
+  it("creates local Project sessions and returns persisted chat events", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-workspace-"));
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const service = createGuiLocalHostService({
+      stateDir: root,
+      deviceId: "device_gui_test",
+      createRuntime: async () => new ScorelRuntime({ provider }),
+    });
+
+    await service.start();
+    try {
+      const project = await service.registerLocalProject(repo);
+      const sessionId = await service.createLocalSession(project.projectId);
+
+      await expect(service.listLocalSessions(project.projectId)).resolves.toMatchObject([
+        { sessionId, projectId: project.projectId },
+      ]);
+
+      const events = await service.sendLocalMessage(sessionId, "hello gui");
+
+      expect(events.some((event) => event.type === "user_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "hello gui")).toBe(true);
+      expect(events.some((event) => event.type === "assistant_message" && event.message.content[0]?.type === "text" && event.message.content[0].text === "ok")).toBe(true);
+      await expect(service.openLocalSession(sessionId)).resolves.toEqual(events);
+    } finally {
+      await service.stop();
+    }
+  });
 });

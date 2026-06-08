@@ -18,12 +18,33 @@
       #root {
         display: grid;
         min-height: 100vh;
-        grid-template-columns: 280px 1fr;
+        grid-template-columns: 280px 260px 1fr;
       }
 
-      .sidebar {
+      button,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        cursor: pointer;
+      }
+
+      button:disabled,
+      textarea:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+
+      .project-pane,
+      .session-pane {
         background: #f7f7f8;
         padding: 16px;
+      }
+
+      .session-pane {
+        border-left: 1px solid #e7eaec;
       }
 
       .brand {
@@ -39,21 +60,86 @@
         font-size: 12px;
       }
 
-      .project-list {
+      .project-list,
+      .session-list {
         margin: 8px 0 0;
         padding: 0;
         list-style: none;
         font-size: 13px;
       }
 
-      .project-list li {
+      .project-list li,
+      .session-list li {
+        margin-bottom: 4px;
+      }
+
+      .primary-action,
+      .pane-header button {
+        width: 100%;
+        min-height: 34px;
+        border-radius: 8px;
+        background: #0d0d0d;
+        color: #ffffff;
+      }
+
+      .pane-header {
+        display: grid;
+        grid-template-columns: 1fr 64px;
+        gap: 12px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .nav-row {
+        display: grid;
+        width: 100%;
+        min-height: 44px;
+        border-radius: 8px;
+        background: transparent;
         padding: 8px;
+        color: #0d0d0d;
+        text-align: left;
+      }
+
+      .nav-row:hover,
+      .nav-row.active {
+        background: #efeff1;
+      }
+
+      .nav-row span,
+      .nav-row small {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .nav-row small {
+        color: #5d5d5d;
       }
 
       .workspace {
         display: grid;
-        place-content: center;
+        grid-template-rows: auto 1fr auto;
+        min-width: 0;
         padding: 24px;
+      }
+
+      .workspace-status {
+        display: flex;
+        min-height: 24px;
+        gap: 12px;
+        color: #5d5d5d;
+        font-size: 12px;
+      }
+
+      .error {
+        color: #dc2626;
+      }
+
+      .transcript {
+        overflow: auto;
+        min-height: 0;
+        padding: 24px 0;
       }
 
       h1 {
@@ -61,6 +147,60 @@
         font-size: 30px;
         font-weight: 600;
         letter-spacing: 0;
+      }
+
+      .message {
+        max-width: 780px;
+        margin: 0 auto 24px;
+      }
+
+      .message.user {
+        max-width: 70%;
+        margin-right: 0;
+        border-radius: 16px;
+        background: #f4f4f4;
+        padding: 12px 14px;
+      }
+
+      .role {
+        margin-bottom: 6px;
+        color: #5d5d5d;
+        font-size: 12px;
+      }
+
+      .message p,
+      .empty {
+        margin: 0;
+        white-space: pre-wrap;
+        line-height: 1.6;
+      }
+
+      .composer {
+        display: grid;
+        grid-template-columns: 1fr 72px;
+        gap: 10px;
+        align-items: end;
+        max-width: 820px;
+        width: 100%;
+        margin: 0 auto;
+        border: 1px solid #e7eaec;
+        border-radius: 24px;
+        padding: 10px;
+      }
+
+      .composer textarea {
+        min-height: 44px;
+        max-height: 160px;
+        resize: vertical;
+        border: 0;
+        outline: 0;
+      }
+
+      .composer button {
+        min-height: 36px;
+        border-radius: 9999px;
+        background: #0d0d0d;
+        color: #ffffff;
       }
     </style>
   </head>

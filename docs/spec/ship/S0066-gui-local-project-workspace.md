@@ -40,10 +40,19 @@ Make the GUI useful for local work: show all local Projects in a Project-first w
 Run:
 
 ```bash
+pnpm --filter @scorel/app-gui build
 pnpm --filter @scorel/app-gui typecheck
+pnpm --filter @scorel/app-gui test
 pnpm typecheck
 pnpm test
+pnpm pack:smoke
 git diff --check
+```
+
+GUI smoke command:
+
+```bash
+pnpm gui
 ```
 
 Manual smoke must use:
@@ -52,6 +61,8 @@ Manual smoke must use:
 - embedded local Host
 - real JSONL Session
 - real provider for at least one prompt if this spec wires chat sending end to end
+
+If provider credentials are unavailable, automated GUI tests must still cover the prompt-send path with a real `ScorelRuntime` and fake provider.
 
 ## Affected Paths
 
