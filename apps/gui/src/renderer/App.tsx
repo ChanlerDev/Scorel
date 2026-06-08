@@ -2,6 +2,8 @@ import type { PersistentEvent, ScorelEvent, SessionId, SessionSummary } from "@s
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createRafBatcher } from "./chatbox/delta-batch.js";
+import { AddRemoteProjectDialog } from "./composer/AddRemoteProjectDialog.js";
+import { ProjectPickerMenu } from "./composer/ProjectPickerMenu.js";
 import {
   emptyProjectorState,
   projectEvent,
@@ -41,6 +43,9 @@ export function App() {
   const [inFlight, setInFlight] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string>("");
+  const [pickerOpen, setPickerOpen] = useState<boolean>(false);
+  const [pickerAnchor, setPickerAnchor] = useState<{ left: number; top: number } | undefined>(undefined);
+  const [showAddRemote, setShowAddRemote] = useState<boolean>(false);
 
   const attachUnsubRef = useRef<(() => void) | null>(null);
   const currentSessionRef = useRef<string | null>(null);
@@ -290,6 +295,42 @@ export function App() {
     setSelectedProjectKey(`relay:${project.deviceId}:${project.projectId}`);
   }, []);
 
+  const openProjectPicker = useCallback((anchor: DOMRect): void => {
+    const popoverWidth = 324;
+    const margin = 12;
+    const left = Math.min(
+      Math.max(anchor.left, margin),
+      Math.max(margin, window.innerWidth - popoverWidth - margin),
+    );
+    setPickerAnchor({ left, top: anchor.bottom + 6 });
+    setPickerOpen(true);
+  }, []);
+
+  const picker = pickerOpen ? (
+    <ProjectPickerMenu
+      projects={projects}
+      selectedKey={selectedProjectKey}
+      anchor={pickerAnchor}
+      onSelect={handleProjectClick}
+      onAddLocal={() => void handleAddLocalProject()}
+      onAddRemote={() => setShowAddRemote(true)}
+      onClose={() => setPickerOpen(false)}
+    />
+  ) : null;
+
+  const remoteDialog = showAddRemote ? (
+    <AddRemoteProjectDialog
+      devices={relayDevices}
+      initialDeviceId={relayDevices[0]?.deviceId}
+      onClose={() => setShowAddRemote(false)}
+      onSubmitted={(project) => {
+        handleProjectAdded(project);
+        void refreshSnapshot();
+      }}
+      setError={setError}
+    />
+  ) : null;
+
   if (view === "settings") {
     return (
       <SettingsShell
@@ -318,7 +359,7 @@ export function App() {
         sessionsByProject={sessionsByProject}
         busy={busy}
         onNewSessionClick={() => void handleNewSession()}
-        onAddLocalProject={() => void handleAddLocalProject()}
+        onProjectPickerOpen={openProjectPicker}
         onProjectClick={handleProjectClick}
         onSessionClick={handleSessionClick}
         onSettingsClick={() => setView("settings")}
@@ -335,15 +376,10 @@ export function App() {
         inFlight={inFlight}
         error={error}
         hostMessage={hostMessage}
-        projects={projects}
-        selectedProjectKey={selectedProjectKey}
-        relayDevices={relayDevices}
-        onSelectProject={handleProjectClick}
-        onAddLocalProject={() => void handleAddLocalProject()}
-        onProjectAdded={handleProjectAdded}
-        setError={setError}
-        refreshSnapshot={refreshSnapshot}
+        onPickerOpen={openProjectPicker}
+        picker={picker}
       />
+      {remoteDialog}
     </div>
   );
 }

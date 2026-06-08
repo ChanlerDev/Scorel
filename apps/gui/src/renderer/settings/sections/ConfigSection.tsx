@@ -4,8 +4,6 @@ import type { GuiRelayDeviceView, GuiRelayPairSessionView } from "../../../share
 import { SettingsCard } from "../SettingsCard.js";
 import { SettingsHeader } from "../SettingsHeader.js";
 import { SettingsRow } from "../SettingsRow.js";
-import { LinkAccent } from "../controls/LinkAccent.js";
-import { Select } from "../controls/Select.js";
 
 export type ConfigSectionProps = {
   devices: GuiRelayDeviceView[];
@@ -49,61 +47,8 @@ export function ConfigSection({ devices, busy, setBusy, setError, refresh }: Con
     <>
       <SettingsHeader
         title="配置"
-        subtitle={
-          <>
-            配置审批策略和沙盒设置 <LinkAccent href="https://chanler.dev/docs/scorel">了解更多</LinkAccent>
-          </>
-        }
+        subtitle="管理 Relay 设备和远程项目授权。"
       />
-
-      <section className="settings-section">
-        <h2 className="settings-section__title">自定义 config.toml 设置</h2>
-        <SettingsCard
-          head={
-            <>
-              <div className="settings-card__head-meta">
-                <Select
-                  value="user"
-                  options={[{ value: "user", label: "用户配置" }]}
-                  disabled
-                />
-              </div>
-              <LinkAccent href="#" trailingArrow>打开 config.toml</LinkAccent>
-            </>
-          }
-        >
-          <SettingsRow
-            label="批准策略"
-            description="选择 Codex 何时请求批准"
-            control={
-              <Select
-                value="never"
-                disabled
-                options={[
-                  { value: "never", label: "从不" },
-                  { value: "on_failure", label: "失败时" },
-                  { value: "always", label: "始终" },
-                ]}
-              />
-            }
-          />
-          <SettingsRow
-            label="沙盒设置"
-            description="选择 Codex 的命令执行权限"
-            control={
-              <Select
-                value="full"
-                disabled
-                options={[
-                  { value: "full", label: "完全访问" },
-                  { value: "workspace_write", label: "工作区写入" },
-                  { value: "read_only", label: "只读" },
-                ]}
-              />
-            }
-          />
-        </SettingsCard>
-      </section>
 
       <section className="settings-section">
         <h2 className="settings-section__title">Relay 设备</h2>

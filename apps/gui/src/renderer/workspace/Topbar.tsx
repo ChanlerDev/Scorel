@@ -5,8 +5,6 @@ export type TopbarProps = {
 };
 
 export function Topbar({ title, error, hostMessage }: TopbarProps) {
-  const hasContent = Boolean(title || error || hostMessage);
-  if (!hasContent) return null;
   return (
     <header className="topbar">
       <div className="topbar__title">{title ?? ""}</div>

@@ -1,9 +1,7 @@
-import { useState } from "react";
+import type { ReactNode } from "react";
 
-import { AddRemoteProjectDialog } from "../composer/AddRemoteProjectDialog.js";
-import { ProjectPickerMenu } from "../composer/ProjectPickerMenu.js";
 import type { Turn } from "../chatbox/projector.js";
-import type { GuiProjectView, GuiRelayDeviceView, GuiRemoteProjectView, GuiSnapshot } from "../../shared/ipc.js";
+import type { GuiProjectView } from "../../shared/ipc.js";
 import { EmptyState } from "./EmptyState.js";
 import { SessionView } from "./SessionView.js";
 import { Topbar } from "./Topbar.js";
@@ -20,44 +18,11 @@ export type WorkspaceProps = {
   inFlight: boolean;
   error: string | null;
   hostMessage: string | undefined;
-  projects: GuiProjectView[];
-  selectedProjectKey: string | null;
-  relayDevices: GuiRelayDeviceView[];
-  onSelectProject(key: string): void;
-  onAddLocalProject(): void;
-  onProjectAdded(project: GuiRemoteProjectView): void;
-  setError(message: string | null): void;
-  refreshSnapshot(): Promise<GuiSnapshot>;
+  onPickerOpen(anchor: DOMRect): void;
+  picker?: ReactNode;
 };
 
 export function Workspace(props: WorkspaceProps) {
-  const [pickerOpen, setPickerOpen] = useState<boolean>(false);
-  const [showAddRemote, setShowAddRemote] = useState<boolean>(false);
-
-  const picker = pickerOpen ? (
-    <ProjectPickerMenu
-      projects={props.projects}
-      selectedKey={props.selectedProjectKey}
-      onSelect={(key) => props.onSelectProject(key)}
-      onAddLocal={() => props.onAddLocalProject()}
-      onAddRemote={() => setShowAddRemote(true)}
-      onClose={() => setPickerOpen(false)}
-    />
-  ) : null;
-
-  const remoteDialog = showAddRemote ? (
-    <AddRemoteProjectDialog
-      devices={props.relayDevices}
-      initialDeviceId={props.relayDevices[0]?.deviceId}
-      onClose={() => setShowAddRemote(false)}
-      onSubmitted={(project) => {
-        props.onProjectAdded(project);
-        void props.refreshSnapshot();
-      }}
-      setError={props.setError}
-    />
-  ) : null;
-
   return (
     <main className="workspace">
       <Topbar
@@ -72,10 +37,10 @@ export function Workspace(props: WorkspaceProps) {
           message={props.message}
           onMessageChange={props.onMessageChange}
           onSubmit={props.onSubmit}
-          onPickerOpen={() => setPickerOpen(true)}
+          onPickerOpen={props.onPickerOpen}
           busy={props.busy}
           inFlight={props.inFlight}
-          picker={picker}
+          picker={props.picker}
         />
       ) : (
         <EmptyState
@@ -83,13 +48,12 @@ export function Workspace(props: WorkspaceProps) {
           message={props.message}
           onMessageChange={props.onMessageChange}
           onSubmit={props.onSubmit}
-          onPickerOpen={() => setPickerOpen(true)}
+          onPickerOpen={props.onPickerOpen}
           busy={props.busy}
           inFlight={props.inFlight}
-          picker={picker}
+          picker={props.picker}
         />
       )}
-      {remoteDialog}
     </main>
   );
 }

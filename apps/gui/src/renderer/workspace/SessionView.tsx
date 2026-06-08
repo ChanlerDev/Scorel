@@ -12,7 +12,7 @@ export type SessionViewProps = {
   message: string;
   onMessageChange(value: string): void;
   onSubmit(): void;
-  onPickerOpen(): void;
+  onPickerOpen(anchor: DOMRect): void;
   busy: boolean;
   inFlight: boolean;
   picker?: ReactNode;

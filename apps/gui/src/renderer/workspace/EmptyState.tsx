@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 import { Composer } from "../composer/Composer.js";
 import { ProjectPickerPill } from "../composer/ProjectPickerPill.js";
@@ -9,7 +9,7 @@ export type EmptyStateProps = {
   message: string;
   onMessageChange(value: string): void;
   onSubmit(): void;
-  onPickerOpen(): void;
+  onPickerOpen(anchor: DOMRect): void;
   busy: boolean;
   inFlight: boolean;
   picker?: ReactNode;
@@ -26,13 +26,32 @@ export function EmptyState({
   picker,
 }: EmptyStateProps) {
   const projectName = selectedProject?.displayName;
-  const heading = projectName
-    ? `我们应该在 ${projectName} 中做些什么？`
-    : "我们应该构建什么？";
+  const handleHeadingProjectClick = (event: MouseEvent<HTMLButtonElement>): void => {
+    onPickerOpen(event.currentTarget.getBoundingClientRect());
+  };
+
   return (
     <section className="content empty">
       <div className="empty__stack">
-        <h1 className="empty__title">{heading}</h1>
+        <h1 className="empty__title">
+          {projectName ? (
+            <>
+              我们应该在{" "}
+              <button
+                type="button"
+                className="empty__project-button"
+                onClick={handleHeadingProjectClick}
+                disabled={busy}
+                data-testid="empty-heading-project-picker"
+              >
+                {projectName}
+              </button>{" "}
+              中构建什么？
+            </>
+          ) : (
+            "我们要构建什么？"
+          )}
+        </h1>
         <div className="composer-shell">
           <Composer
             value={message}

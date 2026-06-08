@@ -143,6 +143,12 @@ const createWindow = async (): Promise<void> => {
     minWidth: 900,
     minHeight: 640,
     title: "Scorel",
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 18, y: 18 },
+    backgroundColor: "#00000000",
+    transparent: true,
+    vibrancy: "sidebar",
+    visualEffectState: "active",
     webPreferences: {
       preload: join(here, "preload.cjs"),
       contextIsolation: true,

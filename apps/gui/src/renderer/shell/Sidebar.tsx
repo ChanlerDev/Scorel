@@ -1,12 +1,10 @@
 import type { SessionSummary } from "@scorel/protocol";
 
 import {
-  Clock,
   Plus,
-  Puzzle,
-  Search,
   Settings,
 } from "../icons/index.js";
+import { ProjectPickerPill } from "../composer/ProjectPickerPill.js";
 import type { GuiProjectView, GuiRelayDeviceView } from "../../shared/ipc.js";
 import { ProjectTree } from "./ProjectTree.js";
 import { SidebarActionRow } from "./SidebarActionRow.js";
@@ -19,7 +17,7 @@ export type SidebarProps = {
   sessionsByProject: Record<string, SessionSummary[]>;
   busy: boolean;
   onNewSessionClick(): void;
-  onAddLocalProject(): void;
+  onProjectPickerOpen(anchor: DOMRect): void;
   onProjectClick(key: string): void;
   onSessionClick(key: string, sessionId: string): void;
   onSettingsClick(): void;
@@ -39,7 +37,7 @@ export function Sidebar({
   sessionsByProject,
   busy,
   onNewSessionClick,
-  onAddLocalProject,
+  onProjectPickerOpen,
   onProjectClick,
   onSessionClick,
   onSettingsClick,
@@ -55,23 +53,17 @@ export function Sidebar({
           onClick={onNewSessionClick}
           testId="sidebar-new-session"
         />
-        <SidebarActionRow icon={<Search size={14} />} label="搜索" disabled />
-        <SidebarActionRow icon={<Puzzle size={14} />} label="插件" disabled />
-        <SidebarActionRow icon={<Clock size={14} />} label="自动化" disabled />
       </nav>
       <div className="sidebar__scroll">
         <div className="sidebar__section-header">
           <h2 className="sidebar__section-title">项目</h2>
-          <button
-            type="button"
-            className="sidebar__plus"
-            aria-label="Add local Project"
-            onClick={onAddLocalProject}
+          <ProjectPickerPill
+            label="添加项目"
+            onClick={onProjectPickerOpen}
             disabled={busy}
-            data-testid="sidebar-add-project"
-          >
-            <Plus size={14} />
-          </button>
+            className="project-picker-pill--sidebar"
+            testId="sidebar-add-project"
+          />
         </div>
         {projects.length === 0 ? (
           <div className="muted-row">还没有项目</div>

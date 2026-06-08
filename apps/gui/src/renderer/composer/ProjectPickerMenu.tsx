@@ -6,6 +6,7 @@ import type { GuiProjectView } from "../../shared/ipc.js";
 export type ProjectPickerMenuProps = {
   projects: GuiProjectView[];
   selectedKey: string | null;
+  anchor?: { left: number; top: number };
   onSelect(key: string): void;
   onAddLocal(): void;
   onAddRemote(): void;
@@ -15,6 +16,7 @@ export type ProjectPickerMenuProps = {
 export function ProjectPickerMenu({
   projects,
   selectedKey,
+  anchor,
   onSelect,
   onAddLocal,
   onAddRemote,
@@ -43,6 +45,7 @@ export function ProjectPickerMenu({
     <div className="overlay-backdrop" onMouseDown={onClose}>
       <div
         className="overlay-popover"
+        style={anchor ? { left: anchor.left, top: anchor.top } : undefined}
         onMouseDown={(event) => event.stopPropagation()}
         role="dialog"
         aria-label="Project picker"

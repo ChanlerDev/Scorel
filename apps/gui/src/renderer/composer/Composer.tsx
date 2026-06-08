@@ -1,6 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useRef } from "react";
 
-import { AlertTriangle, ArrowUp, Mic, Plus, Square } from "../icons/index.js";
+import { ArrowUp } from "../icons/index.js";
 
 export type ComposerProps = {
   value: string;
@@ -14,6 +14,7 @@ export type ComposerProps = {
 const MAX_HEIGHT = 200;
 
 export function Composer({ value, onChange, onSubmit, disabled, inFlight, onCancel }: ComposerProps) {
+  void onCancel;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const handleSubmit = useCallback(
@@ -52,41 +53,15 @@ export function Composer({ value, onChange, onSubmit, disabled, inFlight, onCanc
         }}
       />
       <div className="composer__bar">
-        <div className="composer__left">
-          <button type="button" className="composer__icon-button" disabled aria-label="Add attachment">
-            <Plus size={16} />
-          </button>
-          <button type="button" className="composer__chip composer__chip--warn" disabled>
-            <AlertTriangle />
-            完全访问
-          </button>
-        </div>
         <div className="composer__right">
-          <button type="button" className="composer__chip" disabled>
-            5.5 中
+          <button
+            type="submit"
+            className="composer__send"
+            disabled={disabled || empty || inFlight}
+            aria-label="Send"
+          >
+            <ArrowUp size={14} />
           </button>
-          <button type="button" className="composer__icon-button" disabled aria-label="Voice">
-            <Mic size={14} />
-          </button>
-          {inFlight ? (
-            <button
-              type="button"
-              className="composer__send composer__send--cancel"
-              onClick={onCancel}
-              aria-label="Cancel"
-            >
-              <Square size={12} />
-            </button>
-          ) : (
-            <button
-              type="submit"
-              className="composer__send"
-              disabled={disabled || empty}
-              aria-label="Send"
-            >
-              <ArrowUp size={14} />
-            </button>
-          )}
         </div>
       </div>
     </form>
