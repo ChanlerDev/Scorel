@@ -576,6 +576,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 |---|---|---|---|
 | M9.F1.1 | [`S0069`](spec/ship/S0069-gui-codex-ui-refactor.md) | renderer 骨架 + tokens + lucide icon + 三段式 sidebar + composer pill + project picker + Add Remote Project modal + 独立 Settings view + 基础 markdown(react-markdown + GFM + sanitize + shiki)+ 工具块注册表 + 流式 IPC channel | Done |
 | M9.F1.2 | [`S0070`](spec/ship/S0070-gui-streaming-and-tool-blocks.md) | streaming 光标 + RAF batcher + IntersectionObserver autoscroll + jump-to-bottom + 7 个特化工具块(Read/Glob/Grep/Edit/Write/Bash/TodoWrite)+ unified diff viewer + 真实 provider local + Relay e2e | Done |
+| M9.F1.3 | [`S0071`](spec/ship/S0071-gui-visual-fidelity-and-settings-shell.md) | 视觉打底:tokens 重置 + sidebar/composer/empty/picker/modal/transcript/工具块 chip 化 + Settings macOS 风重构(nav 三段分组 + header + card row + Toggle/Select/LinkAccent + 9 section 含 Config / General 真实) | Planned |
 
 **Not in M9 Follow-up**:
 
@@ -713,6 +714,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0068`](spec/ship/S0068-gui-codex-app-polish-and-e2e.md) | GUI Codex App polish and local + Relay e2e | Done |
 | [`S0069`](spec/ship/S0069-gui-codex-ui-refactor.md) | GUI Codex 风一刀重构:模块化 renderer + sidebar inline sessions + project picker + Add Remote modal + Settings view + markdown + 工具块注册表 + 流式 IPC channel | Done |
 | [`S0070`](spec/ship/S0070-gui-streaming-and-tool-blocks.md) | GUI streaming UX + 7 个特化工具块 + unified diff + 真实 provider local + Relay e2e | Done |
+| [`S0071`](spec/ship/S0071-gui-visual-fidelity-and-settings-shell.md) | GUI 视觉打底 + Settings macOS 风重构 | Planned |
 
 ---
 
