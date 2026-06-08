@@ -47,19 +47,18 @@ export function ProjectPickerMenu({
         role="dialog"
         aria-label="Project picker"
       >
-        <label className="composer__pill" style={{ paddingLeft: 0 }}>
-          <Search size={14} />
+        <div className="overlay-popover__search">
+          <Search />
           <input
             ref={inputRef}
-            className="overlay-popover__search"
             placeholder="搜索项目"
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
-        </label>
+        </div>
         <ul className="overlay-popover__list">
           {items.length === 0 ? (
-            <li className="muted-row">没有匹配的项目</li>
+            <li className="muted-row" style={{ padding: "8px 12px" }}>没有匹配的项目</li>
           ) : (
             items.map((project) => {
               const key = projectKey(project);
@@ -73,11 +72,11 @@ export function ProjectPickerMenu({
                       onClose();
                     }}
                   >
-                    <Globe size={14} />
+                    <Globe />
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {project.displayName}
                     </span>
-                    {key === selectedKey ? <Check size={14} /> : <span />}
+                    {key === selectedKey ? <Check /> : <span />}
                   </button>
                 </li>
               );
@@ -94,7 +93,7 @@ export function ProjectPickerMenu({
           }}
           data-testid="picker-add-local"
         >
-          <FolderPlus size={14} />
+          <FolderPlus />
           <span>添加本地项目</span>
           <span />
         </button>
@@ -107,7 +106,7 @@ export function ProjectPickerMenu({
           }}
           data-testid="picker-add-remote"
         >
-          <Globe size={14} />
+          <Globe />
           <span>添加远程项目</span>
           <span />
         </button>

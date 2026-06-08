@@ -1,6 +1,8 @@
 import { useState } from "react";
 
+import { Terminal } from "../../icons/index.js";
 import type { ToolBlockProps } from "./registry.js";
+import { ToolChip } from "./ToolChip.js";
 
 type BashArgs = { command?: string; description?: string };
 
@@ -14,65 +16,8 @@ type BashResult = {
 
 const COLLAPSE_AT = 12;
 
-export function BashBlock({ call, result, pending }: ToolBlockProps) {
-  const args = (call.args ?? {}) as BashArgs;
-  const command = args.command ?? "";
-  const isError = Boolean(result?.isError);
-  const [open, setOpen] = useState<boolean>(isError);
-  const [showAll, setShowAll] = useState<boolean>(false);
-
-  const out = parseBashResult(result?.result);
-  const lines = out.text ? out.text.split(/\r?\n/) : [];
-  const truncated = !showAll && lines.length > COLLAPSE_AT ? lines.slice(0, COLLAPSE_AT) : lines;
-
-  const exitColor = out.exitCode === 0 || out.exitCode === undefined
-    ? "var(--color-status-ok)"
-    : "var(--color-status-err)";
-
-  return (
-    <div className={`tool-block${isError ? " tool-block--error" : ""}`}>
-      <button type="button" className="tool-block__header" onClick={() => setOpen((v) => !v)}>
-        <span className="tool-block__title">
-          <span style={{ color: "var(--color-text-muted)", fontFamily: "var(--font-mono)" }}>$</span>
-          <span className="tool-block__title-text">
-            {truncate(command, 80)}
-            {pending ? " · pending" : ""}
-            {isError ? " · error" : ""}
-          </span>
-        </span>
-        <span className="tool-block__toggle">{open ? "Hide" : "Show"}</span>
-      </button>
-      {open ? (
-        <div className="tool-block__body">
-          <pre
-            style={{
-              margin: 0,
-              fontFamily: "var(--font-mono)",
-              fontSize: "var(--text-xs)",
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {truncated.join("\n")}
-          </pre>
-          {!showAll && lines.length > COLLAPSE_AT ? (
-            <button
-              type="button"
-              className="tool-block__toggle"
-              onClick={() => setShowAll(true)}
-              style={{ marginTop: 4 }}
-            >
-              Show {lines.length - COLLAPSE_AT} more lines
-            </button>
-          ) : null}
-          {out.exitCode !== undefined ? (
-            <p style={{ margin: "4px 0 0", fontSize: "var(--text-xs)", color: exitColor }}>
-              → exit {out.exitCode}
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
+function truncate(value: string, limit: number): string {
+  return value.length > limit ? value.slice(0, limit - 1) + "…" : value;
 }
 
 function parseBashResult(value: unknown): { text: string; exitCode?: number } {
@@ -88,6 +33,52 @@ function parseBashResult(value: unknown): { text: string; exitCode?: number } {
   return { text: "" };
 }
 
-function truncate(value: string, limit: number): string {
-  return value.length > limit ? value.slice(0, limit - 1) + "…" : value;
+export function BashBlock({ call, result, pending }: ToolBlockProps) {
+  const args = (call.args ?? {}) as BashArgs;
+  const command = args.command ?? "";
+  const out = parseBashResult(result?.result);
+  const [showAll, setShowAll] = useState<boolean>(false);
+  const lines = out.text ? out.text.split(/\r?\n/) : [];
+  const visible = !showAll && lines.length > COLLAPSE_AT ? lines.slice(0, COLLAPSE_AT) : lines;
+  const exitColor = out.exitCode === 0 || out.exitCode === undefined
+    ? "var(--color-status-ok)"
+    : "var(--color-status-err)";
+
+  return (
+    <ToolChip
+      icon={<Terminal />}
+      title={
+        <span style={{ fontFamily: "var(--font-mono)", color: "var(--color-text)" }}>
+          $ {truncate(command, 64)}
+        </span>
+      }
+      pending={pending}
+      isError={Boolean(result?.isError)}
+      body={
+        <>
+          <pre>{visible.join("\n")}</pre>
+          {!showAll && lines.length > COLLAPSE_AT ? (
+            <button
+              type="button"
+              onClick={() => setShowAll(true)}
+              style={{
+                marginTop: 4,
+                fontSize: 12,
+                color: "var(--color-text-muted)",
+                textDecoration: "underline",
+                background: "transparent",
+              }}
+            >
+              展开 {lines.length - COLLAPSE_AT} 行
+            </button>
+          ) : null}
+          {out.exitCode !== undefined ? (
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: exitColor }}>
+              → exit {out.exitCode}
+            </p>
+          ) : null}
+        </>
+      }
+    />
+  );
 }

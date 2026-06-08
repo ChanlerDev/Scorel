@@ -18,9 +18,9 @@ export function ProjectPickerPill({ label, onClick, disabled, trailing }: Projec
       disabled={disabled}
       data-testid="project-picker-pill"
     >
-      <Folder size={14} />
+      <Folder />
       <span>{label}</span>
-      <ChevronDown size={14} />
+      <ChevronDown />
       {trailing}
     </button>
   );

@@ -9,7 +9,7 @@ import {
 } from "./chatbox/projector.js";
 import "./chatbox/tool-blocks/bootstrap.js";
 import { Sidebar, projectKey } from "./shell/Sidebar.js";
-import { SettingsPage } from "./settings/SettingsPage.js";
+import { SettingsShell } from "./settings/SettingsShell.js";
 import { Workspace } from "./workspace/Workspace.js";
 import "./styles.css";
 import type {
@@ -292,31 +292,16 @@ export function App() {
 
   if (view === "settings") {
     return (
-      <div className="app-shell">
-        <Sidebar
-          projects={projects}
-          selectedProjectKey={selectedProjectKey}
-          selectedSessionId={selectedSessionId}
-          relayDevices={relayDevices}
-          sessionsByProject={sessionsByProject}
-          busy={busy}
-          onNewSessionClick={() => void handleNewSession()}
-          onAddLocalProject={() => void handleAddLocalProject()}
-          onProjectClick={handleProjectClick}
-          onSessionClick={handleSessionClick}
-          onSettingsClick={() => setView("workspace")}
-        />
-        <SettingsPage
-          devices={relayDevices}
-          busy={busy}
-          setBusy={setBusy}
-          setError={setError}
-          refresh={async () => {
-            await refreshSnapshot();
-          }}
-          onBack={() => setView("workspace")}
-        />
-      </div>
+      <SettingsShell
+        devices={relayDevices}
+        busy={busy}
+        setBusy={setBusy}
+        setError={setError}
+        refresh={async () => {
+          await refreshSnapshot();
+        }}
+        onBack={() => setView("workspace")}
+      />
     );
   }
 

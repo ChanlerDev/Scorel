@@ -33,6 +33,7 @@ export function ProjectTree({
   };
 
   const isRelay = project.source === "relay";
+  const showSecondary = isRelay && relayDevice && relayDevice.label && relayDevice.label !== project.displayName;
   const onlinePillClass = isRelay
     ? `project-tree__online${relayDevice?.online ? "" : " project-tree__online--off"}`
     : null;
@@ -46,19 +47,18 @@ export function ProjectTree({
         data-testid={`project-row-${projectKey}`}
       >
         <span className="project-tree__caret">
-          {collapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          {collapsed ? <ChevronRight /> : <ChevronDown />}
+        </span>
+        <span className="project-tree__folder">
+          <Folder />
         </span>
         <span className="project-tree__name">
-          <span className="project-tree__name-primary">
-            <Folder size={14} style={{ marginRight: 6, verticalAlign: "-2px" }} />
-            {project.displayName}
-          </span>
-          {isRelay && relayDevice ? (
-            <span className="project-tree__name-secondary">{relayDevice.label}</span>
+          <span className="project-tree__name-primary">{project.displayName}</span>
+          {showSecondary ? (
+            <span className="project-tree__name-secondary">{relayDevice!.label}</span>
           ) : null}
         </span>
         {onlinePillClass ? <span className={onlinePillClass} /> : <span />}
-        <span />
       </button>
       {!collapsed ? (
         <ul className="project-tree__sessions" data-testid={`session-list-${projectKey}`}>

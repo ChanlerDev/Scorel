@@ -63,8 +63,8 @@ export function AddRemoteProjectDialog({
       <div className="modal__panel" onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal__header">
           <h2 className="modal__title">添加远程项目</h2>
-          <button type="button" className="topbar__icon-button" onClick={onClose} aria-label="Close">
-            <X size={16} />
+          <button type="button" className="modal__icon-button" onClick={onClose} aria-label="Close">
+            <X size={14} />
           </button>
         </div>
         <p className="modal__subtitle">选择已连接的远程主机,并输入此项目的文件夹。</p>
@@ -101,12 +101,12 @@ export function AddRemoteProjectDialog({
             />
             <button
               type="button"
-              className="topbar__icon-button"
+              className="modal__icon-button"
               onClick={() => void browse("")}
               aria-label="Reset"
               disabled={busy || !deviceId}
             >
-              <RotateCcw size={16} />
+              <RotateCcw size={14} />
             </button>
           </div>
         </div>
@@ -122,7 +122,7 @@ export function AddRemoteProjectDialog({
                   onClick={() => void browse(entry.path)}
                   disabled={busy}
                 >
-                  <Folder size={14} />
+                  <Folder />
                   <span>{entry.name}</span>
                 </button>
               ))

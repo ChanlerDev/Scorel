@@ -6,7 +6,6 @@ import {
   Puzzle,
   Search,
   Settings,
-  Smartphone,
 } from "../icons/index.js";
 import type { GuiProjectView, GuiRelayDeviceView } from "../../shared/ipc.js";
 import { ProjectTree } from "./ProjectTree.js";
@@ -50,15 +49,15 @@ export function Sidebar({
       <div className="sidebar__traffic" />
       <nav className="sidebar__actions">
         <SidebarActionRow
-          icon={<Plus size={16} />}
+          icon={<Plus size={14} />}
           label="新对话"
           disabled={busy || !selectedProjectKey}
           onClick={onNewSessionClick}
           testId="sidebar-new-session"
         />
-        <SidebarActionRow icon={<Search size={16} />} label="搜索" disabled />
-        <SidebarActionRow icon={<Puzzle size={16} />} label="插件" disabled />
-        <SidebarActionRow icon={<Clock size={16} />} label="自动化" disabled />
+        <SidebarActionRow icon={<Search size={14} />} label="搜索" disabled />
+        <SidebarActionRow icon={<Puzzle size={14} />} label="插件" disabled />
+        <SidebarActionRow icon={<Clock size={14} />} label="自动化" disabled />
       </nav>
       <div className="sidebar__scroll">
         <div className="sidebar__section-header">
@@ -103,9 +102,8 @@ export function Sidebar({
       </div>
       <div className="sidebar__bottom">
         <SidebarActionRow
-          icon={<Settings size={16} />}
+          icon={<Settings size={14} />}
           label="设置"
-          trailing={<Smartphone size={14} />}
           onClick={onSettingsClick}
           testId="sidebar-open-settings"
         />

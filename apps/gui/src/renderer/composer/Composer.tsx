@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback } from "react";
+import { type FormEvent, useCallback, useEffect, useRef } from "react";
 
 import { AlertTriangle, ArrowUp, Mic, Plus, Square } from "../icons/index.js";
 
@@ -11,7 +11,11 @@ export type ComposerProps = {
   onCancel?(): void;
 };
 
+const MAX_HEIGHT = 200;
+
 export function Composer({ value, onChange, onSubmit, disabled, inFlight, onCancel }: ComposerProps) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>): void => {
       event.preventDefault();
@@ -20,11 +24,21 @@ export function Composer({ value, onChange, onSubmit, disabled, inFlight, onCanc
     [onSubmit],
   );
 
+  useEffect(() => {
+    const node = textareaRef.current;
+    if (!node) return;
+    node.style.height = "auto";
+    const next = Math.min(node.scrollHeight, MAX_HEIGHT);
+    node.style.height = `${next}px`;
+  }, [value]);
+
   const empty = value.trim().length === 0;
 
   return (
     <form className="composer" onSubmit={handleSubmit} data-testid="composer">
       <textarea
+        ref={textareaRef}
+        rows={1}
         className="composer__textarea"
         placeholder="随心输入"
         value={value}
@@ -40,30 +54,28 @@ export function Composer({ value, onChange, onSubmit, disabled, inFlight, onCanc
       <div className="composer__bar">
         <div className="composer__left">
           <button type="button" className="composer__icon-button" disabled aria-label="Add attachment">
-            <Plus size={18} />
+            <Plus size={16} />
           </button>
-          <button type="button" className="composer__pill composer__pill--warn" disabled>
-            <AlertTriangle size={14} />
+          <button type="button" className="composer__chip composer__chip--warn" disabled>
+            <AlertTriangle />
             完全访问
           </button>
         </div>
-        <div />
         <div className="composer__right">
-          <button type="button" className="composer__pill" disabled>
-            5.5 超高
+          <button type="button" className="composer__chip" disabled>
+            5.5 中
           </button>
           <button type="button" className="composer__icon-button" disabled aria-label="Voice">
-            <Mic size={16} />
+            <Mic size={14} />
           </button>
           {inFlight ? (
             <button
               type="button"
-              className="composer__send"
+              className="composer__send composer__send--cancel"
               onClick={onCancel}
               aria-label="Cancel"
-              style={{ background: "var(--color-status-err)" }}
             >
-              <Square size={14} />
+              <Square size={12} />
             </button>
           ) : (
             <button
@@ -72,7 +84,7 @@ export function Composer({ value, onChange, onSubmit, disabled, inFlight, onCanc
               disabled={disabled || empty}
               aria-label="Send"
             >
-              <ArrowUp size={16} />
+              <ArrowUp size={14} />
             </button>
           )}
         </div>
