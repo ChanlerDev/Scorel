@@ -584,6 +584,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.8 | [`S0076`](spec/ship/S0076-provider-modal-search-and-direct-key.md) | Provider 新建 modal、catalog 搜索、provider 名称归一和直接 API key | Done |
 | M9.F1.9 | [`S0077`](spec/ship/S0077-auxiliary-session-title-generation.md) | 第一条 chat 后用 auxiliary model 生成持久 session title | Done |
 | M9.F1.10 | [`S0078`](spec/ship/S0078-gui-provider-settings-forward-config-and-simplification.md) | GUI Settings 使用前向 provider/model profile，并简化 Provider/Model 表单为用户可理解字段 | Done |
+| M9.F1.11 | [`S0079`](spec/ship/S0079-gui-sidebar-layout-controls.md) | GUI sidebar 标题截断、宽度拖拽和收起/展开控制 | Done |
 
 **Not in M9 Follow-up**:
 

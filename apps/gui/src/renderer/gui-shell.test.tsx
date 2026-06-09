@@ -7,6 +7,7 @@ import { ProviderSection } from "./settings/sections/ProviderSection.js";
 import { SettingsShell } from "./settings/SettingsShell.js";
 import { Sidebar } from "./shell/Sidebar.js";
 import { EmptyState } from "./workspace/EmptyState.js";
+import { Topbar } from "./workspace/Topbar.js";
 
 const noop = (): void => {};
 
@@ -114,6 +115,52 @@ describe("GUI shell rendering contract", () => {
 
     expect(html).toContain('data-testid="sidebar-new-session"');
     expect(html).not.toMatch(/disabled=""[^>]*data-testid="sidebar-new-session"|data-testid="sidebar-new-session"[^>]*disabled=""/);
+  });
+
+  it("renders sidebar resize and collapse affordances", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[localProject]}
+        selectedProjectKey="local:project_scorel"
+        selectedSessionId={"session_long"}
+        relayDevices={[]}
+        sessionsByProject={{
+          "local:project_scorel": [
+            {
+              sessionId: "session_long" as never,
+              projectId: localProject.projectId,
+              title: "这是一个非常非常长的会话标题，应该在侧边栏内截断而不是撑出横向滚动条",
+              updatedAt: 1,
+              currentSeq: 1 as never,
+            },
+          ],
+        }}
+        busy={false}
+        onNewSessionClick={noop}
+        onProjectPickerOpen={noop}
+        onProjectClick={noop}
+        onSessionClick={noop}
+        onSettingsClick={noop}
+        onSidebarToggle={noop}
+      />,
+    );
+
+    expect(html).toContain('data-testid="sidebar-toggle"');
+    expect(html).toContain('data-testid="sidebar-resize-handle"');
+    expect(html).toContain('title="这是一个非常非常长的会话标题，应该在侧边栏内截断而不是撑出横向滚动条"');
+  });
+
+  it("renders a topbar sidebar toggle for the collapsed state", () => {
+    const html = renderToStaticMarkup(
+      <Topbar
+        title="用户问候你好"
+        sidebarCollapsed={true}
+        onSidebarToggle={noop}
+      />,
+    );
+
+    expect(html).toContain('data-testid="topbar-sidebar-toggle"');
+    expect(html).toContain('aria-label="展开侧边栏"');
   });
 
   it("uses distinct empty workspace headings for no project and selected project", () => {

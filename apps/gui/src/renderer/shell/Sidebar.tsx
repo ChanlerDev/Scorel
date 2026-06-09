@@ -1,6 +1,8 @@
 import type { SessionSummary } from "@scorel/protocol";
+import type { MouseEvent } from "react";
 
 import {
+  PanelLeft,
   Plus,
   Settings,
 } from "../icons/index.js";
@@ -21,6 +23,8 @@ export type SidebarProps = {
   onProjectClick(key: string): void;
   onSessionClick(key: string, sessionId: string): void;
   onSettingsClick(): void;
+  onSidebarToggle?: () => void;
+  onResizeStart?(event: MouseEvent<HTMLDivElement>): void;
 };
 
 export function projectKey(project: GuiProjectView): string {
@@ -41,10 +45,25 @@ export function Sidebar({
   onProjectClick,
   onSessionClick,
   onSettingsClick,
+  onSidebarToggle,
+  onResizeStart,
 }: SidebarProps) {
   return (
     <aside className="sidebar">
-      <div className="sidebar__traffic" />
+      <div className="sidebar__traffic">
+        {onSidebarToggle ? (
+          <button
+            type="button"
+            className="sidebar__toggle"
+            aria-label="收起侧边栏"
+            title="收起侧边栏"
+            onClick={onSidebarToggle}
+            data-testid="sidebar-toggle"
+          >
+            <PanelLeft size={15} />
+          </button>
+        ) : null}
+      </div>
       <nav className="sidebar__actions">
         <SidebarActionRow
           icon={<Plus size={14} />}
@@ -100,6 +119,14 @@ export function Sidebar({
           testId="sidebar-open-settings"
         />
       </div>
+      <div
+        className="sidebar__resize-handle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整侧边栏宽度"
+        onMouseDown={onResizeStart}
+        data-testid="sidebar-resize-handle"
+      />
     </aside>
   );
 }

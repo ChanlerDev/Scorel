@@ -196,10 +196,16 @@ a {
   background: transparent;
 }
 
+.app-shell--sidebar-collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .sidebar {
+  position: relative;
   display: grid;
   grid-template-rows: auto auto 1fr auto;
   min-height: 0;
+  min-width: 0;
   background: var(--color-sidebar);
   padding: 12px 12px 14px;
   color: var(--color-text);
@@ -209,7 +215,57 @@ a {
 }
 
 .sidebar__traffic {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
   height: 54px;
+  padding-top: 4px;
+}
+
+.sidebar__toggle {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  -webkit-app-region: no-drag;
+}
+
+.sidebar__toggle:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.sidebar__resize-handle {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 5;
+  width: 8px;
+  cursor: col-resize;
+  -webkit-app-region: no-drag;
+}
+
+.sidebar__resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 3px;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+}
+
+.sidebar__resize-handle:hover::after,
+.sidebar-resizing .sidebar__resize-handle::after {
+  background: var(--color-border-strong);
+}
+
+.sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .sidebar__actions {
@@ -264,7 +320,8 @@ a {
 }
 
 .sidebar__scroll {
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   display: grid;
   align-content: start;
   gap: 1px;
@@ -276,6 +333,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-width: 0;
   margin: 18px 8px 8px;
 }
 
@@ -294,6 +352,7 @@ a {
   padding: 0;
   display: grid;
   gap: 1px;
+  min-width: 0;
 }
 
 .muted-row {
@@ -312,6 +371,7 @@ a {
 .project-tree {
   display: grid;
   gap: 1px;
+  min-width: 0;
 }
 
 .project-tree__row {
@@ -320,6 +380,7 @@ a {
   align-items: center;
   gap: 8px;
   width: 100%;
+  min-width: 0;
   min-height: 32px;
   padding: 5px 10px;
   border-radius: 9px;
@@ -392,11 +453,13 @@ a {
   padding: 0;
   display: grid;
   gap: 1px;
+  min-width: 0;
 }
 
 .project-tree__session {
-  display: block;
+  display: grid;
   width: 100%;
+  min-width: 0;
   min-height: 28px;
   padding: 5px 9px;
   border-radius: 9px;
@@ -418,6 +481,7 @@ a {
 }
 
 .project-tree__session-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -436,6 +500,11 @@ a {
   overflow: hidden;
 }
 
+.app-shell--sidebar-collapsed .workspace {
+  border-left: 0;
+  border-top-left-radius: 0;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -444,6 +513,29 @@ a {
   min-height: 44px;
   border-bottom: 1px solid var(--color-border);
   -webkit-app-region: drag;
+}
+
+.topbar__left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.topbar__sidebar-toggle {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  -webkit-app-region: no-drag;
+}
+
+.topbar__sidebar-toggle:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
 }
 
 .topbar__title {

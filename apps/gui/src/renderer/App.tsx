@@ -1,5 +1,5 @@
 import type { PersistentEvent, ScorelEvent, SessionId, SessionSummary } from "@scorel/protocol";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from "react";
 
 import { createRafBatcher } from "./chatbox/delta-batch.js";
 import { AddRemoteProjectDialog } from "./composer/AddRemoteProjectDialog.js";
@@ -25,10 +25,17 @@ import type {
 
 type ViewMode = "workspace" | "settings";
 
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_DEFAULT_WIDTH = 278;
+
 const projectRef = (project: GuiProjectView): GuiProjectRef =>
   project.source === "local"
     ? { source: "local", projectId: project.projectId }
     : { source: "relay", deviceId: project.deviceId, projectId: project.projectId };
+
+const clampSidebarWidth = (width: number): number =>
+  Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 
 export function App() {
   const [view, setView] = useState<ViewMode>("workspace");
@@ -49,6 +56,8 @@ export function App() {
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
   const [pickerAnchor, setPickerAnchor] = useState<{ left: number; top: number } | undefined>(undefined);
   const [showAddRemote, setShowAddRemote] = useState<boolean>(false);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(SIDEBAR_DEFAULT_WIDTH);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
 
   const currentSessionRef = useRef<string | null>(null);
   const projectorStateRef = useRef<ProjectorState>(emptyProjectorState());
@@ -332,6 +341,25 @@ export function App() {
     setPickerOpen(true);
   }, []);
 
+  const handleSidebarResizeStart = useCallback((event: MouseEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+
+    const handleMove = (moveEvent: globalThis.MouseEvent): void => {
+      setSidebarWidth(clampSidebarWidth(startWidth + moveEvent.clientX - startX));
+    };
+    const handleUp = (): void => {
+      document.body.classList.remove("sidebar-resizing");
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+
+    document.body.classList.add("sidebar-resizing");
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp, { once: true });
+  }, [sidebarWidth]);
+
   const picker = pickerOpen ? (
     <ProjectPickerMenu
       projects={projects}
@@ -384,21 +412,30 @@ export function App() {
   // void hostState reference (status surfaced via topbar message)
   void hostState;
 
+  const shellStyle = {
+    "--sidebar-width": `${sidebarWidth}px`,
+  } as CSSProperties;
+  const shellClassName = `app-shell${sidebarCollapsed ? " app-shell--sidebar-collapsed" : ""}`;
+
   return (
-    <div className="app-shell">
-      <Sidebar
-        projects={projects}
-        selectedProjectKey={selectedProjectKey}
-        selectedSessionId={selectedSessionId}
-        relayDevices={relayDevices}
-        sessionsByProject={sessionsByProject}
-        busy={busy}
-        onNewSessionClick={() => void handleNewSession()}
-        onProjectPickerOpen={openProjectPicker}
-        onProjectClick={handleProjectClick}
-        onSessionClick={handleSessionClick}
-        onSettingsClick={() => setView("settings")}
-      />
+    <div className={shellClassName} style={shellStyle}>
+      {sidebarCollapsed ? null : (
+        <Sidebar
+          projects={projects}
+          selectedProjectKey={selectedProjectKey}
+          selectedSessionId={selectedSessionId}
+          relayDevices={relayDevices}
+          sessionsByProject={sessionsByProject}
+          busy={busy}
+          onNewSessionClick={() => void handleNewSession()}
+          onProjectPickerOpen={openProjectPicker}
+          onProjectClick={handleProjectClick}
+          onSessionClick={handleSessionClick}
+          onSettingsClick={() => setView("settings")}
+          onSidebarToggle={() => setSidebarCollapsed(true)}
+          onResizeStart={handleSidebarResizeStart}
+        />
+      )}
       <Workspace
         selectedProject={selectedProject}
         selectedSessionTitle={selectedSessionTitle}
@@ -416,6 +453,8 @@ export function App() {
         error={error}
         hostMessage={hostMessage}
         onPickerOpen={openProjectPicker}
+        sidebarCollapsed={sidebarCollapsed}
+        onSidebarToggle={() => setSidebarCollapsed(false)}
         picker={picker}
       />
       {remoteDialog}

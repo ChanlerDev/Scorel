@@ -23,6 +23,8 @@ export type WorkspaceProps = {
   error: string | null;
   hostMessage: string | undefined;
   onPickerOpen(anchor: DOMRect): void;
+  sidebarCollapsed?: boolean;
+  onSidebarToggle?: () => void;
   picker?: ReactNode;
 };
 
@@ -33,6 +35,8 @@ export function Workspace(props: WorkspaceProps) {
         title={props.hasActiveSession ? props.selectedSessionTitle : undefined}
         error={props.error ?? undefined}
         hostMessage={props.hostMessage}
+        sidebarCollapsed={props.sidebarCollapsed}
+        onSidebarToggle={props.onSidebarToggle}
       />
       {props.hasActiveSession ? (
         <SessionView

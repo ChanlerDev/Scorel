@@ -22,6 +22,7 @@ export {
   Check,
   AlertTriangle,
   PanelRight,
+  PanelLeft,
   Send,
   MoreHorizontal,
   Loader,

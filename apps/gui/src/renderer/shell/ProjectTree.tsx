@@ -44,6 +44,7 @@ export function ProjectTree({
         type="button"
         className={`project-tree__row${isActive ? " project-tree__row--active" : ""}`}
         onClick={handleProjectClick}
+        title={project.displayName}
         data-testid={`project-row-${projectKey}`}
       >
         <span className="project-tree__caret">
@@ -73,6 +74,7 @@ export function ProjectTree({
                     session.sessionId === selectedSessionId ? " project-tree__session--active" : ""
                   }`}
                   onClick={() => onSessionClick(session.sessionId)}
+                  title={session.title ?? "Untitled session"}
                 >
                   <span className="project-tree__session-title">
                     {session.title ?? "Untitled session"}
