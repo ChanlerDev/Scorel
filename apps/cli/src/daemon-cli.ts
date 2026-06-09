@@ -9,6 +9,7 @@ import {
   daemonStateLiveness,
   loadOrCreateHostDeviceIdentity,
   loadScorelConfig,
+  loadScorelConfigProfile,
   markDaemonStopped,
   readLocalDaemonState,
   removeLocalDaemonState,
@@ -120,9 +121,13 @@ const runServeCommand = async (
     projectsPath: join(options.stateDir, "projects.json"),
     deviceId: identity.deviceId,
     deviceDisplayName: identity.displayName,
-    createRuntime: async ({ project }) => createRealRuntime({
+    loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir }),
+    loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir }),
+    createRuntime: async ({ project, selectedModel, purpose }) => createRealRuntime({
       cwd: project.workDir,
       config: await loadScorelConfig({ cwd: project.workDir }),
+      modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
+      includeTools: purpose !== "title",
     }),
   });
   await daemon.start();

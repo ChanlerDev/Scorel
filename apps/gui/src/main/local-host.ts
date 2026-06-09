@@ -6,6 +6,7 @@ import {
   createEmbeddedTransport,
   createRealRuntime,
   loadScorelConfig,
+  loadScorelConfigProfile,
   ScorelHost,
   type ScorelHostOptions,
 } from "@scorel/daemon";
@@ -15,6 +16,13 @@ import {
   asProjectId,
   asSessionId,
   type HostProject,
+  type ModelSelectionInput,
+  type AvailableModelSummary,
+  type ModelRole,
+  type ProviderCatalogModelSummary,
+  type ProviderConnectionSummary,
+  type ProviderModelSummary,
+  type UpsertModelProfileInput,
   type PersistentEvent,
   type ProjectId,
   type ScorelEvent,
@@ -39,7 +47,10 @@ export type GuiLocalHostService = {
   listLocalProjects(): Promise<HostProject[]>;
   registerLocalProject(workDir: string): Promise<HostProject>;
   listLocalSessions(projectId: string): Promise<SessionSummary[]>;
-  createLocalSession(projectId: string): Promise<SessionId>;
+  listLocalModels(projectId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
+  upsertLocalModelProfile(input: UpsertModelProfileInput): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
+  fetchLocalProviderModels(projectId: string, providerId: string): Promise<ProviderCatalogModelSummary[]>;
+  createLocalSession(projectId: string, modelSelection?: ModelSelectionInput): Promise<SessionId>;
   openLocalSession(sessionId: string): Promise<PersistentEvent[]>;
   attachLocalSession(sessionId: string, handler: GuiLocalSubscriber): Promise<{
     events: PersistentEvent[];
@@ -57,12 +68,20 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     projectsPath,
     deviceId: asDeviceId(options.deviceId ?? "device_gui_local"),
     deviceDisplayName: options.deviceDisplayName ?? "Local",
+    ...(options.createRuntime
+      ? {}
+      : {
+          loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir }),
+          loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir }),
+        }),
     createRuntime:
       options.createRuntime ??
-      (async ({ project }) =>
+      (async ({ project, selectedModel, purpose }) =>
         createRealRuntime({
           cwd: project.workDir,
           config: await loadScorelConfig({ cwd: project.workDir }),
+          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
+          includeTools: purpose !== "title",
         })),
   });
   const client = new DaemonClient(createEmbeddedTransport(host), {
@@ -98,8 +117,17 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     listLocalSessions(projectId) {
       return client.listSessions({ projectId: asProjectId(projectId) as ProjectId });
     },
-    createLocalSession(projectId) {
-      return client.createSession({ meta: { projectId: asProjectId(projectId) as ProjectId } });
+    listLocalModels(projectId) {
+      return client.listModels({ projectId: asProjectId(projectId) as ProjectId });
+    },
+    upsertLocalModelProfile(input) {
+      return client.upsertModelProfile(input);
+    },
+    fetchLocalProviderModels(projectId, providerId) {
+      return client.fetchProviderModels({ projectId: asProjectId(projectId) as ProjectId, providerId });
+    },
+    createLocalSession(projectId, modelSelection) {
+      return client.createSession({ meta: { projectId: asProjectId(projectId) as ProjectId, modelSelection } });
     },
     async openLocalSession(sessionId) {
       await client.loadSession(asSessionId(sessionId));

@@ -388,6 +388,7 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
     value.type !== "user_message" &&
     value.type !== "assistant_message" &&
     value.type !== "tool_result" &&
+    value.type !== "session_title_updated" &&
     value.type !== "instruction_snapshot" &&
     value.type !== "harness_item" &&
     value.type !== "queue_update" &&
@@ -410,6 +411,9 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
     !isRecord(value.message)
   ) {
     throw new SessionStoreError("invalid_event", "Message event is missing message payload");
+  }
+  if (value.type === "session_title_updated" && !isSessionTitleUpdated(value)) {
+    throw new SessionStoreError("invalid_event", "session_title_updated is missing title payload");
   }
   if (value.type === "instruction_snapshot" && !isInstructionSnapshot(value.snapshot)) {
     throw new SessionStoreError("invalid_event", "instruction_snapshot is missing snapshot payload");
@@ -468,6 +472,15 @@ const isQueueUpdate = (value: Record<string, unknown>): boolean =>
       typeof item.updatedAt === "number" &&
       typeof item.clientId === "string",
   );
+
+const isSessionTitleUpdated = (value: Record<string, unknown>): boolean =>
+  typeof value.title === "string" &&
+  value.title.length > 0 &&
+  (value.source === "model" || value.source === "user") &&
+  (value.derivedFrom === undefined ||
+    (isRecord(value.derivedFrom) &&
+      typeof value.derivedFrom.eventId === "string" &&
+      typeof value.derivedFrom.seq === "number"));
 
 const isSkillIndexSnapshot = (value: Record<string, unknown>): boolean =>
   (value.anchorEventId === null || typeof value.anchorEventId === "string") &&

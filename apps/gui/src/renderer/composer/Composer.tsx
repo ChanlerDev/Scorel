@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useRef } from "react";
 
 import { ArrowUp } from "../icons/index.js";
+import type { GuiModelProfileView } from "../../shared/ipc.js";
 
 export type ComposerProps = {
   value: string;
@@ -8,12 +9,27 @@ export type ComposerProps = {
   onSubmit(): void;
   disabled: boolean;
   inFlight: boolean;
+  models?: GuiModelProfileView["models"];
+  selectedModelId?: string;
+  onModelChange?(modelId: string): void;
+  modelPickerDisabled?: boolean;
   onCancel?(): void;
 };
 
 const MAX_HEIGHT = 200;
 
-export function Composer({ value, onChange, onSubmit, disabled, inFlight, onCancel }: ComposerProps) {
+export function Composer({
+  value,
+  onChange,
+  onSubmit,
+  disabled,
+  inFlight,
+  models = [],
+  selectedModelId = "",
+  onModelChange,
+  modelPickerDisabled,
+  onCancel,
+}: ComposerProps) {
   void onCancel;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -54,6 +70,24 @@ export function Composer({ value, onChange, onSubmit, disabled, inFlight, onCanc
       />
       <div className="composer__bar">
         <div className="composer__right">
+          <select
+            className="composer__model-select"
+            value={selectedModelId}
+            disabled={disabled || modelPickerDisabled || models.length === 0}
+            onChange={(event) => onModelChange?.(event.currentTarget.value)}
+            aria-label="Model"
+            data-testid="composer-model-picker"
+          >
+            {models.length === 0 ? (
+              <option value="">Default</option>
+            ) : (
+              models.map((model) => (
+                <option key={model.modelId} value={model.modelId}>
+                  {model.displayName}
+                </option>
+              ))
+            )}
+          </select>
           <button
             type="submit"
             className="composer__send"

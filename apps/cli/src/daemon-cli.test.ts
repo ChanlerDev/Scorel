@@ -292,16 +292,25 @@ const writeConfig = async (cwd: string): Promise<void> => {
   await mkdir(join(cwd, ".scorel"), { recursive: true });
   await writeFile(
     join(cwd, ".scorel", "config.toml"),
-    `[model]
+    `[providers.chanleramp]
 type = "custom"
 api = "openai-completions"
 provider = "chanleramp"
-id = "gpt-5.4-mini"
 baseUrl = "https://amp.chanler.dev/v1"
 apiKeyEnv = "SCOREL_API_KEY"
+
+[models.main]
+provider = "chanleramp"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
 contextWindow = 400000
 maxTokens = 128000
 reasoning = true
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
 `,
   );
   process.env.SCOREL_API_KEY = "chanleramp";

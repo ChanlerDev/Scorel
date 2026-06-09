@@ -2,7 +2,7 @@ import type { MouseEvent, ReactNode } from "react";
 
 import { Composer } from "../composer/Composer.js";
 import { ProjectPickerPill } from "../composer/ProjectPickerPill.js";
-import type { GuiProjectView } from "../../shared/ipc.js";
+import type { GuiProjectView, GuiModelProfileView } from "../../shared/ipc.js";
 
 export type EmptyStateProps = {
   selectedProject: GuiProjectView | undefined;
@@ -12,6 +12,10 @@ export type EmptyStateProps = {
   onPickerOpen(anchor: DOMRect): void;
   busy: boolean;
   inFlight: boolean;
+  models: GuiModelProfileView["models"];
+  selectedModelId: string;
+  onModelChange(modelId: string): void;
+  modelPickerDisabled?: boolean;
   picker?: ReactNode;
 };
 
@@ -23,6 +27,10 @@ export function EmptyState({
   onPickerOpen,
   busy,
   inFlight,
+  models,
+  selectedModelId,
+  onModelChange,
+  modelPickerDisabled,
   picker,
 }: EmptyStateProps) {
   const projectName = selectedProject?.displayName;
@@ -59,6 +67,10 @@ export function EmptyState({
             onSubmit={onSubmit}
             disabled={busy || !selectedProject}
             inFlight={inFlight}
+            models={models}
+            selectedModelId={selectedModelId}
+            onModelChange={onModelChange}
+            modelPickerDisabled={modelPickerDisabled}
           />
           <ProjectPickerPill
             label={projectName ?? "选择项目"}

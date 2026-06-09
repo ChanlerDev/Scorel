@@ -8,6 +8,13 @@ import {
   type ClientId,
   type DeviceId,
   type DirectoryListing,
+  type ModelSelectionInput,
+  type AvailableModelSummary,
+  type ModelRole,
+  type ProviderCatalogModelSummary,
+  type ProviderConnectionSummary,
+  type ProviderModelSummary,
+  type UpsertModelProfileInput,
   type PersistentEvent,
   type ProjectId,
   type RelayAuthorizedDevice,
@@ -40,7 +47,10 @@ export type GuiRelayService = {
   listRemoteDirectories(deviceId: string, path?: string): Promise<DirectoryListing>;
   registerRemoteProject(deviceId: string, workDir: string): Promise<GuiVisibleRemoteProject>;
   listRemoteSessions(deviceId: string, projectId: string): Promise<SessionSummary[]>;
-  createRemoteSession(deviceId: string, projectId: string): Promise<SessionId>;
+  listRemoteModels(deviceId: string, projectId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
+  upsertRemoteModelProfile(deviceId: string, input: UpsertModelProfileInput): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
+  fetchRemoteProviderModels(deviceId: string, projectId: string, providerId: string): Promise<ProviderCatalogModelSummary[]>;
+  createRemoteSession(deviceId: string, projectId: string, modelSelection?: ModelSelectionInput): Promise<SessionId>;
   openRemoteSession(deviceId: string, sessionId: string): Promise<PersistentEvent[]>;
   attachRemoteSession(
     deviceId: string,
@@ -121,8 +131,17 @@ export const createGuiRelayService = (store: GuiStore): GuiRelayService => {
     async listRemoteSessions(deviceId, projectId) {
       return (await connectedClient(deviceId)).listSessions({ projectId: asProjectId(projectId) as ProjectId });
     },
-    async createRemoteSession(deviceId, projectId) {
-      return (await connectedClient(deviceId)).createSession({ meta: { projectId: asProjectId(projectId) as ProjectId } });
+    async listRemoteModels(deviceId, projectId) {
+      return (await connectedClient(deviceId)).listModels({ projectId: asProjectId(projectId) as ProjectId });
+    },
+    async upsertRemoteModelProfile(deviceId, input) {
+      return (await connectedClient(deviceId)).upsertModelProfile(input);
+    },
+    async fetchRemoteProviderModels(deviceId, projectId, providerId) {
+      return (await connectedClient(deviceId)).fetchProviderModels({ projectId: asProjectId(projectId) as ProjectId, providerId });
+    },
+    async createRemoteSession(deviceId, projectId, modelSelection) {
+      return (await connectedClient(deviceId)).createSession({ meta: { projectId: asProjectId(projectId) as ProjectId, modelSelection } });
     },
     async openRemoteSession(deviceId, sessionId) {
       const client = await connectedClient(deviceId);

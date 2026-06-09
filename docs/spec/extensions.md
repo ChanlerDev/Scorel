@@ -163,32 +163,103 @@ class PromptBuilder {
 
 环境变量不参与通用配置覆盖，只通过 `apiKeyEnv` 指向具体密钥。CLI 参数也不复制完整 config schema；只有明确属于交互控制的参数才进入 CLI。
 
-### 5.2 初期配置示例
+配置保存和配置展示只记录 / 返回 `apiKeyEnv`，不读取或保存 raw API key。缺少对应环境变量时，Settings 可以显示 credential missing 状态；真正创建 runtime 或调用 provider 时才把缺失 env 作为错误抛出。
 
-pi-ai 已支持的内置 provider 使用 `type = "builtin"`，Scorel 只把 provider/model/api key 交给 pi-ai，不在本仓库重写 provider 协议：
+### 5.2 Provider / Model Profile 配置示例
+
+S0073 后，旧的单 `[model]` 配置被替换为 provider / provider models / available models / role profile 四层合同。
+
+pi-ai 已支持的内置 provider 使用 `type = "builtin"`。Scorel 只把 provider/model/api key 交给 pi-ai，不在本仓库重写 provider 协议：
 
 ```toml
-[model]
+[providers.openai]
 type = "builtin"
 provider = "openai"
-id = "gpt-5.4-mini"
 apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.openai_gpt_54_mini]
+provider = "openai"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[provider_models.openai_gpt_54_nano]
+provider = "openai"
+id = "gpt-5.4-nano"
+displayName = "GPT 5.4 Nano"
+
+[available_models.main]
+model = "openai_gpt_54_mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.aux]
+model = "openai_gpt_54_nano"
+displayName = "GPT 5.4 Nano"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "aux"
 ```
 
-自定义兼容 endpoint 使用 `type = "custom"`，并显式声明兼容协议。这个分支和 builtin provider 分开，避免把任意自定义 endpoint 混成 pi-ai 内置 provider：
+自定义兼容 endpoint 使用 `type = "custom"`，并显式声明兼容协议。这个分支和 builtin provider 分开，避免把任意自定义 endpoint 混成 pi-ai 内置 provider。Custom model 必须手动声明 context metadata，因为自定义 endpoint 不一定能可靠 discover model catalog：
 
 ```toml
-[model]
+[providers.chanleramp]
 type = "custom"
 api = "openai-completions"
 provider = "chanleramp"
-id = "gpt-5.4-mini"
 baseUrl = "https://amp.chanler.dev/v1"
 apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.chanleramp_gpt_54_mini]
+provider = "chanleramp"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
 contextWindow = 400000
 maxTokens = 128000
 reasoning = true
+
+[provider_models.chanleramp_deepseek_v4_flash]
+provider = "chanleramp"
+id = "deepseek-v4-flash"
+displayName = "DeepSeek Flash"
+contextWindow = 128000
+maxTokens = 32000
+reasoning = false
+
+[available_models.main]
+model = "chanleramp_gpt_54_mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.aux]
+model = "chanleramp_deepseek_v4_flash"
+displayName = "DeepSeek Flash"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "aux"
 ```
+
+`providers.*` 是 LLM provider connection：供应商名称、协议/API shape、base URL 和 API key env var。一个 provider connection 可以对应多个 `provider_models.*`。
+
+`provider_models.*` 是 provider connection 下记录的候选模型。它描述真实 provider model id、展示名和自定义 endpoint 必需的 context metadata。
+
+`available_models.*` 是 Scorel 的 available model / use pool。它们从 `provider_models.*` 里引用少量真正允许 Scorel 使用的模型；Runtime、GUI composer 和未来 subagent selection 只能选择 pool 内模型，不能直接选择 provider catalog 或 provider model 里的任意条目。
+
+GUI 的 provider/model 写入必须 merge 到现有 `.scorel/config.toml`：同一 provider 下追加第二个 provider model，或把 provider model 加入 available models 时，不能删除已存在 provider、provider model、available model 或 role assignment，除非用户明确覆盖对应字段。
+
+Scorel 仍处在开发阶段，没有存量配置兼容要求。旧 `[models.*]` section 不再支持；遇到旧 section 必须按未知 section 报错。
+
+`model_profile.roles` 是 V1 的用途绑定：
+
+```text
+primary   -> 最强/最稳的主 agent 模型
+standard  -> 默认日常模型
+auxiliary -> 轻量辅助模型
+```
+
+这些 role 名是通用产品语义，不绑定 Opus / Sonnet / Haiku 这类具体供应商命名。
 
 `api` 初期只接受以下四个值：
 
@@ -222,7 +293,7 @@ disabled = ["experimental-memory"]
 
 配置必须通过 `SCOREL_CONFIG_SCHEMA` 校验。未知 section 和未知 key 都应由通用 schema 校验拒绝，例如根级 `sessionsDir = "/tmp/nope"` 必须报 `Unsupported config key: sessionsDir`，不能为单个字段写特殊判断。
 
-当前已落地的稳定 section 只有 `[model]`。未来新增 `[tools]` / `[mcp]` / `[extensions]` 时，必须先把字段加入 schema，再接入加载逻辑和测试。
+当前已落地的稳定 section 是 `[providers.*]`、`[provider_models.*]`、`[available_models.*]` 和 `[model_profile.roles]`。未来新增 `[tools]` / `[mcp]` / `[extensions]` 时，必须先把字段加入 schema，再接入加载逻辑和测试。
 
 ### 5.4 延后段落
 
@@ -241,7 +312,7 @@ disabled = ["experimental-memory"]
 - 广播事件：`turn_finish` / `turn_error` / `rewind` / `compact`
 - Extension 加载 + 错误隔离（`tools` / `commands` / `onEvent`）
 - System Prompt 组装与预算
-- TOML 配置的核心段：`[model]`，并通过 `SCOREL_CONFIG_SCHEMA` 统一拒绝未知 section/key
+- TOML 配置的核心段：`[providers.*]` / `[provider_models.*]` / `[available_models.*]` / `[model_profile.roles]`，并通过 `SCOREL_CONFIG_SCHEMA` 统一拒绝未知 section/key
 
 **延后**
 - Extension 的沙箱与权限边界（现阶段信任本地扩展）

@@ -578,6 +578,11 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.2 | [`S0070`](spec/ship/S0070-gui-streaming-and-tool-blocks.md) | streaming 光标 + RAF batcher + IntersectionObserver autoscroll + jump-to-bottom + 7 个特化工具块(Read/Glob/Grep/Edit/Write/Bash/TodoWrite)+ unified diff viewer + 真实 provider local + Relay e2e | Done |
 | M9.F1.3 | [`S0071`](spec/ship/S0071-gui-visual-fidelity-and-settings-shell.md) | 视觉打底:tokens 重置 + sidebar/composer/empty/picker/modal/transcript/工具块 chip 化 + Settings macOS 风重构(nav 三段分组 + header + card row + Toggle/Select/LinkAccent + 9 section 含 Config / General 真实) | Done |
 | M9.F1.4 | [`S0072`](spec/ship/S0072-gui-glass-sidebar-and-picker-anchoring.md) | GUI glass sidebar + 删除未实现入口 + 空态文案修正 + project picker 跟随触发 pill | Done |
+| M9.F1.5 | [`S0073`](spec/ship/S0073-provider-model-profile-contract.md) | Provider/model profile 合同:pi-ai provider config、available models、primary/standard/auxiliary 三角色与 GUI model picker | Done |
+| M9.F1.6 | [`S0074`](spec/ship/S0074-gui-model-provider-settings-split.md) | GUI Settings 拆分模型页和 Provider 页，让三工作模型、available models、provider source 管理分层清楚 | Done |
+| M9.F1.7 | [`S0075`](spec/ship/S0075-provider-catalog-model-cards.md) | Provider 页支持 /models 获取、折叠模型卡片和选用状态 | Done |
+| M9.F1.8 | [`S0076`](spec/ship/S0076-provider-modal-search-and-direct-key.md) | Provider 新建 modal、catalog 搜索、provider 名称归一和直接 API key | Done |
+| M9.F1.9 | [`S0077`](spec/ship/S0077-auxiliary-session-title-generation.md) | 第一条 chat 后用 auxiliary model 生成持久 session title | Done |
 
 **Not in M9 Follow-up**:
 
@@ -585,7 +590,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - 全局 `对话` 历史分组。
 - composer review banner(变更审查 UI)。
 - "不使用项目" picker 选项(GUI 是 Project-first,与 S0064 冲突)。
-- 模型/语音/`完全访问`真实切换(灰按钮占位)。
+- 语音/`完全访问`真实切换(灰按钮占位)。
 - WebUI 反向复用 GUI 组件(产品方向,本阶段不做)。
 - SSH / direct WS + token / HTTP API。
 
@@ -716,6 +721,11 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0070`](spec/ship/S0070-gui-streaming-and-tool-blocks.md) | GUI streaming UX + 7 个特化工具块 + unified diff + 真实 provider local + Relay e2e | Done |
 | [`S0071`](spec/ship/S0071-gui-visual-fidelity-and-settings-shell.md) | GUI 视觉打底 + Settings macOS 风重构 | Done |
 | [`S0072`](spec/ship/S0072-gui-glass-sidebar-and-picker-anchoring.md) | GUI glass sidebar + 删除未实现入口 + 空态文案修正 + project picker 跟随触发 pill | Done |
+| [`S0073`](spec/ship/S0073-provider-model-profile-contract.md) | Provider/model profile、available models、三角色模型选择与 GUI model picker | Done |
+| [`S0074`](spec/ship/S0074-gui-model-provider-settings-split.md) | GUI Settings 模型页和 Provider 页拆分 | Done |
+| [`S0075`](spec/ship/S0075-provider-catalog-model-cards.md) | Provider 页 /models catalog 获取和模型卡片选择 | Done |
+| [`S0076`](spec/ship/S0076-provider-modal-search-and-direct-key.md) | Provider 新建 modal、catalog 搜索、provider 名称归一和直接 API key | Done |
+| [`S0077`](spec/ship/S0077-auxiliary-session-title-generation.md) | 第一条 chat 后用 auxiliary model 生成持久 session title | Done |
 
 ---
 

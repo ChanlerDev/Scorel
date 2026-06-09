@@ -8,6 +8,8 @@ import { createGuiRelayService, type GuiRelayService } from "./main/relay-servic
 import {
   guiIpcChannels,
   type GuiHostStatus,
+  type GuiModelSelection,
+  type GuiUpsertModelProfileInput,
   type GuiProjectRef,
   type GuiRemoteProjectView,
   type GuiSnapshot,
@@ -110,11 +112,30 @@ const registerIpc = (): void => {
       ? requireConnectedLocalHost().listLocalSessions(ref.projectId)
       : relayService.listRemoteSessions(requireRelayDeviceId(ref), ref.projectId);
   });
-  ipcMain.handle(guiIpcChannels.createSession, async (_event, project: GuiProjectRef) => {
+  ipcMain.handle(guiIpcChannels.listModels, async (_event, project: GuiProjectRef) => {
     const ref = normalizeProjectRef(project);
     return ref.source === "local"
-      ? requireConnectedLocalHost().createLocalSession(ref.projectId)
-      : relayService.createRemoteSession(requireRelayDeviceId(ref), ref.projectId);
+      ? requireConnectedLocalHost().listLocalModels(ref.projectId)
+      : relayService.listRemoteModels(requireRelayDeviceId(ref), ref.projectId);
+  });
+  ipcMain.handle(guiIpcChannels.upsertModelProfile, async (_event, project: GuiProjectRef, input: GuiUpsertModelProfileInput) => {
+    const ref = normalizeProjectRef(project);
+    const payload = { ...input, projectId: ref.projectId as never };
+    return ref.source === "local"
+      ? requireConnectedLocalHost().upsertLocalModelProfile(payload)
+      : relayService.upsertRemoteModelProfile(requireRelayDeviceId(ref), payload);
+  });
+  ipcMain.handle(guiIpcChannels.fetchProviderModels, async (_event, project: GuiProjectRef, providerId: string) => {
+    const ref = normalizeProjectRef(project);
+    return ref.source === "local"
+      ? requireConnectedLocalHost().fetchLocalProviderModels(ref.projectId, providerId)
+      : relayService.fetchRemoteProviderModels(requireRelayDeviceId(ref), ref.projectId, providerId);
+  });
+  ipcMain.handle(guiIpcChannels.createSession, async (_event, project: GuiProjectRef, modelSelection?: GuiModelSelection) => {
+    const ref = normalizeProjectRef(project);
+    return ref.source === "local"
+      ? requireConnectedLocalHost().createLocalSession(ref.projectId, modelSelection)
+      : relayService.createRemoteSession(requireRelayDeviceId(ref), ref.projectId, modelSelection);
   });
   ipcMain.handle(guiIpcChannels.openSession, async (_event, project: GuiProjectRef, sessionId: string) => {
     const ref = normalizeProjectRef(project);

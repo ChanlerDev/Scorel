@@ -1,13 +1,61 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import type { GuiProjectView } from "../shared/ipc.js";
+import type { GuiModelProfileView, GuiProjectView } from "../shared/ipc.js";
 import { ProjectPickerMenu } from "./composer/ProjectPickerMenu.js";
+import { ProviderSection } from "./settings/sections/ProviderSection.js";
 import { SettingsShell } from "./settings/SettingsShell.js";
 import { Sidebar } from "./shell/Sidebar.js";
 import { EmptyState } from "./workspace/EmptyState.js";
 
 const noop = (): void => {};
+
+const modelProfile: GuiModelProfileView = {
+  providers: [
+    {
+      providerId: "test",
+      type: "custom",
+      provider: "scorel-test/main-model",
+      api: "openai-completions",
+      baseUrl: "https://llm.example.test/v1",
+      apiKeyEnv: "SCOREL_API_KEY",
+      credentialSource: "env",
+      credentialStatus: "available",
+    },
+  ],
+  providerModels: [
+    {
+      providerModelId: "test_main",
+      providerId: "test",
+      provider: "scorel-test/main-model",
+      id: "main-model",
+      displayName: "Main Model",
+      availableModelIds: ["main"],
+    },
+  ],
+  models: [
+    {
+      modelId: "main",
+      providerModelId: "test_main",
+      providerId: "test",
+      provider: "scorel-test/main-model",
+      id: "main-model",
+      displayName: "Main Model",
+      roles: ["primary", "standard"],
+    },
+  ],
+  roles: {
+    primary: "main",
+    standard: "main",
+    auxiliary: "main",
+  },
+};
+
+const modelProps = {
+  models: modelProfile.models,
+  selectedModelId: "main",
+  onModelChange: noop,
+};
 
 const localProject: GuiProjectView = {
   source: "local",
@@ -54,6 +102,7 @@ describe("GUI shell rendering contract", () => {
         onPickerOpen={noop}
         busy={false}
         inFlight={false}
+        {...modelProps}
       />,
     );
     const selectedProjectHtml = renderToStaticMarkup(
@@ -65,6 +114,7 @@ describe("GUI shell rendering contract", () => {
         onPickerOpen={noop}
         busy={false}
         inFlight={false}
+        {...modelProps}
       />,
     );
 
@@ -84,6 +134,7 @@ describe("GUI shell rendering contract", () => {
         onPickerOpen={noop}
         busy={false}
         inFlight={false}
+        {...modelProps}
       />,
     );
 
@@ -100,6 +151,7 @@ describe("GUI shell rendering contract", () => {
         onPickerOpen={noop}
         busy={false}
         inFlight={false}
+        {...modelProps}
       />,
     );
 
@@ -108,7 +160,8 @@ describe("GUI shell rendering contract", () => {
     expect(html).not.toContain("Voice");
     expect(html).not.toContain("Add attachment");
     expect(html).not.toContain("本地模式");
-    expect(html).not.toContain("main");
+    expect(html).toContain("Main Model");
+    expect(html).toContain('data-testid="composer-model-picker"');
   });
 
   it("keeps the project picker project-first without a null project option", () => {
@@ -132,6 +185,9 @@ describe("GUI shell rendering contract", () => {
     const html = renderToStaticMarkup(
       <SettingsShell
         devices={[]}
+        project={{ source: "local", projectId: localProject.projectId }}
+        modelProfile={modelProfile}
+        onModelProfileChange={noop}
         busy={false}
         setBusy={noop}
         setError={noop}
@@ -140,8 +196,23 @@ describe("GUI shell rendering contract", () => {
       />,
     );
 
-    expect(html).toContain("配置");
-    expect(html).toContain("Relay 设备");
+    expect(html).toContain("模型");
+    expect(html).toContain("Provider");
+    expect(html).toContain("Main Model");
+    expect(html).toContain("Working Models");
+    expect(html).toContain("Available Models");
+    expect(html).toContain("scorel-test/main-model");
+    expect(html).not.toContain("scorel-test/main-model/main-model");
+    expect(html).toContain(">Main Model</option>");
+    expect(html.indexOf("Working Models")).toBeLessThan(html.indexOf("Available Models"));
+    expect(html).toContain("加入 available models");
+    expect(html).toContain("保存 working models");
+    expect(html).toContain("Available model id");
+    expect(html).not.toContain("Provider Management");
+    expect(html).not.toContain("Provider type");
+    expect(html).not.toContain("API key env");
+    expect(html).not.toContain("Base URL");
+    expect(html).not.toContain("Relay 设备");
     expect(html).not.toContain("MCP 服务器");
     expect(html).not.toContain("浏览器");
     expect(html).not.toContain("电脑操控");
@@ -149,5 +220,56 @@ describe("GUI shell rendering contract", () => {
     expect(html).not.toContain("批准策略");
     expect(html).not.toContain("沙盒设置");
     expect(html).not.toContain("打开 config.toml");
+  });
+
+  it("keeps model and connection settings as separate pages", () => {
+    const html = renderToStaticMarkup(
+      <SettingsShell
+        devices={[]}
+        project={{ source: "local", projectId: localProject.projectId }}
+        modelProfile={modelProfile}
+        onModelProfileChange={noop}
+        busy={false}
+        setBusy={noop}
+        setError={noop}
+        refresh={async () => undefined}
+        onBack={noop}
+      />,
+    );
+
+    expect(html).toContain("模型");
+    expect(html).toContain("Provider");
+    expect(html).toContain("连接");
+    expect(html).toContain("加入 available models");
+    expect(html).not.toContain("Provider type");
+    expect(html).not.toContain("Relay URL");
+  });
+
+  it("renders LLM provider management on its own settings page", () => {
+    const html = renderToStaticMarkup(
+      <ProviderSection
+        project={{ source: "local", projectId: localProject.projectId }}
+        modelProfile={modelProfile}
+        busy={false}
+        setBusy={noop}
+        setError={noop}
+        onModelProfileChange={noop}
+      />,
+    );
+
+    expect(html).toContain("Provider Management");
+    expect(html).toContain("Provider type");
+    expect(html).toContain("API key env");
+    expect(html).toContain("Direct API key");
+    expect(html).toContain("Base URL");
+    expect(html).toContain("Models from provider");
+    expect(html).toContain("搜索 models");
+    expect(html).toContain("获取模型");
+    expect(html).toContain("provider-model-card");
+    expect(html).toContain("新建 provider");
+    expect(html).toContain("保存 provider");
+    expect(html).toContain("自行添加 model");
+    expect(html).toContain("已选用");
+    expect(html).not.toContain("Relay URL");
   });
 });

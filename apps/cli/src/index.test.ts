@@ -1060,6 +1060,7 @@ describe("@scorel/app-cli", () => {
         ],
       },
       { content: "Done. status is fixed.", tool_calls: [] },
+      { content: "Fix Status Value", tool_calls: [] },
       { content: "Resume sees completed work.", tool_calls: [] },
     ]);
 
@@ -1097,8 +1098,9 @@ describe("@scorel/app-cli", () => {
         .filter((line) => line.type === "tool_result")
         .map((line) => line.message.content[0].toolName);
       expect(toolNames).toEqual(["TodoWrite", "Grep", "Read", "Edit", "Bash", "TodoWrite"]);
-      expect(server.requests.length).toBe(8);
+      expect(server.requests.length).toBe(9);
       const firstRequest = server.requests[0] as { tools?: Array<{ function?: { name?: string; parameters?: unknown } }> };
+      const titleRequest = server.requests[7] as { tools?: unknown[]; messages?: Array<{ content?: string }> };
       const readTool = firstRequest.tools?.find((tool) => tool.function?.name === "Read");
       expect(server.requests[0]).toMatchObject({
         model: "gpt-5.4-mini",
@@ -1114,6 +1116,8 @@ describe("@scorel/app-cli", () => {
           }),
         },
       });
+      expect(titleRequest.tools ?? []).toEqual([]);
+      expect(titleRequest.messages?.at(-1)?.content).toContain("Fix the failing status value");
       expect(server.requests.at(-1)).toMatchObject({
         messages: expect.arrayContaining([expect.objectContaining({ role: "tool" })]),
       });
@@ -1284,16 +1288,34 @@ const toolCall = (id: string, name: string, args: unknown) => ({
 });
 
 const testConfig = (baseURL: string): ScorelConfig => ({
-  model: {
-    type: "custom",
-    api: "openai-completions",
-    provider: "scorel-test",
-    id: "gpt-5.4-mini",
-    baseUrl: baseURL,
-    apiKey: "chanleramp",
-    contextWindow: 400000,
-    maxTokens: 128000,
-    reasoning: true,
+  providers: {
+    test: {
+      type: "custom",
+      api: "openai-completions",
+      provider: "scorel-test",
+      baseUrl: baseURL,
+      apiKey: "chanleramp",
+    },
+  },
+  providerModels: {
+    main: {
+      provider: "test",
+      id: "gpt-5.4-mini",
+      displayName: "GPT 5.4 Mini",
+      contextWindow: 400000,
+      maxTokens: 128000,
+      reasoning: true,
+    },
+  },
+  models: {
+    main: { model: "main", displayName: "GPT 5.4 Mini" },
+  },
+  modelProfile: {
+    roles: {
+      primary: "main",
+      standard: "main",
+      auxiliary: "main",
+    },
   },
 });
 

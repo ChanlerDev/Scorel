@@ -17,16 +17,24 @@ import {
   createPiAiProvider,
   createSession,
   hasSkillIndexDelta,
+  isDeprecatedModelSectionError,
+  listAvailableModels,
+  listProviderConnections,
+  listProviderModels,
   loadScorelConfig,
+  loadScorelConfigProfile,
   loadSession,
   renderSkillDelta,
   renderSkillListing,
   renderSystemPrompt,
+  renderModelProfileConfig,
+  resolveModelSelection,
   resolvePiAiModel,
   scanSkillIndex,
   sessionLogFilePath,
   scorelSessionsDir,
   type ScorelConfig,
+  type ScorelConfigProfile,
   type JsonlSession,
   type RawRuntimeEvent,
 } from "@scorel/core";
@@ -43,16 +51,22 @@ import {
   type ClientRequest,
   type ConnectParams,
   type ConnectResult,
+  type CreateSessionMeta,
   type DaemonTransport,
   type DaemonMessage,
   type DeviceId,
   type EventId,
+  type AvailableModelSummary,
   type HostProject,
   type PersistentEvent,
   type ProjectId,
   type QueueItem,
   type QueueName,
   type ScorelEvent,
+  type SelectedModelSummary,
+  type ProviderCatalogModelSummary,
+  type ProviderConnectionSummary,
+  type ProviderModelSummary,
   type Seq,
   type SessionId,
   type SessionMeta,
@@ -67,7 +81,7 @@ export const daemonCoreDependency = corePackageName;
 export const daemonProtocolDependency = protocolPackageName;
 export const daemonProtocolVersion = protocolVersion;
 export type ScorelHostTransport = DaemonTransport;
-export { loadScorelConfig, scorelSessionsDir, type ScorelConfig };
+export { loadScorelConfig, loadScorelConfigProfile, scorelSessionsDir, type ScorelConfig };
 export {
   authorizeRelayClient,
   hostDeviceIdentityPath,
@@ -393,6 +407,8 @@ const closeWebSocketServer = (server: WebSocketServer): Promise<void> =>
 export type RuntimeFactoryOptions = {
   cwd: string;
   config: ScorelConfig;
+  modelSelection?: { modelId?: string; role?: "primary" | "standard" | "auxiliary" };
+  includeTools?: boolean;
 };
 
 export type ScorelHostOptions = {
@@ -400,21 +416,27 @@ export type ScorelHostOptions = {
   projectsPath: string;
   deviceId: DeviceId;
   deviceDisplayName?: string;
-  createRuntime: (options: { sessionId: SessionId; project: HostProject }) => Promise<ScorelRuntime>;
+  modelProfile?: ScorelConfig;
+  loadConfig?: (options: { project: HostProject }) => Promise<ScorelConfig>;
+  loadConfigProfile?: (options: { project: HostProject }) => Promise<ScorelConfigProfile>;
+  createRuntime: (options: { sessionId: SessionId; project: HostProject; selectedModel?: SelectedModelSummary; purpose: "chat" | "title" }) => Promise<ScorelRuntime>;
   now?: () => number;
   createId?: () => string;
 };
 
 export const createRealRuntime = (options: RuntimeFactoryOptions): ScorelRuntime => {
-  const model = resolvePiAiModel(options.config.model);
+  const selection = resolveModelSelection(options.config, options.modelSelection);
+  const model = resolvePiAiModel(selection.config);
   const runtime = new ScorelRuntime({
     provider: createPiAiProvider({
       model,
-      apiKey: options.config.model.apiKey,
+      apiKey: selection.config.apiKey,
     }),
   });
-  for (const tool of createCodingTools({ cwd: options.cwd, contextWindow: model.contextWindow })) {
-    runtime.registerTool(tool);
+  if (options.includeTools !== false) {
+    for (const tool of createCodingTools({ cwd: options.cwd, contextWindow: model.contextWindow })) {
+      runtime.registerTool(tool);
+    }
   }
   return runtime;
 };
@@ -431,6 +453,7 @@ type PersistentEventInput =
   | Omit<Extract<PersistentEvent, { type: "user_message" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "assistant_message" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "tool_result" }>, "seq">
+  | Omit<Extract<PersistentEvent, { type: "session_title_updated" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "instruction_snapshot" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "harness_item" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "queue_update" }>, "seq">
@@ -462,6 +485,9 @@ export class ScorelHost {
   readonly #sessionsDir: string;
   readonly #deviceId: DeviceId;
   readonly #deviceDisplayName: string | undefined;
+  readonly #modelProfile: ScorelConfig | undefined;
+  readonly #loadConfig: ((options: { project: HostProject }) => Promise<ScorelConfig>) | undefined;
+  readonly #loadConfigProfile: ((options: { project: HostProject }) => Promise<ScorelConfigProfile>) | undefined;
   readonly #createRuntime: ScorelHostOptions["createRuntime"];
   readonly #now: () => number;
   readonly #createId: () => string;
@@ -476,6 +502,9 @@ export class ScorelHost {
     this.#sessionsDir = options.sessionsDir;
     this.#deviceId = options.deviceId;
     this.#deviceDisplayName = options.deviceDisplayName;
+    this.#modelProfile = options.modelProfile;
+    this.#loadConfig = options.loadConfig;
+    this.#loadConfigProfile = options.loadConfigProfile;
     this.#createRuntime = options.createRuntime;
     this.#now = options.now ?? Date.now;
     this.#createId = options.createId ?? (() => crypto.randomUUID());
@@ -628,6 +657,18 @@ export class ScorelHost {
       }
       case "list_projects": {
         this.#respond(connection, message, { projects: await this.listProjects() });
+        break;
+      }
+      case "list_models": {
+        this.#respond(connection, message, await this.#listModels(message.projectId));
+        break;
+      }
+      case "upsert_model_profile": {
+        this.#respond(connection, message, await this.#handleUpsertModelProfile(message));
+        break;
+      }
+      case "fetch_provider_models": {
+        this.#respond(connection, message, { models: await this.#fetchProviderModels(message.projectId, message.providerId) });
         break;
       }
       case "list_directories": {
@@ -793,7 +834,7 @@ export class ScorelHost {
           ? { meta: { source: "follow_up", queueItemId: input.queueItemId } }
           : {}),
       },
-    });
+    }) as Extract<PersistentEvent, { type: "user_message" }>;
     const firstAssistantEventId = asEventId(this.#createId());
     const state: RuntimeEventState = {
       parentId: userEvent.id,
@@ -822,7 +863,101 @@ export class ScorelHost {
       source: input.source,
     });
     input.onComplete?.(result);
+    const generatedTitle = await this.#maybeGenerateSessionTitle(lane, clientId, userEvent).catch((cause) => {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      void this.#appendDiagnostic(sessionId, "session_title_generation_failed", {
+        clientId,
+        message: error.message,
+        stack: shortStack(error),
+      });
+      return undefined;
+    });
+    if (generatedTitle) {
+      await this.#appendPersistent(lane, {
+        type: "session_title_updated",
+        id: asEventId(this.#createId()),
+        parentId: null,
+        sessionId,
+        clientId,
+        ts: this.#now(),
+        title: generatedTitle.title,
+        source: "model",
+        model: generatedTitle.model,
+        derivedFrom: {
+          eventId: userEvent.id,
+          seq: userEvent.seq,
+        },
+      });
+      await this.#appendDiagnostic(sessionId, "session_title_generated", {
+        clientId,
+        title: generatedTitle.title,
+        modelId: generatedTitle.model.modelId,
+      });
+    }
     return { ...result, status: "completed" };
+  }
+
+  async #maybeGenerateSessionTitle(
+    lane: SessionLane,
+    clientId: ClientId,
+    userEvent: Extract<PersistentEvent, { type: "user_message" }>,
+  ): Promise<{ title: string; model: SelectedModelSummary } | undefined> {
+    if (lane.session.header.meta.title?.trim()) {
+      return undefined;
+    }
+    const text = inputText(userEvent.message).trim();
+    if (!text) {
+      return undefined;
+    }
+    let userMessages = 0;
+    for (const event of lane.session.tree) {
+      if (event.type === "session_title_updated") {
+        return undefined;
+      }
+      if (event.type === "user_message") {
+        userMessages += 1;
+      }
+    }
+    if (userMessages !== 1) {
+      return undefined;
+    }
+    const selectedModel = await this.#selectedModelFromMeta(
+      { projectId: lane.project.projectId, modelSelection: { role: "auxiliary" } },
+      lane.project,
+    );
+    if (!selectedModel) {
+      return undefined;
+    }
+    const runtime = await this.#createRuntime({ sessionId: lane.session.header.sessionId, project: lane.project, selectedModel, purpose: "title" });
+    let rawTitle = "";
+    for await (const rawEvent of runtime.executeTurn(
+      [
+        {
+          role: "user",
+          content: [{ type: "text", text: text.slice(0, 4_000) }],
+        },
+      ],
+      "Generate a concise title for this chat. Return only the title text. Do not use tools. Use 4 to 8 words, no quotes, no trailing punctuation.",
+      {},
+    )) {
+      if (rawEvent.type === "text_delta") {
+        rawTitle += rawEvent.delta;
+      } else if (rawEvent.type === "message_end") {
+        rawTitle = assistantText(rawEvent.message) || rawTitle;
+      } else if (rawEvent.type === "error") {
+        throw rawEvent.error;
+      }
+    }
+    const title = sanitizeSessionTitle(rawTitle);
+    if (!title) {
+      return undefined;
+    }
+    await this.#appendDiagnostic(lane.session.header.sessionId, "session_title_model_used", {
+      clientId,
+      modelId: selectedModel.modelId,
+      role: selectedModel.role,
+    });
+    return { title, model: selectedModel };
   }
 
   async #enqueueFollowUp(
@@ -1313,10 +1448,12 @@ export class ScorelHost {
     }
     const loaded = await loadSession({ sessionsDir: this.#sessionsDir, sessionId });
     const project = await this.#resolveProject(sessionId, loaded.header.meta.projectId);
-    const runtime = await this.#createRuntime({ sessionId, project });
+    const selectedModel = await this.#selectedModelFromMeta(loaded.header.meta, project);
+    const runtime = await this.#createRuntime({ sessionId, project, selectedModel, purpose: "chat" });
     await this.#appendDiagnostic(sessionId, "runtime_created", {
       projectId: project.projectId,
       workDir: project.workDir,
+      selectedModelId: selectedModel?.modelId,
     });
     const lane = {
       session: loaded,
@@ -1346,7 +1483,8 @@ export class ScorelHost {
     }
   }
 
-  async #createLane(sessionId: SessionId, meta: SessionMeta, project: HostProject): Promise<SessionLane> {
+  async #createLane(sessionId: SessionId, meta: CreateSessionMeta, project: HostProject): Promise<SessionLane> {
+    const selectedModel = await this.#selectedModelFromMeta(meta, project);
     const session = await createSession({
       sessionsDir: this.#sessionsDir,
       header: {
@@ -1356,13 +1494,20 @@ export class ScorelHost {
         createdAt: this.#now(),
         meta: {
           ...meta,
+          ...(selectedModel
+            ? {
+                model: selectedModel.displayName,
+                selectedModel,
+              }
+            : {}),
         },
       },
     });
-    const runtime = await this.#createRuntime({ sessionId, project });
+    const runtime = await this.#createRuntime({ sessionId, project, selectedModel, purpose: "chat" });
     await this.#appendDiagnostic(sessionId, "runtime_created", {
       projectId: project.projectId,
       workDir: project.workDir,
+      selectedModelId: selectedModel?.modelId,
     });
     const lane = {
       session,
@@ -1382,6 +1527,211 @@ export class ScorelHost {
         listNames: () => Object.keys(lane.session.tree.controlState.skillIndex).sort(),
       }),
     );
+  }
+
+  async #listModels(projectId?: ProjectId): Promise<{
+    providers: ProviderConnectionSummary[];
+    providerModels: ProviderModelSummary[];
+    models: AvailableModelSummary[];
+    roles: Record<"primary" | "standard" | "auxiliary", string>;
+    warnings?: string[];
+  }> {
+    let config: ScorelConfig | ScorelConfigProfile | undefined;
+    let warnings: string[] | undefined;
+    try {
+      config = await this.#configProfileForProject(projectId);
+    } catch (cause) {
+      if (isDeprecatedModelSectionError(cause)) {
+        warnings = ["当前项目包含开发期废弃的 [models.*] 配置；保存新的模型设置会用 provider_models / available_models 合同重写它。"];
+        config = undefined;
+      } else
+      if (!isMissingConfigError(cause)) {
+        throw cause;
+      }
+      config = undefined;
+    }
+    if (!config) {
+      return {
+        providers: [],
+        providerModels: [],
+        models: [],
+        roles: {
+          primary: "",
+          standard: "",
+          auxiliary: "",
+        },
+        ...(warnings ? { warnings } : {}),
+      };
+    }
+    const configWarnings = "warnings" in config ? config.warnings : undefined;
+    return {
+      providers: listProviderConnections(config),
+      providerModels: listProviderModels(config),
+      models: listAvailableModels(config),
+      roles: config.modelProfile.roles,
+      ...(configWarnings ?? warnings ? { warnings: [...(configWarnings ?? []), ...(warnings ?? [])] } : {}),
+    };
+  }
+
+  async #handleUpsertModelProfile(
+    request: ClientRequest<"upsert_model_profile">,
+  ): Promise<{
+    providers: ProviderConnectionSummary[];
+    providerModels: ProviderModelSummary[];
+    models: AvailableModelSummary[];
+    roles: Record<"primary" | "standard" | "auxiliary", string>;
+    warnings?: string[];
+  }> {
+    const project = await this.#registry.require(request.projectId);
+    const configPath = join(project.workDir, ".scorel", "config.toml");
+    let existingConfigText: string | undefined;
+    try {
+      existingConfigText = await readFile(configPath, "utf8");
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+    await mkdir(join(project.workDir, ".scorel"), { recursive: true });
+    await writeFile(
+      configPath,
+      renderModelProfileConfig({
+        providerId: request.providerId,
+        providerType: request.providerType,
+        provider: request.provider,
+        apiKeyEnv: request.apiKeyEnv,
+        apiKey: request.apiKey,
+        api: request.api,
+        baseUrl: request.baseUrl,
+        modelId: request.modelId,
+        providerModelKey: request.providerModelKey,
+        availableModelId: request.availableModelId,
+        addToAvailable: request.addToAvailable,
+        providerModelId: request.providerModelId,
+        displayName: request.displayName,
+        contextWindow: request.contextWindow,
+        maxTokens: request.maxTokens,
+        reasoning: request.reasoning,
+        supportsDeveloperRole: request.supportsDeveloperRole,
+        roles: request.roles,
+        existingConfigText,
+      }),
+      "utf8",
+    );
+    await this.#appendHostDiagnostic("model_profile_upserted", {
+      projectId: project.projectId,
+      workDir: project.workDir,
+      providerId: request.providerId,
+      modelId: request.modelId,
+    });
+    return this.#listModels(project.projectId);
+  }
+
+  async #fetchProviderModels(projectId: ProjectId, providerId: string): Promise<ProviderCatalogModelSummary[]> {
+    const project = await this.#registry.require(projectId);
+    const config = await loadScorelConfigProfile({ cwd: project.workDir, includeSecrets: true });
+    if (!config) {
+      throw new Error("Model profile config is not configured");
+    }
+    const provider = config.providers[providerId];
+    if (!provider) {
+      throw new Error(`Provider is not configured: ${providerId}`);
+    }
+    if (provider.type !== "custom" || (provider.api !== "openai-completions" && provider.api !== "openai-responses")) {
+      throw new Error("Provider catalog fetch currently supports custom OpenAI-compatible providers only");
+    }
+    if (!provider.baseUrl) {
+      throw new Error(`providers.${providerId}.baseUrl is required`);
+    }
+    const apiKeyEnv = "apiKeyEnv" in provider ? provider.apiKeyEnv : undefined;
+    const apiKey = provider.apiKey || (apiKeyEnv ? process.env[apiKeyEnv] : undefined);
+    if (!apiKey) {
+      throw new Error(apiKeyEnv ? `${apiKeyEnv} is not set` : "Provider API key is not configured");
+    }
+    const endpoint = `${provider.baseUrl.replace(/\/+$/, "")}/models`;
+    const response = await fetch(endpoint, {
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`Provider /models request failed: ${response.status} ${response.statusText}`);
+    }
+    const payload = await response.json() as {
+      data?: Array<{ id?: unknown; name?: unknown }>;
+      models?: Array<{ id?: unknown; name?: unknown }>;
+    };
+    const rawModels = Array.isArray(payload.data) ? payload.data : Array.isArray(payload.models) ? payload.models : [];
+    return rawModels
+      .map((model) => {
+        const id = typeof model.id === "string" ? model.id : "";
+        const name = typeof model.name === "string" ? model.name : id;
+        return id ? { id, displayName: name || id } : undefined;
+      })
+      .filter((model): model is ProviderCatalogModelSummary => Boolean(model))
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  async #selectedModelFromMeta(meta: CreateSessionMeta | SessionMeta, project: HostProject): Promise<SelectedModelSummary | undefined> {
+    const config = await this.#configForProject(project.projectId);
+    if (!config) {
+      return "selectedModel" in meta ? meta.selectedModel : undefined;
+    }
+    const persistedSelection = "selectedModel" in meta ? meta.selectedModel : undefined;
+    const requestedSelection = "modelSelection" in meta ? meta.modelSelection : undefined;
+    const selection = resolveModelSelection(
+      config,
+      persistedSelection
+        ? { modelId: persistedSelection.modelId, role: persistedSelection.role }
+        : requestedSelection,
+    );
+    const model = resolvePiAiModel(selection.config);
+    return {
+      modelId: selection.modelId,
+      role: selection.role,
+      providerId: selection.providerId,
+      provider: model.provider,
+      id: model.id,
+      displayName: selection.displayName,
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
+      reasoning: model.reasoning,
+    };
+  }
+
+  async #configForProject(projectId?: ProjectId): Promise<ScorelConfig | undefined> {
+    if (this.#loadConfig) {
+      if (!projectId) {
+        return this.#modelProfile;
+      }
+      const project = await this.#registry.require(projectId);
+      return this.#loadConfig({ project });
+    }
+    return this.#modelProfile;
+  }
+
+  async #configProfileForProject(projectId?: ProjectId): Promise<ScorelConfigProfile | ScorelConfig | undefined> {
+    if (this.#loadConfigProfile) {
+      if (!projectId) {
+        return this.#modelProfile;
+      }
+      const project = await this.#registry.require(projectId);
+      return this.#loadConfigProfile({ project });
+    }
+    if (this.#loadConfig) {
+      if (!projectId) {
+        return this.#modelProfile;
+      }
+      const project = await this.#registry.require(projectId);
+      try {
+        return await loadScorelConfigProfile({ cwd: project.workDir });
+      } catch (cause) {
+        if (!isMissingConfigError(cause)) {
+          throw cause;
+        }
+      }
+    }
+    return this.#modelProfile;
   }
 
   #respond<TRequest extends ClientRequest>(
@@ -1431,6 +1781,9 @@ export class ScorelHost {
     return project;
   }
 }
+
+const isMissingConfigError = (cause: unknown): boolean =>
+  cause instanceof Error && cause.message.startsWith("Scorel config not found:");
 
 export const createEmbeddedTransport = (host: ScorelHost): DaemonTransport => {
   const handlers = new Set<(message: DaemonMessage) => void>();
@@ -1508,6 +1861,34 @@ const countContentBlocks = (message: ScorelMessage, type: string): number =>
 
 const normalizeContent = (content: string | ScorelMessage["content"]): ScorelMessage["content"] =>
   typeof content === "string" ? [{ type: "text", text: content }] : content;
+
+const inputText = (message: ScorelMessage): string =>
+  message.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+
+const assistantText = (message: ScorelMessage): string =>
+  message.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
+
+const sanitizeSessionTitle = (value: string): string => {
+  const title = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean)
+    ?.replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, "")
+    .replace(/[.!?。！？]+$/g, "")
+    .trim();
+  if (!title) {
+    return "";
+  }
+  return title.slice(0, 80);
+};
 
 const shortStack = (error: Error): string | undefined => error.stack?.split("\n").slice(0, 3).join(" | ");
 

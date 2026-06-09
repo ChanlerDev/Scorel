@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import {
   SCOREL_CONFIG_SCHEMA,
   loadScorelConfig,
+  loadScorelConfigProfile,
+  renderModelProfileConfig,
   scorelProjectConfigPath,
   scorelSessionsDir,
   scorelUserConfigPath,
@@ -27,97 +29,220 @@ describe("loadScorelConfig", () => {
     });
   });
 
-  it("loads builtin pi-ai model config from project .scorel/config.toml", async () => {
+  it("loads a builtin provider model profile from project .scorel/config.toml", async () => {
     const cwd = await mkProject(`
-[model]
+[providers.openai]
 type = "builtin"
 provider = "openai"
+apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.openai_gpt_54_mini]
+provider = "openai"
 id = "gpt-5.4-mini"
-apiKeyEnv = "SCOREL_API_KEY"
+displayName = "GPT 5.4 Mini"
+
+[provider_models.openai_gpt_54_nano]
+provider = "openai"
+id = "gpt-5.4-nano"
+displayName = "GPT 5.4 Nano"
+
+[available_models.main]
+model = "openai_gpt_54_mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.aux]
+model = "openai_gpt_54_nano"
+displayName = "GPT 5.4 Nano"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "aux"
 `);
 
-    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).resolves.toEqual({
-      model: {
-        type: "builtin",
-        provider: "openai",
-        id: "gpt-5.4-mini",
-        apiKey: "chanleramp",
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).resolves.toMatchObject({
+      providers: {
+        openai: {
+          type: "builtin",
+          provider: "openai",
+          apiKey: "chanleramp",
+        },
       },
-    });
-  });
-
-  it("loads custom pi-ai model config separately from builtin providers", async () => {
-    const cwd = await mkProject(`
-[model]
-type = "custom"
-api = "openai-completions"
-provider = "chanleramp"
-id = "gpt-5.4-mini"
-baseUrl = "https://amp.chanler.dev/v1"
-apiKeyEnv = "SCOREL_API_KEY"
-contextWindow = 400000
-maxTokens = 128000
-reasoning = true
-`);
-
-    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).resolves.toEqual({
-      model: {
-        type: "custom",
-        api: "openai-completions",
-        provider: "chanleramp",
-        id: "gpt-5.4-mini",
-        baseUrl: "https://amp.chanler.dev/v1",
-        apiKey: "chanleramp",
-        contextWindow: 400000,
-        maxTokens: 128000,
-        reasoning: true,
+      providerModels: {
+        openai_gpt_54_mini: {
+          provider: "openai",
+          id: "gpt-5.4-mini",
+          displayName: "GPT 5.4 Mini",
+        },
+        openai_gpt_54_nano: {
+          provider: "openai",
+          id: "gpt-5.4-nano",
+          displayName: "GPT 5.4 Nano",
+        },
       },
-    });
-  });
-
-  it("loads custom pi-ai compatibility overrides", async () => {
-    const cwd = await mkProject(`
-[model]
-type = "custom"
-api = "openai-completions"
-provider = "openai-compatible"
-id = "reasoning-model"
-baseUrl = "https://llm.example.test/v1"
-apiKeyEnv = "SCOREL_API_KEY"
-contextWindow = 400000
-maxTokens = 128000
-reasoning = true
-supportsDeveloperRole = true
-`);
-
-    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).resolves.toEqual({
-      model: {
-        type: "custom",
-        api: "openai-completions",
-        provider: "openai-compatible",
-        id: "reasoning-model",
-        baseUrl: "https://llm.example.test/v1",
-        apiKey: "chanleramp",
-        contextWindow: 400000,
-        maxTokens: 128000,
-        reasoning: true,
-        compat: {
-          supportsDeveloperRole: true,
+      models: {
+        main: { model: "openai_gpt_54_mini", displayName: "GPT 5.4 Mini" },
+        aux: { model: "openai_gpt_54_nano", displayName: "GPT 5.4 Nano" },
+      },
+      modelProfile: {
+        roles: {
+          primary: "main",
+          standard: "main",
+          auxiliary: "aux",
         },
       },
     });
   });
 
-  it("rejects real model config when the API key env var is missing", async () => {
+  it("loads custom pi-ai provider models with model metadata", async () => {
     const cwd = await mkProject(`
-[model]
+[providers.chanleramp]
+type = "custom"
+api = "openai-completions"
+provider = "chanleramp"
+baseUrl = "https://amp.chanler.dev/v1"
+apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.chanleramp_gpt_54_mini]
+provider = "chanleramp"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+contextWindow = 400000
+maxTokens = 128000
+reasoning = true
+supportsDeveloperRole = true
+
+[available_models.main]
+model = "chanleramp_gpt_54_mini"
+displayName = "GPT 5.4 Mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
+`);
+
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).resolves.toMatchObject({
+      providers: {
+        chanleramp: {
+          type: "custom",
+          api: "openai-completions",
+          provider: "chanleramp",
+          baseUrl: "https://amp.chanler.dev/v1",
+          apiKey: "chanleramp",
+        },
+      },
+      providerModels: {
+        chanleramp_gpt_54_mini: {
+          provider: "chanleramp",
+          id: "gpt-5.4-mini",
+          displayName: "GPT 5.4 Mini",
+          contextWindow: 400000,
+          maxTokens: 128000,
+          reasoning: true,
+          compat: {
+            supportsDeveloperRole: true,
+          },
+        },
+      },
+      models: {
+        main: { model: "chanleramp_gpt_54_mini", displayName: "GPT 5.4 Mini" },
+      },
+      modelProfile: {
+        roles: {
+          primary: "main",
+          standard: "main",
+          auxiliary: "main",
+        },
+      },
+    });
+  });
+
+  it("loads direct API key providers and redacts keys from profile listings", async () => {
+    const cwd = await mkProject(`
+[providers.amp]
+type = "custom"
+api = "openai-completions"
+provider = "AMP/codex/gpt-5.3-codex-spark"
+baseUrl = "https://amp.chanler.dev/v1"
+apiKey = "direct-secret"
+
+[provider_models.amp_codex_spark]
+provider = "amp"
+id = "codex/gpt-5.3-codex-spark"
+displayName = "Codex Spark"
+contextWindow = 128000
+maxTokens = 32000
+reasoning = false
+
+[available_models.codex_spark]
+model = "amp_codex_spark"
+displayName = "Codex Spark"
+
+[model_profile.roles]
+primary = "codex_spark"
+standard = "codex_spark"
+auxiliary = "codex_spark"
+`);
+
+    await expect(loadScorelConfig({ cwd, env: {} })).resolves.toMatchObject({
+      providers: {
+        amp: {
+          provider: "AMP",
+          apiKey: "direct-secret",
+        },
+      },
+    });
+    await expect(loadScorelConfigProfile({ cwd, env: {} })).resolves.toMatchObject({
+      providers: {
+        amp: {
+          provider: "AMP",
+          credentialSource: "direct",
+          credentialStatus: "available",
+        },
+      },
+    });
+    const profile = await loadScorelConfigProfile({ cwd, env: {} });
+    expect(JSON.stringify(profile)).not.toContain("direct-secret");
+  });
+
+  it("rejects provider config when the API key env var is missing", async () => {
+    const cwd = await mkProject(`
+[providers.openai]
 type = "builtin"
 provider = "openai"
-id = "gpt-5.4-mini"
 apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.openai_gpt_54_mini]
+provider = "openai"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.main]
+model = "openai_gpt_54_mini"
+displayName = "GPT 5.4 Mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
 `);
 
     await expect(loadScorelConfig({ cwd, env: {} })).rejects.toThrow("SCOREL_API_KEY is not set");
+    await expect(loadScorelConfigProfile({ cwd, env: {} })).resolves.toMatchObject({
+      providers: {
+        openai: {
+          providerId: "openai",
+          apiKeyEnv: "SCOREL_API_KEY",
+          credentialStatus: "missing",
+        },
+      },
+      models: {
+        main: {
+          model: "openai_gpt_54_mini",
+        },
+      },
+    });
   });
 
   it("rejects config keys outside the schema", async () => {
@@ -152,6 +277,198 @@ apiKeyEnv = "SCOREL_API_KEY"
       "Unsupported config section: session",
     );
   });
+
+  it("rejects legacy models sections in development-stage config", async () => {
+    const cwd = await mkProject(`
+[providers.openai]
+type = "builtin"
+provider = "openai"
+apiKeyEnv = "SCOREL_API_KEY"
+
+[models.main]
+provider = "openai"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
+`);
+
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).rejects.toThrow(
+      "Unsupported config section: models.main",
+    );
+  });
+
+  it("rejects role assignments outside the available model pool", async () => {
+    const cwd = await mkProject(`
+[providers.openai]
+type = "builtin"
+provider = "openai"
+apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.openai_gpt_54_mini]
+provider = "openai"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.main]
+model = "openai_gpt_54_mini"
+displayName = "GPT 5.4 Mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "missing"
+auxiliary = "main"
+`);
+
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).rejects.toThrow(
+      "model_profile.roles.standard must reference a configured model",
+    );
+  });
+
+  it("renders GUI-created provider model profiles without embedding secrets", async () => {
+    const config = renderModelProfileConfig({
+      providerId: "chanleramp",
+      providerType: "custom",
+      provider: "chanleramp",
+      api: "openai-completions",
+      baseUrl: "https://amp.chanler.dev/v1/",
+      apiKeyEnv: "SCOREL_API_KEY",
+      modelId: "main",
+      providerModelId: "deepseek-v4-flash",
+      displayName: "DeepSeek Flash",
+      contextWindow: 128000,
+      maxTokens: 32000,
+      reasoning: false,
+    });
+    const cwd = await mkProject(config);
+
+    expect(config).toContain('[providers.chanleramp]');
+    expect(config).toContain('apiKeyEnv = "SCOREL_API_KEY"');
+    expect(config).toContain('baseUrl = "https://amp.chanler.dev/v1"');
+    expect(config).not.toContain("secret");
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "secret" } })).resolves.toMatchObject({
+      providerModels: {
+        chanleramp_main: {
+          id: "deepseek-v4-flash",
+          displayName: "DeepSeek Flash",
+        },
+      },
+      models: {
+        main: {
+          model: "chanleramp_main",
+          displayName: "DeepSeek Flash",
+        },
+      },
+      modelProfile: {
+        roles: {
+          primary: "main",
+          standard: "main",
+          auxiliary: "main",
+        },
+      },
+    });
+  });
+
+  it("merges GUI-created provider models into an existing profile", () => {
+    const first = renderModelProfileConfig({
+      providerId: "chanleramp",
+      providerType: "custom",
+      provider: "chanleramp",
+      api: "openai-completions",
+      baseUrl: "https://amp.chanler.dev/v1/",
+      apiKeyEnv: "SCOREL_API_KEY",
+      modelId: "main",
+      providerModelId: "deepseek-v4-flash",
+      displayName: "DeepSeek Flash",
+      contextWindow: 128000,
+      maxTokens: 32000,
+      reasoning: false,
+    });
+
+    const merged = renderModelProfileConfig({
+      existingConfigText: first,
+      providerId: "chanleramp",
+      providerType: "custom",
+      provider: "chanleramp",
+      api: "openai-completions",
+      baseUrl: "https://amp.chanler.dev/v1/",
+      apiKeyEnv: "SCOREL_API_KEY",
+      modelId: "aux",
+      providerModelId: "deepseek-v4-lite",
+      displayName: "DeepSeek Lite",
+      contextWindow: 64000,
+      maxTokens: 16000,
+      reasoning: false,
+      roles: {
+        primary: "main",
+        standard: "main",
+        auxiliary: "aux",
+      },
+    });
+
+    expect(merged).toContain("[providers.chanleramp]");
+    expect(merged).toContain("[provider_models.chanleramp_main]");
+    expect(merged).toContain("[provider_models.chanleramp_aux]");
+    expect(merged).toContain("[available_models.main]");
+    expect(merged).toContain("[available_models.aux]");
+    expect(merged).toContain('auxiliary = "aux"');
+  });
+
+  it("adds provider models without requiring providerType when provider already exists", () => {
+    const first = renderModelProfileConfig({
+      providerId: "chanleramp",
+      providerType: "custom",
+      provider: "chanleramp",
+      api: "openai-completions",
+      baseUrl: "https://amp.chanler.dev/v1/",
+      apiKeyEnv: "SCOREL_API_KEY",
+    });
+
+    const merged = renderModelProfileConfig({
+      existingConfigText: first,
+      providerId: "chanleramp",
+      providerModelKey: "chanleramp_deepseek_flash",
+      providerModelId: "deepseek-v4-flash",
+      displayName: "DeepSeek Flash",
+      contextWindow: 128000,
+      maxTokens: 32000,
+      reasoning: false,
+      availableModelId: "deepseek_flash",
+      addToAvailable: true,
+    });
+
+    expect(merged).toContain("[providers.chanleramp]");
+    expect(merged).toContain("[provider_models.chanleramp_deepseek_flash]");
+    expect(merged).toContain("[available_models.deepseek_flash]");
+  });
+
+  it("preserves direct API keys when updating an existing provider without a new key", () => {
+    const first = renderModelProfileConfig({
+      providerId: "amp",
+      providerType: "custom",
+      provider: "AMP/codex/gpt-5.3-codex-spark",
+      api: "openai-completions",
+      baseUrl: "https://amp.chanler.dev/v1/",
+      apiKey: "direct-secret",
+    });
+
+    const merged = renderModelProfileConfig({
+      existingConfigText: first,
+      providerId: "amp",
+      providerType: "custom",
+      provider: "AMP",
+      api: "openai-completions",
+      baseUrl: "https://amp.chanler.dev/v1/",
+    });
+
+    expect(merged).toContain('provider = "AMP"');
+    expect(merged).toContain('apiKey = "direct-secret"');
+    expect(merged).not.toContain("apiKeyEnv");
+  });
+
 });
 
 const mkProject = async (config: string): Promise<string> => {

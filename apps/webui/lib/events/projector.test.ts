@@ -452,8 +452,24 @@ describe("projector", () => {
       sessionId: SESSION_ID,
       clientId: CLIENT_ID,
       ts: 0,
-      protocolVersion: 2,
+      protocolVersion: 3,
       meta: { projectId: asProjectId("prj_test") },
+    });
+    expect(s.turns).toEqual([]);
+  });
+
+  it("ignores session title metadata events", () => {
+    reset();
+    const s = projectEvent(emptyProjectorState(), {
+      type: "session_title_updated",
+      id: asEventId("evt_title_1"),
+      parentId: null,
+      seq: asSeq(seq()),
+      sessionId: SESSION_ID,
+      clientId: CLIENT_ID,
+      ts: 0,
+      title: "Provider Setup",
+      source: "model",
     });
     expect(s.turns).toEqual([]);
   });

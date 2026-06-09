@@ -112,7 +112,8 @@ export function projectEvent(state: ProjectorState, event: ScorelEvent): Project
   };
   switch (event.type) {
     case "session_header":
-      // No UI projection — header is metadata only.
+    case "session_title_updated":
+      // No transcript projection — session metadata only.
       return next;
     case "user_message":
       return appendUserTurn(next, event);

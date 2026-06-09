@@ -5,6 +5,12 @@ import type {
   DirectoryListing,
   ErrorCode,
   HostProject,
+  AvailableModelSummary,
+  ModelRole,
+  ProviderConnectionSummary,
+  ProviderCatalogModelSummary,
+  ProviderModelSummary,
+  UpsertModelProfileInput,
   PersistentEvent,
   QueueItem,
   QueueName,
@@ -49,6 +55,18 @@ export type ClientRequestMap = {
   list_projects: {
     request: Record<never, never>;
     response: { projects: HostProject[] };
+  };
+  list_models: {
+    request: { projectId?: ProjectId };
+    response: { providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] };
+  };
+  upsert_model_profile: {
+    request: UpsertModelProfileInput;
+    response: { providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] };
+  };
+  fetch_provider_models: {
+    request: { projectId: ProjectId; providerId: string };
+    response: { models: ProviderCatalogModelSummary[] };
   };
   list_directories: {
     request: { path?: string };

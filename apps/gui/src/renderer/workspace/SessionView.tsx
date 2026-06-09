@@ -4,7 +4,7 @@ import { Composer } from "../composer/Composer.js";
 import { ProjectPickerPill } from "../composer/ProjectPickerPill.js";
 import { Transcript } from "../chatbox/Transcript.js";
 import type { Turn } from "../chatbox/projector.js";
-import type { GuiProjectView } from "../../shared/ipc.js";
+import type { GuiProjectView, GuiModelProfileView } from "../../shared/ipc.js";
 
 export type SessionViewProps = {
   selectedProject: GuiProjectView | undefined;
@@ -15,6 +15,10 @@ export type SessionViewProps = {
   onPickerOpen(anchor: DOMRect): void;
   busy: boolean;
   inFlight: boolean;
+  models: GuiModelProfileView["models"];
+  selectedModelId: string;
+  onModelChange(modelId: string): void;
+  modelPickerDisabled?: boolean;
   picker?: ReactNode;
 };
 
@@ -27,6 +31,10 @@ export function SessionView({
   onPickerOpen,
   busy,
   inFlight,
+  models,
+  selectedModelId,
+  onModelChange,
+  modelPickerDisabled,
   picker,
 }: SessionViewProps) {
   return (
@@ -39,6 +47,10 @@ export function SessionView({
           onSubmit={onSubmit}
           disabled={busy || !selectedProject}
           inFlight={inFlight}
+          models={models}
+          selectedModelId={selectedModelId}
+          onModelChange={onModelChange}
+          modelPickerDisabled={modelPickerDisabled}
         />
         <ProjectPickerPill
           label={selectedProject?.displayName ?? "选择项目"}

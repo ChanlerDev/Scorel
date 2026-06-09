@@ -5,14 +5,98 @@ export type CreateSessionMeta = {
   projectId: ProjectId;
   title?: string;
   model?: string;
+  modelSelection?: ModelSelectionInput;
 };
 
 export type SessionMeta = {
   projectId: ProjectId;
   title?: string;
   model?: string;
+  selectedModel?: SelectedModelSummary;
   createdAt?: number;
   updatedAt?: number;
+};
+
+export type ModelRole = "primary" | "standard" | "auxiliary";
+
+export type ModelSelectionInput = {
+  modelId?: string;
+  role?: ModelRole;
+};
+
+export type AvailableModelSummary = {
+  modelId: string;
+  providerModelId: string;
+  providerId: string;
+  provider: string;
+  id: string;
+  displayName: string;
+  roles: ModelRole[];
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+};
+
+export type ProviderConnectionSummary = {
+  providerId: string;
+  type: "builtin" | "custom";
+  provider: string;
+  api?: "openai-completions" | "openai-responses" | "google-generative-ai" | "anthropic-messages";
+  baseUrl?: string;
+  apiKeyEnv?: string;
+  credentialSource: "env" | "direct";
+  credentialStatus: "available" | "missing";
+};
+
+export type ProviderModelSummary = {
+  providerModelId: string;
+  providerId: string;
+  provider: string;
+  id: string;
+  displayName: string;
+  availableModelIds: string[];
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+};
+
+export type ProviderCatalogModelSummary = {
+  id: string;
+  displayName: string;
+};
+
+export type UpsertModelProfileInput = {
+  projectId: ProjectId;
+  providerId?: string;
+  providerType?: "builtin" | "custom";
+  provider?: string;
+  apiKeyEnv?: string;
+  apiKey?: string;
+  api?: "openai-completions" | "openai-responses" | "google-generative-ai" | "anthropic-messages";
+  baseUrl?: string;
+  modelId?: string;
+  providerModelId?: string;
+  providerModelKey?: string;
+  availableModelId?: string;
+  addToAvailable?: boolean;
+  displayName?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  supportsDeveloperRole?: boolean;
+  roles?: Partial<Record<ModelRole, string>>;
+};
+
+export type SelectedModelSummary = {
+  modelId: string;
+  role?: ModelRole;
+  providerId: string;
+  provider: string;
+  id: string;
+  displayName: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
 };
 
 export type PersistentEventBase = {
@@ -26,7 +110,7 @@ export type PersistentEventBase = {
 
 export type SessionHeaderEvent = PersistentEventBase & {
   type: "session_header";
-  protocolVersion: 2;
+  protocolVersion: 3;
   meta: SessionMeta;
 };
 
@@ -43,6 +127,17 @@ export type AssistantMessageEvent = PersistentEventBase & {
 export type ToolResultEvent = PersistentEventBase & {
   type: "tool_result";
   message: ScorelMessage & { role: "tool_result" };
+};
+
+export type SessionTitleUpdatedEvent = PersistentEventBase & {
+  type: "session_title_updated";
+  title: string;
+  source: "model" | "user";
+  model?: SelectedModelSummary;
+  derivedFrom?: {
+    eventId: EventId;
+    seq: Seq;
+  };
 };
 
 export type InstructionSectionKind = "baseline" | "agents" | "memory" | "workspace" | "environment" | "time";
@@ -150,6 +245,7 @@ export type PersistentEvent =
   | UserMessageEvent
   | AssistantMessageEvent
   | ToolResultEvent
+  | SessionTitleUpdatedEvent
   | InstructionSnapshotEvent
   | HarnessItemEvent
   | QueueUpdateEvent

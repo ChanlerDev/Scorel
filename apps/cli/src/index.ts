@@ -14,6 +14,7 @@ import {
   createRealRuntime,
   daemonPackageName,
   loadScorelConfig,
+  loadScorelConfigProfile,
   readLocalDaemonState,
   scorelSessionsDir,
   type ScorelConfig,
@@ -710,13 +711,19 @@ const parseLogsOptions = (argv: string[]): LogsOptions => {
 };
 
 export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> => {
+  const loadProjectConfig = async (project: { workDir: string }) =>
+    options.config ?? (await loadScorelConfig({ cwd: project.workDir }));
   const daemon = new ScorelHost({
     sessionsDir: options.sessionsDir,
     projectsPath: join(options.stateDir, "projects.json"),
     deviceId: asDeviceId("device_local"),
-    createRuntime: async ({ project }) => createRealRuntime({
+    loadConfig: async ({ project }) => loadProjectConfig(project),
+    loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir }),
+    createRuntime: async ({ project, selectedModel, purpose }) => createRealRuntime({
       cwd: project.workDir,
-      config: options.config ?? (await loadScorelConfig({ cwd: project.workDir })),
+      config: await loadProjectConfig(project),
+      modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
+      includeTools: purpose !== "title",
     }),
   });
   const client = new DaemonClient(createEmbeddedTransport(daemon), {

@@ -430,7 +430,7 @@ describe("session core", () => {
     await expect(
       session.append({
         type: "session_header",
-        protocolVersion: 2,
+        protocolVersion: 3,
         id: asEventId("evt_header"),
         parentId: asEventId("evt_1"),
         seq: asSeq(2),
@@ -451,6 +451,37 @@ describe("session core", () => {
     await expect(session.append(assistantEvent("evt_3", "evt_1", 1, "old seq"))).rejects.toMatchObject({
       code: "non_monotonic_seq",
     });
+  });
+
+  it("stores title update events as metadata outside the conversation tree", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+    await session.append(userEvent("evt_1", null, 1, "hello"));
+    await session.append({
+      type: "session_title_updated",
+      id: asEventId("evt_title"),
+      parentId: null,
+      seq: asSeq(2),
+      sessionId,
+      clientId,
+      ts: 1_002,
+      title: "Hello Session",
+      source: "user",
+    });
+
+    const loaded = await loadSession({ filePath: session.filePath });
+    expect(loaded.currentSeq).toBe(2);
+    expect(loaded.activeLeafId).toBe("evt_1");
+    expect([...loaded.tree].map((event) => event.type)).toEqual(["user_message", "session_title_updated"]);
   });
 
   it("rejects pre-S0048 headers without meta.projectId", async () => {

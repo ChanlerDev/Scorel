@@ -46,7 +46,7 @@ export function ConfigSection({ devices, busy, setBusy, setError, refresh }: Con
   return (
     <>
       <SettingsHeader
-        title="配置"
+        title="连接"
         subtitle="管理 Relay 设备和远程项目授权。"
       />
 

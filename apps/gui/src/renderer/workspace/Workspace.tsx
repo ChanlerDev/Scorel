@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { Turn } from "../chatbox/projector.js";
-import type { GuiProjectView } from "../../shared/ipc.js";
+import type { GuiProjectView, GuiModelProfileView } from "../../shared/ipc.js";
 import { EmptyState } from "./EmptyState.js";
 import { SessionView } from "./SessionView.js";
 import { Topbar } from "./Topbar.js";
@@ -16,6 +16,10 @@ export type WorkspaceProps = {
   onSubmit(): void;
   busy: boolean;
   inFlight: boolean;
+  models: GuiModelProfileView["models"];
+  selectedModelId: string;
+  onModelChange(modelId: string): void;
+  modelPickerDisabled?: boolean;
   error: string | null;
   hostMessage: string | undefined;
   onPickerOpen(anchor: DOMRect): void;
@@ -40,6 +44,10 @@ export function Workspace(props: WorkspaceProps) {
           onPickerOpen={props.onPickerOpen}
           busy={props.busy}
           inFlight={props.inFlight}
+          models={props.models}
+          selectedModelId={props.selectedModelId}
+          onModelChange={props.onModelChange}
+          modelPickerDisabled={props.modelPickerDisabled}
           picker={props.picker}
         />
       ) : (
@@ -51,6 +59,10 @@ export function Workspace(props: WorkspaceProps) {
           onPickerOpen={props.onPickerOpen}
           busy={props.busy}
           inFlight={props.inFlight}
+          models={props.models}
+          selectedModelId={props.selectedModelId}
+          onModelChange={props.onModelChange}
+          modelPickerDisabled={props.modelPickerDisabled}
           picker={props.picker}
         />
       )}

@@ -57,10 +57,11 @@ const readSummary = async (
     return undefined;
   }
   const override = overrides?.get(header.sessionId);
+  const title = latestTitle(lines.slice(1)) ?? (typeof header.meta.title === "string" ? header.meta.title : undefined);
   return {
     sessionId: asSessionId(header.sessionId),
     projectId: asProjectId(header.meta.projectId),
-    title: typeof header.meta.title === "string" ? header.meta.title : undefined,
+    title,
     model: typeof header.meta.model === "string" ? header.meta.model : undefined,
     updatedAt: override?.updatedAt ?? (typeof header.meta.updatedAt === "number" ? header.meta.updatedAt : header.createdAt),
     currentSeq: asSeq(override?.currentSeq ?? tailSeq(lines.slice(1))),
@@ -75,6 +76,17 @@ const tailSeq = (lines: string[]): number => {
     }
   }
   return 0;
+};
+
+const latestTitle = (lines: string[]): string | undefined => {
+  let title: string | undefined;
+  for (const line of lines) {
+    const event = parseRecord(line);
+    if (event?.type === "session_title_updated" && typeof event.title === "string" && event.title.trim()) {
+      title = event.title.trim();
+    }
+  }
+  return title;
 };
 
 const clampLimit = (limit: number | undefined): number =>

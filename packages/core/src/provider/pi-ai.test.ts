@@ -5,7 +5,61 @@ import { describe, expect, it } from "vitest";
 import type { ScorelMessage } from "@scorel/protocol";
 
 import { createPiAiProvider, resolvePiAiModel } from "./pi-ai.js";
+import { listAvailableModels, resolveModelSelection, type ScorelConfig } from "../config/index.js";
 import type { AgentTool } from "../tools/index.js";
+
+describe("model profile resolution", () => {
+  it("resolves builtin model roles through the configured available model pool", () => {
+    const selection = resolveModelSelection(builtinProfile, { role: "standard" });
+    const model = resolvePiAiModel(selection.config);
+
+    expect(selection).toMatchObject({
+      modelId: "main",
+      role: "standard",
+      displayName: "GPT 5.4 Mini",
+      providerId: "openai",
+    });
+    expect(model.id).toBe("gpt-5.4-mini");
+    expect(model.provider).toBe("openai");
+  });
+
+  it("lists available models without provider credentials", () => {
+    expect(listAvailableModels(builtinProfile)).toEqual([
+      {
+        modelId: "main",
+        providerModelId: "main",
+        providerId: "openai",
+        provider: "openai",
+        id: "gpt-5.4-mini",
+        displayName: "GPT 5.4 Mini",
+        roles: ["primary", "standard"],
+      },
+      {
+        modelId: "aux",
+        providerModelId: "aux",
+        providerId: "openai",
+        provider: "openai",
+        id: "gpt-5.4-nano",
+        displayName: "GPT 5.4 Nano",
+        roles: ["auxiliary"],
+      },
+    ]);
+  });
+
+  it("resolves custom models with manual context metadata", () => {
+    const selection = resolveModelSelection(customProfile, { modelId: "aux" });
+    const model = resolvePiAiModel(selection.config);
+
+    expect(model).toMatchObject({
+      id: "deepseek-v4-flash",
+      provider: "chanleramp",
+      baseUrl: "https://amp.chanler.dev/v1",
+      contextWindow: 400000,
+      maxTokens: 128000,
+      reasoning: true,
+    });
+  });
+});
 
 describe("createPiAiProvider", () => {
   it("uses systemPrompt as a system message for custom OpenAI-compatible completions by default", async () => {
@@ -120,6 +174,71 @@ const readTool: AgentTool = {
   name: "Read",
   description: "Read a file",
   execute: async () => ({ content: [] }),
+};
+
+const builtinProfile: ScorelConfig = {
+  providers: {
+    openai: {
+      type: "builtin",
+      provider: "openai",
+      apiKey: "secret",
+    },
+  },
+  providerModels: {
+    main: {
+      provider: "openai",
+      id: "gpt-5.4-mini",
+      displayName: "GPT 5.4 Mini",
+    },
+    aux: {
+      provider: "openai",
+      id: "gpt-5.4-nano",
+      displayName: "GPT 5.4 Nano",
+    },
+  },
+  models: {
+    main: { model: "main", displayName: "GPT 5.4 Mini" },
+    aux: { model: "aux", displayName: "GPT 5.4 Nano" },
+  },
+  modelProfile: {
+    roles: {
+      primary: "main",
+      standard: "main",
+      auxiliary: "aux",
+    },
+  },
+};
+
+const customProfile: ScorelConfig = {
+  providers: {
+    chanleramp: {
+      type: "custom",
+      api: "openai-completions",
+      provider: "chanleramp",
+      baseUrl: "https://amp.chanler.dev/v1",
+      apiKey: "secret",
+    },
+  },
+  providerModels: {
+    aux: {
+      provider: "chanleramp",
+      id: "deepseek-v4-flash",
+      displayName: "DeepSeek Flash",
+      contextWindow: 400000,
+      maxTokens: 128000,
+      reasoning: true,
+    },
+  },
+  models: {
+    aux: { model: "aux", displayName: "DeepSeek Flash" },
+  },
+  modelProfile: {
+    roles: {
+      primary: "aux",
+      standard: "aux",
+      auxiliary: "aux",
+    },
+  },
 };
 
 const user = (text: string): ScorelMessage => ({

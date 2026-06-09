@@ -76,6 +76,7 @@ export function projectEvent(state: ProjectorState, event: ScorelEvent): Project
   };
   switch (event.type) {
     case "session_header":
+    case "session_title_updated":
       return next;
     case "user_message":
       return appendUserTurn(next, event);

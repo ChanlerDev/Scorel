@@ -17,6 +17,7 @@ import "./styles.css";
 import type {
   GuiProjectRef,
   GuiProjectView,
+  GuiModelProfileView,
   GuiRelayDeviceView,
   GuiRemoteProjectView,
   GuiSnapshot,
@@ -43,6 +44,8 @@ export function App() {
   const [inFlight, setInFlight] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string>("");
+  const [modelProfile, setModelProfile] = useState<GuiModelProfileView>({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
+  const [selectedModelId, setSelectedModelId] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
   const [pickerAnchor, setPickerAnchor] = useState<{ left: number; top: number } | undefined>(undefined);
   const [showAddRemote, setShowAddRemote] = useState<boolean>(false);
@@ -171,6 +174,9 @@ export function App() {
     const unsubscribe = window.scorel.onSessionEvent(({ sessionId, event }) => {
       if (sessionId !== currentSessionRef.current) return;
       ingestEvent(event as ScorelEvent);
+      if (event.type === "session_title_updated" && selectedProject) {
+        void refreshSessionsForProject(selectedProject);
+      }
       if (event.type === "message_end" || event.type === "turn_end" || event.type === "assistant_message") {
         setInFlight(false);
       }
@@ -180,7 +186,7 @@ export function App() {
       unsubscribe();
       attachUnsubRef.current = null;
     };
-  }, [ingestEvent]);
+  }, [ingestEvent, refreshSessionsForProject, selectedProject]);
 
   useEffect(() => {
     void (async () => {
@@ -208,6 +214,27 @@ export function App() {
       setError(cause instanceof Error ? cause.message : String(cause));
     });
   }, [selectedProject, sessionsByProject, refreshSessionsForProject]);
+
+  useEffect(() => {
+    if (!selectedProject) {
+      setModelProfile({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
+      setSelectedModelId("");
+      return;
+    }
+    void window.scorel.listModels(projectRef(selectedProject))
+      .then((profile) => {
+        setModelProfile(profile);
+        setSelectedModelId((current) => {
+          if (current && profile.models.some((model) => model.modelId === current)) return current;
+          return profile.roles.standard || profile.models[0]?.modelId || "";
+        });
+      })
+      .catch((cause) => {
+        setModelProfile({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
+        setSelectedModelId("");
+        setError(cause instanceof Error ? cause.message : String(cause));
+      });
+  }, [selectedProject]);
 
   const handleProjectClick = useCallback((key: string): void => {
     setSelectedProjectKey(key);
@@ -247,7 +274,10 @@ export function App() {
     if (!selectedProject) return;
     setBusy(true);
     try {
-      const sessionId = await window.scorel.createSession(projectRef(selectedProject));
+      const sessionId = await window.scorel.createSession(
+        projectRef(selectedProject),
+        selectedModelId ? { modelId: selectedModelId } : undefined,
+      );
       await refreshSessionsForProject(selectedProject);
       setSelectedSessionId(sessionId as string);
       loadInitialEvents([]);
@@ -258,7 +288,7 @@ export function App() {
     } finally {
       setBusy(false);
     }
-  }, [selectedProject, refreshSessionsForProject, attachToSession, loadInitialEvents]);
+  }, [selectedProject, selectedModelId, refreshSessionsForProject, attachToSession, loadInitialEvents]);
 
   const handleSubmitMessage = useCallback(async (): Promise<void> => {
     if (!selectedProject) return;
@@ -270,7 +300,10 @@ export function App() {
     try {
       let sessionId = selectedSessionId;
       if (!sessionId) {
-        sessionId = (await window.scorel.createSession(projectRef(selectedProject))) as string;
+        sessionId = (await window.scorel.createSession(
+          projectRef(selectedProject),
+          selectedModelId ? { modelId: selectedModelId } : undefined,
+        )) as string;
         setSelectedSessionId(sessionId);
         await refreshSessionsForProject(selectedProject);
         await attachToSession(selectedProject, sessionId);
@@ -286,6 +319,7 @@ export function App() {
   }, [
     selectedProject,
     selectedSessionId,
+    selectedModelId,
     message,
     refreshSessionsForProject,
     attachToSession,
@@ -335,11 +369,20 @@ export function App() {
     return (
       <SettingsShell
         devices={relayDevices}
+        project={selectedProject ? projectRef(selectedProject) : null}
         busy={busy}
         setBusy={setBusy}
         setError={setError}
         refresh={async () => {
           await refreshSnapshot();
+        }}
+        modelProfile={modelProfile}
+        onModelProfileChange={(profile) => {
+          setModelProfile(profile);
+          setSelectedModelId((current) => {
+            if (current && profile.models.some((model) => model.modelId === current)) return current;
+            return profile.roles.standard || profile.models[0]?.modelId || "";
+          });
         }}
         onBack={() => setView("workspace")}
       />
@@ -374,6 +417,10 @@ export function App() {
         onSubmit={() => void handleSubmitMessage()}
         busy={busy}
         inFlight={inFlight}
+        models={modelProfile.models}
+        selectedModelId={selectedModelId}
+        onModelChange={setSelectedModelId}
+        modelPickerDisabled={Boolean(selectedSessionId)}
         error={error}
         hostMessage={hostMessage}
         onPickerOpen={openProjectPicker}

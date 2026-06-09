@@ -18,6 +18,12 @@ import {
   type DeviceId,
   type EventId,
   type HostProject,
+  type AvailableModelSummary,
+  type ModelRole,
+  type ProviderCatalogModelSummary,
+  type ProviderConnectionSummary,
+  type ProviderModelSummary,
+  type UpsertModelProfileInput,
   type PersistentEvent,
   type ProjectId,
   type QueueItem,
@@ -282,6 +288,21 @@ export class DaemonClient {
     this.#assertDaemonConnected();
     const response = await this.#request("list_projects", {});
     return response.projects;
+  }
+
+  async listModels(filter?: { projectId?: ProjectId }): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }> {
+    this.#assertDaemonConnected();
+    return this.#request("list_models", { projectId: filter?.projectId });
+  }
+
+  async upsertModelProfile(input: UpsertModelProfileInput): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }> {
+    this.#assertDaemonConnected();
+    return this.#request("upsert_model_profile", input);
+  }
+
+  async fetchProviderModels(input: { projectId: ProjectId; providerId: string }): Promise<ProviderCatalogModelSummary[]> {
+    this.#assertDaemonConnected();
+    return (await this.#request("fetch_provider_models", input)).models;
   }
 
   async listDirectories(path?: string): Promise<DirectoryListing> {

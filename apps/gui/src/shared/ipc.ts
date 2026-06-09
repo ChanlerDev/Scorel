@@ -1,10 +1,16 @@
 import type {
   DirectoryListing,
+  AvailableModelSummary,
   HostProject,
+  ModelRole,
+  ProviderCatalogModelSummary,
+  ProviderConnectionSummary,
+  ProviderModelSummary,
   PersistentEvent,
   ScorelEvent,
   SessionId,
   SessionSummary,
+  UpsertModelProfileInput,
 } from "@scorel/protocol";
 
 export type GuiHostStatus = {
@@ -48,6 +54,23 @@ export type GuiProjectRef = {
   deviceId?: string;
 };
 
+export type GuiModelSelection = {
+  modelId?: string;
+  role?: ModelRole;
+};
+
+export type GuiModelProfileView = {
+  providers: ProviderConnectionSummary[];
+  providerModels: ProviderModelSummary[];
+  models: AvailableModelSummary[];
+  roles: Record<ModelRole, string>;
+  warnings?: string[];
+};
+
+export type GuiUpsertModelProfileInput = Omit<UpsertModelProfileInput, "projectId">;
+
+export type GuiProviderCatalogModelView = ProviderCatalogModelSummary;
+
 export type GuiRelayPairSessionView = {
   relayUrl: string;
   clientId: string;
@@ -75,7 +98,10 @@ export type GuiApi = {
   addRemoteProject(deviceId: string, workDir: string): Promise<GuiRemoteProjectView>;
   hideRemoteProject(deviceId: string, projectId: string): Promise<boolean>;
   listSessions(project: GuiProjectRef): Promise<SessionSummary[]>;
-  createSession(project: GuiProjectRef): Promise<SessionId>;
+  listModels(project: GuiProjectRef): Promise<GuiModelProfileView>;
+  upsertModelProfile(project: GuiProjectRef, input: GuiUpsertModelProfileInput): Promise<GuiModelProfileView>;
+  fetchProviderModels(project: GuiProjectRef, providerId: string): Promise<GuiProviderCatalogModelView[]>;
+  createSession(project: GuiProjectRef, modelSelection?: GuiModelSelection): Promise<SessionId>;
   openSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
   attachSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
   detachSession(sessionId: string): Promise<void>;
@@ -94,6 +120,9 @@ export const guiIpcChannels = {
   addRemoteProject: "scorel:addRemoteProject",
   hideRemoteProject: "scorel:hideRemoteProject",
   listSessions: "scorel:listSessions",
+  listModels: "scorel:listModels",
+  upsertModelProfile: "scorel:upsertModelProfile",
+  fetchProviderModels: "scorel:fetchProviderModels",
   createSession: "scorel:createSession",
   openSession: "scorel:openSession",
   attachSession: "scorel:attachSession",
