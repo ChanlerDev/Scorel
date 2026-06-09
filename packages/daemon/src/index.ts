@@ -445,8 +445,15 @@ type SessionLane = {
   project: HostProject;
   runtime: ScorelRuntime;
   queue: Promise<unknown>;
+  appendQueue: Promise<void>;
   followUpWaiters: Map<string, { connection: Connection; request: ClientRequest<"send_message"> }>;
 };
+
+type AfterUserMessageHook = (input: {
+  lane: SessionLane;
+  clientId: ClientId;
+  userEvent: Extract<PersistentEvent, { type: "user_message" }>;
+}) => Promise<void>;
 
 type PersistentEventInput =
   | Omit<Extract<PersistentEvent, { type: "user_message" }>, "seq">
@@ -834,6 +841,15 @@ export class ScorelHost {
           : {}),
       },
     }) as Extract<PersistentEvent, { type: "user_message" }>;
+    const runAfterUserMessageHooks = this.#scheduleAfterUserMessageHooks(lane, clientId, userEvent);
+    void runAfterUserMessageHooks().catch((cause) => {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      void this.#appendDiagnostic(sessionId, "after_user_message_hook_failed", {
+        clientId,
+        message: error.message,
+        stack: shortStack(error),
+      });
+    });
     const firstAssistantEventId = asEventId(this.#createId());
     const state: RuntimeEventState = {
       parentId: userEvent.id,
@@ -862,6 +878,31 @@ export class ScorelHost {
       source: input.source,
     });
     input.onComplete?.(result);
+    return { ...result, status: "completed" };
+  }
+
+  #scheduleAfterUserMessageHooks(
+    lane: SessionLane,
+    clientId: ClientId,
+    userEvent: Extract<PersistentEvent, { type: "user_message" }>,
+  ): () => Promise<void> {
+    const hooks: AfterUserMessageHook[] = [
+      ({ lane: hookLane, clientId: hookClientId, userEvent: hookUserEvent }) =>
+        this.#runSessionTitleHook(hookLane, hookClientId, hookUserEvent),
+    ];
+    return async () => {
+      for (const hook of hooks) {
+        await hook({ lane, clientId, userEvent });
+      }
+    };
+  }
+
+  async #runSessionTitleHook(
+    lane: SessionLane,
+    clientId: ClientId,
+    userEvent: Extract<PersistentEvent, { type: "user_message" }>,
+  ): Promise<void> {
+    const sessionId = lane.session.header.sessionId;
     const generatedTitle = await this.#maybeGenerateSessionTitle(lane, clientId, userEvent).catch((cause) => {
       const error = cause instanceof Error ? cause : new Error(String(cause));
       void this.#appendDiagnostic(sessionId, "session_title_generation_failed", {
@@ -893,7 +934,6 @@ export class ScorelHost {
         modelId: generatedTitle.model.modelId,
       });
     }
-    return { ...result, status: "completed" };
   }
 
   async #maybeGenerateSessionTitle(
@@ -933,10 +973,33 @@ export class ScorelHost {
       [
         {
           role: "user",
-          content: [{ type: "text", text: text.slice(0, 4_000) }],
+          content: [{
+            type: "text",
+            text: [
+              "Write a session title for the following first user request.",
+              "",
+              "Rules:",
+              "- Return only the title text.",
+              "- Do not answer the request.",
+              "- Do not mention yourself.",
+              "- Use the same language as the request when obvious.",
+              "- Prefer a short noun phrase or task label, 4 to 12 Chinese characters or 4 to 8 English words.",
+              "- No quotes, punctuation, or trailing period.",
+              "",
+              "<user_request>",
+              text.slice(0, 4_000),
+              "</user_request>",
+            ].join("\n"),
+          }],
         },
       ],
-      "Generate a concise title for this chat. Return only the title text. Do not use tools. Use 4 to 8 words, no quotes, no trailing punctuation.",
+      [
+        "You generate concise chat session titles.",
+        "You are not answering the user request.",
+        "You only summarize the user's intent as a short title.",
+        "If the request is in Chinese, output Chinese.",
+        "Output plain text only.",
+      ].join("\n"),
       {},
     )) {
       if (rawEvent.type === "text_delta") {
@@ -1244,10 +1307,16 @@ export class ScorelHost {
     lane: SessionLane,
     event: PersistentEventInput,
   ): Promise<PersistentEvent> {
-    const withSeq = { ...event, seq: this.#nextSeq(lane.session.header.sessionId) } as PersistentEvent;
-    await lane.session.append(withSeq);
-    this.#recordAndBroadcast(lane.session.header.sessionId, withSeq);
-    return withSeq;
+    let appended: PersistentEvent | undefined;
+    const appendTask = lane.appendQueue.then(async () => {
+      const withSeq = { ...event, seq: this.#nextSeq(lane.session.header.sessionId) } as PersistentEvent;
+      await lane.session.append(withSeq);
+      this.#recordAndBroadcast(lane.session.header.sessionId, withSeq);
+      appended = withSeq;
+    });
+    lane.appendQueue = appendTask.catch(() => {});
+    await appendTask;
+    return appended!;
   }
 
   async #ensureInstructionSnapshot(lane: SessionLane, clientId: ClientId) {
@@ -1459,6 +1528,7 @@ export class ScorelHost {
       project,
       runtime,
       queue: Promise.resolve(),
+      appendQueue: Promise.resolve(),
       followUpWaiters: new Map(),
     };
     this.#registerLaneTools(lane);
@@ -1513,6 +1583,7 @@ export class ScorelHost {
       project,
       runtime,
       queue: Promise.resolve(),
+      appendQueue: Promise.resolve(),
       followUpWaiters: new Map(),
     };
     this.#registerLaneTools(lane);

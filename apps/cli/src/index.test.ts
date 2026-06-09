@@ -1060,9 +1060,10 @@ describe("@scorel/app-cli", () => {
         ],
       },
       { content: "Done. status is fixed.", tool_calls: [] },
-      { content: "Fix Status Value", tool_calls: [] },
       { content: "Resume sees completed work.", tool_calls: [] },
-    ]);
+    ], {
+      titleResponse: { content: "Fix Status Value", tool_calls: [] },
+    });
 
     try {
       const config = testConfig(server.baseURL);
@@ -1099,10 +1100,20 @@ describe("@scorel/app-cli", () => {
         .map((line) => line.message.content[0].toolName);
       expect(toolNames).toEqual(["TodoWrite", "Grep", "Read", "Edit", "Bash", "TodoWrite"]);
       expect(server.requests.length).toBe(9);
-      const firstRequest = server.requests[0] as { tools?: Array<{ function?: { name?: string; parameters?: unknown } }> };
-      const titleRequest = server.requests[7] as { tools?: unknown[]; messages?: Array<{ content?: string }> };
+      const firstRequest = server.requests.find(isToolChatRequest) as
+        | { tools?: Array<{ function?: { name?: string; parameters?: unknown } }> }
+        | undefined;
+      const titleRequest = server.requests.find(isTitleGenerationRequest) as
+        | { tools?: unknown[]; messages?: Array<{ content?: unknown }> }
+        | undefined;
+      if (!firstRequest) {
+        throw new Error("missing tool chat request");
+      }
+      if (!titleRequest) {
+        throw new Error("missing title generation request");
+      }
       const readTool = firstRequest.tools?.find((tool) => tool.function?.name === "Read");
-      expect(server.requests[0]).toMatchObject({
+      expect(firstRequest).toMatchObject({
         model: "gpt-5.4-mini",
         tools: expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "TodoWrite" }) })]),
       });
@@ -1117,7 +1128,9 @@ describe("@scorel/app-cli", () => {
         },
       });
       expect(titleRequest.tools ?? []).toEqual([]);
-      expect(titleRequest.messages?.at(-1)?.content).toContain("Fix the failing status value");
+      expect(requestMessageText(titleRequest)).toContain("Write a session title");
+      expect(requestMessageText(titleRequest)).toContain("<user_request>");
+      expect(requestMessageText(titleRequest)).toContain("Fix the failing status value");
       expect(server.requests.at(-1)).toMatchObject({
         messages: expect.arrayContaining([expect.objectContaining({ role: "tool" })]),
       });
@@ -1250,7 +1263,10 @@ type AssistantResponse = {
   tool_calls: Array<ReturnType<typeof toolCall>>;
 };
 
-const startChatServer = async (responses: AssistantResponse[]) => {
+const startChatServer = async (
+  responses: AssistantResponse[],
+  options: { titleResponse?: AssistantResponse } = {},
+) => {
   const requests: unknown[] = [];
   let index = 0;
   const server = createServer(async (request, response) => {
@@ -1258,8 +1274,11 @@ const startChatServer = async (responses: AssistantResponse[]) => {
       response.writeHead(404).end();
       return;
     }
-    requests.push(await readJson(request));
-    const item = responses[index++];
+    const payload = await readJson(request);
+    requests.push(payload);
+    const item = options.titleResponse && isTitleGenerationRequest(payload)
+      ? options.titleResponse
+      : responses[index++];
     if (!item) {
       response.writeHead(500).end(JSON.stringify({ error: { message: "unexpected request" } }));
       return;
@@ -1276,6 +1295,42 @@ const startChatServer = async (responses: AssistantResponse[]) => {
     requests,
     close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
   };
+};
+
+const isToolChatRequest = (
+  request: unknown,
+): request is { tools: Array<{ function?: { name?: string; parameters?: unknown } }> } => {
+  return Array.isArray((request as { tools?: unknown }).tools);
+};
+
+const isTitleGenerationRequest = (request: unknown): boolean => {
+  const text = requestMessageText(request);
+  return text.includes("You generate concise chat session titles")
+    || text.includes("Write a session title for the following first user request.")
+    || text.includes("<user_request>");
+};
+
+const requestMessageText = (request: unknown): string => {
+  const messages = (request as { messages?: unknown }).messages;
+  if (!Array.isArray(messages)) {
+    return "";
+  }
+  return messages.map((message) => {
+    const content = (message as { content?: unknown }).content;
+    if (typeof content === "string") {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      return content.map((part) => {
+        if (part && typeof part === "object" && "text" in part) {
+          const text = (part as { text?: unknown }).text;
+          return typeof text === "string" ? text : "";
+        }
+        return "";
+      }).join("\n");
+    }
+    return "";
+  }).join("\n");
 };
 
 const toolCall = (id: string, name: string, args: unknown) => ({

@@ -585,6 +585,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.9 | [`S0077`](spec/ship/S0077-auxiliary-session-title-generation.md) | 第一条 chat 后用 auxiliary model 生成持久 session title | Done |
 | M9.F1.10 | [`S0078`](spec/ship/S0078-gui-provider-settings-forward-config-and-simplification.md) | GUI Settings 使用前向 provider/model profile，并简化 Provider/Model 表单为用户可理解字段 | Done |
 | M9.F1.11 | [`S0079`](spec/ship/S0079-gui-sidebar-layout-controls.md) | GUI sidebar 标题截断、宽度拖拽和收起/展开控制 | Done |
+| M9.F1.12 | [`S0080`](spec/ship/S0080-session-title-hook-and-gui-markdown-dark-code.md) | Session title 生成改为 after-user-message hook，并修复 GUI Markdown 深色代码块 | Done |
 
 **Not in M9 Follow-up**:
 
