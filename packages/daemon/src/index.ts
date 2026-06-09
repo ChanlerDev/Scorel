@@ -17,7 +17,6 @@ import {
   createPiAiProvider,
   createSession,
   hasSkillIndexDelta,
-  isDeprecatedModelSectionError,
   listAvailableModels,
   listProviderConnections,
   listProviderModels,
@@ -1537,14 +1536,9 @@ export class ScorelHost {
     warnings?: string[];
   }> {
     let config: ScorelConfig | ScorelConfigProfile | undefined;
-    let warnings: string[] | undefined;
     try {
       config = await this.#configProfileForProject(projectId);
     } catch (cause) {
-      if (isDeprecatedModelSectionError(cause)) {
-        warnings = ["当前项目包含开发期废弃的 [models.*] 配置；保存新的模型设置会用 provider_models / available_models 合同重写它。"];
-        config = undefined;
-      } else
       if (!isMissingConfigError(cause)) {
         throw cause;
       }
@@ -1560,7 +1554,6 @@ export class ScorelHost {
           standard: "",
           auxiliary: "",
         },
-        ...(warnings ? { warnings } : {}),
       };
     }
     const configWarnings = "warnings" in config ? config.warnings : undefined;
@@ -1569,7 +1562,7 @@ export class ScorelHost {
       providerModels: listProviderModels(config),
       models: listAvailableModels(config),
       roles: config.modelProfile.roles,
-      ...(configWarnings ?? warnings ? { warnings: [...(configWarnings ?? []), ...(warnings ?? [])] } : {}),
+      ...(configWarnings ? { warnings: configWarnings } : {}),
     };
   }
 
@@ -1607,12 +1600,14 @@ export class ScorelHost {
         providerModelKey: request.providerModelKey,
         availableModelId: request.availableModelId,
         addToAvailable: request.addToAvailable,
+        removeAvailableModelId: request.removeAvailableModelId,
         providerModelId: request.providerModelId,
         displayName: request.displayName,
         contextWindow: request.contextWindow,
         maxTokens: request.maxTokens,
         reasoning: request.reasoning,
         supportsDeveloperRole: request.supportsDeveloperRole,
+        supportsImageInput: request.supportsImageInput,
         roles: request.roles,
         existingConfigText,
       }),
@@ -1696,6 +1691,7 @@ export class ScorelHost {
       contextWindow: model.contextWindow,
       maxTokens: model.maxTokens,
       reasoning: model.reasoning,
+      supportsImageInput: model.input.includes("image"),
     };
   }
 

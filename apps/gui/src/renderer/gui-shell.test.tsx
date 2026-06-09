@@ -31,6 +31,9 @@ const modelProfile: GuiModelProfileView = {
       id: "main-model",
       displayName: "Main Model",
       availableModelIds: ["main"],
+      contextWindow: 128000,
+      maxTokens: 32000,
+      reasoning: false,
     },
   ],
   models: [
@@ -92,6 +95,27 @@ describe("GUI shell rendering contract", () => {
     expect(html).not.toContain("自动化");
   });
 
+  it("keeps new chat as an empty composer action even without a selected project", () => {
+    const html = renderToStaticMarkup(
+      <Sidebar
+        projects={[]}
+        selectedProjectKey={null}
+        selectedSessionId={null}
+        relayDevices={[]}
+        sessionsByProject={{}}
+        busy={false}
+        onNewSessionClick={noop}
+        onProjectPickerOpen={noop}
+        onProjectClick={noop}
+        onSessionClick={noop}
+        onSettingsClick={noop}
+      />,
+    );
+
+    expect(html).toContain('data-testid="sidebar-new-session"');
+    expect(html).not.toMatch(/disabled=""[^>]*data-testid="sidebar-new-session"|data-testid="sidebar-new-session"[^>]*disabled=""/);
+  });
+
   it("uses distinct empty workspace headings for no project and selected project", () => {
     const noProjectHtml = renderToStaticMarkup(
       <EmptyState
@@ -119,6 +143,7 @@ describe("GUI shell rendering contract", () => {
     );
 
     expect(noProjectHtml).toContain("我们要构建什么？");
+    expect(noProjectHtml).not.toContain("<textarea disabled");
     expect(selectedProjectHtml).toContain("我们应该在");
     expect(selectedProjectHtml).toContain(">Scorel</button>");
     expect(selectedProjectHtml).toContain("中构建什么？");
@@ -199,15 +224,15 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("模型");
     expect(html).toContain("Provider");
     expect(html).toContain("Main Model");
-    expect(html).toContain("Working Models");
-    expect(html).toContain("Available Models");
-    expect(html).toContain("scorel-test/main-model");
+    expect(html).toContain("工作模型");
+    expect(html).toContain("已选用模型");
+    expect(html).toContain("scorel-test / main-model");
     expect(html).not.toContain("scorel-test/main-model/main-model");
     expect(html).toContain(">Main Model</option>");
-    expect(html.indexOf("Working Models")).toBeLessThan(html.indexOf("Available Models"));
-    expect(html).toContain("加入 available models");
-    expect(html).toContain("保存 working models");
-    expect(html).toContain("Available model id");
+    expect(html.indexOf("工作模型")).toBeLessThan(html.indexOf("已选用模型"));
+    expect(html).not.toContain("加入可用模型");
+    expect(html).toContain("保存工作模型");
+    expect(html).not.toContain("Available model id");
     expect(html).not.toContain("Provider Management");
     expect(html).not.toContain("Provider type");
     expect(html).not.toContain("API key env");
@@ -240,7 +265,9 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("模型");
     expect(html).toContain("Provider");
     expect(html).toContain("连接");
-    expect(html).toContain("加入 available models");
+    expect(html).toContain("已选用模型");
+    expect(html).not.toContain("加入可用模型");
+    expect(html).not.toContain("模型来源");
     expect(html).not.toContain("Provider type");
     expect(html).not.toContain("Relay URL");
   });
@@ -257,19 +284,30 @@ describe("GUI shell rendering contract", () => {
       />,
     );
 
-    expect(html).toContain("Provider Management");
-    expect(html).toContain("Provider type");
-    expect(html).toContain("API key env");
-    expect(html).toContain("Direct API key");
+    expect(html).toContain("提供商");
+    expect(html).toContain("提供商名称");
+    expect(html).toContain("API Key");
+    expect(html).toContain("直接填写");
+    expect(html).toContain("环境变量");
     expect(html).toContain("Base URL");
-    expect(html).toContain("Models from provider");
-    expect(html).toContain("搜索 models");
+    expect(html).toContain("模型列表");
+    expect(html).toContain("搜索模型");
     expect(html).toContain("获取模型");
     expect(html).toContain("provider-model-card");
-    expect(html).toContain("新建 provider");
-    expect(html).toContain("保存 provider");
-    expect(html).toContain("自行添加 model");
-    expect(html).toContain("已选用");
+    expect(html).toContain("新建提供商");
+    expect(html).toContain("手动添加模型");
+    expect(html).toContain("选用");
+    expect(html).toContain("配置");
+    expect(html).toContain("测试模型");
+    expect(html).not.toContain("保存提供商");
+    expect(html).not.toContain("Context");
+    expect(html).not.toContain("Max Tokens");
+    expect(html).not.toContain("Reasoning");
+    expect(html).not.toContain("Provider id");
+    expect(html).not.toContain("Provider model key");
+    expect(html).not.toContain("openai-completions");
+    expect(html).not.toContain("chanleramp");
+    expect(html).not.toContain("deepseek-v4-flash");
     expect(html).not.toContain("Relay URL");
   });
 });

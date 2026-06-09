@@ -35,6 +35,8 @@ export type AvailableModelSummary = {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  supportsDeveloperRole?: boolean;
+  supportsImageInput?: boolean;
 };
 
 export type ProviderConnectionSummary = {
@@ -58,6 +60,8 @@ export type ProviderModelSummary = {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  supportsDeveloperRole?: boolean;
+  supportsImageInput?: boolean;
 };
 
 export type ProviderCatalogModelSummary = {
@@ -79,11 +83,13 @@ export type UpsertModelProfileInput = {
   providerModelKey?: string;
   availableModelId?: string;
   addToAvailable?: boolean;
+  removeAvailableModelId?: string;
   displayName?: string;
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
   supportsDeveloperRole?: boolean;
+  supportsImageInput?: boolean;
   roles?: Partial<Record<ModelRole, string>>;
 };
 
@@ -97,6 +103,7 @@ export type SelectedModelSummary = {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  supportsImageInput?: boolean;
 };
 
 export type PersistentEventBase = {

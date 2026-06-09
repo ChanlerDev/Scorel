@@ -57,6 +57,7 @@ describe("model profile resolution", () => {
       contextWindow: 400000,
       maxTokens: 128000,
       reasoning: true,
+      input: ["text", "image"],
     });
   });
 });
@@ -227,6 +228,7 @@ const customProfile: ScorelConfig = {
       contextWindow: 400000,
       maxTokens: 128000,
       reasoning: true,
+      supportsImageInput: true,
     },
   },
   models: {

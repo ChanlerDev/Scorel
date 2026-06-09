@@ -16,7 +16,7 @@ export const SCOREL_CONFIG_SCHEMA = {
       keys: ["type", "provider", "api", "baseUrl", "apiKeyEnv", "apiKey"],
     },
     providerModel: {
-      keys: ["provider", "id", "displayName", "contextWindow", "maxTokens", "reasoning", "supportsDeveloperRole"],
+      keys: ["provider", "id", "displayName", "contextWindow", "maxTokens", "reasoning", "supportsDeveloperRole", "supportsImageInput"],
     },
     availableModel: {
       keys: ["model", "displayName"],
@@ -55,6 +55,7 @@ export type ProviderModelConfig = {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  supportsImageInput?: boolean;
   compat?: {
     supportsDeveloperRole?: boolean;
   };
@@ -73,9 +74,10 @@ export type BuiltinPiAiModelConfig = BuiltinPiAiProviderConfig & {
 export type CustomPiAiModelConfig = CustomPiAiProviderConfig & {
   id: string;
   displayName?: string;
-  contextWindow: number;
-  maxTokens: number;
-  reasoning: boolean;
+  contextWindow?: number;
+  maxTokens?: number;
+  reasoning?: boolean;
+  supportsImageInput?: boolean;
   compat?: {
     supportsDeveloperRole?: boolean;
   };
@@ -126,6 +128,8 @@ export type AvailableModelSummary = {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  supportsDeveloperRole?: boolean;
+  supportsImageInput?: boolean;
 };
 
 export type ProviderModelSummary = {
@@ -138,6 +142,8 @@ export type ProviderModelSummary = {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  supportsDeveloperRole?: boolean;
+  supportsImageInput?: boolean;
 };
 
 export type ResolvedModelSelection = {
@@ -160,12 +166,14 @@ export type UpsertModelProfileConfigInput = {
   providerModelKey?: string;
   availableModelId?: string;
   addToAvailable?: boolean;
+  removeAvailableModelId?: string;
   providerModelId?: string;
   displayName?: string;
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
   supportsDeveloperRole?: boolean;
+  supportsImageInput?: boolean;
   roles?: Partial<Record<ModelRole, string>>;
   existingConfigText?: string;
 };
@@ -201,6 +209,7 @@ type RawConfig = {
     maxTokens?: number;
     reasoning?: boolean;
     supportsDeveloperRole?: boolean;
+    supportsImageInput?: boolean;
   }>;
   availableModels: Record<string, {
     model?: string;
@@ -284,6 +293,8 @@ export const listAvailableModels = (config: ScorelConfig | ScorelConfigProfile):
       ...(providerModel.contextWindow !== undefined ? { contextWindow: providerModel.contextWindow } : {}),
       ...(providerModel.maxTokens !== undefined ? { maxTokens: providerModel.maxTokens } : {}),
       ...(providerModel.reasoning !== undefined ? { reasoning: providerModel.reasoning } : {}),
+      ...(providerModel.compat?.supportsDeveloperRole !== undefined ? { supportsDeveloperRole: providerModel.compat.supportsDeveloperRole } : {}),
+      ...(providerModel.supportsImageInput !== undefined ? { supportsImageInput: providerModel.supportsImageInput } : {}),
     };
   });
 
@@ -305,6 +316,8 @@ export const listProviderModels = (config: ScorelConfig | ScorelConfigProfile): 
       ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
       ...(model.maxTokens !== undefined ? { maxTokens: model.maxTokens } : {}),
       ...(model.reasoning !== undefined ? { reasoning: model.reasoning } : {}),
+      ...(model.compat?.supportsDeveloperRole !== undefined ? { supportsDeveloperRole: model.compat.supportsDeveloperRole } : {}),
+      ...(model.supportsImageInput !== undefined ? { supportsImageInput: model.supportsImageInput } : {}),
     };
   });
 
@@ -349,9 +362,10 @@ export const resolveModelSelection = (
       ...provider,
       id: providerModel.id,
       displayName,
-      contextWindow: requireNumber(providerModel.contextWindow, `provider_models.${model.model}.contextWindow`),
-      maxTokens: requireNumber(providerModel.maxTokens, `provider_models.${model.model}.maxTokens`),
-      reasoning: requireBoolean(providerModel.reasoning, `provider_models.${model.model}.reasoning`),
+      ...(providerModel.contextWindow !== undefined ? { contextWindow: providerModel.contextWindow } : {}),
+      ...(providerModel.maxTokens !== undefined ? { maxTokens: providerModel.maxTokens } : {}),
+      ...(providerModel.reasoning !== undefined ? { reasoning: providerModel.reasoning } : {}),
+      ...(providerModel.supportsImageInput !== undefined ? { supportsImageInput: providerModel.supportsImageInput } : {}),
       ...(providerModel.compat ? { compat: providerModel.compat } : {}),
     },
   };
@@ -392,7 +406,7 @@ export const renderModelProfileConfig = (input: UpsertModelProfileConfigInput): 
     }
   }
 
-  if (input.providerModelKey || input.providerModelId || input.displayName || input.contextWindow !== undefined || input.maxTokens !== undefined || input.reasoning !== undefined) {
+  if (input.providerModelKey || input.providerModelId || input.displayName || input.contextWindow !== undefined || input.maxTokens !== undefined || input.reasoning !== undefined || input.supportsDeveloperRole !== undefined || input.supportsImageInput !== undefined) {
     const providerId = requireIdentifier(input.providerId, "providerId");
     const providerModelKey = requireIdentifier(input.providerModelKey ?? `${providerId}_${input.availableModelId ?? input.modelId ?? "main"}`, "providerModelKey");
     const providerType = raw.providers[providerId]?.type ?? input.providerType;
@@ -401,18 +415,27 @@ export const renderModelProfileConfig = (input: UpsertModelProfileConfigInput): 
       id: requireString(input.providerModelId, "providerModelId"),
       displayName: requireString(input.displayName, "displayName"),
     };
-    if (providerType === "custom") {
+    if (providerType === "custom" && input.contextWindow !== undefined) {
       raw.providerModels[providerModelKey].contextWindow = requireNumber(input.contextWindow, "contextWindow");
+    }
+    if (providerType === "custom" && input.maxTokens !== undefined) {
       raw.providerModels[providerModelKey].maxTokens = requireNumber(input.maxTokens, "maxTokens");
+    }
+    if (providerType === "custom" && input.reasoning !== undefined) {
       raw.providerModels[providerModelKey].reasoning = requireBoolean(input.reasoning, "reasoning");
-      if (input.supportsDeveloperRole !== undefined) {
-        raw.providerModels[providerModelKey].supportsDeveloperRole = requireBoolean(input.supportsDeveloperRole, "supportsDeveloperRole");
-      }
-    } else {
+    }
+    if (providerType === "custom" && input.supportsImageInput !== undefined) {
+      raw.providerModels[providerModelKey].supportsImageInput = requireBoolean(input.supportsImageInput, "supportsImageInput");
+    }
+    if (providerType === "custom" && input.supportsDeveloperRole !== undefined) {
+      raw.providerModels[providerModelKey].supportsDeveloperRole = requireBoolean(input.supportsDeveloperRole, "supportsDeveloperRole");
+    }
+    if (providerType !== "custom") {
       delete raw.providerModels[providerModelKey].contextWindow;
       delete raw.providerModels[providerModelKey].maxTokens;
       delete raw.providerModels[providerModelKey].reasoning;
       delete raw.providerModels[providerModelKey].supportsDeveloperRole;
+      delete raw.providerModels[providerModelKey].supportsImageInput;
     }
   }
 
@@ -424,6 +447,23 @@ export const renderModelProfileConfig = (input: UpsertModelProfileConfigInput): 
       model: providerModelKey,
       ...(input.displayName ? { displayName: input.displayName } : {}),
     };
+  }
+
+  if (input.removeAvailableModelId) {
+    const availableModelId = requireIdentifier(input.removeAvailableModelId, "removeAvailableModelId");
+    delete raw.availableModels[availableModelId];
+    if (raw.modelProfile?.roles) {
+      const fallbackModelId = Object.keys(raw.availableModels).sort()[0];
+      if (!fallbackModelId) {
+        delete raw.modelProfile;
+      } else {
+        for (const role of ["primary", "standard", "auxiliary"] as const) {
+          if (raw.modelProfile.roles[role] === availableModelId) {
+            raw.modelProfile.roles[role] = fallbackModelId;
+          }
+        }
+      }
+    }
   }
 
   if (input.roles) {
@@ -538,9 +578,18 @@ const loadProviderModels = (
       displayName: requireString(model.displayName, `provider_models.${modelId}.displayName`),
     };
     if (provider.type === "custom") {
-      loaded.contextWindow = requireNumber(model.contextWindow, `provider_models.${modelId}.contextWindow`);
-      loaded.maxTokens = requireNumber(model.maxTokens, `provider_models.${modelId}.maxTokens`);
-      loaded.reasoning = requireBoolean(model.reasoning, `provider_models.${modelId}.reasoning`);
+      if (model.contextWindow !== undefined) {
+        loaded.contextWindow = requireNumber(model.contextWindow, `provider_models.${modelId}.contextWindow`);
+      }
+      if (model.maxTokens !== undefined) {
+        loaded.maxTokens = requireNumber(model.maxTokens, `provider_models.${modelId}.maxTokens`);
+      }
+      if (model.reasoning !== undefined) {
+        loaded.reasoning = requireBoolean(model.reasoning, `provider_models.${modelId}.reasoning`);
+      }
+      if (model.supportsImageInput !== undefined) {
+        loaded.supportsImageInput = requireBoolean(model.supportsImageInput, `provider_models.${modelId}.supportsImageInput`);
+      }
       if (model.supportsDeveloperRole !== undefined) {
         loaded.compat = {
           supportsDeveloperRole: requireBoolean(model.supportsDeveloperRole, `provider_models.${modelId}.supportsDeveloperRole`),
@@ -661,21 +710,11 @@ const parseToml = (text: string): RawConfig => {
   return result;
 };
 
-export const isDeprecatedModelSectionError = (cause: unknown): boolean =>
-  cause instanceof Error && /^Unsupported config section: models\./.test(cause.message);
-
 const parseEditableConfig = (text: string | undefined): RawConfig => {
   if (!text?.trim()) {
     return emptyRawConfig();
   }
-  try {
-    return parseToml(text);
-  } catch (cause) {
-    if (isDeprecatedModelSectionError(cause)) {
-      return emptyRawConfig();
-    }
-    throw cause;
-  }
+  return parseToml(text);
 };
 
 const renderRawConfig = (raw: RawConfig): string => {
@@ -704,13 +743,20 @@ const renderRawConfig = (raw: RawConfig): string => {
     lines.push(`id = ${tomlString(requireString(model.id, `provider_models.${modelId}.id`))}`);
     lines.push(`displayName = ${tomlString(requireString(model.displayName, `provider_models.${modelId}.displayName`))}`);
     const provider = raw.providers[model.provider ?? ""];
-    if (provider?.type === "custom") {
+    if (provider?.type === "custom" && model.contextWindow !== undefined) {
       lines.push(`contextWindow = ${requireNumber(model.contextWindow, `provider_models.${modelId}.contextWindow`)}`);
+    }
+    if (provider?.type === "custom" && model.maxTokens !== undefined) {
       lines.push(`maxTokens = ${requireNumber(model.maxTokens, `provider_models.${modelId}.maxTokens`)}`);
+    }
+    if (provider?.type === "custom" && model.reasoning !== undefined) {
       lines.push(`reasoning = ${requireBoolean(model.reasoning, `provider_models.${modelId}.reasoning`)}`);
-      if (model.supportsDeveloperRole !== undefined) {
-        lines.push(`supportsDeveloperRole = ${requireBoolean(model.supportsDeveloperRole, `provider_models.${modelId}.supportsDeveloperRole`)}`);
-      }
+    }
+    if (provider?.type === "custom" && model.supportsImageInput !== undefined) {
+      lines.push(`supportsImageInput = ${requireBoolean(model.supportsImageInput, `provider_models.${modelId}.supportsImageInput`)}`);
+    }
+    if (provider?.type === "custom" && model.supportsDeveloperRole !== undefined) {
+      lines.push(`supportsDeveloperRole = ${requireBoolean(model.supportsDeveloperRole, `provider_models.${modelId}.supportsDeveloperRole`)}`);
     }
     lines.push("");
   }

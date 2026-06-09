@@ -158,6 +158,44 @@ auxiliary = "main"
     });
   });
 
+  it("loads custom pi-ai provider models without generated runtime metadata", async () => {
+    const cwd = await mkProject(`
+[providers.chanleramp]
+type = "custom"
+api = "openai-completions"
+provider = "chanleramp"
+baseUrl = "https://amp.chanler.dev/v1"
+apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.chanleramp_deepseek_v4_pro]
+provider = "chanleramp"
+id = "deepseek-v4-pro"
+displayName = "DeepSeek V4 Pro"
+
+[available_models.deepseek_v4_pro]
+model = "chanleramp_deepseek_v4_pro"
+displayName = "DeepSeek V4 Pro"
+
+[model_profile.roles]
+primary = "deepseek_v4_pro"
+standard = "deepseek_v4_pro"
+auxiliary = "deepseek_v4_pro"
+`);
+
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).resolves.toMatchObject({
+      providerModels: {
+        chanleramp_deepseek_v4_pro: {
+          provider: "chanleramp",
+          id: "deepseek-v4-pro",
+          displayName: "DeepSeek V4 Pro",
+        },
+      },
+      models: {
+        deepseek_v4_pro: { model: "chanleramp_deepseek_v4_pro", displayName: "DeepSeek V4 Pro" },
+      },
+    });
+  });
+
   it("loads direct API key providers and redacts keys from profile listings", async () => {
     const cwd = await mkProject(`
 [providers.amp]
@@ -339,15 +377,15 @@ auxiliary = "main"
       modelId: "main",
       providerModelId: "deepseek-v4-flash",
       displayName: "DeepSeek Flash",
-      contextWindow: 128000,
-      maxTokens: 32000,
-      reasoning: false,
     });
     const cwd = await mkProject(config);
 
     expect(config).toContain('[providers.chanleramp]');
     expect(config).toContain('apiKeyEnv = "SCOREL_API_KEY"');
     expect(config).toContain('baseUrl = "https://amp.chanler.dev/v1"');
+    expect(config).not.toContain("contextWindow");
+    expect(config).not.toContain("maxTokens");
+    expect(config).not.toContain("reasoning");
     expect(config).not.toContain("secret");
     await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "secret" } })).resolves.toMatchObject({
       providerModels: {
@@ -383,9 +421,6 @@ auxiliary = "main"
       modelId: "main",
       providerModelId: "deepseek-v4-flash",
       displayName: "DeepSeek Flash",
-      contextWindow: 128000,
-      maxTokens: 32000,
-      reasoning: false,
     });
 
     const merged = renderModelProfileConfig({
@@ -399,9 +434,6 @@ auxiliary = "main"
       modelId: "aux",
       providerModelId: "deepseek-v4-lite",
       displayName: "DeepSeek Lite",
-      contextWindow: 64000,
-      maxTokens: 16000,
-      reasoning: false,
       roles: {
         primary: "main",
         standard: "main",
@@ -443,6 +475,44 @@ auxiliary = "main"
     expect(merged).toContain("[providers.chanleramp]");
     expect(merged).toContain("[provider_models.chanleramp_deepseek_flash]");
     expect(merged).toContain("[available_models.deepseek_flash]");
+  });
+
+  it("updates provider model parameters and removes selected available models", () => {
+    const first = renderModelProfileConfig({
+      providerId: "chanleramp",
+      providerType: "custom",
+      provider: "chanleramp",
+      api: "openai-completions",
+      baseUrl: "https://amp.chanler.dev/v1/",
+      apiKeyEnv: "SCOREL_API_KEY",
+      providerModelKey: "chanleramp_deepseek_flash",
+      providerModelId: "deepseek-v4-flash",
+      displayName: "DeepSeek Flash",
+      availableModelId: "deepseek_flash",
+      addToAvailable: true,
+    });
+
+    const merged = renderModelProfileConfig({
+      existingConfigText: first,
+      providerId: "chanleramp",
+      providerModelKey: "chanleramp_deepseek_flash",
+      providerModelId: "deepseek-v4-flash",
+      displayName: "DeepSeek V4 Flash",
+      contextWindow: 1000000,
+      maxTokens: 128000,
+      reasoning: true,
+      supportsImageInput: true,
+      removeAvailableModelId: "deepseek_flash",
+    });
+
+    expect(merged).toContain("[provider_models.chanleramp_deepseek_flash]");
+    expect(merged).toContain('displayName = "DeepSeek V4 Flash"');
+    expect(merged).toContain("contextWindow = 1000000");
+    expect(merged).toContain("maxTokens = 128000");
+    expect(merged).toContain("reasoning = true");
+    expect(merged).toContain("supportsImageInput = true");
+    expect(merged).not.toContain("[available_models.deepseek_flash]");
+    expect(merged).not.toContain("[model_profile.roles]");
   });
 
   it("preserves direct API keys when updating an existing provider without a new key", () => {

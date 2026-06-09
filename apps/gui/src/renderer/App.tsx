@@ -50,7 +50,6 @@ export function App() {
   const [pickerAnchor, setPickerAnchor] = useState<{ left: number; top: number } | undefined>(undefined);
   const [showAddRemote, setShowAddRemote] = useState<boolean>(false);
 
-  const attachUnsubRef = useRef<(() => void) | null>(null);
   const currentSessionRef = useRef<string | null>(null);
   const projectorStateRef = useRef<ProjectorState>(emptyProjectorState());
   const pendingEventsRef = useRef<ScorelEvent[]>([]);
@@ -146,8 +145,6 @@ export function App() {
     const previous = currentSessionRef.current;
     if (!previous) return;
     currentSessionRef.current = null;
-    attachUnsubRef.current?.();
-    attachUnsubRef.current = null;
     try {
       await window.scorel.detachSession(previous);
     } catch {
@@ -181,10 +178,8 @@ export function App() {
         setInFlight(false);
       }
     });
-    attachUnsubRef.current = unsubscribe;
     return () => {
       unsubscribe();
-      attachUnsubRef.current = null;
     };
   }, [ingestEvent, refreshSessionsForProject, selectedProject]);
 
@@ -271,27 +266,23 @@ export function App() {
   }, [refreshSnapshot, refreshSessionsForProject]);
 
   const handleNewSession = useCallback(async (): Promise<void> => {
-    if (!selectedProject) return;
-    setBusy(true);
-    try {
-      const sessionId = await window.scorel.createSession(
-        projectRef(selectedProject),
-        selectedModelId ? { modelId: selectedModelId } : undefined,
-      );
-      await refreshSessionsForProject(selectedProject);
-      setSelectedSessionId(sessionId as string);
-      loadInitialEvents([]);
-      await attachToSession(selectedProject, sessionId as string);
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
+    await detachCurrentSession();
+    const fallbackProject = selectedProject ?? projects[0];
+    if (fallbackProject && !selectedProject) {
+      setSelectedProjectKey(projectKey(fallbackProject));
     }
-  }, [selectedProject, selectedModelId, refreshSessionsForProject, attachToSession, loadInitialEvents]);
+    setSelectedSessionId(null);
+    setInFlight(false);
+    loadInitialEvents([]);
+    setError(null);
+  }, [detachCurrentSession, loadInitialEvents, projects, selectedProject]);
 
   const handleSubmitMessage = useCallback(async (): Promise<void> => {
-    if (!selectedProject) return;
+    const targetProject = selectedProject ?? projects[0];
+    if (!targetProject) return;
+    if (!selectedProject) {
+      setSelectedProjectKey(projectKey(targetProject));
+    }
     const content = message.trim();
     if (!content) return;
     setMessage("");
@@ -301,14 +292,14 @@ export function App() {
       let sessionId = selectedSessionId;
       if (!sessionId) {
         sessionId = (await window.scorel.createSession(
-          projectRef(selectedProject),
+          projectRef(targetProject),
           selectedModelId ? { modelId: selectedModelId } : undefined,
         )) as string;
         setSelectedSessionId(sessionId);
-        await refreshSessionsForProject(selectedProject);
-        await attachToSession(selectedProject, sessionId);
+        await refreshSessionsForProject(targetProject);
+        await attachToSession(targetProject, sessionId);
       }
-      await window.scorel.sendMessage(projectRef(selectedProject), sessionId as SessionId, content);
+      await window.scorel.sendMessage(projectRef(targetProject), sessionId as SessionId, content);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -318,6 +309,7 @@ export function App() {
     }
   }, [
     selectedProject,
+    projects,
     selectedSessionId,
     selectedModelId,
     message,
@@ -420,7 +412,7 @@ export function App() {
         models={modelProfile.models}
         selectedModelId={selectedModelId}
         onModelChange={setSelectedModelId}
-        modelPickerDisabled={Boolean(selectedSessionId)}
+        modelPickerDisabled={Boolean(selectedSessionId && projectorState.turns.length > 0)}
         error={error}
         hostMessage={hostMessage}
         onPickerOpen={openProjectPicker}

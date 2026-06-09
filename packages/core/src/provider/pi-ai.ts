@@ -34,6 +34,9 @@ export type PiAiProviderOptions = {
   onPayload?: (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
 };
 
+const DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW = 200_000;
+const DEFAULT_CUSTOM_MODEL_MAX_TOKENS = 64_000;
+
 export const createPiAiProvider = (options: PiAiProviderOptions): RuntimeProvider => ({
   streamTurn: async function* ({ context, systemPrompt, tools, signal }) {
     const stream = streamSimple(options.model, toPiContext(context, systemPrompt, tools), {
@@ -61,11 +64,11 @@ export const resolvePiAiModel = (config: BuiltinPiAiModelConfig | CustomPiAiMode
       api: config.api,
       provider: config.provider,
       baseUrl: config.baseUrl,
-      reasoning: config.reasoning,
-      input: ["text"],
+      input: config.supportsImageInput ? ["text", "image"] : ["text"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: config.contextWindow,
-      maxTokens: config.maxTokens,
+      reasoning: config.reasoning ?? false,
+      contextWindow: config.contextWindow ?? DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW,
+      maxTokens: config.maxTokens ?? DEFAULT_CUSTOM_MODEL_MAX_TOKENS,
       ...(config.api === "openai-completions"
         ? { compat: { supportsDeveloperRole: config.compat?.supportsDeveloperRole ?? false } }
         : {}),

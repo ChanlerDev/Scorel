@@ -1475,7 +1475,7 @@ a {
 }
 
 .settings-section--wide {
-  max-width: 980px;
+  max-width: 1120px;
 }
 
 .settings-section__title {
@@ -1622,7 +1622,7 @@ a {
 
 .provider-management {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: 260px minmax(0, 1fr);
   min-height: 520px;
 }
 
@@ -1693,6 +1693,7 @@ a {
 
 .provider-model-card-list {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   padding: 12px;
   box-shadow: inset 0 -1px 0 var(--color-border-hairline);
@@ -1744,15 +1745,8 @@ a {
   font-size: 12px;
 }
 
-.provider-model-card__details {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  padding-top: 10px;
-  box-shadow: inset 0 1px 0 var(--color-border-hairline);
-}
-
-.provider-model-card__details label {
+.provider-modal__form label,
+.provider-model-card__checkbox {
   display: grid;
   gap: 6px;
   min-width: 0;
@@ -1761,14 +1755,76 @@ a {
   font-weight: 500;
 }
 
-.provider-model-card__details .input-text {
+.provider-modal__form .input-text {
   width: 100%;
   min-width: 0;
 }
 
 .provider-model-card__actions {
   display: flex;
+  gap: 8px;
   justify-content: flex-end;
+}
+
+.provider-model-card__checkbox {
+  display: inline-flex !important;
+  grid-auto-flow: column;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px !important;
+  min-height: 30px;
+}
+
+.provider-model-card__config-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+}
+
+.provider-model-card__config-button:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.provider-model-card__test-button {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+}
+
+.provider-model-card__test-button:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-text);
+}
+
+.provider-model-card__test-button--pass {
+  color: var(--color-status-ok);
+}
+
+.provider-model-card__test-button--fail {
+  color: var(--color-status-err);
+}
+
+.provider-catalog__message {
+  padding: 10px 12px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  box-shadow: inset 0 -1px 0 var(--color-border-hairline);
 }
 
 .provider-manual-model {

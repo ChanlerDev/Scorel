@@ -290,10 +290,14 @@ describe("@scorel/protocol", () => {
       apiKeyEnv: "SCOREL_API_KEY",
       modelId: "main",
       providerModelId: "deepseek-v4-flash",
+      availableModelId: "deepseek_flash",
+      addToAvailable: true,
+      removeAvailableModelId: "old_flash",
       displayName: "DeepSeek Flash",
       contextWindow: 128000,
       maxTokens: 32000,
       reasoning: false,
+      supportsImageInput: true,
     } satisfies ClientRequest<"upsert_model_profile">;
 
     const response = okResponse(request, {

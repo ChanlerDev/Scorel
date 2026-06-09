@@ -65,7 +65,7 @@ export function EmptyState({
             value={message}
             onChange={onMessageChange}
             onSubmit={onSubmit}
-            disabled={busy || !selectedProject}
+            disabled={busy}
             inFlight={inFlight}
             models={models}
             selectedModelId={selectedModelId}

@@ -49,7 +49,7 @@ export function Sidebar({
         <SidebarActionRow
           icon={<Plus size={14} />}
           label="新对话"
-          disabled={busy || !selectedProjectKey}
+          disabled={busy}
           onClick={onNewSessionClick}
           testId="sidebar-new-session"
         />

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import type { GuiModelProfileView, GuiProjectRef, GuiUpsertModelProfileInput } from "../../../shared/ipc.js";
 import { SettingsCard } from "../SettingsCard.js";
@@ -14,22 +14,10 @@ export type ModelSectionProps = {
   onModelProfileChange(profile: GuiModelProfileView): void;
 };
 
-type AvailableModelForm = {
-  availableModelId: string;
-  providerModelKey: string;
-  displayName: string;
-};
-
-const DEFAULT_AVAILABLE_MODEL_FORM: AvailableModelForm = {
-  availableModelId: "main",
-  providerModelKey: "chanleramp_deepseek_flash",
-  displayName: "DeepSeek Flash",
-};
-
 const roleLabels = {
-  primary: "Primary",
-  standard: "Standard",
-  auxiliary: "Auxiliary",
+  primary: "主力",
+  standard: "默认",
+  auxiliary: "辅助",
 } as const;
 
 export function ModelSection({
@@ -40,13 +28,7 @@ export function ModelSection({
   setError,
   onModelProfileChange,
 }: ModelSectionProps) {
-  const [availableModelForm, setAvailableModelForm] = useState<AvailableModelForm>(DEFAULT_AVAILABLE_MODEL_FORM);
   const [rolesForm, setRolesForm] = useState(modelProfile.roles);
-
-  const providerModelById = useMemo(
-    () => new Map(modelProfile.providerModels.map((model) => [model.providerModelId, model])),
-    [modelProfile.providerModels],
-  );
   const roleOptions = modelProfile.models.map((model) => model.modelId);
   const roles = {
     primary: rolesForm.primary || modelProfile.roles.primary,
@@ -69,30 +51,13 @@ export function ModelSection({
     }
   };
 
-  const stageProviderModel = (providerModelId: string): void => {
-    const providerModel = providerModelById.get(providerModelId);
-    setAvailableModelForm({
-      availableModelId: providerModel ? identifierFromModelId(providerModel.id) : providerModelId,
-      providerModelKey: providerModelId,
-      displayName: providerModel?.displayName ?? providerModelId,
-    });
-  };
-
-  const saveAvailableModel = (): Promise<void> =>
-    save({
-      providerModelKey: availableModelForm.providerModelKey,
-      availableModelId: availableModelForm.availableModelId,
-      displayName: availableModelForm.displayName,
-      addToAvailable: true,
-    });
-
   const saveRoles = (): Promise<void> => save({ roles });
 
   return (
     <>
       <SettingsHeader
         title="模型"
-        subtitle="选择三个实际工作模型，并维护允许 Scorel 使用的 available models。"
+        subtitle="选择 Scorel 实际使用的工作模型。模型在 Provider 页选用和配置。"
       />
 
       {modelProfile.warnings?.map((warning) => (
@@ -104,7 +69,7 @@ export function ModelSection({
       ))}
 
       <section className="settings-section settings-section--wide">
-        <h2 className="settings-section__title">Working Models</h2>
+        <h2 className="settings-section__title">工作模型</h2>
         <SettingsCard>
           <div className="model-role-grid">
             {(["primary", "standard", "auxiliary"] as const).map((role) => {
@@ -123,57 +88,35 @@ export function ModelSection({
                       <option key={candidate.modelId} value={candidate.modelId}>{candidate.displayName}</option>
                     ))}
                   </select>
-                  <span className="model-role-card__meta">{model ? `${model.modelId} / ${providerName(model.provider)}/${model.id}` : "从 available models 中选择"}</span>
+                  <span className="model-role-card__meta">{model ? `${providerName(model.provider)} / ${model.id}` : "先添加可用模型"}</span>
                 </label>
               );
             })}
           </div>
           <div className="settings-card__head">
-            <span className="settings-value">Runtime、composer 和 subagent 只使用这里选出的角色模型。</span>
+            <span className="settings-value">主对话默认使用“默认”模型，标题等轻量任务使用“辅助”模型。</span>
             <button type="button" className="button button--primary" disabled={busy || !project || roleOptions.length === 0} onClick={() => void saveRoles()}>
-              保存 working models
+              保存工作模型
             </button>
           </div>
         </SettingsCard>
       </section>
 
       <section className="settings-section settings-section--wide">
-        <h2 className="settings-section__title">Available Models</h2>
+        <h2 className="settings-section__title">已选用模型</h2>
         <SettingsCard>
           {modelProfile.models.length === 0 ? (
-            <div className="settings-empty">还没有模型进入 use pool。先从 Provider 页添加 provider model。</div>
+            <div className="settings-empty">还没有已选用模型。先到 Provider 页获取或手动添加模型，然后打开选用开关。</div>
           ) : (
             modelProfile.models.map((model) => (
               <SettingsRow
                 key={model.modelId}
                 label={model.displayName}
-                description={`${model.modelId} / ${model.providerModelId} / ${providerName(model.provider)}/${model.id}`}
-                control={<span className="settings-value">{model.roles.length > 0 ? model.roles.join(", ") : "未分配角色"}</span>}
+                description={`${providerName(model.provider)} / ${model.id}`}
+                control={<span className="settings-value">{model.roles.length > 0 ? model.roles.map((role) => roleLabels[role]).join(", ") : "未分配"}</span>}
               />
             ))
           )}
-          <div className="settings-form settings-form--compact">
-            <label>
-              <span>Available model id</span>
-              <input className="input-text" value={availableModelForm.availableModelId} onChange={(event) => setAvailableModelForm({ ...availableModelForm, availableModelId: event.currentTarget.value })} />
-            </label>
-            <label>
-              <span>Provider model</span>
-              <select className="input-text" value={availableModelForm.providerModelKey} onChange={(event) => stageProviderModel(event.currentTarget.value)}>
-                <option value={availableModelForm.providerModelKey}>{availableModelForm.providerModelKey}</option>
-                {modelProfile.providerModels.map((model) => (
-                  <option key={model.providerModelId} value={model.providerModelId}>{model.displayName}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Display name</span>
-              <input className="input-text" value={availableModelForm.displayName} onChange={(event) => setAvailableModelForm({ ...availableModelForm, displayName: event.currentTarget.value })} />
-            </label>
-            <button type="button" className="button button--primary" disabled={busy || !project} onClick={() => void saveAvailableModel()}>
-              加入 available models
-            </button>
-          </div>
         </SettingsCard>
       </section>
     </>
@@ -181,4 +124,3 @@ export function ModelSection({
 }
 
 const providerName = (value: string): string => value.split("/")[0]?.trim() || value.trim();
-const identifierFromModelId = (value: string): string => value.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "model";

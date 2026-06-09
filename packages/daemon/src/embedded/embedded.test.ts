@@ -266,7 +266,7 @@ describe("ScorelHost + embedded transport", () => {
     });
   });
 
-  it("lets GUI recover from development-stage legacy models config", async () => {
+  it("surfaces development-stage legacy models config as a schema error", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-legacy-models-"));
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
@@ -305,46 +305,51 @@ displayName = "GPT 5.4 Mini"
     });
 
     await expect(response).resolves.toMatchObject({
-      type: "response",
-      requestType: "list_models",
-      data: {
-        providers: [],
-        providerModels: [],
-        models: [],
-        roles: {
-          primary: "",
-          standard: "",
-          auxiliary: "",
-        },
-        warnings: [expect.stringContaining("[models.*]")],
-      },
+      type: "error",
+      code: "internal_error",
+      message: expect.stringContaining("Unsupported config section: models.main"),
     });
+  });
 
-    const upsertResponse = waitForResponse(transport, "req_replace_legacy_provider");
+  it("surfaces the deprecated single model config as a schema error", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-legacy-single-model-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const repo = join(root, "repo");
+    await Promise.all([mkdir(sessionsDir), mkdir(join(repo, ".scorel"), { recursive: true })]);
+    await writeFile(join(repo, ".scorel", "config.toml"), `
+[model]
+type = "builtin"
+provider = "openai"
+id = "gpt-5.4-mini"
+apiKeyEnv = "SCOREL_API_KEY"
+`);
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir, homeDir: join(root, "home"), env: {} }),
+      loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir, homeDir: join(root, "home"), env: {} }),
+      createRuntime: async () => new ScorelRuntime({ provider }),
+      now: () => 1_000,
+    });
+    await host.start();
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+    const response = waitForResponse(transport, "req_models_legacy_single");
+
     await transport.send({
-      type: "upsert_model_profile",
-      requestId: asRequestId("req_replace_legacy_provider"),
+      type: "list_models",
+      requestId: asRequestId("req_models_legacy_single"),
       projectId: project.projectId,
-      providerId: "chanleramp",
-      providerType: "custom",
-      provider: "chanleramp",
-      api: "openai-completions",
-      baseUrl: "https://amp.chanler.dev/v1",
-      apiKeyEnv: "SCOREL_API_KEY",
     });
 
-    await expect(upsertResponse).resolves.toMatchObject({
-      type: "response",
-      requestType: "upsert_model_profile",
-      data: {
-        providers: [{ providerId: "chanleramp" }],
-        providerModels: [],
-        models: [],
-      },
+    await expect(response).resolves.toMatchObject({
+      type: "error",
+      code: "internal_error",
+      message: expect.stringContaining("Unsupported config section: model"),
     });
-    const rewrittenConfig = await readFile(join(repo, ".scorel", "config.toml"), "utf8");
-    expect(rewrittenConfig).toContain("[providers.chanleramp]");
-    expect(rewrittenConfig).not.toContain("[models.main]");
   });
 
   it("surfaces invalid model profile config instead of treating it as empty", async () => {
@@ -437,9 +442,6 @@ auxiliary = "main"
       modelId: "main",
       providerModelId: "deepseek-v4-flash",
       displayName: "DeepSeek Flash",
-      contextWindow: 128000,
-      maxTokens: 32000,
-      reasoning: false,
     });
 
     await expect(response).resolves.toMatchObject({
@@ -477,6 +479,9 @@ auxiliary = "main"
     expect(config).toContain("[provider_models.chanleramp_main]");
     expect(config).toContain("[available_models.main]");
     expect(config).toContain('apiKeyEnv = "SCOREL_API_KEY"');
+    expect(config).not.toContain("contextWindow");
+    expect(config).not.toContain("maxTokens");
+    expect(config).not.toContain("reasoning");
     expect(config).not.toContain("secret");
 
     const secondResponse = waitForResponse(transport, "req_upsert_aux_model");
@@ -493,9 +498,6 @@ auxiliary = "main"
       modelId: "aux",
       providerModelId: "deepseek-v4-lite",
       displayName: "DeepSeek Lite",
-      contextWindow: 64000,
-      maxTokens: 16000,
-      reasoning: false,
       roles: {
         primary: "main",
         standard: "main",
@@ -523,6 +525,37 @@ auxiliary = "main"
     expect(mergedConfig).toContain("[provider_models.chanleramp_aux]");
     expect(mergedConfig).toContain("[available_models.main]");
     expect(mergedConfig).toContain("[available_models.aux]");
+
+    const removeResponse = waitForResponse(transport, "req_remove_aux_model");
+    await transport.send({
+      type: "upsert_model_profile",
+      requestId: asRequestId("req_remove_aux_model"),
+      projectId: project.projectId,
+      providerId: "chanleramp",
+      providerModelKey: "chanleramp_aux",
+      providerModelId: "deepseek-v4-lite",
+      displayName: "DeepSeek Lite",
+      removeAvailableModelId: "aux",
+    });
+
+    await expect(removeResponse).resolves.toMatchObject({
+      type: "response",
+      requestType: "upsert_model_profile",
+      data: {
+        roles: {
+          primary: "main",
+          standard: "main",
+          auxiliary: "main",
+        },
+        models: [
+          { modelId: "main" },
+        ],
+      },
+    });
+    const removedConfig = await readFile(join(repo, ".scorel", "config.toml"), "utf8");
+    expect(removedConfig).toContain("[provider_models.chanleramp_aux]");
+    expect(removedConfig).not.toContain("[available_models.aux]");
+    expect(removedConfig).toContain('auxiliary = "main"');
   });
 
   it("fetches provider catalog models through a real /models endpoint", async () => {

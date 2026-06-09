@@ -583,6 +583,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.7 | [`S0075`](spec/ship/S0075-provider-catalog-model-cards.md) | Provider 页支持 /models 获取、折叠模型卡片和选用状态 | Done |
 | M9.F1.8 | [`S0076`](spec/ship/S0076-provider-modal-search-and-direct-key.md) | Provider 新建 modal、catalog 搜索、provider 名称归一和直接 API key | Done |
 | M9.F1.9 | [`S0077`](spec/ship/S0077-auxiliary-session-title-generation.md) | 第一条 chat 后用 auxiliary model 生成持久 session title | Done |
+| M9.F1.10 | [`S0078`](spec/ship/S0078-gui-provider-settings-forward-config-and-simplification.md) | GUI Settings 使用前向 provider/model profile，并简化 Provider/Model 表单为用户可理解字段 | Done |
 
 **Not in M9 Follow-up**:
 
@@ -726,6 +727,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0075`](spec/ship/S0075-provider-catalog-model-cards.md) | Provider 页 /models catalog 获取和模型卡片选择 | Done |
 | [`S0076`](spec/ship/S0076-provider-modal-search-and-direct-key.md) | Provider 新建 modal、catalog 搜索、provider 名称归一和直接 API key | Done |
 | [`S0077`](spec/ship/S0077-auxiliary-session-title-generation.md) | 第一条 chat 后用 auxiliary model 生成持久 session title | Done |
+| [`S0078`](spec/ship/S0078-gui-provider-settings-forward-config-and-simplification.md) | GUI Settings 前向 provider/model profile 和 Provider/Model 表单简化 | Done |
 
 ---
 
