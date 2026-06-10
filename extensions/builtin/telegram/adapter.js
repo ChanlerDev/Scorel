@@ -2,8 +2,9 @@ const DEFAULT_POLL_INTERVAL_MS = 1000;
 const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 export const createAdapter = ({ config = {} } = {}) => {
+  const directToken = optionalStringConfig(config.apiKey ?? config.botToken, "Telegram direct API key");
   const tokenEnv = stringConfig(config.botTokenEnv, "SCOREL_TELEGRAM_BOT_TOKEN");
-  const token = process.env[tokenEnv];
+  const token = directToken ?? process.env[tokenEnv];
   if (!token) {
     throw new Error(`${tokenEnv} is not set`);
   }
@@ -220,6 +221,16 @@ const stringConfig = (value, fallback) => {
   }
   if (typeof value !== "string") {
     throw new Error("Telegram config value must be a string");
+  }
+  return value;
+};
+
+const optionalStringConfig = (value, name) => {
+  if (value === undefined || value === "") {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`${name} must be a string`);
   }
   return value;
 };

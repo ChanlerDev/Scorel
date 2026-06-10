@@ -4,6 +4,7 @@ import type {
   HostProject,
   ModelRole,
   MemorySettings,
+  ExtensionSettings,
   ProviderCatalogModelSummary,
   ProviderConnectionSummary,
   ProviderModelSummary,
@@ -13,6 +14,7 @@ import type {
   SessionSummary,
   UpsertModelProfileInput,
   UpsertMemorySettingsInput,
+  UpsertExtensionSettingsInput,
 } from "@scorel/protocol";
 
 export type GuiHostStatus = {
@@ -75,6 +77,10 @@ export type GuiMemorySettingsView = MemorySettings;
 
 export type GuiUpsertMemorySettingsInput = Omit<UpsertMemorySettingsInput, "projectId">;
 
+export type GuiExtensionSettingsView = ExtensionSettings;
+
+export type GuiUpsertExtensionSettingsInput = UpsertExtensionSettingsInput;
+
 export type GuiProviderCatalogModelView = ProviderCatalogModelSummary;
 
 export type GuiRelayPairSessionView = {
@@ -109,6 +115,8 @@ export type GuiApi = {
   fetchProviderModels(project: GuiProjectRef, providerId: string): Promise<GuiProviderCatalogModelView[]>;
   getMemorySettings(project: GuiProjectRef): Promise<GuiMemorySettingsView>;
   upsertMemorySettings(project: GuiProjectRef, input: GuiUpsertMemorySettingsInput): Promise<GuiMemorySettingsView>;
+  getExtensionSettings(extensionId: string): Promise<GuiExtensionSettingsView>;
+  upsertExtensionSettings(input: GuiUpsertExtensionSettingsInput): Promise<GuiExtensionSettingsView>;
   createSession(project: GuiProjectRef, modelSelection?: GuiModelSelection): Promise<SessionId>;
   openSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
   attachSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
@@ -134,6 +142,8 @@ export const guiIpcChannels = {
   fetchProviderModels: "scorel:fetchProviderModels",
   getMemorySettings: "scorel:getMemorySettings",
   upsertMemorySettings: "scorel:upsertMemorySettings",
+  getExtensionSettings: "scorel:getExtensionSettings",
+  upsertExtensionSettings: "scorel:upsertExtensionSettings",
   createSession: "scorel:createSession",
   openSession: "scorel:openSession",
   attachSession: "scorel:attachSession",

@@ -4,6 +4,7 @@ import type {
   DaemonStatus,
   DirectoryListing,
   ErrorCode,
+  ExtensionSettings,
   HostProject,
   AvailableModelSummary,
   ModelRole,
@@ -12,6 +13,7 @@ import type {
   ProviderModelSummary,
   UpsertModelProfileInput,
   MemorySettings,
+  UpsertExtensionSettingsInput,
   UpsertMemorySettingsInput,
   PersistentEvent,
   QueueItem,
@@ -87,6 +89,14 @@ export type ClientRequestMap = {
   upsert_memory_settings: {
     request: UpsertMemorySettingsInput;
     response: { memory: MemorySettings };
+  };
+  get_extension_settings: {
+    request: { extensionId: string };
+    response: { extension: ExtensionSettings };
+  };
+  upsert_extension_settings: {
+    request: UpsertExtensionSettingsInput;
+    response: { extension: ExtensionSettings };
   };
   list_directories: {
     request: { path?: string };

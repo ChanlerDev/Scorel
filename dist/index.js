@@ -245,6 +245,34 @@ var init_src2 = __esm({
         const response = await this.#request("list_projects", {});
         return response.projects;
       }
+      async listModels(filter) {
+        this.#assertDaemonConnected();
+        return this.#request("list_models", { projectId: filter?.projectId });
+      }
+      async upsertModelProfile(input) {
+        this.#assertDaemonConnected();
+        return this.#request("upsert_model_profile", input);
+      }
+      async fetchProviderModels(input) {
+        this.#assertDaemonConnected();
+        return (await this.#request("fetch_provider_models", input)).models;
+      }
+      async getMemorySettings(input) {
+        this.#assertDaemonConnected();
+        return (await this.#request("get_memory_settings", input)).memory;
+      }
+      async upsertMemorySettings(input) {
+        this.#assertDaemonConnected();
+        return (await this.#request("upsert_memory_settings", input)).memory;
+      }
+      async getExtensionSettings(input) {
+        this.#assertDaemonConnected();
+        return (await this.#request("get_extension_settings", input)).extension;
+      }
+      async upsertExtensionSettings(input) {
+        this.#assertDaemonConnected();
+        return (await this.#request("upsert_extension_settings", input)).extension;
+      }
       async listDirectories(path) {
         this.#assertDaemonConnected();
         return this.#request("list_directories", { path });
@@ -310,8 +338,8 @@ var init_src2 = __esm({
           requestId,
           ...payload
         };
-        return new Promise((resolve5, reject) => {
-          this.#pending.set(String(requestId), { resolve: resolve5, reject });
+        return new Promise((resolve7, reject) => {
+          this.#pending.set(String(requestId), { resolve: resolve7, reject });
           try {
             this.#transport.send(request);
           } catch (cause) {
@@ -395,7 +423,7 @@ var init_src2 = __esm({
         });
       }
       connect(params) {
-        return new Promise((resolve5, reject) => {
+        return new Promise((resolve7, reject) => {
           const socket = this.#createWebSocket(this.url);
           this.#socket = socket;
           const rejectOnError = (event) => {
@@ -416,7 +444,7 @@ var init_src2 = __esm({
             }
             unsubscribe();
             socket.removeEventListener("error", rejectOnError);
-            resolve5({
+            resolve7({
               clientId: message.clientId,
               sessionId: message.sessionId,
               currentSeq: message.currentSeq,
@@ -689,7 +717,7 @@ var init_directories = __esm({
 // packages/daemon/src/projects/sessions.ts
 import { readFile as readFile2, readdir as readdir3 } from "node:fs/promises";
 import { join as join3 } from "node:path";
-var listSessionSummaries, readSummary, tailSeq, clampLimit, parseRecord, isRecord2, isNodeError2;
+var listSessionSummaries, readSummary, tailSeq, latestTitle, clampLimit, parseRecord, isRecord2, isNodeError2;
 var init_sessions = __esm({
   "packages/daemon/src/projects/sessions.ts"() {
     "use strict";
@@ -725,10 +753,11 @@ var init_sessions = __esm({
         return void 0;
       }
       const override = overrides?.get(header.sessionId);
+      const title = latestTitle(lines.slice(1)) ?? (typeof header.meta.title === "string" ? header.meta.title : void 0);
       return {
         sessionId: asSessionId(header.sessionId),
         projectId: asProjectId(header.meta.projectId),
-        title: typeof header.meta.title === "string" ? header.meta.title : void 0,
+        title,
         model: typeof header.meta.model === "string" ? header.meta.model : void 0,
         updatedAt: override?.updatedAt ?? (typeof header.meta.updatedAt === "number" ? header.meta.updatedAt : header.createdAt),
         currentSeq: asSeq(override?.currentSeq ?? tailSeq(lines.slice(1)))
@@ -742,6 +771,16 @@ var init_sessions = __esm({
         }
       }
       return 0;
+    };
+    latestTitle = (lines) => {
+      let title;
+      for (const line of lines) {
+        const event = parseRecord(line);
+        if (event?.type === "session_title_updated" && typeof event.title === "string" && event.title.trim()) {
+          title = event.title.trim();
+        }
+      }
+      return title;
     };
     clampLimit = (limit) => limit === void 0 || !Number.isFinite(limit) || limit <= 0 ? 200 : Math.min(Math.floor(limit), 1e3);
     parseRecord = (line) => {
@@ -760,7 +799,7 @@ var init_sessions = __esm({
 // packages/core/src/config/index.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join4 } from "node:path";
-var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, scorelProjectConfigPath, loadScorelConfig, readConfigText, parseToml, stripComment, requireString, requireNumber, requireBoolean, requireCustomApi, requireSection, ensureSection, setConfigValue, assertKnownKey, setModelValue, parseTomlValue, stripTrailingSlashes;
+var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, scorelProjectConfigPath, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, renderMemoryConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, loadMemory, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, requireModelRole, modelRoles;
 var init_config = __esm({
   "packages/core/src/config/index.ts"() {
     "use strict";
@@ -775,19 +814,26 @@ var init_config = __esm({
         root: {
           keys: []
         },
-        model: {
-          keys: [
-            "type",
-            "provider",
-            "id",
-            "api",
-            "baseUrl",
-            "apiKeyEnv",
-            "contextWindow",
-            "maxTokens",
-            "reasoning",
-            "supportsDeveloperRole"
-          ]
+        provider: {
+          keys: ["type", "provider", "api", "baseUrl", "apiKeyEnv", "apiKey"]
+        },
+        providerModel: {
+          keys: ["provider", "id", "displayName", "contextWindow", "maxTokens", "reasoning", "supportsDeveloperRole", "supportsImageInput"]
+        },
+        availableModel: {
+          keys: ["model", "displayName"]
+        },
+        modelProfileRoles: {
+          keys: ["primary", "standard", "auxiliary"]
+        },
+        memory: {
+          keys: ["enabled", "daily", "autoDream", "promoteRoot", "dreamIdleMinutes"]
+        },
+        extension: {
+          keys: ["enabled", "kind"]
+        },
+        extensionConfig: {
+          keys: []
         }
       }
     };
@@ -798,44 +844,451 @@ var init_config = __esm({
     loadScorelConfig = async (options) => {
       const env = options.env ?? process.env;
       const raw = parseToml(await readConfigText(options));
-      const model = raw.model;
+      const providers = loadProviders(raw, env);
+      const providerModels = loadProviderModels(raw, providers);
+      const models = loadAvailableModels(raw, providerModels);
+      const roles = loadRoles(raw, models);
+      return {
+        providers,
+        providerModels,
+        models,
+        modelProfile: { roles },
+        memory: loadMemory(raw),
+        extensions: loadExtensions(raw)
+      };
+    };
+    loadScorelConfigProfile = async (options) => {
+      const env = options.env ?? process.env;
+      const raw = parseToml(await readConfigText(options));
+      const providers = loadProviderProfiles(raw, env, { includeSecrets: options.includeSecrets ?? false });
+      const providerModels = loadProviderModels(raw, providers, { requireAny: false });
+      const models = loadAvailableModels(raw, providerModels, { requireAny: false, includeAllProviderModels: false });
+      const roles = loadRoles(raw, models, { requireComplete: false });
+      return {
+        providers,
+        providerModels,
+        models,
+        modelProfile: { roles },
+        memory: loadMemory(raw),
+        extensions: loadExtensions(raw)
+      };
+    };
+    listProviderConnections = (config) => Object.entries(config.providers).map(([providerId, provider]) => ({
+      providerId,
+      type: provider.type,
+      provider: provider.provider,
+      ...provider.type === "custom" ? { api: provider.api, baseUrl: provider.baseUrl } : {},
+      ...provider.type === "builtin" && provider.baseUrl ? { baseUrl: provider.baseUrl } : {},
+      ..."apiKeyEnv" in provider && provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {},
+      credentialSource: "credentialSource" in provider ? provider.credentialSource : "apiKey" in provider ? "direct" : "env",
+      credentialStatus: "credentialStatus" in provider ? provider.credentialStatus : "available"
+    }));
+    listAvailableModels = (config) => Object.entries(config.models).map(([modelId, available]) => {
+      const providerModel = config.providerModels[available.model];
+      if (!providerModel) {
+        throw new Error(`available_models.${modelId}.model must reference a configured provider model`);
+      }
+      const provider = config.providers[providerModel.provider];
+      if (!provider) {
+        throw new Error(`provider_models.${available.model}.provider must reference a configured provider`);
+      }
+      return {
+        modelId,
+        providerModelId: available.model,
+        providerId: providerModel.provider,
+        provider: normalizeProviderName(provider.provider),
+        id: providerModel.id,
+        displayName: available.displayName ?? providerModel.displayName,
+        roles: modelRoles(config, modelId),
+        ...providerModel.contextWindow !== void 0 ? { contextWindow: providerModel.contextWindow } : {},
+        ...providerModel.maxTokens !== void 0 ? { maxTokens: providerModel.maxTokens } : {},
+        ...providerModel.reasoning !== void 0 ? { reasoning: providerModel.reasoning } : {},
+        ...providerModel.compat?.supportsDeveloperRole !== void 0 ? { supportsDeveloperRole: providerModel.compat.supportsDeveloperRole } : {},
+        ...providerModel.supportsImageInput !== void 0 ? { supportsImageInput: providerModel.supportsImageInput } : {}
+      };
+    });
+    listProviderModels = (config) => Object.entries(config.providerModels).map(([providerModelId, model]) => {
+      const provider = config.providers[model.provider];
+      if (!provider) {
+        throw new Error(`provider_models.${providerModelId}.provider must reference a configured provider`);
+      }
+      return {
+        providerModelId,
+        providerId: model.provider,
+        provider: normalizeProviderName(provider.provider),
+        id: model.id,
+        displayName: model.displayName,
+        availableModelIds: Object.entries(config.models).filter(([, available]) => available.model === providerModelId).map(([modelId]) => modelId),
+        ...model.contextWindow !== void 0 ? { contextWindow: model.contextWindow } : {},
+        ...model.maxTokens !== void 0 ? { maxTokens: model.maxTokens } : {},
+        ...model.reasoning !== void 0 ? { reasoning: model.reasoning } : {},
+        ...model.compat?.supportsDeveloperRole !== void 0 ? { supportsDeveloperRole: model.compat.supportsDeveloperRole } : {},
+        ...model.supportsImageInput !== void 0 ? { supportsImageInput: model.supportsImageInput } : {}
+      };
+    });
+    resolveModelSelection = (config, selection) => {
+      const role = selection?.role ?? (selection?.modelId ? void 0 : "standard");
+      const modelId = selection?.modelId ?? config.modelProfile.roles[role ?? "standard"];
+      const model = config.models[modelId];
       if (!model) {
-        throw new Error("model config is required");
+        throw new Error(`Unknown configured model: ${modelId}`);
       }
-      const apiKeyEnv = requireString(model.apiKeyEnv, "model.apiKeyEnv");
-      const apiKey = env[apiKeyEnv];
-      if (!apiKey) {
-        throw new Error(`${apiKeyEnv} is not set`);
+      const providerModel = config.providerModels[model.model];
+      if (!providerModel) {
+        throw new Error(`available_models.${modelId}.model must reference a configured provider model`);
       }
-      if (model.type === "builtin") {
+      const provider = config.providers[providerModel.provider];
+      if (!provider) {
+        throw new Error(`provider_models.${model.model}.provider must reference a configured provider`);
+      }
+      const displayName = model.displayName ?? providerModel.displayName;
+      if (provider.type === "builtin") {
         return {
-          model: {
+          modelId,
+          role,
+          displayName,
+          providerId: providerModel.provider,
+          config: {
+            ...provider,
+            id: providerModel.id,
+            displayName
+          }
+        };
+      }
+      return {
+        modelId,
+        role,
+        displayName,
+        providerId: providerModel.provider,
+        config: {
+          ...provider,
+          id: providerModel.id,
+          displayName,
+          ...providerModel.contextWindow !== void 0 ? { contextWindow: providerModel.contextWindow } : {},
+          ...providerModel.maxTokens !== void 0 ? { maxTokens: providerModel.maxTokens } : {},
+          ...providerModel.reasoning !== void 0 ? { reasoning: providerModel.reasoning } : {},
+          ...providerModel.supportsImageInput !== void 0 ? { supportsImageInput: providerModel.supportsImageInput } : {},
+          ...providerModel.compat ? { compat: providerModel.compat } : {}
+        }
+      };
+    };
+    renderModelProfileConfig = (input) => {
+      const raw = parseEditableConfig(input.existingConfigText);
+      if (input.providerType || input.provider || input.apiKeyEnv || input.apiKey || input.api || input.baseUrl) {
+        const providerId = requireIdentifier(input.providerId, "providerId");
+        const providerType = requireProviderType(input.providerType, "providerType");
+        const existingProvider = raw.providers[providerId];
+        raw.providers[providerId] = {
+          type: providerType,
+          provider: normalizeProviderName(requireString(input.provider, "provider"))
+        };
+        if (input.apiKey !== void 0) {
+          raw.providers[providerId].apiKey = input.apiKey ? requireString(input.apiKey, "apiKey") : existingProvider?.apiKey;
+        } else if (existingProvider?.apiKey) {
+          raw.providers[providerId].apiKey = existingProvider.apiKey;
+        }
+        if (input.apiKeyEnv !== void 0) {
+          raw.providers[providerId].apiKeyEnv = input.apiKeyEnv ? requireString(input.apiKeyEnv, "apiKeyEnv") : existingProvider?.apiKeyEnv;
+        } else if (existingProvider?.apiKeyEnv) {
+          raw.providers[providerId].apiKeyEnv = existingProvider.apiKeyEnv;
+        }
+        requireProviderCredential(raw.providers[providerId], `providers.${providerId}`);
+        if (providerType === "custom") {
+          raw.providers[providerId].api = requireCustomApi(input.api, "api");
+          raw.providers[providerId].baseUrl = stripTrailingSlashes(requireString(input.baseUrl, "baseUrl"));
+        } else {
+          delete raw.providers[providerId].api;
+          if (input.baseUrl) {
+            raw.providers[providerId].baseUrl = stripTrailingSlashes(input.baseUrl);
+          } else {
+            delete raw.providers[providerId].baseUrl;
+          }
+        }
+      }
+      if (input.providerModelKey || input.providerModelId || input.displayName || input.contextWindow !== void 0 || input.maxTokens !== void 0 || input.reasoning !== void 0 || input.supportsDeveloperRole !== void 0 || input.supportsImageInput !== void 0) {
+        const providerId = requireIdentifier(input.providerId, "providerId");
+        const providerModelKey = requireIdentifier(input.providerModelKey ?? `${providerId}_${input.availableModelId ?? input.modelId ?? "main"}`, "providerModelKey");
+        const providerType = raw.providers[providerId]?.type ?? input.providerType;
+        raw.providerModels[providerModelKey] = {
+          provider: providerId,
+          id: requireString(input.providerModelId, "providerModelId"),
+          displayName: requireString(input.displayName, "displayName")
+        };
+        if (providerType === "custom" && input.contextWindow !== void 0) {
+          raw.providerModels[providerModelKey].contextWindow = requireNumber(input.contextWindow, "contextWindow");
+        }
+        if (providerType === "custom" && input.maxTokens !== void 0) {
+          raw.providerModels[providerModelKey].maxTokens = requireNumber(input.maxTokens, "maxTokens");
+        }
+        if (providerType === "custom" && input.reasoning !== void 0) {
+          raw.providerModels[providerModelKey].reasoning = requireBoolean(input.reasoning, "reasoning");
+        }
+        if (providerType === "custom" && input.supportsImageInput !== void 0) {
+          raw.providerModels[providerModelKey].supportsImageInput = requireBoolean(input.supportsImageInput, "supportsImageInput");
+        }
+        if (providerType === "custom" && input.supportsDeveloperRole !== void 0) {
+          raw.providerModels[providerModelKey].supportsDeveloperRole = requireBoolean(input.supportsDeveloperRole, "supportsDeveloperRole");
+        }
+        if (providerType !== "custom") {
+          delete raw.providerModels[providerModelKey].contextWindow;
+          delete raw.providerModels[providerModelKey].maxTokens;
+          delete raw.providerModels[providerModelKey].reasoning;
+          delete raw.providerModels[providerModelKey].supportsDeveloperRole;
+          delete raw.providerModels[providerModelKey].supportsImageInput;
+        }
+      }
+      if (input.addToAvailable === true || input.availableModelId || input.modelId) {
+        const providerId = input.providerId ? requireIdentifier(input.providerId, "providerId") : void 0;
+        const providerModelKey = requireIdentifier(input.providerModelKey ?? (providerId ? `${providerId}_${input.availableModelId ?? input.modelId ?? "main"}` : void 0), "providerModelKey");
+        const availableModelId = requireIdentifier(input.availableModelId ?? input.modelId, "availableModelId");
+        raw.availableModels[availableModelId] = {
+          model: providerModelKey,
+          ...input.displayName ? { displayName: input.displayName } : {}
+        };
+      }
+      if (input.removeAvailableModelId) {
+        const availableModelId = requireIdentifier(input.removeAvailableModelId, "removeAvailableModelId");
+        delete raw.availableModels[availableModelId];
+        if (raw.modelProfile?.roles) {
+          const fallbackModelId = Object.keys(raw.availableModels).sort()[0];
+          if (!fallbackModelId) {
+            delete raw.modelProfile;
+          } else {
+            for (const role of ["primary", "standard", "auxiliary"]) {
+              if (raw.modelProfile.roles[role] === availableModelId) {
+                raw.modelProfile.roles[role] = fallbackModelId;
+              }
+            }
+          }
+        }
+      }
+      if (input.roles) {
+        raw.modelProfile ??= {};
+        raw.modelProfile.roles = {
+          primary: requireIdentifier(input.roles.primary, "roles.primary"),
+          standard: requireIdentifier(input.roles.standard, "roles.standard"),
+          auxiliary: requireIdentifier(input.roles.auxiliary, "roles.auxiliary")
+        };
+      } else if (!raw.modelProfile?.roles && Object.keys(raw.availableModels).length > 0) {
+        const firstAvailableModel = Object.keys(raw.availableModels).sort()[0];
+        raw.modelProfile = {
+          roles: {
+            primary: firstAvailableModel,
+            standard: firstAvailableModel,
+            auxiliary: firstAvailableModel
+          }
+        };
+      }
+      return renderRawConfig(raw);
+    };
+    renderMemoryConfig = (input) => {
+      const raw = parseEditableConfig(input.existingConfigText);
+      raw.memory = {
+        ...loadMemory(raw),
+        ...input.enabled !== void 0 ? { enabled: requireBoolean(input.enabled, "memory.enabled") } : {},
+        ...input.daily !== void 0 ? { daily: requireBoolean(input.daily, "memory.daily") } : {},
+        ...input.autoDream !== void 0 ? { autoDream: requireBoolean(input.autoDream, "memory.autoDream") } : {},
+        ...input.promoteRoot !== void 0 ? { promoteRoot: requireBoolean(input.promoteRoot, "memory.promoteRoot") } : {},
+        ...input.dreamIdleMinutes !== void 0 ? { dreamIdleMinutes: requireNonNegativeNumber(input.dreamIdleMinutes, "memory.dreamIdleMinutes") } : {}
+      };
+      return renderRawConfig(raw);
+    };
+    renderExtensionConfig = (input) => {
+      const raw = parseEditableConfig(input.existingConfigText);
+      const extensionId = requireIdentifier(input.extensionId, "extensionId");
+      const existing = raw.extensions[extensionId] ?? {};
+      const config = { ...existing.config ?? {} };
+      for (const [key, value] of Object.entries(input.config ?? {})) {
+        if (!/^[A-Za-z0-9_-]+$/.test(key)) {
+          throw new Error(`Unsupported config key: ${key}`);
+        }
+        if (value === void 0 || value === "") {
+          delete config[key];
+        } else {
+          config[key] = value;
+        }
+      }
+      raw.extensions[extensionId] = {
+        enabled: input.enabled ?? existing.enabled ?? false,
+        kind: input.kind ?? (existing.kind === "im" ? "im" : "im"),
+        ...Object.keys(config).length > 0 ? { config } : {}
+      };
+      return renderRawConfig(raw);
+    };
+    DEFAULT_MEMORY_CONFIG = {
+      enabled: true,
+      daily: true,
+      autoDream: true,
+      promoteRoot: true,
+      dreamIdleMinutes: 60
+    };
+    loadMemory = (raw) => ({
+      enabled: raw.memory?.enabled ?? DEFAULT_MEMORY_CONFIG.enabled,
+      daily: raw.memory?.daily ?? DEFAULT_MEMORY_CONFIG.daily,
+      autoDream: raw.memory?.autoDream ?? DEFAULT_MEMORY_CONFIG.autoDream,
+      promoteRoot: raw.memory?.promoteRoot ?? DEFAULT_MEMORY_CONFIG.promoteRoot,
+      dreamIdleMinutes: requireNonNegativeNumber(raw.memory?.dreamIdleMinutes ?? DEFAULT_MEMORY_CONFIG.dreamIdleMinutes, "memory.dreamIdleMinutes")
+    });
+    loadExtensions = (raw) => {
+      const extensions = {};
+      for (const [extensionId, extension] of Object.entries(raw.extensions)) {
+        if (extension.kind !== "im") {
+          throw new Error(`extensions.${extensionId}.kind must be im`);
+        }
+        extensions[extensionId] = {
+          enabled: extension.enabled === true,
+          kind: "im",
+          config: extension.config ?? {}
+        };
+      }
+      return extensions;
+    };
+    loadProviders = (raw, env) => {
+      const providers = {};
+      for (const [providerId, provider] of Object.entries(raw.providers)) {
+        const apiKey = resolveProviderApiKey(provider, env, `providers.${providerId}`);
+        if (provider.type === "builtin") {
+          providers[providerId] = {
             type: "builtin",
-            provider: requireString(model.provider, "model.provider"),
-            id: requireString(model.id, "model.id"),
-            ...model.baseUrl ? { baseUrl: stripTrailingSlashes(model.baseUrl) } : {},
+            provider: normalizeProviderName(requireString(provider.provider, `providers.${providerId}.provider`)),
+            ...provider.baseUrl ? { baseUrl: stripTrailingSlashes(provider.baseUrl) } : {},
             apiKey
-          }
-        };
-      }
-      if (model.type === "custom") {
-        const api = requireCustomApi(model.api);
-        return {
-          model: {
+          };
+          continue;
+        }
+        if (provider.type === "custom") {
+          providers[providerId] = {
             type: "custom",
-            api,
-            provider: requireString(model.provider, "model.provider"),
-            id: requireString(model.id, "model.id"),
-            baseUrl: stripTrailingSlashes(requireString(model.baseUrl, "model.baseUrl")),
-            contextWindow: requireNumber(model.contextWindow, "model.contextWindow"),
-            maxTokens: requireNumber(model.maxTokens, "model.maxTokens"),
-            reasoning: requireBoolean(model.reasoning, "model.reasoning"),
-            ...model.supportsDeveloperRole === void 0 ? {} : { compat: { supportsDeveloperRole: requireBoolean(model.supportsDeveloperRole, "model.supportsDeveloperRole") } },
+            api: requireCustomApi(provider.api, `providers.${providerId}.api`),
+            provider: normalizeProviderName(requireString(provider.provider, `providers.${providerId}.provider`)),
+            baseUrl: stripTrailingSlashes(requireString(provider.baseUrl, `providers.${providerId}.baseUrl`)),
             apiKey
+          };
+          continue;
+        }
+        throw new Error(`providers.${providerId}.type must be builtin or custom`);
+      }
+      if (Object.keys(providers).length === 0) {
+        throw new Error("at least one provider config is required");
+      }
+      return providers;
+    };
+    loadProviderProfiles = (raw, env, options = {}) => {
+      const providers = {};
+      for (const [providerId, provider] of Object.entries(raw.providers)) {
+        const credential = providerCredentialSummary(provider, env);
+        const base = {
+          providerId,
+          provider: normalizeProviderName(requireString(provider.provider, `providers.${providerId}.provider`)),
+          ...credential,
+          ...options.includeSecrets && provider.apiKey ? { apiKey: provider.apiKey } : {}
+        };
+        if (provider.type === "builtin") {
+          providers[providerId] = {
+            ...base,
+            type: "builtin",
+            ...provider.baseUrl ? { baseUrl: stripTrailingSlashes(provider.baseUrl) } : {}
+          };
+          continue;
+        }
+        if (provider.type === "custom") {
+          providers[providerId] = {
+            ...base,
+            type: "custom",
+            api: requireCustomApi(provider.api, `providers.${providerId}.api`),
+            baseUrl: stripTrailingSlashes(requireString(provider.baseUrl, `providers.${providerId}.baseUrl`))
+          };
+          continue;
+        }
+        throw new Error(`providers.${providerId}.type must be builtin or custom`);
+      }
+      return providers;
+    };
+    loadProviderModels = (raw, providers, options = { requireAny: true }) => {
+      const models = {};
+      for (const [modelId, model] of Object.entries(raw.providerModels)) {
+        const providerId = requireString(model.provider, `provider_models.${modelId}.provider`);
+        const provider = providers[providerId];
+        if (!provider) {
+          throw new Error(`provider_models.${modelId}.provider must reference a configured provider`);
+        }
+        const loaded = {
+          provider: providerId,
+          id: requireString(model.id, `provider_models.${modelId}.id`),
+          displayName: requireString(model.displayName, `provider_models.${modelId}.displayName`)
+        };
+        if (provider.type === "custom") {
+          if (model.contextWindow !== void 0) {
+            loaded.contextWindow = requireNumber(model.contextWindow, `provider_models.${modelId}.contextWindow`);
           }
+          if (model.maxTokens !== void 0) {
+            loaded.maxTokens = requireNumber(model.maxTokens, `provider_models.${modelId}.maxTokens`);
+          }
+          if (model.reasoning !== void 0) {
+            loaded.reasoning = requireBoolean(model.reasoning, `provider_models.${modelId}.reasoning`);
+          }
+          if (model.supportsImageInput !== void 0) {
+            loaded.supportsImageInput = requireBoolean(model.supportsImageInput, `provider_models.${modelId}.supportsImageInput`);
+          }
+          if (model.supportsDeveloperRole !== void 0) {
+            loaded.compat = {
+              supportsDeveloperRole: requireBoolean(model.supportsDeveloperRole, `provider_models.${modelId}.supportsDeveloperRole`)
+            };
+          }
+        }
+        models[modelId] = loaded;
+      }
+      if (options.requireAny !== false && Object.keys(models).length === 0) {
+        throw new Error("at least one provider model config is required");
+      }
+      return models;
+    };
+    loadAvailableModels = (raw, providerModels, options = { requireAny: true, includeAllProviderModels: true }) => {
+      const models = {};
+      if (options.includeAllProviderModels !== false && Object.keys(raw.availableModels).length === 0) {
+        for (const [modelId, providerModel] of Object.entries(providerModels)) {
+          models[modelId] = {
+            model: modelId,
+            displayName: providerModel.displayName
+          };
+        }
+        return models;
+      }
+      for (const [modelId, model] of Object.entries(raw.availableModels)) {
+        const providerModelId = requireString(model.model, `available_models.${modelId}.model`);
+        if (!providerModels[providerModelId]) {
+          throw new Error(`available_models.${modelId}.model must reference a configured provider model`);
+        }
+        models[modelId] = {
+          model: providerModelId,
+          ...model.displayName ? { displayName: model.displayName } : {}
         };
       }
-      throw new Error("model.type must be builtin or custom");
+      if (options.requireAny !== false && Object.keys(models).length === 0) {
+        throw new Error("at least one available model config is required");
+      }
+      return models;
+    };
+    loadRoles = (raw, models, options = { requireComplete: true }) => {
+      const roles = raw.modelProfile?.roles;
+      if (!roles) {
+        if (options.requireComplete === false) {
+          return { primary: "", standard: "", auxiliary: "" };
+        }
+        throw new Error("model_profile.roles is required");
+      }
+      if (options.requireComplete === false) {
+        return {
+          primary: roles.primary ? requireModelRole(roles.primary, "primary", models) : "",
+          standard: roles.standard ? requireModelRole(roles.standard, "standard", models) : "",
+          auxiliary: roles.auxiliary ? requireModelRole(roles.auxiliary, "auxiliary", models) : ""
+        };
+      }
+      return {
+        primary: requireModelRole(roles.primary, "primary", models),
+        standard: requireModelRole(roles.standard, "standard", models),
+        auxiliary: requireModelRole(roles.auxiliary, "auxiliary", models)
+      };
     };
     readConfigText = async (options) => {
       const projectPath = scorelProjectConfigPath(options.cwd);
@@ -855,14 +1308,14 @@ var init_config = __esm({
       }
     };
     parseToml = (text) => {
-      const result = {};
-      let section2 = "root";
+      const result = emptyRawConfig();
+      let section2 = { kind: "root" };
       for (const rawLine of text.split(/\r?\n/)) {
         const line = stripComment(rawLine).trim();
         if (line.length === 0) {
           continue;
         }
-        const sectionMatch = /^\[([A-Za-z0-9_-]+)\]$/.exec(line);
+        const sectionMatch = /^\[([A-Za-z0-9_.-]+)\]$/.exec(line);
         if (sectionMatch) {
           section2 = requireSection(sectionMatch[1] ?? "");
           ensureSection(result, section2);
@@ -880,6 +1333,100 @@ var init_config = __esm({
       }
       return result;
     };
+    parseEditableConfig = (text) => {
+      if (!text?.trim()) {
+        return emptyRawConfig();
+      }
+      return parseToml(text);
+    };
+    renderRawConfig = (raw) => {
+      const lines = [];
+      for (const [providerId, provider] of Object.entries(raw.providers).sort(([left], [right]) => left.localeCompare(right))) {
+        lines.push(`[providers.${providerId}]`);
+        lines.push(`type = ${tomlString(requireProviderType(provider.type, `providers.${providerId}.type`))}`);
+        lines.push(`provider = ${tomlString(normalizeProviderName(requireString(provider.provider, `providers.${providerId}.provider`)))}`);
+        if (provider.type === "custom") {
+          lines.push(`api = ${tomlString(requireCustomApi(provider.api, `providers.${providerId}.api`))}`);
+          lines.push(`baseUrl = ${tomlString(stripTrailingSlashes(requireString(provider.baseUrl, `providers.${providerId}.baseUrl`)))}`);
+        } else if (provider.baseUrl) {
+          lines.push(`baseUrl = ${tomlString(stripTrailingSlashes(provider.baseUrl))}`);
+        }
+        if (provider.apiKey) {
+          lines.push(`apiKey = ${tomlString(requireString(provider.apiKey, `providers.${providerId}.apiKey`))}`);
+        } else {
+          lines.push(`apiKeyEnv = ${tomlString(requireString(provider.apiKeyEnv, `providers.${providerId}.apiKeyEnv`))}`);
+        }
+        lines.push("");
+      }
+      for (const [modelId, model] of Object.entries(raw.providerModels).sort(([left], [right]) => left.localeCompare(right))) {
+        lines.push(`[provider_models.${modelId}]`);
+        lines.push(`provider = ${tomlString(requireString(model.provider, `provider_models.${modelId}.provider`))}`);
+        lines.push(`id = ${tomlString(requireString(model.id, `provider_models.${modelId}.id`))}`);
+        lines.push(`displayName = ${tomlString(requireString(model.displayName, `provider_models.${modelId}.displayName`))}`);
+        const provider = raw.providers[model.provider ?? ""];
+        if (provider?.type === "custom" && model.contextWindow !== void 0) {
+          lines.push(`contextWindow = ${requireNumber(model.contextWindow, `provider_models.${modelId}.contextWindow`)}`);
+        }
+        if (provider?.type === "custom" && model.maxTokens !== void 0) {
+          lines.push(`maxTokens = ${requireNumber(model.maxTokens, `provider_models.${modelId}.maxTokens`)}`);
+        }
+        if (provider?.type === "custom" && model.reasoning !== void 0) {
+          lines.push(`reasoning = ${requireBoolean(model.reasoning, `provider_models.${modelId}.reasoning`)}`);
+        }
+        if (provider?.type === "custom" && model.supportsImageInput !== void 0) {
+          lines.push(`supportsImageInput = ${requireBoolean(model.supportsImageInput, `provider_models.${modelId}.supportsImageInput`)}`);
+        }
+        if (provider?.type === "custom" && model.supportsDeveloperRole !== void 0) {
+          lines.push(`supportsDeveloperRole = ${requireBoolean(model.supportsDeveloperRole, `provider_models.${modelId}.supportsDeveloperRole`)}`);
+        }
+        lines.push("");
+      }
+      for (const [modelId, model] of Object.entries(raw.availableModels).sort(([left], [right]) => left.localeCompare(right))) {
+        lines.push(`[available_models.${modelId}]`);
+        lines.push(`model = ${tomlString(requireString(model.model, `available_models.${modelId}.model`))}`);
+        if (model.displayName) {
+          lines.push(`displayName = ${tomlString(model.displayName)}`);
+        }
+        lines.push("");
+      }
+      if (raw.modelProfile?.roles) {
+        lines.push("[model_profile.roles]");
+        lines.push(`primary = ${tomlString(requireIdentifier(raw.modelProfile.roles.primary, "model_profile.roles.primary"))}`);
+        lines.push(`standard = ${tomlString(requireIdentifier(raw.modelProfile.roles.standard, "model_profile.roles.standard"))}`);
+        lines.push(`auxiliary = ${tomlString(requireIdentifier(raw.modelProfile.roles.auxiliary, "model_profile.roles.auxiliary"))}`);
+        lines.push("");
+      }
+      if (raw.memory) {
+        const memory = loadMemory(raw);
+        lines.push("[memory]");
+        lines.push(`enabled = ${memory.enabled}`);
+        lines.push(`daily = ${memory.daily}`);
+        lines.push(`autoDream = ${memory.autoDream}`);
+        lines.push(`promoteRoot = ${memory.promoteRoot}`);
+        lines.push(`dreamIdleMinutes = ${memory.dreamIdleMinutes}`);
+        lines.push("");
+      }
+      for (const [extensionId, extension] of Object.entries(raw.extensions).sort(([left], [right]) => left.localeCompare(right))) {
+        lines.push(`[extensions.${extensionId}]`);
+        lines.push(`enabled = ${extension.enabled === true}`);
+        lines.push(`kind = ${tomlString(extension.kind === "im" ? "im" : requireString(extension.kind, `extensions.${extensionId}.kind`))}`);
+        lines.push("");
+        if (extension.config && Object.keys(extension.config).length > 0) {
+          lines.push(`[extensions.${extensionId}.config]`);
+          for (const [key, value] of Object.entries(extension.config).sort(([left], [right]) => left.localeCompare(right))) {
+            lines.push(`${key} = ${renderTomlValue(value)}`);
+          }
+          lines.push("");
+        }
+      }
+      return lines.join("\n");
+    };
+    emptyRawConfig = () => ({
+      providers: {},
+      providerModels: {},
+      availableModels: {},
+      extensions: {}
+    });
     stripComment = (line) => {
       const index = line.indexOf("#");
       return index === -1 ? line : line.slice(0, index);
@@ -890,11 +1437,58 @@ var init_config = __esm({
       }
       return value;
     };
+    normalizeProviderName = (value) => {
+      const provider = value.split("/")[0]?.trim();
+      return provider || value.trim();
+    };
+    requireProviderCredential = (provider, name) => {
+      if (!provider.apiKeyEnv && !provider.apiKey) {
+        throw new Error(`${name}.apiKeyEnv or ${name}.apiKey is required`);
+      }
+    };
+    resolveProviderApiKey = (provider, env, name) => {
+      if (provider.apiKey) {
+        return provider.apiKey;
+      }
+      const apiKeyEnv = requireString(provider.apiKeyEnv, `${name}.apiKeyEnv`);
+      const apiKey = env[apiKeyEnv];
+      if (!apiKey) {
+        throw new Error(`${apiKeyEnv} is not set`);
+      }
+      return apiKey;
+    };
+    providerCredentialSummary = (provider, env) => {
+      if (provider.apiKey) {
+        return {
+          credentialSource: "direct",
+          credentialStatus: "available"
+        };
+      }
+      const apiKeyEnv = provider.apiKeyEnv;
+      if (!apiKeyEnv) {
+        return {
+          credentialSource: "env",
+          credentialStatus: "missing"
+        };
+      }
+      return {
+        apiKeyEnv,
+        credentialSource: "env",
+        credentialStatus: env[apiKeyEnv] ? "available" : "missing"
+      };
+    };
     requireNumber = (value, name) => {
       if (typeof value !== "number" || !Number.isFinite(value)) {
         throw new Error(`${name} is required`);
       }
       return value;
+    };
+    requireNonNegativeNumber = (value, name) => {
+      const number = requireNumber(value, name);
+      if (number < 0) {
+        throw new Error(`${name} must be non-negative`);
+      }
+      return number;
     };
     requireBoolean = (value, name) => {
       if (typeof value !== "boolean") {
@@ -902,38 +1496,112 @@ var init_config = __esm({
       }
       return value;
     };
-    requireCustomApi = (value) => {
+    requireCustomApi = (value, name) => {
       if (value === "openai-completions" || value === "openai-responses" || value === "google-generative-ai" || value === "anthropic-messages") {
         return value;
       }
-      throw new Error("model.api must be openai-completions, openai-responses, google-generative-ai, or anthropic-messages");
+      throw new Error(`${name} must be openai-completions, openai-responses, google-generative-ai, or anthropic-messages`);
+    };
+    requireProviderType = (value, name) => {
+      if (value === "builtin" || value === "custom") {
+        return value;
+      }
+      throw new Error(`${name} must be builtin or custom`);
     };
     requireSection = (section2) => {
-      if (section2 in SCOREL_CONFIG_SCHEMA.sections) {
-        return section2;
+      if (section2 === "root") {
+        return { kind: "root" };
+      }
+      const providerMatch = /^providers\.([A-Za-z0-9_-]+)$/.exec(section2);
+      if (providerMatch?.[1]) {
+        return { kind: "provider", id: providerMatch[1] };
+      }
+      const providerModelMatch = /^provider_models\.([A-Za-z0-9_-]+)$/.exec(section2);
+      if (providerModelMatch?.[1]) {
+        return { kind: "providerModel", id: providerModelMatch[1] };
+      }
+      const availableModelMatch = /^available_models\.([A-Za-z0-9_-]+)$/.exec(section2);
+      if (availableModelMatch?.[1]) {
+        return { kind: "availableModel", id: availableModelMatch[1] };
+      }
+      if (section2 === "model_profile.roles") {
+        return { kind: "modelProfileRoles" };
+      }
+      if (section2 === "memory") {
+        return { kind: "memory" };
+      }
+      const extensionConfigMatch = /^extensions\.([A-Za-z0-9_-]+)\.config$/.exec(section2);
+      if (extensionConfigMatch?.[1]) {
+        return { kind: "extensionConfig", id: extensionConfigMatch[1] };
+      }
+      const extensionMatch = /^extensions\.([A-Za-z0-9_-]+)$/.exec(section2);
+      if (extensionMatch?.[1]) {
+        return { kind: "extension", id: extensionMatch[1] };
       }
       throw new Error(`Unsupported config section: ${section2}`);
     };
     ensureSection = (config, section2) => {
-      if (section2 === "model") {
-        config.model ??= {};
+      if (section2.kind === "provider") {
+        config.providers[section2.id] ??= {};
+      } else if (section2.kind === "providerModel") {
+        config.providerModels[section2.id] ??= {};
+      } else if (section2.kind === "availableModel") {
+        config.availableModels[section2.id] ??= {};
+      } else if (section2.kind === "modelProfileRoles") {
+        config.modelProfile ??= {};
+        config.modelProfile.roles ??= {};
+      } else if (section2.kind === "memory") {
+        config.memory ??= {};
+      } else if (section2.kind === "extension") {
+        config.extensions[section2.id] ??= {};
+      } else if (section2.kind === "extensionConfig") {
+        config.extensions[section2.id] ??= {};
+        config.extensions[section2.id].config ??= {};
       }
     };
     setConfigValue = (config, section2, key, value) => {
       assertKnownKey(section2, key);
-      if (section2 === "model") {
-        config.model ??= {};
-        setModelValue(config.model, key, value);
+      if (section2.kind === "provider") {
+        config.providers[section2.id] ??= {};
+        setValue(config.providers[section2.id], key, value);
+      } else if (section2.kind === "providerModel") {
+        config.providerModels[section2.id] ??= {};
+        setValue(config.providerModels[section2.id], key, value);
+      } else if (section2.kind === "availableModel") {
+        config.availableModels[section2.id] ??= {};
+        setValue(config.availableModels[section2.id], key, value);
+      } else if (section2.kind === "modelProfileRoles") {
+        config.modelProfile ??= {};
+        config.modelProfile.roles ??= {};
+        setValue(config.modelProfile.roles, key, value);
+      } else if (section2.kind === "memory") {
+        config.memory ??= {};
+        setValue(config.memory, key, value);
+      } else if (section2.kind === "extension") {
+        config.extensions[section2.id] ??= {};
+        setValue(config.extensions[section2.id], key, value);
+      } else if (section2.kind === "extensionConfig") {
+        config.extensions[section2.id] ??= {};
+        const extensionConfig = config.extensions[section2.id].config ?? {};
+        config.extensions[section2.id].config = extensionConfig;
+        setValue(extensionConfig, key, value);
       }
     };
     assertKnownKey = (section2, key) => {
-      const allowed = SCOREL_CONFIG_SCHEMA.sections[section2].keys;
+      const schemaSection = section2.kind;
+      if (schemaSection === "extensionConfig") {
+        if (!/^[A-Za-z0-9_-]+$/.test(key)) {
+          throw new Error(`Unsupported config key: ${key}`);
+        }
+        return;
+      }
+      const allowed = SCOREL_CONFIG_SCHEMA.sections[schemaSection].keys;
       if (!allowed.includes(key)) {
         throw new Error(`Unsupported config key: ${key}`);
       }
     };
-    setModelValue = (model, key, value) => {
-      model[key] = value;
+    setValue = (target, key, value) => {
+      target[key] = value;
     };
     parseTomlValue = (value) => {
       const stringMatch = /^"([^"]*)"$/.exec(value);
@@ -953,968 +1621,31 @@ var init_config = __esm({
       throw new Error(`Unsupported config value: ${value}`);
     };
     stripTrailingSlashes = (value) => value.replace(/\/+$/, "");
-  }
-});
-
-// packages/core/src/instructions/index.ts
-import { existsSync } from "node:fs";
-import { readdir as readdir4, readFile as readFile4 } from "node:fs/promises";
-import { homedir as homedir2, platform, release } from "node:os";
-import { dirname as dirname3, join as join5, resolve } from "node:path";
-var BASELINE_PROMPT, buildInstructionSnapshot, renderSystemPrompt, section, discoverAgentsSources, projectAgentsPaths, findGitRoot, renderAgentsBlock, renderWorkspaceBlock, renderEnvironmentBlock, renderTimeBlock, isNodeErrorCode;
-var init_instructions = __esm({
-  "packages/core/src/instructions/index.ts"() {
-    "use strict";
-    BASELINE_PROMPT = [
-      "You are Scorel, a coding agent running inside a recoverable local workspace.",
-      "Follow the user's request, respect the project instructions, use tools deliberately, and keep changes scoped to the active task.",
-      "Tool results and user messages may include <system-reminder> tags. These tags contain information automatically added by Scorel's harness. They are not part of the specific tool result or user message in which they appear."
-    ].join("\n");
-    buildInstructionSnapshot = async (options) => {
-      const cwd = resolve(options.cwd);
-      const now = options.now ?? Date.now;
-      const frozenAt = now();
-      const homeDir = resolve(options.homeDir ?? homedir2());
-      const agentsSources = await discoverAgentsSources({ cwd, homeDir });
-      const repoRoot = findGitRoot(cwd);
-      return {
-        version: 1,
-        cwd,
-        sections: [
-          section("baseline", frozenAt, BASELINE_PROMPT, [{ sourceType: "builtin" }]),
-          section("agents", frozenAt, renderAgentsBlock(agentsSources), agentsSources),
-          section("memory", frozenAt, "No memory sources are configured for this session.", []),
-          section("workspace", frozenAt, await renderWorkspaceBlock(cwd, repoRoot), void 0, {
-            cwd,
-            repoRoot
-          }),
-          section("environment", frozenAt, renderEnvironmentBlock(options.env ?? process.env), void 0, {
-            platform: platform(),
-            release: release(),
-            shell: (options.env ?? process.env).SHELL
-          }),
-          section("time", frozenAt, renderTimeBlock(frozenAt), void 0, {
-            timestamp: frozenAt,
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
-          })
-        ]
-      };
+    requireIdentifier = (value, name) => {
+      const text = requireString(value, name);
+      if (!/^[A-Za-z0-9_-]+$/.test(text)) {
+        throw new Error(`${name} must contain only letters, numbers, underscores, or hyphens`);
+      }
+      return text;
     };
-    renderSystemPrompt = (snapshot) => snapshot.sections.map((section2) => section2.renderedBlock.trim()).filter(Boolean).join("\n\n");
-    section = (kind, frozenAt, renderedBlock, sources, data) => ({
-      kind,
-      frozenAt,
-      ...sources ? { sources } : {},
-      renderedBlock,
-      ...data ? { data } : {}
-    });
-    discoverAgentsSources = async (options) => {
-      const projectFiles = projectAgentsPaths(options.cwd, options.homeDir);
-      const globalPath = join5(options.homeDir, ".scorel", "AGENTS.md");
-      const candidates = [...projectFiles.map((path) => ({ path, scope: "project" })), { path: globalPath, scope: "global_user" }];
-      const sources = [];
-      for (const candidate of candidates) {
-        try {
-          const content = await readFile4(candidate.path, "utf8");
-          sources.push({
-            sourceType: "agents_md",
-            path: candidate.path,
-            scope: candidate.scope,
-            priority: candidate.scope === "global_user" ? 0 : sources.length + 1,
-            content
-          });
-        } catch (cause) {
-          if (!isNodeErrorCode(cause, "ENOENT") && !isNodeErrorCode(cause, "ENOTDIR")) {
-            throw cause;
-          }
-        }
+    tomlString = (value) => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+    renderTomlValue = (value) => typeof value === "string" ? tomlString(value) : String(value);
+    requireModelRole = (value, role, models) => {
+      const modelId = requireString(value, `model_profile.roles.${role}`);
+      if (!models[modelId]) {
+        throw new Error(`model_profile.roles.${role} must reference a configured model`);
       }
-      return sources;
+      return modelId;
     };
-    projectAgentsPaths = (cwd, homeDir) => {
-      const gitRoot = findGitRoot(cwd);
-      const stopAt = gitRoot ?? homeDir;
-      const paths = [];
-      let current = cwd;
-      while (true) {
-        if (current !== homeDir) {
-          paths.push(join5(current, "AGENTS.md"));
-        }
-        if (current === stopAt || current === dirname3(current)) {
-          break;
-        }
-        const next = dirname3(current);
-        if (!gitRoot && next === homeDir) {
-          break;
-        }
-        current = next;
-      }
-      return paths.reverse();
-    };
-    findGitRoot = (cwd) => {
-      let current = cwd;
-      while (true) {
-        if (existsSync(join5(current, ".git"))) {
-          return current;
-        }
-        const next = dirname3(current);
-        if (next === current) {
-          return void 0;
-        }
-        current = next;
-      }
-    };
-    renderAgentsBlock = (sources) => {
-      if (sources.length === 0) {
-        return "No AGENTS.md instructions were found for this session.";
-      }
-      return [
-        "AGENTS.md instructions loaded for this session:",
-        ...sources.map(
-          (source) => [`Source: ${source.path}`, `Scope: ${source.scope}`, "Content:", source.content.trimEnd()].join("\n")
-        )
-      ].join("\n\n");
-    };
-    renderWorkspaceBlock = async (cwd, repoRoot) => {
-      const root = repoRoot ?? cwd;
-      let entries = [];
-      try {
-        entries = (await readdir4(root, { withFileTypes: true })).filter((entry) => !entry.name.startsWith(".")).slice(0, 20).map((entry) => `${entry.isDirectory() ? "dir" : "file"}:${entry.name}`);
-      } catch {
-        entries = [];
-      }
-      return [`Workspace cwd: ${cwd}`, `Repository root: ${repoRoot ?? "not detected"}`, `Top-level entries: ${entries.join(", ") || "none"}`].join("\n");
-    };
-    renderEnvironmentBlock = (env) => [`Platform: ${platform()} ${release()}`, `Shell: ${env.SHELL ?? "unknown"}`].join("\n");
-    renderTimeBlock = (timestamp) => [`Session started at: ${new Date(timestamp).toISOString()}`, `Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`].join("\n");
-    isNodeErrorCode = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
-  }
-});
-
-// packages/core/src/provider/pi-ai.ts
-import {
-  Type,
-  getModels,
-  streamSimple
-} from "@mariozechner/pi-ai";
-var createPiAiProvider, resolvePiAiModel, toPiContext, toPiMessage, toPiAssistantBlock, fromPiAssistant, fromPiContentBlock, toPiTool, toolParameters, textContent, toolResultText, stringMeta, toPiStopReason, fromPiStopReason, fromPiUsage;
-var init_pi_ai = __esm({
-  "packages/core/src/provider/pi-ai.ts"() {
-    "use strict";
-    createPiAiProvider = (options) => ({
-      streamTurn: async function* ({ context, systemPrompt, tools, signal }) {
-        const stream = streamSimple(options.model, toPiContext(context, systemPrompt, tools), {
-          apiKey: options.apiKey,
-          signal,
-          ...options.reasoning ? { reasoning: options.reasoning } : {},
-          ...options.onPayload ? { onPayload: options.onPayload } : {}
-        });
-        for await (const event of stream) {
-          if (event.type === "text_delta") {
-            yield { type: "text_delta", delta: event.delta };
-          }
-        }
-        return fromPiAssistant(await stream.result());
-      }
-    });
-    resolvePiAiModel = (config) => {
-      if (config.type === "custom") {
-        return {
-          id: config.id,
-          name: config.id,
-          api: config.api,
-          provider: config.provider,
-          baseUrl: config.baseUrl,
-          reasoning: config.reasoning,
-          input: ["text"],
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: config.contextWindow,
-          maxTokens: config.maxTokens,
-          ...config.api === "openai-completions" ? { compat: { supportsDeveloperRole: config.compat?.supportsDeveloperRole ?? false } } : {}
-        };
-      }
-      const model = getModels(config.provider).find((candidate) => candidate.id === config.id);
-      if (!model) {
-        throw new Error(`Unknown pi-ai model: ${config.provider}/${config.id}`);
-      }
-      return {
-        ...model,
-        ...config.baseUrl ? { baseUrl: config.baseUrl } : {}
-      };
-    };
-    toPiContext = (context, systemPrompt, tools) => ({
-      ...systemPrompt ? { systemPrompt } : {},
-      messages: context.flatMap(toPiMessage),
-      tools: tools.map(toPiTool)
-    });
-    toPiMessage = (message) => {
-      if (message.role === "system") {
-        return [{ role: "user", content: textContent(message), timestamp: Date.now() }];
-      }
-      if (message.role === "user") {
-        return [{ role: "user", content: textContent(message), timestamp: Date.now() }];
-      }
-      if (message.role === "assistant") {
-        return [
-          {
-            role: "assistant",
-            content: message.content.flatMap(toPiAssistantBlock),
-            api: stringMeta(message, "api") ?? "openai-completions",
-            provider: stringMeta(message, "provider") ?? "scorel",
-            model: stringMeta(message, "model") ?? "unknown",
-            usage: {
-              input: message.usage?.inputTokens ?? 0,
-              output: message.usage?.outputTokens ?? 0,
-              cacheRead: 0,
-              cacheWrite: 0,
-              totalTokens: message.usage?.totalTokens ?? 0,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
-            },
-            stopReason: toPiStopReason(message.stopReason),
-            timestamp: Date.now()
-          }
-        ];
-      }
-      return message.content.flatMap((block) => {
-        if (block.type !== "tool_result") {
-          return [];
-        }
-        return [
-          {
-            role: "toolResult",
-            toolCallId: block.toolCallId,
-            toolName: block.toolName,
-            content: [{ type: "text", text: toolResultText(block.result) }],
-            isError: block.isError ?? false,
-            timestamp: Date.now()
-          }
-        ];
-      });
-    };
-    toPiAssistantBlock = (block) => {
-      if (block.type === "text") {
-        return [{ type: "text", text: block.text }];
-      }
-      if (block.type === "thinking") {
-        return [{ type: "thinking", thinking: block.text }];
-      }
-      if (block.type === "tool_call") {
-        return [{ type: "toolCall", id: block.toolCallId, name: block.toolName, arguments: block.args }];
-      }
-      return [];
-    };
-    fromPiAssistant = (message) => ({
-      role: "assistant",
-      content: message.content.map(fromPiContentBlock),
-      stopReason: fromPiStopReason(message.stopReason),
-      usage: fromPiUsage(message.usage),
-      meta: {
-        api: message.api,
-        provider: message.provider,
-        model: message.model
-      }
-    });
-    fromPiContentBlock = (block) => {
-      if (block.type === "text") {
-        return { type: "text", text: block.text };
-      }
-      if (block.type === "thinking") {
-        return { type: "thinking", text: block.thinking };
-      }
-      return {
-        type: "tool_call",
-        toolCallId: block.id,
-        toolName: block.name,
-        args: block.arguments
-      };
-    };
-    toPiTool = (tool) => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: toolParameters(tool.name)
-    });
-    toolParameters = (name) => {
-      switch (name) {
-        case "Read":
-          return Type.Object({
-            file_path: Type.String(),
-            offset: Type.Optional(Type.Number()),
-            limit: Type.Optional(Type.Number()),
-            full: Type.Optional(Type.Boolean())
-          });
-        case "Write":
-          return Type.Object({
-            file_path: Type.String(),
-            content: Type.String()
-          });
-        case "Edit":
-          return Type.Object({
-            file_path: Type.String(),
-            old_string: Type.String(),
-            new_string: Type.String(),
-            replace_all: Type.Optional(Type.Boolean())
-          });
-        case "Bash":
-          return Type.Object({
-            command: Type.String(),
-            cwd: Type.Optional(Type.String()),
-            timeout: Type.Optional(Type.Number()),
-            description: Type.Optional(Type.String()),
-            maxOutputBytes: Type.Optional(Type.Number())
-          });
-        case "Glob":
-          return Type.Object({
-            pattern: Type.String(),
-            path: Type.Optional(Type.String()),
-            head_limit: Type.Optional(Type.Number()),
-            offset: Type.Optional(Type.Number())
-          });
-        case "Grep":
-          return Type.Object({
-            pattern: Type.String(),
-            path: Type.Optional(Type.String()),
-            glob: Type.Optional(Type.String()),
-            output_mode: Type.Optional(Type.Union([Type.Literal("files"), Type.Literal("content"), Type.Literal("count")])),
-            "-B": Type.Optional(Type.Number()),
-            "-A": Type.Optional(Type.Number()),
-            "-C": Type.Optional(Type.Number()),
-            context: Type.Optional(Type.Number()),
-            "-n": Type.Optional(Type.Boolean()),
-            "-i": Type.Optional(Type.Boolean()),
-            type: Type.Optional(Type.String()),
-            head_limit: Type.Optional(Type.Number()),
-            offset: Type.Optional(Type.Number()),
-            multiline: Type.Optional(Type.Boolean())
-          });
-        case "TodoWrite":
-          return Type.Object({
-            todos: Type.Array(
-              Type.Object({
-                content: Type.String(),
-                status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")]),
-                activeForm: Type.Optional(Type.String())
-              })
-            )
-          });
-        case "Skill":
-          return Type.Object({
-            name: Type.String(),
-            args: Type.Optional(Type.String())
-          });
-        default:
-          return Type.Object({});
-      }
-    };
-    textContent = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
-    toolResultText = (result) => {
-      if (typeof result === "object" && result !== null && "content" in result) {
-        const content = result.content;
-        if (Array.isArray(content)) {
-          return content.filter((block) => block?.type === "text" && typeof block.text === "string").map((block) => block.text).join("\n");
-        }
-      }
-      return JSON.stringify(result);
-    };
-    stringMeta = (message, key) => {
-      const value = message.meta?.[key];
-      return typeof value === "string" ? value : void 0;
-    };
-    toPiStopReason = (reason) => {
-      if (reason === "tool_call") {
-        return "toolUse";
-      }
-      if (reason === "max_tokens") {
-        return "length";
-      }
-      if (reason === "cancelled") {
-        return "aborted";
-      }
-      if (reason === "error") {
-        return "error";
-      }
-      return "stop";
-    };
-    fromPiStopReason = (reason) => {
-      if (reason === "toolUse") {
-        return "tool_call";
-      }
-      if (reason === "length") {
-        return "max_tokens";
-      }
-      if (reason === "aborted") {
-        return "cancelled";
-      }
-      if (reason === "error") {
-        return "error";
-      }
-      return "end_turn";
-    };
-    fromPiUsage = (usage) => {
-      if (!usage) {
-        return void 0;
-      }
-      return {
-        inputTokens: usage.input,
-        outputTokens: usage.output,
-        totalTokens: usage.totalTokens
-      };
-    };
-  }
-});
-
-// packages/core/src/runtime/index.ts
-var ScorelRuntime, normalizeAssistantMessage, isAssistantMessage, partialAssistantMessage;
-var init_runtime = __esm({
-  "packages/core/src/runtime/index.ts"() {
-    "use strict";
-    ScorelRuntime = class {
-      #provider;
-      #tools = /* @__PURE__ */ new Map();
-      #controller;
-      constructor({ provider }) {
-        this.#provider = provider;
-      }
-      get running() {
-        return this.#controller !== void 0;
-      }
-      registerTool(tool) {
-        this.#tools.set(tool.name, tool);
-      }
-      unregisterTool(name) {
-        this.#tools.delete(name);
-      }
-      cancel() {
-        this.#controller?.abort();
-      }
-      async *executeTurn(context, systemPrompt, options) {
-        if (this.#controller) {
-          throw new Error("Runtime is already running");
-        }
-        const controller = new AbortController();
-        this.#controller = controller;
-        yield { type: "turn_start" };
-        try {
-          let nextContext = [...context];
-          while (!controller.signal.aborted) {
-            const result = yield* this.#runProviderTurn(nextContext, systemPrompt, options, controller.signal);
-            if (result.finished) {
-              return;
-            }
-            const assistant = result.message;
-            if (!assistant) {
-              yield { type: "turn_end", stopReason: result.stopReason ?? "end_turn" };
-              return;
-            }
-            const toolCalls = assistant.content.filter(
-              (block) => block.type === "tool_call"
-            );
-            if (controller.signal.aborted || toolCalls.length === 0 || assistant.stopReason !== "tool_call") {
-              yield { type: "turn_end", stopReason: controller.signal.aborted ? "cancelled" : assistant.stopReason };
-              return;
-            }
-            const toolMessages = [];
-            for (const toolCall of toolCalls) {
-              if (controller.signal.aborted) {
-                break;
-              }
-              toolMessages.push(yield* this.#executeTool(toolCall, controller.signal));
-            }
-            if (controller.signal.aborted) {
-              yield { type: "turn_end", stopReason: "cancelled" };
-              return;
-            }
-            const contextAfterTools = [...nextContext, assistant, ...toolMessages];
-            nextContext = options.refreshContext ? await options.refreshContext(contextAfterTools) : contextAfterTools;
-          }
-          yield { type: "turn_end", stopReason: "cancelled" };
-        } finally {
-          this.#controller = void 0;
-        }
-      }
-      async *#runProviderTurn(context, systemPrompt, options, signal) {
-        let text = "";
-        yield { type: "message_start", role: "assistant" };
-        try {
-          const stream = this.#provider.streamTurn({
-            context,
-            systemPrompt,
-            tools: [...this.#tools.values()],
-            signal,
-            options
-          });
-          while (true) {
-            if (signal.aborted) {
-              break;
-            }
-            const next = await stream.next();
-            if (next.done) {
-              const message = normalizeAssistantMessage(next.value, text, signal.aborted ? "cancelled" : "end_turn");
-              if (message) {
-                yield { type: "message_end", message };
-              }
-              return { message, stopReason: message?.stopReason ?? "end_turn" };
-            }
-            if (next.value.type === "text_delta") {
-              text += next.value.delta;
-              yield next.value;
-            }
-          }
-          const cancelledMessage = partialAssistantMessage(text, "cancelled");
-          if (cancelledMessage) {
-            yield { type: "message_end", message: cancelledMessage };
-          }
-          return { stopReason: "cancelled" };
-        } catch (cause) {
-          const error = cause instanceof Error ? cause : new Error(String(cause));
-          const partial = partialAssistantMessage(text, "error");
-          if (partial) {
-            yield { type: "message_end", message: partial };
-          }
-          yield { type: "error", error };
-          yield { type: "turn_end", stopReason: "error" };
-          return { finished: true };
-        }
-      }
-      async *#executeTool(toolCall, signal) {
-        const start = Date.now();
-        const tool = this.#tools.get(toolCall.toolName);
-        yield {
-          type: "tool_execution_start",
-          toolCallId: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-          args: toolCall.args
-        };
-        let result;
-        let isError = false;
-        try {
-          if (!tool) {
-            throw new Error(`Unknown tool: ${toolCall.toolName}`);
-          }
-          result = await tool.execute(toolCall.toolCallId, toolCall.args, signal, () => void 0);
-        } catch (cause) {
-          isError = true;
-          const message = cause instanceof Error ? cause.message : String(cause);
-          result = { content: [{ type: "text", text: message }] };
-        }
-        yield {
-          type: "tool_execution_end",
-          toolCallId: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-          durationMs: Date.now() - start,
-          isError,
-          result
-        };
-        const block = {
-          type: "tool_result",
-          toolCallId: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-          result,
-          isError
-        };
-        return {
-          role: "tool_result",
-          content: [block]
-        };
-      }
-    };
-    normalizeAssistantMessage = (value, text, fallbackStopReason) => {
-      if (value) {
-        if (!isAssistantMessage(value)) {
-          throw new Error(`Provider returned ${value.role} message instead of assistant`);
-        }
-        return value;
-      }
-      return partialAssistantMessage(text, fallbackStopReason);
-    };
-    isAssistantMessage = (message) => message.role === "assistant";
-    partialAssistantMessage = (text, stopReason) => {
-      if (text.length === 0) {
-        return void 0;
-      }
-      return {
-        role: "assistant",
-        content: [{ type: "text", text }],
-        stopReason,
-        meta: stopReason === "end_turn" ? void 0 : { partial: true }
-      };
-    };
-  }
-});
-
-// packages/core/src/session/index.ts
-import { appendFile, mkdir as mkdir2, readFile as readFile5, writeFile as writeFile2 } from "node:fs/promises";
-import { dirname as dirname4, join as join6 } from "node:path";
-function assertTreeEvent(value) {
-  if (!isRecord3(value)) {
-    throw new SessionStoreError("invalid_event", "Event must be an object");
-  }
-  if (value.type === "session_header") {
-    throw new SessionStoreError("invalid_event", "Session header must be stored as the JSONL header line");
-  }
-  if (value.type !== "user_message" && value.type !== "assistant_message" && value.type !== "tool_result" && value.type !== "instruction_snapshot" && value.type !== "harness_item" && value.type !== "queue_update" && value.type !== "skill_index_snapshot" && value.type !== "skill_index_delta") {
-    throw new SessionStoreError("invalid_event", "Unsupported session event type");
-  }
-  if (typeof value.id !== "string" || value.parentId !== null && typeof value.parentId !== "string" || typeof value.seq !== "number" || typeof value.clientId !== "string" || typeof value.ts !== "number") {
-    throw new SessionStoreError("invalid_event", "Event is missing required base fields");
-  }
-  if ((value.type === "user_message" || value.type === "assistant_message" || value.type === "tool_result") && !isRecord3(value.message)) {
-    throw new SessionStoreError("invalid_event", "Message event is missing message payload");
-  }
-  if (value.type === "instruction_snapshot" && !isInstructionSnapshot(value.snapshot)) {
-    throw new SessionStoreError("invalid_event", "instruction_snapshot is missing snapshot payload");
-  }
-  if (value.type === "harness_item" && !isHarnessItem(value.item)) {
-    throw new SessionStoreError("invalid_event", "harness_item is missing item payload");
-  }
-  if (value.type === "queue_update" && !isQueueUpdate(value)) {
-    throw new SessionStoreError("invalid_event", "queue_update is missing queue payload");
-  }
-  if (value.type === "skill_index_snapshot" && !isSkillIndexSnapshot(value)) {
-    throw new SessionStoreError("invalid_event", "skill_index_snapshot is missing entries");
-  }
-  if (value.type === "skill_index_delta" && !isSkillIndexDelta(value)) {
-    throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
-  }
-}
-var SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, createSession, loadSession, buildContext, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isQueueUpdate, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, cloneMessage, isRecord3;
-var init_session = __esm({
-  "packages/core/src/session/index.ts"() {
-    "use strict";
-    init_src();
-    SessionStoreError = class extends Error {
-      code;
-      line;
-      constructor(code, message, options) {
-        super(message);
-        this.name = "SessionStoreError";
-        this.code = code;
-        this.line = options?.line;
-      }
-    };
-    SessionTree = class {
-      #nodes = /* @__PURE__ */ new Map();
-      #events = /* @__PURE__ */ new Map();
-      #order = [];
-      #conversationOrder = [];
-      #rootId = null;
-      #currentSeq = asSeq(0);
-      controlState = {
-        queues: {
-          follow_up: [],
-          steer: []
-        },
-        skillIndexInitialized: false,
-        skillIndex: {}
-      };
-      get rootId() {
-        return this.#rootId;
-      }
-      get size() {
-        return this.#events.size;
-      }
-      get currentSeq() {
-        return this.#currentSeq;
-      }
-      get(id) {
-        const node = this.#nodes.get(id);
-        if (!node) {
-          return void 0;
-        }
-        return {
-          event: node.event,
-          children: [...node.children]
-        };
-      }
-      has(id) {
-        return this.#events.has(id);
-      }
-      append(event) {
-        this.assertCanAppend(event);
-        this.#events.set(event.id, event);
-        this.#order.push(event.id);
-        this.#currentSeq = event.seq;
-        this.#applyControlEvent(event);
-        if (!isConversationEvent(event)) {
-          return;
-        }
-        if (event.parentId !== null) {
-          this.#nodes.get(event.parentId)?.children.push(event.id);
-        } else {
-          this.#rootId = event.id;
-        }
-        this.#nodes.set(event.id, { event, children: [] });
-        this.#conversationOrder.push(event.id);
-      }
-      assertCanAppend(event) {
-        assertTreeEvent(event);
-        if (this.#events.has(event.id)) {
-          throw new SessionStoreError("duplicate_event_id", `Duplicate event id: ${event.id}`);
-        }
-        if (Number(event.seq) <= Number(this.#currentSeq)) {
-          throw new SessionStoreError(
-            "non_monotonic_seq",
-            `Event seq ${String(event.seq)} must be greater than ${String(this.#currentSeq)}`
-          );
-        }
-        if (!isConversationEvent(event)) {
-          return;
-        }
-        if (event.parentId === null) {
-          if (this.#rootId !== null) {
-            throw new SessionStoreError("invalid_parent", "Only the first event can have a null parentId");
-          }
-        } else {
-          const parent = this.#nodes.get(event.parentId);
-          if (!parent) {
-            throw new SessionStoreError("invalid_parent", `Missing parent event: ${event.parentId}`);
-          }
-        }
-      }
-      getLeaves() {
-        return this.#conversationOrder.filter((id) => this.#nodes.get(id)?.children.length === 0);
-      }
-      getChildren(id) {
-        return [...this.#nodes.get(id)?.children ?? []];
-      }
-      getPath(id) {
-        if (!this.#nodes.has(id)) {
-          throw new SessionStoreError("invalid_parent", `Unknown event id: ${id}`);
-        }
-        const path = [];
-        let current = id;
-        while (current !== null) {
-          const node = this.#nodes.get(current);
-          if (!node) {
-            throw new SessionStoreError("invalid_parent", `Broken path at event id: ${current}`);
-          }
-          path.push(current);
-          current = node.event.parentId;
-        }
-        return path.reverse();
-      }
-      getBranchPoints() {
-        return this.#conversationOrder.filter((id) => (this.#nodes.get(id)?.children.length ?? 0) > 1);
-      }
-      *[Symbol.iterator]() {
-        for (const id of this.#order) {
-          const event = this.#events.get(id);
-          if (event) {
-            yield event;
-          }
-        }
-      }
-      #applyControlEvent(event) {
-        if (event.type === "instruction_snapshot") {
-          this.controlState.instructionSnapshot = event.snapshot;
-        } else if (event.type === "queue_update") {
-          this.controlState.queues[event.queue] = [...event.items];
-        } else if (event.type === "skill_index_snapshot") {
-          this.controlState.skillIndexInitialized = true;
-          this.controlState.skillIndex = Object.fromEntries(event.entries.map((entry) => [entry.name, entry]));
-        } else if (event.type === "skill_index_delta") {
-          this.controlState.skillIndexInitialized = true;
-          const next = { ...this.controlState.skillIndex };
-          for (const entry of event.added) {
-            next[entry.name] = entry;
-          }
-          for (const entry of event.changed) {
-            next[entry.name] = entry;
-          }
-          for (const removed of event.removed) {
-            delete next[removed.name];
-          }
-          this.controlState.skillIndex = next;
-        }
-      }
-    };
-    JsonlSession = class {
-      filePath;
-      header;
-      tree;
-      constructor(filePath, header, tree = new SessionTree()) {
-        this.filePath = filePath;
-        this.header = header;
-        this.tree = tree;
-      }
-      get activeLeafId() {
-        const leaves = this.tree.getLeaves();
-        return leaves.at(-1) ?? null;
-      }
-      get currentSeq() {
-        return this.tree.currentSeq;
-      }
-      async append(event) {
-        validateSessionMatch(this.header, event);
-        this.tree.assertCanAppend(event);
-        await appendFile(this.filePath, `${JSON.stringify(event)}
-`, "utf8");
-        this.tree.append(event);
-        return event;
-      }
-      async close() {
-        return Promise.resolve();
-      }
-    };
-    sessionFilePath = (sessionsDir, sessionId) => join6(sessionsDir, `${sessionId}.jsonl`);
-    sessionLogFilePath = (sessionsDir, sessionId) => join6(sessionsDir, `${sessionId}.log`);
-    createSession = async ({ sessionsDir, header }) => {
-      const validHeader = parseHeader(header);
-      await mkdir2(sessionsDir, { recursive: true });
-      const filePath = sessionFilePath(sessionsDir, validHeader.sessionId);
-      await writeFile2(filePath, `${JSON.stringify(validHeader)}
-`, { encoding: "utf8", flag: "wx" });
-      return new JsonlSession(filePath, validHeader);
-    };
-    loadSession = async (options) => {
-      const filePath = options.filePath !== void 0 ? options.filePath : sessionFilePath(options.sessionsDir, options.sessionId);
-      const content = await readFile5(filePath, "utf8");
-      const lines = content.split(/\r?\n/);
-      const headerLine = lines[0];
-      if (!headerLine) {
-        throw new SessionStoreError("missing_header", "Session file is missing a header");
-      }
-      const parsedLines = lines.map((line, index) => ({ line, lineNumber: index + 1 })).filter(({ line }) => line.length > 0).map(({ line, lineNumber }) => parseJsonLine(line, lineNumber));
-      const header = parseHeader(parsedLines[0]);
-      const tree = new SessionTree();
-      for (const event of parsedLines.slice(1)) {
-        tree.append(parseSessionEvent(header, event));
-      }
-      await mkdir2(dirname4(filePath), { recursive: true });
-      return new JsonlSession(filePath, header, tree);
-    };
-    buildContext = (tree, leafId) => tree.getPath(leafId).reduce((messages, id) => {
-      const event = tree.get(id)?.event;
-      if (!event) {
-        return messages;
-      }
-      if ("message" in event) {
-        messages.push(cloneMessage(event.message));
-        return messages;
-      }
-      if (event.type === "harness_item") {
-        appendHarnessItemToContext(messages, event);
-      }
-      return messages;
-    }, []);
-    parseJsonLine = (line, lineNumber) => {
-      try {
-        return JSON.parse(line);
-      } catch (cause) {
-        throw new SessionStoreError("invalid_json", `Invalid JSON at line ${lineNumber}`, { line: lineNumber });
-      }
-    };
-    parseHeader = (value) => {
-      if (!isRecord3(value)) {
-        throw new SessionStoreError("invalid_header", "Session header must be an object");
-      }
-      if (value.version !== 1 || typeof value.sessionId !== "string" || typeof value.deviceId !== "string") {
-        throw new SessionStoreError("invalid_header", "Session header is missing required identity fields");
-      }
-      if (typeof value.createdAt !== "number" || !isRecord3(value.meta)) {
-        throw new SessionStoreError("invalid_header", "Session header is missing createdAt or meta");
-      }
-      if (typeof value.meta.projectId !== "string" || value.meta.projectId.length === 0) {
-        throw new SessionStoreError("invalid_header", "Session header is missing meta.projectId");
-      }
-      return value;
-    };
-    parseSessionEvent = (header, value) => {
-      validateSessionMatch(header, value);
-      assertTreeEvent(value);
-      return value;
-    };
-    validateSessionMatch = (header, value) => {
-      if (!isRecord3(value) || typeof value.sessionId !== "string") {
-        throw new SessionStoreError("invalid_header", "Event must be an object with a sessionId");
-      }
-      if (value.sessionId !== header.sessionId) {
-        throw new SessionStoreError("session_mismatch", `Event belongs to ${value.sessionId}, expected ${header.sessionId}`);
-      }
-    };
-    isConversationEvent = (event) => event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result" || event.type === "harness_item";
-    isInstructionSnapshot = (value) => {
-      if (!isRecord3(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
-        return false;
-      }
-      return value.sections.every(
-        (section2) => isRecord3(section2) && typeof section2.kind === "string" && typeof section2.frozenAt === "number" && typeof section2.renderedBlock === "string"
-      );
-    };
-    isHarnessItem = (value) => isRecord3(value) && typeof value.kind === "string" && typeof value.origin === "string" && typeof value.content === "string" && (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
-    isQueueUpdate = (value) => (value.queue === "follow_up" || value.queue === "steer") && value.operation === "rewrite" && Array.isArray(value.items) && (value.anchorEventId === null || typeof value.anchorEventId === "string") && value.items.every(
-      (item) => isRecord3(item) && typeof item.id === "string" && Array.isArray(item.content) && typeof item.createdAt === "number" && typeof item.updatedAt === "number" && typeof item.clientId === "string"
-    );
-    isSkillIndexSnapshot = (value) => (value.anchorEventId === null || typeof value.anchorEventId === "string") && Array.isArray(value.entries) && value.entries.every(isSkillIndexEntry);
-    isSkillIndexDelta = (value) => (value.anchorEventId === null || typeof value.anchorEventId === "string") && Array.isArray(value.added) && Array.isArray(value.changed) && Array.isArray(value.removed) && value.added.every(isSkillIndexEntry) && value.changed.every(isSkillIndexEntry) && value.removed.every(
-      (item) => isRecord3(item) && typeof item.name === "string" && typeof item.previousPath === "string"
-    );
-    isSkillIndexEntry = (value) => isRecord3(value) && typeof value.name === "string" && typeof value.path === "string" && (value.scope === "user" || value.scope === "project") && typeof value.description === "string" && typeof value.mtimeMs === "number" && typeof value.size === "number" && typeof value.contentHash === "string" && typeof value.priority === "number";
-    appendHarnessItemToContext = (messages, event) => {
-      const reminder = renderSystemReminder(event.item.content);
-      const last = messages.at(-1);
-      if (last?.role === "tool_result" && appendReminderToToolResult(last, reminder)) {
-        return;
-      }
-      messages.push({
-        role: "user",
-        content: [{ type: "text", text: reminder }],
-        meta: {
-          source: "harness_item",
-          harnessKind: event.item.kind,
-          harnessOrigin: event.item.origin
-        }
-      });
-    };
-    appendReminderToToolResult = (message, reminder) => {
-      for (let i = message.content.length - 1; i >= 0; i -= 1) {
-        const block = message.content[i];
-        if (block?.type !== "tool_result" || !isToolResultWithContent(block.result)) {
-          continue;
-        }
-        const mergedResult = {
-          ...block.result,
-          content: [...block.result.content, { type: "text", text: `
-
-${reminder}` }]
-        };
-        message.content[i] = {
-          ...block,
-          result: mergedResult
-        };
-        return true;
-      }
-      return false;
-    };
-    isToolResultWithContent = (value) => isRecord3(value) && Array.isArray(value.content);
-    renderSystemReminder = (content) => `<system-reminder>
-${content}
-</system-reminder>`;
-    cloneMessage = (message) => ({
-      ...message,
-      content: message.content.map((block) => {
-        if (block.type !== "tool_result" || !isRecord3(block.result)) {
-          return { ...block };
-        }
-        const content = Array.isArray(block.result.content) ? { content: block.result.content.map((item) => isRecord3(item) ? { ...item } : item) } : {};
-        return {
-          ...block,
-          result: {
-            ...block.result,
-            ...content
-          }
-        };
-      }),
-      ...message.meta ? { meta: { ...message.meta } } : {}
-    });
-    isRecord3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    modelRoles = (config, modelId) => ["primary", "standard", "auxiliary"].filter((role) => config.modelProfile.roles[role] === modelId);
   }
 });
 
 // packages/core/src/tools/coding-tools.ts
 import { createHash, randomUUID as randomUUID2 } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir as mkdir3, readFile as readFile6, rename as rename2, rm, stat as stat3, writeFile as writeFile3 } from "node:fs/promises";
-import { dirname as dirname5, extname, isAbsolute, relative, resolve as resolve2 } from "node:path";
+import { mkdir as mkdir2, readFile as readFile4, rename as rename2, rm, stat as stat3, writeFile as writeFile2 } from "node:fs/promises";
+import { dirname as dirname3, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, bashResult, truncate, textResult, byteLength, isTimeoutError, isExecError, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
 var init_coding_tools = __esm({
@@ -1929,7 +1660,7 @@ var init_coding_tools = __esm({
     READ_TOKEN_BUDGET_RATIO = 0.01;
     FULL_READ_TOKEN_BUDGET_RATIO = 0.1;
     createCodingTools = (options) => {
-      const root = resolve2(options.cwd);
+      const root = resolve(options.cwd);
       const state = { reads: /* @__PURE__ */ new Map(), todos: [] };
       const defaultTimeoutMs = options.defaultTimeoutMs ?? 3e4;
       const maxTimeoutMs = options.maxTimeoutMs ?? 12e4;
@@ -1940,7 +1671,7 @@ var init_coding_tools = __esm({
         if (input.length === 0) {
           throw new Error("path must not be empty");
         }
-        const candidate = isAbsolute(input) ? resolve2(input) : resolve2(root, input);
+        const candidate = isAbsolute(input) ? resolve(input) : resolve(root, input);
         if (!isWithin(root, candidate)) {
           throw new Error(`path escapes workspace: ${input}`);
         }
@@ -1979,7 +1710,7 @@ var init_coding_tools = __esm({
             if (fileStat.isDirectory()) {
               throw new Error(`Read cannot read a directory: ${input.path}. Use Glob to find files.`);
             }
-            const buffer = await readFile6(path);
+            const buffer = await readFile4(path);
             assertTextBuffer(buffer, input.path);
             const content = buffer.toString("utf8");
             const lines = linesOf(content);
@@ -2031,7 +1762,7 @@ var init_coding_tools = __esm({
             const input = parseWriteArgs(args);
             const path = resolveWorkspacePath(input.path);
             const previous = await exists(path) ? await assertFreshReadableCoverage(path, "Write") : void 0;
-            await mkdir3(dirname5(path), { recursive: true });
+            await mkdir2(dirname3(path), { recursive: true });
             await atomicWriteFile(path, input.content);
             state.reads.set(path, await snapshotFile(path, input.content, completeRanges(linesOf(input.content).length)));
             const type = previous ? "update" : "create";
@@ -2055,7 +1786,7 @@ var init_coding_tools = __esm({
             if (input.old_string === input.new_string) {
               throw new Error("old_string and new_string must differ");
             }
-            const content = await readFile6(path, "utf8");
+            const content = await readFile4(path, "utf8");
             const count = countOccurrences(content, input.old_string);
             if (count === 0) {
               throw new Error(`String to replace not found in file.
@@ -2328,7 +2059,7 @@ ${filenames.join("\n")}`,
       return value;
     };
     snapshotFile = async (path, content, ranges) => {
-      const [fileStat, fileContent] = await Promise.all([stat3(path), content ?? readFile6(path, "utf8")]);
+      const [fileStat, fileContent] = await Promise.all([stat3(path), content ?? readFile4(path, "utf8")]);
       const totalLines = linesOf(fileContent).length;
       return {
         content: fileContent,
@@ -2462,9 +2193,9 @@ ${filenames.join("\n")}`,
       }
     };
     atomicWriteFile = async (path, content) => {
-      const temp = resolve2(dirname5(path), `.${randomUUID2()}.tmp`);
+      const temp = resolve(dirname3(path), `.${randomUUID2()}.tmp`);
       try {
-        await writeFile3(temp, content, "utf8");
+        await writeFile2(temp, content, "utf8");
         await rename2(temp, path);
       } catch (cause) {
         await rm(temp, { force: true }).catch(() => void 0);
@@ -2583,7 +2314,7 @@ ${stderr}`, {
       };
     };
     toWorkspaceRelative = (root) => (path) => {
-      const absolute = isAbsolute(path) ? path : resolve2(root, path);
+      const absolute = isAbsolute(path) ? path : resolve(root, path);
       return relative(root, absolute) || ".";
     };
     relativizeGrepLine = (root) => (line) => {
@@ -2608,7 +2339,7 @@ ${stderr}`, {
       const entries = await Promise.all(
         paths.map(async (path) => {
           try {
-            const info = await stat3(isAbsolute(path) ? path : resolve2(root, path));
+            const info = await stat3(isAbsolute(path) ? path : resolve(root, path));
             return { path, mtimeMs: info.mtimeMs };
           } catch {
             return { path, mtimeMs: 0 };
@@ -2666,23 +2397,1305 @@ var init_tools = __esm({
   }
 });
 
+// packages/core/src/channel/index.ts
+var createSendChannelMessageTool, parseSendChannelMessageInput, isRecord3;
+var init_channel = __esm({
+  "packages/core/src/channel/index.ts"() {
+    "use strict";
+    init_tools();
+    createSendChannelMessageTool = (options) => defineTool({
+      name: "SendChannelMessage",
+      description: "Send a text reply to the current IM channel conversation. Do not provide raw platform user ids or group ids.",
+      execute: async (_toolCallId, args) => {
+        const input = parseSendChannelMessageInput(args);
+        const result = await options.sendCurrent(input);
+        return {
+          content: [{ type: "text", text: `Channel message sent to ${result.channel}:${result.target}` }],
+          details: result
+        };
+      }
+    });
+    parseSendChannelMessageInput = (value) => {
+      if (!isRecord3(value)) {
+        throw new Error("SendChannelMessage args must be an object");
+      }
+      if (typeof value.text !== "string" || value.text.trim().length === 0) {
+        throw new Error("SendChannelMessage.text must be a non-empty string");
+      }
+      if (value.channel !== void 0 && (typeof value.channel !== "string" || value.channel.trim().length === 0)) {
+        throw new Error("SendChannelMessage.channel must be a non-empty string when provided");
+      }
+      if (value.target !== void 0 && value.target !== "current") {
+        throw new Error("SendChannelMessage.target must be current when provided");
+      }
+      return {
+        text: value.text,
+        ...typeof value.channel === "string" ? { channel: value.channel } : {},
+        ...value.target === "current" ? { target: "current" } : {}
+      };
+    };
+    isRecord3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+});
+
+// packages/core/src/extensions/index.ts
+import { readFile as readFile5 } from "node:fs/promises";
+import { dirname as dirname4, resolve as resolve2 } from "node:path";
+var loadExtensionManifest, parseExtensionManifest, requireString2, requireIdentifier2, requireKind, requireRelativePath, optionalRelativePaths, isRecord4;
+var init_extensions = __esm({
+  "packages/core/src/extensions/index.ts"() {
+    "use strict";
+    loadExtensionManifest = async (manifestPath) => parseExtensionManifest(await readFile5(manifestPath, "utf8"), manifestPath);
+    parseExtensionManifest = (text, manifestPath = "scorel.extension.json") => {
+      let value;
+      try {
+        value = JSON.parse(text);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        throw new Error(`Invalid extension manifest JSON at ${manifestPath}: ${message}`);
+      }
+      if (!isRecord4(value)) {
+        throw new Error(`Extension manifest at ${manifestPath} must be an object`);
+      }
+      const rootDir = dirname4(resolve2(manifestPath));
+      const id = requireIdentifier2(value.id, "id", manifestPath);
+      const kind = requireKind(value.kind, manifestPath);
+      const displayName = requireString2(value.displayName, "displayName", manifestPath);
+      const adapter = requireRelativePath(value.adapter, "adapter", manifestPath);
+      const skills = optionalRelativePaths(value.skills, "skills", manifestPath);
+      const mcp = Array.isArray(value.mcp) ? value.mcp : [];
+      return {
+        id,
+        kind,
+        displayName,
+        adapter,
+        skills,
+        mcp,
+        manifestPath: resolve2(manifestPath),
+        rootDir
+      };
+    };
+    requireString2 = (value, name, manifestPath) => {
+      if (typeof value !== "string" || value.trim().length === 0) {
+        throw new Error(`Extension manifest ${manifestPath} field ${name} must be a non-empty string`);
+      }
+      return value;
+    };
+    requireIdentifier2 = (value, name, manifestPath) => {
+      const text = requireString2(value, name, manifestPath);
+      if (!/^[A-Za-z0-9_-]+$/.test(text)) {
+        throw new Error(`Extension manifest ${manifestPath} field ${name} must contain only letters, numbers, underscores, or hyphens`);
+      }
+      return text;
+    };
+    requireKind = (value, manifestPath) => {
+      if (value === "im") {
+        return value;
+      }
+      throw new Error(`Extension manifest ${manifestPath} field kind must be im`);
+    };
+    requireRelativePath = (value, name, manifestPath) => {
+      const text = requireString2(value, name, manifestPath);
+      if (text.startsWith("/") || text.includes("..")) {
+        throw new Error(`Extension manifest ${manifestPath} field ${name} must be a relative path inside the extension`);
+      }
+      return text;
+    };
+    optionalRelativePaths = (value, name, manifestPath) => {
+      if (value === void 0) {
+        return [];
+      }
+      if (!Array.isArray(value)) {
+        throw new Error(`Extension manifest ${manifestPath} field ${name} must be an array`);
+      }
+      return value.map((item, index) => requireRelativePath(item, `${name}.${index}`, manifestPath));
+    };
+    isRecord4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+});
+
+// packages/core/src/instructions/index.ts
+import { existsSync } from "node:fs";
+import { readdir as readdir4, readFile as readFile6 } from "node:fs/promises";
+import { homedir as homedir2, platform, release } from "node:os";
+import { dirname as dirname5, join as join5, resolve as resolve3 } from "node:path";
+var BASELINE_PROMPT, buildInstructionSnapshot, renderSystemPrompt, section, discoverAgentsSources, projectAgentsPaths, findGitRoot, renderAgentsBlock, renderWorkspaceBlock, renderEnvironmentBlock, renderTimeBlock, isNodeErrorCode;
+var init_instructions = __esm({
+  "packages/core/src/instructions/index.ts"() {
+    "use strict";
+    BASELINE_PROMPT = [
+      "You are Scorel, a coding agent running inside a recoverable local workspace.",
+      "Follow the user's request, respect the project instructions, use tools deliberately, and keep changes scoped to the active task.",
+      "Tool results and user messages may include <system-reminder> tags. These tags contain information automatically added by Scorel's harness. They are not part of the specific tool result or user message in which they appear.",
+      "If the AppendDaily tool is available, use it once near the end of meaningful completed work to record durable progress, decisions, and follow-ups. Do not use it for empty turns or transient noise."
+    ].join("\n");
+    buildInstructionSnapshot = async (options) => {
+      const cwd = resolve3(options.cwd);
+      const now = options.now ?? Date.now;
+      const frozenAt = now();
+      const homeDir = resolve3(options.homeDir ?? homedir2());
+      const agentsSources = await discoverAgentsSources({ cwd, homeDir });
+      const repoRoot = findGitRoot(cwd);
+      return {
+        version: 1,
+        cwd,
+        sections: [
+          section("baseline", frozenAt, BASELINE_PROMPT, [{ sourceType: "builtin" }]),
+          section("agents", frozenAt, renderAgentsBlock(agentsSources), agentsSources),
+          section("memory", frozenAt, "No memory sources are configured for this session.", []),
+          section("workspace", frozenAt, await renderWorkspaceBlock(cwd, repoRoot), void 0, {
+            cwd,
+            repoRoot
+          }),
+          section("environment", frozenAt, renderEnvironmentBlock(options.env ?? process.env), void 0, {
+            platform: platform(),
+            release: release(),
+            shell: (options.env ?? process.env).SHELL
+          }),
+          section("time", frozenAt, renderTimeBlock(frozenAt), void 0, {
+            timestamp: frozenAt,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+          })
+        ]
+      };
+    };
+    renderSystemPrompt = (snapshot) => snapshot.sections.map((section2) => section2.renderedBlock.trim()).filter(Boolean).join("\n\n");
+    section = (kind, frozenAt, renderedBlock, sources, data) => ({
+      kind,
+      frozenAt,
+      ...sources ? { sources } : {},
+      renderedBlock,
+      ...data ? { data } : {}
+    });
+    discoverAgentsSources = async (options) => {
+      const projectFiles = projectAgentsPaths(options.cwd, options.homeDir);
+      const globalPath = join5(options.homeDir, ".scorel", "AGENTS.md");
+      const candidates = [...projectFiles.map((path) => ({ path, scope: "project" })), { path: globalPath, scope: "global_user" }];
+      const sources = [];
+      for (const candidate of candidates) {
+        try {
+          const content = await readFile6(candidate.path, "utf8");
+          sources.push({
+            sourceType: "agents_md",
+            path: candidate.path,
+            scope: candidate.scope,
+            priority: candidate.scope === "global_user" ? 0 : sources.length + 1,
+            content
+          });
+        } catch (cause) {
+          if (!isNodeErrorCode(cause, "ENOENT") && !isNodeErrorCode(cause, "ENOTDIR")) {
+            throw cause;
+          }
+        }
+      }
+      return sources;
+    };
+    projectAgentsPaths = (cwd, homeDir) => {
+      const gitRoot = findGitRoot(cwd);
+      const stopAt = gitRoot ?? homeDir;
+      const paths = [];
+      let current = cwd;
+      while (true) {
+        if (current !== homeDir) {
+          paths.push(join5(current, "AGENTS.md"));
+        }
+        if (current === stopAt || current === dirname5(current)) {
+          break;
+        }
+        const next = dirname5(current);
+        if (!gitRoot && next === homeDir) {
+          break;
+        }
+        current = next;
+      }
+      return paths.reverse();
+    };
+    findGitRoot = (cwd) => {
+      let current = cwd;
+      while (true) {
+        if (existsSync(join5(current, ".git"))) {
+          return current;
+        }
+        const next = dirname5(current);
+        if (next === current) {
+          return void 0;
+        }
+        current = next;
+      }
+    };
+    renderAgentsBlock = (sources) => {
+      if (sources.length === 0) {
+        return "No AGENTS.md instructions were found for this session.";
+      }
+      return [
+        "AGENTS.md instructions loaded for this session:",
+        ...sources.map(
+          (source) => [`Source: ${source.path}`, `Scope: ${source.scope}`, "Content:", source.content.trimEnd()].join("\n")
+        )
+      ].join("\n\n");
+    };
+    renderWorkspaceBlock = async (cwd, repoRoot) => {
+      const root = repoRoot ?? cwd;
+      let entries = [];
+      try {
+        entries = (await readdir4(root, { withFileTypes: true })).filter((entry) => !entry.name.startsWith(".")).slice(0, 20).map((entry) => `${entry.isDirectory() ? "dir" : "file"}:${entry.name}`);
+      } catch {
+        entries = [];
+      }
+      return [`Workspace cwd: ${cwd}`, `Repository root: ${repoRoot ?? "not detected"}`, `Top-level entries: ${entries.join(", ") || "none"}`].join("\n");
+    };
+    renderEnvironmentBlock = (env) => [`Platform: ${platform()} ${release()}`, `Shell: ${env.SHELL ?? "unknown"}`].join("\n");
+    renderTimeBlock = (timestamp) => [`Session started at: ${new Date(timestamp).toISOString()}`, `Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`].join("\n");
+    isNodeErrorCode = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
+  }
+});
+
+// packages/core/src/memory/index.ts
+import { appendFile, mkdir as mkdir3, readFile as readFile7, writeFile as writeFile3 } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import { join as join6 } from "node:path";
+var memoryDate, scorelMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, parseAppendDailyInput, requireString3, optionalStringArray, isRecord5, safeProjectId, isNodeErrorCode2;
+var init_memory = __esm({
+  "packages/core/src/memory/index.ts"() {
+    "use strict";
+    init_tools();
+    memoryDate = (timestamp) => new Date(timestamp).toISOString().slice(0, 10);
+    scorelMemoryPaths = (options) => {
+      const home = options.homeDir ?? homedir3();
+      const now = options.now ?? Date.now;
+      const today = memoryDate(now());
+      const yesterday = memoryDate(now() - 24 * 60 * 60 * 1e3);
+      const rootDir = join6(home, ".scorel", "memory");
+      const projectDir = join6(rootDir, "projects", safeProjectId(options.projectId));
+      const dailyDir = join6(projectDir, "daily");
+      return {
+        rootDir,
+        rootMemoryPath: join6(rootDir, "MEMORY.md"),
+        projectDir,
+        projectMemoryPath: join6(projectDir, "MEMORY.md"),
+        dailyDir,
+        todayDailyPath: join6(dailyDir, `${today}.md`),
+        yesterdayDailyPath: join6(dailyDir, `${yesterday}.md`),
+        dreamStatePath: join6(projectDir, "dream-state.json"),
+        today,
+        yesterday
+      };
+    };
+    buildMemoryContext = async (options) => {
+      const paths = scorelMemoryPaths(options);
+      await ensureMemoryFiles(paths);
+      return {
+        paths,
+        rootMemory: trimForContext(await readOptional(paths.rootMemoryPath), 8e3),
+        projectMemory: trimForContext(await readOptional(paths.projectMemoryPath), 12e3),
+        todayDaily: trimForContext(await readOptional(paths.todayDailyPath), 8e3, "tail"),
+        yesterdayDaily: trimForContext(await readOptional(paths.yesterdayDailyPath), 8e3, "tail")
+      };
+    };
+    renderMemoryHarness = (context) => [
+      "Memory context for this session.",
+      "",
+      "Root MEMORY.md:",
+      context.rootMemory.trim() || "(empty)",
+      "",
+      "Project MEMORY.md:",
+      context.projectMemory.trim() || "(empty)",
+      "",
+      `Recent daily (${context.paths.yesterday}, ${context.paths.today}):`,
+      context.yesterdayDaily.trim() || "(yesterday empty)",
+      "",
+      context.todayDaily.trim() || "(today empty)",
+      "",
+      "Memory rules:",
+      "- Treat memory as point-in-time context; verify current code facts from the repo before acting.",
+      "- Project MEMORY overrides root MEMORY for project-specific decisions.",
+      "- Daily notes are recent progress context, not long-term truth."
+    ].join("\n");
+    appendDailyEntry = async (options) => {
+      const paths = scorelMemoryPaths(options);
+      await ensureMemoryFiles(paths);
+      const text = options.text.trim();
+      if (!text) {
+        return { path: paths.todayDailyPath, entry: "", date: paths.today };
+      }
+      const time = new Date((options.now ?? Date.now)()).toISOString().slice(11, 16);
+      const entry = `- ${time} ${text.replace(/\s+/g, " ")}
+`;
+      await appendFile(paths.todayDailyPath, entry, "utf8");
+      return { path: paths.todayDailyPath, entry: entry.trimEnd(), date: paths.today };
+    };
+    createAppendDailyTool = (options) => defineTool({
+      name: "AppendDaily",
+      description: [
+        "Append a compact hidden project daily journal entry after meaningful work.",
+        "Use this once near the end of a completed user turn when there is progress, a decision, or a follow-up worth preserving.",
+        "Do not include secrets, raw logs, speculation, or facts that should be re-read from the repository."
+      ].join(" "),
+      execute: async (_toolCallId, args) => {
+        const input = parseAppendDailyInput(args);
+        const result = await appendDailyEntry({
+          projectId: options.projectId,
+          homeDir: options.homeDir,
+          now: options.now,
+          text: renderDailyEntry(input)
+        });
+        await options.onAppend?.(result);
+        return {
+          content: [{
+            type: "text",
+            text: result.entry ? `Daily appended: ${result.date}` : "Daily append skipped: empty entry"
+          }],
+          details: {
+            path: result.path,
+            date: result.date
+          }
+        };
+      }
+    });
+    renderDailyEntry = (input) => {
+      const sections = [
+        `Summary: ${compactLine(input.summary, 500)}`,
+        renderList("Completed", input.completed),
+        renderList("Decisions", input.decisions),
+        renderList("Follow-ups", input.followUps),
+        renderList("Memory candidates", input.memoryCandidates)
+      ].filter(Boolean);
+      return sections.join(" ");
+    };
+    ensureMemoryFiles = async (paths) => {
+      await mkdir3(paths.rootDir, { recursive: true, mode: 448 });
+      await mkdir3(paths.projectDir, { recursive: true, mode: 448 });
+      await mkdir3(paths.dailyDir, { recursive: true, mode: 448 });
+      await ensureFile(paths.rootMemoryPath, "# Memory\n");
+      await ensureFile(paths.projectMemoryPath, "# Project Memory\n");
+      await ensureFile(paths.todayDailyPath, `# ${paths.today}
+
+`);
+    };
+    ensureFile = async (path, content) => {
+      try {
+        await writeFile3(path, content, { encoding: "utf8", flag: "wx", mode: 384 });
+      } catch (cause) {
+        if (!isNodeErrorCode2(cause, "EEXIST")) {
+          throw cause;
+        }
+      }
+    };
+    readOptional = async (path) => {
+      try {
+        return await readFile7(path, "utf8");
+      } catch (cause) {
+        if (isNodeErrorCode2(cause, "ENOENT")) {
+          return "";
+        }
+        throw cause;
+      }
+    };
+    trimForContext = (text, maxChars, mode = "head") => {
+      if (text.length <= maxChars) {
+        return text;
+      }
+      return mode === "tail" ? text.slice(-maxChars) : text.slice(0, maxChars);
+    };
+    compactLine = (value, maxChars) => value.replace(/\s+/g, " ").trim().slice(0, maxChars);
+    renderList = (label, values) => {
+      const items = (values ?? []).map((value) => compactLine(value, 240)).filter(Boolean);
+      return items.length > 0 ? `${label}: ${items.join("; ")}` : "";
+    };
+    parseAppendDailyInput = (value) => {
+      if (!isRecord5(value)) {
+        throw new Error("AppendDaily args must be an object");
+      }
+      const summary = requireString3(value.summary, "summary");
+      return {
+        summary,
+        completed: optionalStringArray(value.completed, "completed"),
+        decisions: optionalStringArray(value.decisions, "decisions"),
+        followUps: optionalStringArray(value.followUps, "followUps"),
+        memoryCandidates: optionalStringArray(value.memoryCandidates, "memoryCandidates")
+      };
+    };
+    requireString3 = (value, name) => {
+      if (typeof value !== "string" || !value.trim()) {
+        throw new Error(`AppendDaily.${name} must be a non-empty string`);
+      }
+      return value.trim();
+    };
+    optionalStringArray = (value, name) => {
+      if (value === void 0) {
+        return void 0;
+      }
+      if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+        throw new Error(`AppendDaily.${name} must be an array of strings`);
+      }
+      return value.map((item) => item.trim()).filter(Boolean);
+    };
+    isRecord5 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    safeProjectId = (projectId) => {
+      if (!/^[A-Za-z0-9_-]+$/.test(projectId)) {
+        throw new Error("projectId must contain only letters, numbers, underscores, or hyphens");
+      }
+      return projectId;
+    };
+    isNodeErrorCode2 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
+  }
+});
+
+// packages/core/src/provider/pi-ai.ts
+import {
+  Type,
+  getModels,
+  streamSimple
+} from "@mariozechner/pi-ai";
+var DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW, DEFAULT_CUSTOM_MODEL_MAX_TOKENS, createPiAiProvider, resolvePiAiModel, toPiContext, toPiMessage, toPiAssistantBlock, fromPiAssistant, fromPiContentBlock, toPiTool, toolParameters, textContent, toolResultText, stringMeta, toPiStopReason, fromPiStopReason, fromPiUsage;
+var init_pi_ai = __esm({
+  "packages/core/src/provider/pi-ai.ts"() {
+    "use strict";
+    DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW = 2e5;
+    DEFAULT_CUSTOM_MODEL_MAX_TOKENS = 64e3;
+    createPiAiProvider = (options) => ({
+      streamTurn: async function* ({ context, systemPrompt, tools, signal }) {
+        const stream = streamSimple(options.model, toPiContext(context, systemPrompt, tools), {
+          apiKey: options.apiKey,
+          signal,
+          ...options.reasoning ? { reasoning: options.reasoning } : {},
+          ...options.onPayload ? { onPayload: options.onPayload } : {}
+        });
+        for await (const event of stream) {
+          if (event.type === "text_delta") {
+            yield { type: "text_delta", delta: event.delta };
+          }
+        }
+        return fromPiAssistant(await stream.result());
+      }
+    });
+    resolvePiAiModel = (config) => {
+      if (config.type === "custom") {
+        return {
+          id: config.id,
+          name: config.id,
+          api: config.api,
+          provider: config.provider,
+          baseUrl: config.baseUrl,
+          input: config.supportsImageInput ? ["text", "image"] : ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          reasoning: config.reasoning ?? false,
+          contextWindow: config.contextWindow ?? DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW,
+          maxTokens: config.maxTokens ?? DEFAULT_CUSTOM_MODEL_MAX_TOKENS,
+          ...config.api === "openai-completions" ? { compat: { supportsDeveloperRole: config.compat?.supportsDeveloperRole ?? false } } : {}
+        };
+      }
+      const model = getModels(config.provider).find((candidate) => candidate.id === config.id);
+      if (!model) {
+        throw new Error(`Unknown pi-ai model: ${config.provider}/${config.id}`);
+      }
+      return {
+        ...model,
+        ...config.baseUrl ? { baseUrl: config.baseUrl } : {}
+      };
+    };
+    toPiContext = (context, systemPrompt, tools) => ({
+      ...systemPrompt ? { systemPrompt } : {},
+      messages: context.flatMap(toPiMessage),
+      tools: tools.map(toPiTool)
+    });
+    toPiMessage = (message) => {
+      if (message.role === "system") {
+        return [{ role: "user", content: textContent(message), timestamp: Date.now() }];
+      }
+      if (message.role === "user") {
+        return [{ role: "user", content: textContent(message), timestamp: Date.now() }];
+      }
+      if (message.role === "assistant") {
+        return [
+          {
+            role: "assistant",
+            content: message.content.flatMap(toPiAssistantBlock),
+            api: stringMeta(message, "api") ?? "openai-completions",
+            provider: stringMeta(message, "provider") ?? "scorel",
+            model: stringMeta(message, "model") ?? "unknown",
+            usage: {
+              input: message.usage?.inputTokens ?? 0,
+              output: message.usage?.outputTokens ?? 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: message.usage?.totalTokens ?? 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+            },
+            stopReason: toPiStopReason(message.stopReason),
+            timestamp: Date.now()
+          }
+        ];
+      }
+      return message.content.flatMap((block) => {
+        if (block.type !== "tool_result") {
+          return [];
+        }
+        return [
+          {
+            role: "toolResult",
+            toolCallId: block.toolCallId,
+            toolName: block.toolName,
+            content: [{ type: "text", text: toolResultText(block.result) }],
+            isError: block.isError ?? false,
+            timestamp: Date.now()
+          }
+        ];
+      });
+    };
+    toPiAssistantBlock = (block) => {
+      if (block.type === "text") {
+        return [{ type: "text", text: block.text }];
+      }
+      if (block.type === "thinking") {
+        return [{ type: "thinking", thinking: block.text }];
+      }
+      if (block.type === "tool_call") {
+        return [{ type: "toolCall", id: block.toolCallId, name: block.toolName, arguments: block.args }];
+      }
+      return [];
+    };
+    fromPiAssistant = (message) => ({
+      role: "assistant",
+      content: message.content.map(fromPiContentBlock),
+      stopReason: fromPiStopReason(message.stopReason),
+      usage: fromPiUsage(message.usage),
+      meta: {
+        api: message.api,
+        provider: message.provider,
+        model: message.model
+      }
+    });
+    fromPiContentBlock = (block) => {
+      if (block.type === "text") {
+        return { type: "text", text: block.text };
+      }
+      if (block.type === "thinking") {
+        return { type: "thinking", text: block.thinking };
+      }
+      return {
+        type: "tool_call",
+        toolCallId: block.id,
+        toolName: block.name,
+        args: block.arguments
+      };
+    };
+    toPiTool = (tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: toolParameters(tool.name)
+    });
+    toolParameters = (name) => {
+      switch (name) {
+        case "Read":
+          return Type.Object({
+            file_path: Type.String(),
+            offset: Type.Optional(Type.Number()),
+            limit: Type.Optional(Type.Number()),
+            full: Type.Optional(Type.Boolean())
+          });
+        case "Write":
+          return Type.Object({
+            file_path: Type.String(),
+            content: Type.String()
+          });
+        case "Edit":
+          return Type.Object({
+            file_path: Type.String(),
+            old_string: Type.String(),
+            new_string: Type.String(),
+            replace_all: Type.Optional(Type.Boolean())
+          });
+        case "Bash":
+          return Type.Object({
+            command: Type.String(),
+            cwd: Type.Optional(Type.String()),
+            timeout: Type.Optional(Type.Number()),
+            description: Type.Optional(Type.String()),
+            maxOutputBytes: Type.Optional(Type.Number())
+          });
+        case "Glob":
+          return Type.Object({
+            pattern: Type.String(),
+            path: Type.Optional(Type.String()),
+            head_limit: Type.Optional(Type.Number()),
+            offset: Type.Optional(Type.Number())
+          });
+        case "Grep":
+          return Type.Object({
+            pattern: Type.String(),
+            path: Type.Optional(Type.String()),
+            glob: Type.Optional(Type.String()),
+            output_mode: Type.Optional(Type.Union([Type.Literal("files"), Type.Literal("content"), Type.Literal("count")])),
+            "-B": Type.Optional(Type.Number()),
+            "-A": Type.Optional(Type.Number()),
+            "-C": Type.Optional(Type.Number()),
+            context: Type.Optional(Type.Number()),
+            "-n": Type.Optional(Type.Boolean()),
+            "-i": Type.Optional(Type.Boolean()),
+            type: Type.Optional(Type.String()),
+            head_limit: Type.Optional(Type.Number()),
+            offset: Type.Optional(Type.Number()),
+            multiline: Type.Optional(Type.Boolean())
+          });
+        case "TodoWrite":
+          return Type.Object({
+            todos: Type.Array(
+              Type.Object({
+                content: Type.String(),
+                status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")]),
+                activeForm: Type.Optional(Type.String())
+              })
+            )
+          });
+        case "AppendDaily":
+          return Type.Object({
+            summary: Type.String(),
+            completed: Type.Optional(Type.Array(Type.String())),
+            decisions: Type.Optional(Type.Array(Type.String())),
+            followUps: Type.Optional(Type.Array(Type.String())),
+            memoryCandidates: Type.Optional(Type.Array(Type.String()))
+          });
+        case "Skill":
+          return Type.Object({
+            name: Type.String(),
+            args: Type.Optional(Type.String())
+          });
+        default:
+          return Type.Object({});
+      }
+    };
+    textContent = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+    toolResultText = (result) => {
+      if (typeof result === "object" && result !== null && "content" in result) {
+        const content = result.content;
+        if (Array.isArray(content)) {
+          return content.filter((block) => block?.type === "text" && typeof block.text === "string").map((block) => block.text).join("\n");
+        }
+      }
+      return JSON.stringify(result);
+    };
+    stringMeta = (message, key) => {
+      const value = message.meta?.[key];
+      return typeof value === "string" ? value : void 0;
+    };
+    toPiStopReason = (reason) => {
+      if (reason === "tool_call") {
+        return "toolUse";
+      }
+      if (reason === "max_tokens") {
+        return "length";
+      }
+      if (reason === "cancelled") {
+        return "aborted";
+      }
+      if (reason === "error") {
+        return "error";
+      }
+      return "stop";
+    };
+    fromPiStopReason = (reason) => {
+      if (reason === "toolUse") {
+        return "tool_call";
+      }
+      if (reason === "length") {
+        return "max_tokens";
+      }
+      if (reason === "aborted") {
+        return "cancelled";
+      }
+      if (reason === "error") {
+        return "error";
+      }
+      return "end_turn";
+    };
+    fromPiUsage = (usage) => {
+      if (!usage) {
+        return void 0;
+      }
+      return {
+        inputTokens: usage.input,
+        outputTokens: usage.output,
+        totalTokens: usage.totalTokens
+      };
+    };
+  }
+});
+
+// packages/core/src/runtime/index.ts
+var ScorelRuntime, normalizeAssistantMessage, isAssistantMessage, partialAssistantMessage;
+var init_runtime = __esm({
+  "packages/core/src/runtime/index.ts"() {
+    "use strict";
+    ScorelRuntime = class {
+      #provider;
+      #tools = /* @__PURE__ */ new Map();
+      #controller;
+      constructor({ provider }) {
+        this.#provider = provider;
+      }
+      get running() {
+        return this.#controller !== void 0;
+      }
+      registerTool(tool) {
+        this.#tools.set(tool.name, tool);
+      }
+      unregisterTool(name) {
+        this.#tools.delete(name);
+      }
+      cancel() {
+        this.#controller?.abort();
+      }
+      async *executeTurn(context, systemPrompt, options) {
+        if (this.#controller) {
+          throw new Error("Runtime is already running");
+        }
+        const controller = new AbortController();
+        this.#controller = controller;
+        yield { type: "turn_start" };
+        try {
+          let nextContext = [...context];
+          while (!controller.signal.aborted) {
+            const result = yield* this.#runProviderTurn(nextContext, systemPrompt, options, controller.signal);
+            if (result.finished) {
+              return;
+            }
+            const assistant = result.message;
+            if (!assistant) {
+              yield { type: "turn_end", stopReason: result.stopReason ?? "end_turn" };
+              return;
+            }
+            const toolCalls = assistant.content.filter(
+              (block) => block.type === "tool_call"
+            );
+            if (controller.signal.aborted || toolCalls.length === 0 || assistant.stopReason !== "tool_call") {
+              yield { type: "turn_end", stopReason: controller.signal.aborted ? "cancelled" : assistant.stopReason };
+              return;
+            }
+            const toolMessages = [];
+            for (const toolCall of toolCalls) {
+              if (controller.signal.aborted) {
+                break;
+              }
+              toolMessages.push(yield* this.#executeTool(toolCall, controller.signal));
+            }
+            if (controller.signal.aborted) {
+              yield { type: "turn_end", stopReason: "cancelled" };
+              return;
+            }
+            const contextAfterTools = [...nextContext, assistant, ...toolMessages];
+            nextContext = options.refreshContext ? await options.refreshContext(contextAfterTools) : contextAfterTools;
+          }
+          yield { type: "turn_end", stopReason: "cancelled" };
+        } finally {
+          this.#controller = void 0;
+        }
+      }
+      async *#runProviderTurn(context, systemPrompt, options, signal) {
+        let text = "";
+        yield { type: "message_start", role: "assistant" };
+        try {
+          const stream = this.#provider.streamTurn({
+            context,
+            systemPrompt,
+            tools: [...this.#tools.values()],
+            signal,
+            options
+          });
+          while (true) {
+            if (signal.aborted) {
+              break;
+            }
+            const next = await stream.next();
+            if (next.done) {
+              const message = normalizeAssistantMessage(next.value, text, signal.aborted ? "cancelled" : "end_turn");
+              if (message) {
+                yield { type: "message_end", message };
+              }
+              return { message, stopReason: message?.stopReason ?? "end_turn" };
+            }
+            if (next.value.type === "text_delta") {
+              text += next.value.delta;
+              yield next.value;
+            }
+          }
+          const cancelledMessage = partialAssistantMessage(text, "cancelled");
+          if (cancelledMessage) {
+            yield { type: "message_end", message: cancelledMessage };
+          }
+          return { stopReason: "cancelled" };
+        } catch (cause) {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          const partial = partialAssistantMessage(text, "error");
+          if (partial) {
+            yield { type: "message_end", message: partial };
+          }
+          yield { type: "error", error };
+          yield { type: "turn_end", stopReason: "error" };
+          return { finished: true };
+        }
+      }
+      async *#executeTool(toolCall, signal) {
+        const start = Date.now();
+        const tool = this.#tools.get(toolCall.toolName);
+        yield {
+          type: "tool_execution_start",
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          args: toolCall.args
+        };
+        let result;
+        let isError = false;
+        try {
+          if (!tool) {
+            throw new Error(`Unknown tool: ${toolCall.toolName}`);
+          }
+          result = await tool.execute(toolCall.toolCallId, toolCall.args, signal, () => void 0);
+        } catch (cause) {
+          isError = true;
+          const message = cause instanceof Error ? cause.message : String(cause);
+          result = { content: [{ type: "text", text: message }] };
+        }
+        yield {
+          type: "tool_execution_end",
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          durationMs: Date.now() - start,
+          isError,
+          result
+        };
+        const block = {
+          type: "tool_result",
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          result,
+          isError
+        };
+        return {
+          role: "tool_result",
+          content: [block]
+        };
+      }
+    };
+    normalizeAssistantMessage = (value, text, fallbackStopReason) => {
+      if (value) {
+        if (!isAssistantMessage(value)) {
+          throw new Error(`Provider returned ${value.role} message instead of assistant`);
+        }
+        return value;
+      }
+      return partialAssistantMessage(text, fallbackStopReason);
+    };
+    isAssistantMessage = (message) => message.role === "assistant";
+    partialAssistantMessage = (text, stopReason) => {
+      if (text.length === 0) {
+        return void 0;
+      }
+      return {
+        role: "assistant",
+        content: [{ type: "text", text }],
+        stopReason,
+        meta: stopReason === "end_turn" ? void 0 : { partial: true }
+      };
+    };
+  }
+});
+
+// packages/core/src/session/index.ts
+import { appendFile as appendFile2, mkdir as mkdir4, readFile as readFile8, writeFile as writeFile4 } from "node:fs/promises";
+import { dirname as dirname6, join as join7 } from "node:path";
+function assertTreeEvent(value) {
+  if (!isRecord6(value)) {
+    throw new SessionStoreError("invalid_event", "Event must be an object");
+  }
+  if (value.type === "session_header") {
+    throw new SessionStoreError("invalid_event", "Session header must be stored as the JSONL header line");
+  }
+  if (value.type !== "user_message" && value.type !== "assistant_message" && value.type !== "tool_result" && value.type !== "session_title_updated" && value.type !== "instruction_snapshot" && value.type !== "harness_item" && value.type !== "queue_update" && value.type !== "skill_index_snapshot" && value.type !== "skill_index_delta") {
+    throw new SessionStoreError("invalid_event", "Unsupported session event type");
+  }
+  if (typeof value.id !== "string" || value.parentId !== null && typeof value.parentId !== "string" || typeof value.seq !== "number" || typeof value.clientId !== "string" || typeof value.ts !== "number") {
+    throw new SessionStoreError("invalid_event", "Event is missing required base fields");
+  }
+  if ((value.type === "user_message" || value.type === "assistant_message" || value.type === "tool_result") && !isRecord6(value.message)) {
+    throw new SessionStoreError("invalid_event", "Message event is missing message payload");
+  }
+  if (value.type === "session_title_updated" && !isSessionTitleUpdated(value)) {
+    throw new SessionStoreError("invalid_event", "session_title_updated is missing title payload");
+  }
+  if (value.type === "instruction_snapshot" && !isInstructionSnapshot(value.snapshot)) {
+    throw new SessionStoreError("invalid_event", "instruction_snapshot is missing snapshot payload");
+  }
+  if (value.type === "harness_item" && !isHarnessItem(value.item)) {
+    throw new SessionStoreError("invalid_event", "harness_item is missing item payload");
+  }
+  if (value.type === "queue_update" && !isQueueUpdate(value)) {
+    throw new SessionStoreError("invalid_event", "queue_update is missing queue payload");
+  }
+  if (value.type === "skill_index_snapshot" && !isSkillIndexSnapshot(value)) {
+    throw new SessionStoreError("invalid_event", "skill_index_snapshot is missing entries");
+  }
+  if (value.type === "skill_index_delta" && !isSkillIndexDelta(value)) {
+    throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
+  }
+}
+var SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, createSession, loadSession, buildContext, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, cloneMessage, isRecord6;
+var init_session = __esm({
+  "packages/core/src/session/index.ts"() {
+    "use strict";
+    init_src();
+    SessionStoreError = class extends Error {
+      code;
+      line;
+      constructor(code, message, options) {
+        super(message);
+        this.name = "SessionStoreError";
+        this.code = code;
+        this.line = options?.line;
+      }
+    };
+    SessionTree = class {
+      #nodes = /* @__PURE__ */ new Map();
+      #events = /* @__PURE__ */ new Map();
+      #order = [];
+      #conversationOrder = [];
+      #rootId = null;
+      #currentSeq = asSeq(0);
+      controlState = {
+        queues: {
+          follow_up: [],
+          steer: []
+        },
+        skillIndexInitialized: false,
+        skillIndex: {}
+      };
+      get rootId() {
+        return this.#rootId;
+      }
+      get size() {
+        return this.#events.size;
+      }
+      get currentSeq() {
+        return this.#currentSeq;
+      }
+      get(id) {
+        const node = this.#nodes.get(id);
+        if (!node) {
+          return void 0;
+        }
+        return {
+          event: node.event,
+          children: [...node.children]
+        };
+      }
+      has(id) {
+        return this.#events.has(id);
+      }
+      append(event) {
+        this.assertCanAppend(event);
+        this.#events.set(event.id, event);
+        this.#order.push(event.id);
+        this.#currentSeq = event.seq;
+        this.#applyControlEvent(event);
+        if (!isConversationEvent(event)) {
+          return;
+        }
+        if (event.parentId !== null) {
+          this.#nodes.get(event.parentId)?.children.push(event.id);
+        } else {
+          this.#rootId = event.id;
+        }
+        this.#nodes.set(event.id, { event, children: [] });
+        this.#conversationOrder.push(event.id);
+      }
+      assertCanAppend(event) {
+        assertTreeEvent(event);
+        if (this.#events.has(event.id)) {
+          throw new SessionStoreError("duplicate_event_id", `Duplicate event id: ${event.id}`);
+        }
+        if (Number(event.seq) <= Number(this.#currentSeq)) {
+          throw new SessionStoreError(
+            "non_monotonic_seq",
+            `Event seq ${String(event.seq)} must be greater than ${String(this.#currentSeq)}`
+          );
+        }
+        if (!isConversationEvent(event)) {
+          return;
+        }
+        if (event.parentId === null) {
+          if (this.#rootId !== null) {
+            throw new SessionStoreError("invalid_parent", "Only the first event can have a null parentId");
+          }
+        } else {
+          const parent = this.#nodes.get(event.parentId);
+          if (!parent) {
+            throw new SessionStoreError("invalid_parent", `Missing parent event: ${event.parentId}`);
+          }
+        }
+      }
+      getLeaves() {
+        return this.#conversationOrder.filter((id) => this.#nodes.get(id)?.children.length === 0);
+      }
+      getChildren(id) {
+        return [...this.#nodes.get(id)?.children ?? []];
+      }
+      getPath(id) {
+        if (!this.#nodes.has(id)) {
+          throw new SessionStoreError("invalid_parent", `Unknown event id: ${id}`);
+        }
+        const path = [];
+        let current = id;
+        while (current !== null) {
+          const node = this.#nodes.get(current);
+          if (!node) {
+            throw new SessionStoreError("invalid_parent", `Broken path at event id: ${current}`);
+          }
+          path.push(current);
+          current = node.event.parentId;
+        }
+        return path.reverse();
+      }
+      getBranchPoints() {
+        return this.#conversationOrder.filter((id) => (this.#nodes.get(id)?.children.length ?? 0) > 1);
+      }
+      *[Symbol.iterator]() {
+        for (const id of this.#order) {
+          const event = this.#events.get(id);
+          if (event) {
+            yield event;
+          }
+        }
+      }
+      #applyControlEvent(event) {
+        if (event.type === "instruction_snapshot") {
+          this.controlState.instructionSnapshot = event.snapshot;
+        } else if (event.type === "queue_update") {
+          this.controlState.queues[event.queue] = [...event.items];
+        } else if (event.type === "skill_index_snapshot") {
+          this.controlState.skillIndexInitialized = true;
+          this.controlState.skillIndex = Object.fromEntries(event.entries.map((entry) => [entry.name, entry]));
+        } else if (event.type === "skill_index_delta") {
+          this.controlState.skillIndexInitialized = true;
+          const next = { ...this.controlState.skillIndex };
+          for (const entry of event.added) {
+            next[entry.name] = entry;
+          }
+          for (const entry of event.changed) {
+            next[entry.name] = entry;
+          }
+          for (const removed of event.removed) {
+            delete next[removed.name];
+          }
+          this.controlState.skillIndex = next;
+        }
+      }
+    };
+    JsonlSession = class {
+      filePath;
+      header;
+      tree;
+      constructor(filePath, header, tree = new SessionTree()) {
+        this.filePath = filePath;
+        this.header = header;
+        this.tree = tree;
+      }
+      get activeLeafId() {
+        const leaves = this.tree.getLeaves();
+        return leaves.at(-1) ?? null;
+      }
+      get currentSeq() {
+        return this.tree.currentSeq;
+      }
+      async append(event) {
+        validateSessionMatch(this.header, event);
+        this.tree.assertCanAppend(event);
+        await appendFile2(this.filePath, `${JSON.stringify(event)}
+`, "utf8");
+        this.tree.append(event);
+        return event;
+      }
+      async close() {
+        return Promise.resolve();
+      }
+    };
+    sessionFilePath = (sessionsDir, sessionId) => join7(sessionsDir, `${sessionId}.jsonl`);
+    sessionLogFilePath = (sessionsDir, sessionId) => join7(sessionsDir, `${sessionId}.log`);
+    createSession = async ({ sessionsDir, header }) => {
+      const validHeader = parseHeader(header);
+      await mkdir4(sessionsDir, { recursive: true });
+      const filePath = sessionFilePath(sessionsDir, validHeader.sessionId);
+      await writeFile4(filePath, `${JSON.stringify(validHeader)}
+`, { encoding: "utf8", flag: "wx" });
+      return new JsonlSession(filePath, validHeader);
+    };
+    loadSession = async (options) => {
+      const filePath = options.filePath !== void 0 ? options.filePath : sessionFilePath(options.sessionsDir, options.sessionId);
+      const content = await readFile8(filePath, "utf8");
+      const lines = content.split(/\r?\n/);
+      const headerLine = lines[0];
+      if (!headerLine) {
+        throw new SessionStoreError("missing_header", "Session file is missing a header");
+      }
+      const parsedLines = lines.map((line, index) => ({ line, lineNumber: index + 1 })).filter(({ line }) => line.length > 0).map(({ line, lineNumber }) => parseJsonLine(line, lineNumber));
+      const header = parseHeader(parsedLines[0]);
+      const tree = new SessionTree();
+      for (const event of parsedLines.slice(1)) {
+        tree.append(parseSessionEvent(header, event));
+      }
+      await mkdir4(dirname6(filePath), { recursive: true });
+      return new JsonlSession(filePath, header, tree);
+    };
+    buildContext = (tree, leafId) => tree.getPath(leafId).reduce((messages, id) => {
+      const event = tree.get(id)?.event;
+      if (!event) {
+        return messages;
+      }
+      if ("message" in event) {
+        messages.push(cloneMessage(event.message));
+        return messages;
+      }
+      if (event.type === "harness_item") {
+        appendHarnessItemToContext(messages, event);
+      }
+      return messages;
+    }, []);
+    parseJsonLine = (line, lineNumber) => {
+      try {
+        return JSON.parse(line);
+      } catch (cause) {
+        throw new SessionStoreError("invalid_json", `Invalid JSON at line ${lineNumber}`, { line: lineNumber });
+      }
+    };
+    parseHeader = (value) => {
+      if (!isRecord6(value)) {
+        throw new SessionStoreError("invalid_header", "Session header must be an object");
+      }
+      if (value.version !== 1 || typeof value.sessionId !== "string" || typeof value.deviceId !== "string") {
+        throw new SessionStoreError("invalid_header", "Session header is missing required identity fields");
+      }
+      if (typeof value.createdAt !== "number" || !isRecord6(value.meta)) {
+        throw new SessionStoreError("invalid_header", "Session header is missing createdAt or meta");
+      }
+      if (typeof value.meta.projectId !== "string" || value.meta.projectId.length === 0) {
+        throw new SessionStoreError("invalid_header", "Session header is missing meta.projectId");
+      }
+      return value;
+    };
+    parseSessionEvent = (header, value) => {
+      validateSessionMatch(header, value);
+      assertTreeEvent(value);
+      return value;
+    };
+    validateSessionMatch = (header, value) => {
+      if (!isRecord6(value) || typeof value.sessionId !== "string") {
+        throw new SessionStoreError("invalid_header", "Event must be an object with a sessionId");
+      }
+      if (value.sessionId !== header.sessionId) {
+        throw new SessionStoreError("session_mismatch", `Event belongs to ${value.sessionId}, expected ${header.sessionId}`);
+      }
+    };
+    isConversationEvent = (event) => event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result" || event.type === "harness_item";
+    isInstructionSnapshot = (value) => {
+      if (!isRecord6(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
+        return false;
+      }
+      return value.sections.every(
+        (section2) => isRecord6(section2) && typeof section2.kind === "string" && typeof section2.frozenAt === "number" && typeof section2.renderedBlock === "string"
+      );
+    };
+    isHarnessItem = (value) => isRecord6(value) && typeof value.kind === "string" && typeof value.origin === "string" && typeof value.content === "string" && (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
+    isQueueUpdate = (value) => (value.queue === "follow_up" || value.queue === "steer") && value.operation === "rewrite" && Array.isArray(value.items) && (value.anchorEventId === null || typeof value.anchorEventId === "string") && value.items.every(
+      (item) => isRecord6(item) && typeof item.id === "string" && Array.isArray(item.content) && typeof item.createdAt === "number" && typeof item.updatedAt === "number" && typeof item.clientId === "string"
+    );
+    isSessionTitleUpdated = (value) => typeof value.title === "string" && value.title.length > 0 && (value.source === "model" || value.source === "user") && (value.derivedFrom === void 0 || isRecord6(value.derivedFrom) && typeof value.derivedFrom.eventId === "string" && typeof value.derivedFrom.seq === "number");
+    isSkillIndexSnapshot = (value) => (value.anchorEventId === null || typeof value.anchorEventId === "string") && Array.isArray(value.entries) && value.entries.every(isSkillIndexEntry);
+    isSkillIndexDelta = (value) => (value.anchorEventId === null || typeof value.anchorEventId === "string") && Array.isArray(value.added) && Array.isArray(value.changed) && Array.isArray(value.removed) && value.added.every(isSkillIndexEntry) && value.changed.every(isSkillIndexEntry) && value.removed.every(
+      (item) => isRecord6(item) && typeof item.name === "string" && typeof item.previousPath === "string"
+    );
+    isSkillIndexEntry = (value) => isRecord6(value) && typeof value.name === "string" && typeof value.path === "string" && (value.scope === "user" || value.scope === "project" || value.scope === "extension") && typeof value.description === "string" && typeof value.mtimeMs === "number" && typeof value.size === "number" && typeof value.contentHash === "string" && typeof value.priority === "number";
+    appendHarnessItemToContext = (messages, event) => {
+      const reminder = renderSystemReminder(event.item.content);
+      const last = messages.at(-1);
+      if (last?.role === "tool_result" && appendReminderToToolResult(last, reminder)) {
+        return;
+      }
+      messages.push({
+        role: "user",
+        content: [{ type: "text", text: reminder }],
+        meta: {
+          source: "harness_item",
+          harnessKind: event.item.kind,
+          harnessOrigin: event.item.origin
+        }
+      });
+    };
+    appendReminderToToolResult = (message, reminder) => {
+      for (let i = message.content.length - 1; i >= 0; i -= 1) {
+        const block = message.content[i];
+        if (block?.type !== "tool_result" || !isToolResultWithContent(block.result)) {
+          continue;
+        }
+        const mergedResult = {
+          ...block.result,
+          content: [...block.result.content, { type: "text", text: `
+
+${reminder}` }]
+        };
+        message.content[i] = {
+          ...block,
+          result: mergedResult
+        };
+        return true;
+      }
+      return false;
+    };
+    isToolResultWithContent = (value) => isRecord6(value) && Array.isArray(value.content);
+    renderSystemReminder = (content) => `<system-reminder>
+${content}
+</system-reminder>`;
+    cloneMessage = (message) => ({
+      ...message,
+      content: message.content.map((block) => {
+        if (block.type !== "tool_result" || !isRecord6(block.result)) {
+          return { ...block };
+        }
+        const content = Array.isArray(block.result.content) ? { content: block.result.content.map((item) => isRecord6(item) ? { ...item } : item) } : {};
+        return {
+          ...block,
+          result: {
+            ...block.result,
+            ...content
+          }
+        };
+      }),
+      ...message.meta ? { meta: { ...message.meta } } : {}
+    });
+    isRecord6 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+  }
+});
+
 // packages/core/src/skills/index.ts
 import { createHash as createHash2 } from "node:crypto";
 import { existsSync as existsSync2 } from "node:fs";
-import { readdir as readdir5, readFile as readFile7, stat as stat4 } from "node:fs/promises";
-import { homedir as homedir3 } from "node:os";
-import { dirname as dirname6, join as join7, resolve as resolve3 } from "node:path";
-var scanSkillIndex, diffSkillIndex, hasSkillIndexDelta, renderSkillListing, renderSkillDelta, createSkillTool, projectSkillRoots, readSkillEntry, parseSkillMetadata, firstParagraph, parseSkillArgs, findGitRoot2, isNodeErrorCode2;
+import { readdir as readdir5, readFile as readFile9, stat as stat4 } from "node:fs/promises";
+import { homedir as homedir4 } from "node:os";
+import { dirname as dirname7, join as join8, resolve as resolve4 } from "node:path";
+var scanSkillIndex, diffSkillIndex, hasSkillIndexDelta, renderSkillListing, renderSkillDelta, createSkillTool, projectSkillRoots, readSkillEntry, parseSkillMetadata, firstParagraph, parseSkillArgs, findGitRoot2, isNodeErrorCode3;
 var init_skills = __esm({
   "packages/core/src/skills/index.ts"() {
     "use strict";
     init_tools();
     scanSkillIndex = async (options) => {
-      const cwd = resolve3(options.cwd);
-      const homeDir = resolve3(options.homeDir ?? homedir3());
+      const cwd = resolve4(options.cwd);
+      const homeDir = resolve4(options.homeDir ?? homedir4());
       const roots = [
         ...projectSkillRoots(cwd, homeDir),
-        { path: join7(homeDir, ".scorel", "skills"), scope: "user", priority: 0 }
+        { path: join8(homeDir, ".scorel", "skills"), scope: "user", priority: 0 },
+        ...(options.extensionSkillRoots ?? []).map((root, index) => ({
+          path: root.path,
+          scope: "extension",
+          priority: -100 - index
+        }))
       ];
       const byName = /* @__PURE__ */ new Map();
       for (const root of roots) {
@@ -2690,7 +3703,7 @@ var init_skills = __esm({
         try {
           children = await readdir5(root.path);
         } catch (cause) {
-          if (isNodeErrorCode2(cause, "ENOENT") || isNodeErrorCode2(cause, "ENOTDIR")) {
+          if (isNodeErrorCode3(cause, "ENOENT") || isNodeErrorCode3(cause, "ENOTDIR")) {
             continue;
           }
           throw cause;
@@ -2698,7 +3711,7 @@ var init_skills = __esm({
         for (const child of children.sort()) {
           const entry = await readSkillEntry({
             name: child,
-            skillPath: join7(root.path, child, "SKILL.md"),
+            skillPath: join8(root.path, child, "SKILL.md"),
             scope: root.scope,
             priority: root.priority
           });
@@ -2763,7 +3776,7 @@ var init_skills = __esm({
         if (!entry) {
           throw new Error(`Unknown skill: ${input.name}. Available skills: ${options.listNames().join(", ") || "none"}`);
         }
-        const content = await readFile7(entry.path, "utf8");
+        const content = await readFile9(entry.path, "utf8");
         return {
           content: [{ type: "text", text: content }],
           details: {
@@ -2784,12 +3797,12 @@ var init_skills = __esm({
       let current = cwd;
       while (true) {
         if (current !== homeDir) {
-          roots.push(join7(current, ".scorel", "skills"));
+          roots.push(join8(current, ".scorel", "skills"));
         }
-        if (current === stopAt || current === dirname6(current)) {
+        if (current === stopAt || current === dirname7(current)) {
           break;
         }
-        const next = dirname6(current);
+        const next = dirname7(current);
         if (!gitRoot && next === homeDir) {
           break;
         }
@@ -2801,9 +3814,9 @@ var init_skills = __esm({
       let fileStat;
       let content;
       try {
-        [fileStat, content] = await Promise.all([stat4(options.skillPath), readFile7(options.skillPath, "utf8")]);
+        [fileStat, content] = await Promise.all([stat4(options.skillPath), readFile9(options.skillPath, "utf8")]);
       } catch (cause) {
-        if (isNodeErrorCode2(cause, "ENOENT") || isNodeErrorCode2(cause, "ENOTDIR")) {
+        if (isNodeErrorCode3(cause, "ENOENT") || isNodeErrorCode3(cause, "ENOTDIR")) {
           return void 0;
         }
         throw cause;
@@ -2873,17 +3886,17 @@ var init_skills = __esm({
     findGitRoot2 = (cwd) => {
       let current = cwd;
       while (true) {
-        if (existsSync2(join7(current, ".git"))) {
+        if (existsSync2(join8(current, ".git"))) {
           return current;
         }
-        const next = dirname6(current);
+        const next = dirname7(current);
         if (next === current) {
           return void 0;
         }
         current = next;
       }
     };
-    isNodeErrorCode2 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
+    isNodeErrorCode3 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
   }
 });
 
@@ -2893,7 +3906,10 @@ var init_src3 = __esm({
     "use strict";
     init_src();
     init_config();
+    init_channel();
+    init_extensions();
     init_instructions();
+    init_memory();
     init_pi_ai();
     init_runtime();
     init_session();
@@ -2904,15 +3920,15 @@ var init_src3 = __esm({
 
 // packages/daemon/src/relay/auth.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir4, readFile as readFile8, writeFile as writeFile4 } from "node:fs/promises";
-import { join as join8 } from "node:path";
+import { mkdir as mkdir5, readFile as readFile10, writeFile as writeFile5 } from "node:fs/promises";
+import { join as join9 } from "node:path";
 var hostDeviceIdentityPath, hostRelayAuthPath, loadOrCreateHostDeviceIdentity, readHostDeviceIdentity, readHostRelayAuth, authorizeRelayClient, isRelayClientAuthorized, emptyAuthFile;
 var init_auth = __esm({
   "packages/daemon/src/relay/auth.ts"() {
     "use strict";
     init_src();
-    hostDeviceIdentityPath = (stateDir) => join8(stateDir, "device.json");
-    hostRelayAuthPath = (stateDir) => join8(stateDir, "relay-auth.json");
+    hostDeviceIdentityPath = (stateDir) => join9(stateDir, "device.json");
+    hostRelayAuthPath = (stateDir) => join9(stateDir, "relay-auth.json");
     loadOrCreateHostDeviceIdentity = async (options) => {
       const existing = await readHostDeviceIdentity(options.stateDir);
       if (existing) {
@@ -2923,14 +3939,14 @@ var init_auth = __esm({
         deviceId: asDeviceId(`device_${randomUUID3()}`),
         displayName: options.displayName ?? "Local daemon"
       };
-      await mkdir4(options.stateDir, { recursive: true });
-      await writeFile4(hostDeviceIdentityPath(options.stateDir), `${JSON.stringify(identity, null, 2)}
+      await mkdir5(options.stateDir, { recursive: true });
+      await writeFile5(hostDeviceIdentityPath(options.stateDir), `${JSON.stringify(identity, null, 2)}
 `);
       return identity;
     };
     readHostDeviceIdentity = async (stateDir) => {
       try {
-        const raw = JSON.parse(await readFile8(hostDeviceIdentityPath(stateDir), "utf8"));
+        const raw = JSON.parse(await readFile10(hostDeviceIdentityPath(stateDir), "utf8"));
         if (raw.version !== 1 || typeof raw.deviceId !== "string" || typeof raw.displayName !== "string") {
           return null;
         }
@@ -2948,7 +3964,7 @@ var init_auth = __esm({
     };
     readHostRelayAuth = async (stateDir) => {
       try {
-        const raw = JSON.parse(await readFile8(hostRelayAuthPath(stateDir), "utf8"));
+        const raw = JSON.parse(await readFile10(hostRelayAuthPath(stateDir), "utf8"));
         if (raw.version !== 1 || !Array.isArray(raw.clients)) {
           return emptyAuthFile();
         }
@@ -2974,8 +3990,8 @@ var init_auth = __esm({
         createdAt: (options.now ?? Date.now)(),
         label: options.label
       });
-      await mkdir4(options.stateDir, { recursive: true });
-      await writeFile4(hostRelayAuthPath(options.stateDir), `${JSON.stringify(auth, null, 2)}
+      await mkdir5(options.stateDir, { recursive: true });
+      await writeFile5(hostRelayAuthPath(options.stateDir), `${JSON.stringify(auth, null, 2)}
 `);
       return auth;
     };
@@ -3029,11 +4045,11 @@ var init_pair = __esm({
         socket.close();
       }
     };
-    waitForOpen = (socket) => new Promise((resolve5, reject) => {
-      socket.once("open", () => resolve5());
+    waitForOpen = (socket) => new Promise((resolve7, reject) => {
+      socket.once("open", () => resolve7());
       socket.once("error", reject);
     });
-    waitForRelayResponse = (socket) => new Promise((resolve5, reject) => {
+    waitForRelayResponse = (socket) => new Promise((resolve7, reject) => {
       socket.once("error", reject);
       socket.on("message", function handle(data) {
         const frame = JSON.parse(data.toString());
@@ -3041,7 +4057,7 @@ var init_pair = __esm({
           return;
         }
         socket.off("message", handle);
-        resolve5(frame);
+        resolve7(frame);
       });
     });
   }
@@ -3218,18 +4234,20 @@ var init_host_client = __esm({
         socket.send(JSON.stringify(frame));
       }
     };
-    waitForOpen2 = (socket) => new Promise((resolve5, reject) => {
-      socket.once("open", () => resolve5());
+    waitForOpen2 = (socket) => new Promise((resolve7, reject) => {
+      socket.once("open", () => resolve7());
       socket.once("error", reject);
     });
   }
 });
 
 // packages/daemon/src/index.ts
-import { appendFile as appendFile2, mkdir as mkdir5, readFile as readFile9, rm as rm2, writeFile as writeFile5 } from "node:fs/promises";
-import { join as join9 } from "node:path";
+import { existsSync as existsSync3 } from "node:fs";
+import { appendFile as appendFile3, mkdir as mkdir6, readFile as readFile11, readdir as readdir6, rm as rm2, writeFile as writeFile6 } from "node:fs/promises";
+import { dirname as dirname8, join as join10, resolve as resolve5 } from "node:path";
+import { pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
-var daemonPackageName, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, createEmbeddedTransport, isNodeErrorCode3, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, shortStack, formatDiagnosticLine, formatDiagnosticValue;
+var daemonPackageName, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode4, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, inputText, assistantText, disabledMemorySettings, runtimeChannelContextFromWire, parseQueuedChannelContext, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord7, parseMemoryUpdate, normalizeMarkdownFile, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
 var init_src4 = __esm({
   "packages/daemon/src/index.ts"() {
     "use strict";
@@ -3242,7 +4260,7 @@ var init_src4 = __esm({
     init_pair();
     init_host_client();
     daemonPackageName = "@scorel/daemon";
-    localDaemonStateFile = (stateDir) => join9(stateDir, "daemon.json");
+    localDaemonStateFile = (stateDir) => join10(stateDir, "daemon.json");
     createLocalDaemonState = async (options) => {
       const state = {
         host: options.host,
@@ -3253,14 +4271,14 @@ var init_src4 = __esm({
         startedAt: options.startedAt,
         stoppedAt: options.stoppedAt
       };
-      await mkdir5(options.stateDir, { recursive: true });
-      await writeFile5(localDaemonStateFile(options.stateDir), `${JSON.stringify(state, null, 2)}
+      await mkdir6(options.stateDir, { recursive: true });
+      await writeFile6(localDaemonStateFile(options.stateDir), `${JSON.stringify(state, null, 2)}
 `);
       return state;
     };
     readLocalDaemonState = async (options) => {
       try {
-        const raw = JSON.parse(await readFile9(localDaemonStateFile(options.stateDir), "utf8"));
+        const raw = JSON.parse(await readFile11(localDaemonStateFile(options.stateDir), "utf8"));
         if (typeof raw.host !== "string" || typeof raw.port !== "number" || typeof raw.wsUrl !== "string" || typeof raw.token !== "string" || typeof raw.pid !== "number" || typeof raw.startedAt !== "number" || !(raw.stoppedAt === null || typeof raw.stoppedAt === "number")) {
           return null;
         }
@@ -3288,7 +4306,7 @@ var init_src4 = __esm({
       if (!state) {
         return;
       }
-      await writeFile5(
+      await writeFile6(
         localDaemonStateFile(options.stateDir),
         `${JSON.stringify({ ...state, stoppedAt: options.stoppedAt }, null, 2)}
 `
@@ -3374,11 +4392,11 @@ var init_src4 = __esm({
           }
         });
       });
-      await new Promise((resolve5, reject) => {
+      await new Promise((resolve7, reject) => {
         server.once("error", reject);
         server.once("listening", () => {
           server.off("error", reject);
-          resolve5();
+          resolve7();
         });
       });
       const address = server.address();
@@ -3447,22 +4465,25 @@ var init_src4 = __esm({
         }
       });
     };
-    closeWebSocketServer = (server) => new Promise((resolve5, reject) => {
+    closeWebSocketServer = (server) => new Promise((resolve7, reject) => {
       for (const client of server.clients) {
         client.close();
       }
-      server.close((error) => error ? reject(error) : resolve5());
+      server.close((error) => error ? reject(error) : resolve7());
     });
     createRealRuntime = (options) => {
-      const model = resolvePiAiModel(options.config.model);
+      const selection = resolveModelSelection(options.config, options.modelSelection);
+      const model = resolvePiAiModel(selection.config);
       const runtime = new ScorelRuntime({
         provider: createPiAiProvider({
           model,
-          apiKey: options.config.model.apiKey
+          apiKey: selection.config.apiKey
         })
       });
-      for (const tool of createCodingTools({ cwd: options.cwd, contextWindow: model.contextWindow })) {
-        runtime.registerTool(tool);
+      if (options.includeTools !== false) {
+        for (const tool of createCodingTools({ cwd: options.cwd, contextWindow: model.contextWindow })) {
+          runtime.registerTool(tool);
+        }
       }
       return runtime;
     };
@@ -3470,20 +4491,37 @@ var init_src4 = __esm({
       #sessionsDir;
       #deviceId;
       #deviceDisplayName;
+      #scorelHomeDir;
+      #userHomeDir;
+      #builtinExtensionsDir;
+      #modelProfile;
+      #loadConfig;
+      #loadConfigProfile;
       #createRuntime;
+      #memoryHomeDir;
       #now;
       #createId;
       #sessions = /* @__PURE__ */ new Map();
       #connections = /* @__PURE__ */ new Set();
       #events = /* @__PURE__ */ new Map();
       #seqs = /* @__PURE__ */ new Map();
+      #memoryDreams = /* @__PURE__ */ new Map();
+      #imExtensions = /* @__PURE__ */ new Map();
+      #imBindings = /* @__PURE__ */ new Map();
       #registry;
       #started = false;
       constructor(options) {
         this.#sessionsDir = options.sessionsDir;
         this.#deviceId = options.deviceId;
         this.#deviceDisplayName = options.deviceDisplayName;
+        this.#scorelHomeDir = resolve5(options.scorelHomeDir ?? dirname8(options.projectsPath));
+        this.#userHomeDir = dirname8(this.#scorelHomeDir);
+        this.#builtinExtensionsDir = resolve5(options.builtinExtensionsDir ?? defaultBuiltinExtensionsDir());
+        this.#modelProfile = options.modelProfile;
+        this.#loadConfig = options.loadConfig;
+        this.#loadConfigProfile = options.loadConfigProfile;
         this.#createRuntime = options.createRuntime;
+        this.#memoryHomeDir = options.memoryHomeDir;
         this.#now = options.now ?? Date.now;
         this.#createId = options.createId ?? (() => crypto.randomUUID());
         this.#registry = new ProjectRegistry({
@@ -3495,10 +4533,25 @@ var init_src4 = __esm({
       }
       async start() {
         this.#started = true;
+        await mkdir6(this.#scorelHomeDir, { recursive: true });
+        await this.#loadImBindings();
+        await this.#startEnabledImExtensions();
       }
       async shutdown() {
+        for (const schedule of this.#memoryDreams.values()) {
+          if (schedule.timer) {
+            clearTimeout(schedule.timer);
+          }
+        }
+        this.#memoryDreams.clear();
+        await this.#stopImExtensions();
         this.#connections.clear();
         this.#started = false;
+      }
+      async refreshImExtensions() {
+        this.#assertStarted();
+        await this.#stopImExtensions();
+        await this.#startEnabledImExtensions();
       }
       connect(connection, sessionId) {
         this.#assertStarted();
@@ -3573,6 +4626,17 @@ var init_src4 = __esm({
         });
         return removed;
       }
+      async receiveImMessage(extensionId, message) {
+        this.#assertStarted();
+        const extension = this.#imExtensions.get(extensionId);
+        if (!extension) {
+          throw new Error(`IM extension is not enabled: ${extensionId}`);
+        }
+        return this.#handleImMessage(extension, message);
+      }
+      loopbackOutbox(extensionId = "loopback") {
+        return this.#imExtensions.get(extensionId)?.adapter.getOutbox?.() ?? [];
+      }
       async #handleMessage(connection, message) {
         switch (message.type) {
           case "create_session":
@@ -3626,6 +4690,34 @@ var init_src4 = __esm({
             this.#respond(connection, message, { projects: await this.listProjects() });
             break;
           }
+          case "list_models": {
+            this.#respond(connection, message, await this.#listModels(message.projectId));
+            break;
+          }
+          case "upsert_model_profile": {
+            this.#respond(connection, message, await this.#handleUpsertModelProfile(message));
+            break;
+          }
+          case "fetch_provider_models": {
+            this.#respond(connection, message, { models: await this.#fetchProviderModels(message.projectId, message.providerId) });
+            break;
+          }
+          case "get_memory_settings": {
+            this.#respond(connection, message, { memory: await this.#memorySettingsForProject(message.projectId) });
+            break;
+          }
+          case "upsert_memory_settings": {
+            this.#respond(connection, message, { memory: await this.#handleUpsertMemorySettings(message) });
+            break;
+          }
+          case "get_extension_settings": {
+            this.#respond(connection, message, { extension: await this.#extensionSettings(message.extensionId) });
+            break;
+          }
+          case "upsert_extension_settings": {
+            this.#respond(connection, message, { extension: await this.#handleUpsertExtensionSettings(message) });
+            break;
+          }
           case "list_directories": {
             this.#respond(connection, message, await this.listDirectories(message.path));
             break;
@@ -3662,7 +4754,7 @@ var init_src4 = __esm({
         try {
           lane = await this.#createLane(sessionId, request.meta, project);
         } catch (cause) {
-          if (!request.sessionId || !isNodeErrorCode3(cause, "EEXIST")) {
+          if (!request.sessionId || !isNodeErrorCode4(cause, "EEXIST")) {
             throw cause;
           }
           lane = await this.#getLane(sessionId);
@@ -3725,6 +4817,7 @@ var init_src4 = __esm({
             content: normalizeContent(request.content),
             parentId: request.options?.parentId,
             source: "user",
+            channelContext: request.options?.channelContext ? runtimeChannelContextFromWire(request.options.channelContext) : void 0,
             onComplete: (result) => this.#respond(connection, request, { ...result, status: "completed" })
           });
           await this.#drainFollowUps(lane);
@@ -3757,11 +4850,19 @@ var init_src4 = __esm({
         });
         const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, clientId);
         await this.#syncSkillIndex(lane, clientId);
+        await this.#ensureMemoryHarness(lane, clientId);
+        await this.#syncMemoryTools(lane, clientId);
+        this.#syncChannelTool(lane, input.channelContext);
+        let parentId = input.parentId === void 0 ? lane.session.activeLeafId : input.parentId;
+        if (input.channelContext) {
+          const channelHarness = await this.#appendChannelHarness(lane, clientId, input.channelContext, parentId);
+          parentId = channelHarness.id;
+        }
         const userEventId = asEventId(this.#createId());
         const userEvent = await this.#appendPersistent(lane, {
           type: "user_message",
           id: userEventId,
-          parentId: input.parentId === void 0 ? lane.session.activeLeafId : input.parentId,
+          parentId,
           sessionId,
           clientId,
           ts: this.#now(),
@@ -3771,23 +4872,38 @@ var init_src4 = __esm({
             ...input.source === "follow_up" ? { meta: { source: "follow_up", queueItemId: input.queueItemId } } : {}
           }
         });
+        const runAfterUserMessageHooks = this.#scheduleAfterUserMessageHooks(lane, clientId, userEvent);
+        void runAfterUserMessageHooks().catch((cause) => {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          void this.#appendDiagnostic(sessionId, "after_user_message_hook_failed", {
+            clientId,
+            message: error.message,
+            stack: shortStack(error)
+          });
+        });
         const firstAssistantEventId = asEventId(this.#createId());
         const state = {
           parentId: userEvent.id,
           assistantEventId: firstAssistantEventId,
           finalAssistantEventId: firstAssistantEventId
         };
-        for await (const rawEvent of lane.runtime.executeTurn(
-          buildContext(lane.session.tree, userEvent.id),
-          renderSystemPrompt(instructionSnapshot),
-          {
-            refreshContext: async () => {
-              await this.#consumeSteer(lane, clientId, state);
-              return buildContext(lane.session.tree, lane.session.activeLeafId ?? state.parentId);
+        lane.channelContext = input.channelContext;
+        try {
+          for await (const rawEvent of lane.runtime.executeTurn(
+            buildContext(lane.session.tree, userEvent.id),
+            renderSystemPrompt(instructionSnapshot),
+            {
+              refreshContext: async () => {
+                await this.#consumeSteer(lane, clientId, state);
+                return buildContext(lane.session.tree, lane.session.activeLeafId ?? state.parentId);
+              }
             }
+          )) {
+            await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
           }
-        )) {
-          await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
+        } finally {
+          lane.channelContext = void 0;
+          lane.runtime.unregisterTool("SendChannelMessage");
         }
         const result = { userEventId, assistantEventId: state.finalAssistantEventId };
         await this.#appendDiagnostic(sessionId, "send_message_finished", {
@@ -3799,6 +4915,131 @@ var init_src4 = __esm({
         input.onComplete?.(result);
         return { ...result, status: "completed" };
       }
+      #scheduleAfterUserMessageHooks(lane, clientId, userEvent) {
+        const hooks = [
+          ({ lane: hookLane, clientId: hookClientId, userEvent: hookUserEvent }) => this.#runSessionTitleHook(hookLane, hookClientId, hookUserEvent)
+        ];
+        return async () => {
+          for (const hook of hooks) {
+            await hook({ lane, clientId, userEvent });
+          }
+        };
+      }
+      async #runSessionTitleHook(lane, clientId, userEvent) {
+        const sessionId = lane.session.header.sessionId;
+        const generatedTitle = await this.#maybeGenerateSessionTitle(lane, clientId, userEvent).catch((cause) => {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          void this.#appendDiagnostic(sessionId, "session_title_generation_failed", {
+            clientId,
+            message: error.message,
+            stack: shortStack(error)
+          });
+          return void 0;
+        });
+        if (generatedTitle) {
+          await this.#appendPersistent(lane, {
+            type: "session_title_updated",
+            id: asEventId(this.#createId()),
+            parentId: null,
+            sessionId,
+            clientId,
+            ts: this.#now(),
+            title: generatedTitle.title,
+            source: "model",
+            model: generatedTitle.model,
+            derivedFrom: {
+              eventId: userEvent.id,
+              seq: userEvent.seq
+            }
+          });
+          await this.#appendDiagnostic(sessionId, "session_title_generated", {
+            clientId,
+            title: generatedTitle.title,
+            modelId: generatedTitle.model.modelId
+          });
+        }
+      }
+      async #maybeGenerateSessionTitle(lane, clientId, userEvent) {
+        if (lane.session.header.meta.title?.trim()) {
+          return void 0;
+        }
+        const text = inputText(userEvent.message).trim();
+        if (!text) {
+          return void 0;
+        }
+        let userMessages = 0;
+        for (const event of lane.session.tree) {
+          if (event.type === "session_title_updated") {
+            return void 0;
+          }
+          if (event.type === "user_message") {
+            userMessages += 1;
+          }
+        }
+        if (userMessages !== 1) {
+          return void 0;
+        }
+        const selectedModel = await this.#selectedModelFromMeta(
+          { projectId: lane.project.projectId, modelSelection: { role: "auxiliary" } },
+          lane.project
+        );
+        if (!selectedModel) {
+          return void 0;
+        }
+        const runtime = await this.#createRuntime({ sessionId: lane.session.header.sessionId, project: lane.project, selectedModel, purpose: "title" });
+        let rawTitle = "";
+        for await (const rawEvent of runtime.executeTurn(
+          [
+            {
+              role: "user",
+              content: [{
+                type: "text",
+                text: [
+                  "Write a session title for the following first user request.",
+                  "",
+                  "Rules:",
+                  "- Return only the title text.",
+                  "- Do not answer the request.",
+                  "- Do not mention yourself.",
+                  "- Use the same language as the request when obvious.",
+                  "- Prefer a short noun phrase or task label, 4 to 12 Chinese characters or 4 to 8 English words.",
+                  "- No quotes, punctuation, or trailing period.",
+                  "",
+                  "<user_request>",
+                  text.slice(0, 4e3),
+                  "</user_request>"
+                ].join("\n")
+              }]
+            }
+          ],
+          [
+            "You generate concise chat session titles.",
+            "You are not answering the user request.",
+            "You only summarize the user's intent as a short title.",
+            "If the request is in Chinese, output Chinese.",
+            "Output plain text only."
+          ].join("\n"),
+          {}
+        )) {
+          if (rawEvent.type === "text_delta") {
+            rawTitle += rawEvent.delta;
+          } else if (rawEvent.type === "message_end") {
+            rawTitle = assistantText(rawEvent.message) || rawTitle;
+          } else if (rawEvent.type === "error") {
+            throw rawEvent.error;
+          }
+        }
+        const title = sanitizeSessionTitle(rawTitle);
+        if (!title) {
+          return void 0;
+        }
+        await this.#appendDiagnostic(lane.session.header.sessionId, "session_title_model_used", {
+          clientId,
+          modelId: selectedModel.modelId,
+          role: selectedModel.role
+        });
+        return { title, model: selectedModel };
+      }
       async #enqueueFollowUp(lane, connection, request) {
         const now = this.#now();
         const item = {
@@ -3806,7 +5047,8 @@ var init_src4 = __esm({
           content: normalizeContent(request.content),
           createdAt: now,
           updatedAt: now,
-          clientId: connection.clientId
+          clientId: connection.clientId,
+          ...request.options?.channelContext ? { data: { channelContext: request.options.channelContext } } : {}
         };
         lane.followUpWaiters.set(item.id, { connection, request });
         await this.#appendQueueRewrite(lane, "follow_up", [...lane.session.tree.controlState.queues.follow_up, item], {
@@ -3826,7 +5068,8 @@ var init_src4 = __esm({
           content: normalizeContent(request.content),
           createdAt: now,
           updatedAt: now,
-          clientId: connection.clientId
+          clientId: connection.clientId,
+          ...request.options?.channelContext ? { data: { channelContext: request.options.channelContext } } : {}
         };
         await this.#appendQueueRewrite(lane, "steer", [...lane.session.tree.controlState.queues.steer, item], {
           clientId: connection.clientId,
@@ -3858,6 +5101,7 @@ var init_src4 = __esm({
             parentId: lane.session.activeLeafId,
             source: "follow_up",
             queueItemId: item.id,
+            channelContext: parseQueuedChannelContext(item.data?.channelContext),
             onComplete: waiter ? (result) => this.#respond(waiter.connection, waiter.request, { ...result, status: "completed" }) : void 0
           });
         }
@@ -4048,10 +5292,17 @@ var init_src4 = __esm({
         }
       }
       async #appendPersistent(lane, event) {
-        const withSeq = { ...event, seq: this.#nextSeq(lane.session.header.sessionId) };
-        await lane.session.append(withSeq);
-        this.#recordAndBroadcast(lane.session.header.sessionId, withSeq);
-        return withSeq;
+        let appended;
+        const appendTask = lane.appendQueue.then(async () => {
+          const withSeq = { ...event, seq: this.#nextSeq(lane.session.header.sessionId) };
+          await lane.session.append(withSeq);
+          this.#recordAndBroadcast(lane.session.header.sessionId, withSeq);
+          appended = withSeq;
+        });
+        lane.appendQueue = appendTask.catch(() => {
+        });
+        await appendTask;
+        return appended;
       }
       async #ensureInstructionSnapshot(lane, clientId) {
         const existing = lane.session.tree.controlState.instructionSnapshot;
@@ -4078,7 +5329,7 @@ var init_src4 = __esm({
         return snapshot;
       }
       async #syncSkillIndex(lane, clientId) {
-        const entries = await scanSkillIndex({ cwd: lane.project.workDir });
+        const entries = await scanSkillIndex({ cwd: lane.project.workDir, extensionSkillRoots: this.#extensionSkillRoots() });
         if (!lane.session.tree.controlState.skillIndexInitialized) {
           await this.#appendPersistent(lane, {
             type: "skill_index_snapshot",
@@ -4110,6 +5361,228 @@ var init_src4 = __esm({
           removed: delta.removed
         });
         await this.#appendSkillHarness(lane, clientId, "skill_delta", renderSkillDelta(delta));
+      }
+      async #ensureMemoryHarness(lane, clientId) {
+        const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
+        if (!memory.enabled) {
+          return;
+        }
+        for (const event of lane.session.tree) {
+          if (event.type === "harness_item" && event.item.kind === "memory") {
+            return;
+          }
+        }
+        const context = await buildMemoryContext({
+          projectId: lane.project.projectId,
+          homeDir: this.#memoryHomeDir,
+          now: this.#now
+        });
+        await this.#appendPersistent(lane, {
+          type: "harness_item",
+          id: asEventId(this.#createId()),
+          parentId: lane.session.activeLeafId,
+          sessionId: lane.session.header.sessionId,
+          clientId,
+          ts: this.#now(),
+          item: {
+            kind: "memory",
+            origin: "system",
+            content: renderMemoryHarness(context),
+            visibility: "hidden",
+            data: {
+              date: context.paths.today,
+              projectId: lane.project.projectId
+            }
+          }
+        });
+      }
+      async #syncMemoryTools(lane, clientId) {
+        const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
+        if (!memory.enabled || !memory.daily) {
+          lane.runtime.unregisterTool("AppendDaily");
+          return;
+        }
+        lane.runtime.registerTool(
+          createAppendDailyTool({
+            projectId: lane.project.projectId,
+            homeDir: this.#memoryHomeDir,
+            now: this.#now,
+            onAppend: async (result) => {
+              await this.#appendDiagnostic(lane.session.header.sessionId, "memory_daily_appended", {
+                clientId,
+                path: result.path,
+                date: result.date
+              });
+              await this.#scheduleMemoryDream(lane, clientId);
+            }
+          })
+        );
+      }
+      async #appendChannelHarness(lane, clientId, context, parentId) {
+        const lines = [
+          "This message came from an IM channel.",
+          "",
+          `channel: ${context.channel}`,
+          ...context.conversationType ? [`conversation_type: ${context.conversationType}`] : [],
+          ...context.senderDisplayName ? [`sender_display_name: ${context.senderDisplayName}`] : [],
+          ...context.mentionedBot !== void 0 ? [`mentioned_bot: ${context.mentionedBot}`] : [],
+          "",
+          "Use SendChannelMessage to reply to the current conversation when needed."
+        ];
+        return this.#appendPersistent(lane, {
+          type: "harness_item",
+          id: asEventId(this.#createId()),
+          parentId,
+          sessionId: lane.session.header.sessionId,
+          clientId,
+          ts: this.#now(),
+          item: {
+            kind: "channel_context",
+            origin: "system",
+            content: lines.join("\n"),
+            visibility: "hidden",
+            data: {
+              extensionId: context.extensionId,
+              channel: context.channel,
+              externalConversationId: context.externalConversationId,
+              ...context.conversationType ? { conversationType: context.conversationType } : {},
+              ...context.mentionedBot !== void 0 ? { mentionedBot: context.mentionedBot } : {}
+            }
+          }
+        });
+      }
+      async #scheduleMemoryDream(lane, clientId) {
+        const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
+        if (!memory.enabled || !memory.autoDream) {
+          return;
+        }
+        const projectId = lane.project.projectId;
+        const existing = this.#memoryDreams.get(projectId);
+        if (existing?.timer) {
+          clearTimeout(existing.timer);
+        }
+        const schedule = {
+          running: existing?.running ?? false,
+          sessionId: lane.session.header.sessionId,
+          clientId,
+          lastActivityAt: this.#now()
+        };
+        const delayMs = Math.max(0, memory.dreamIdleMinutes) * 60 * 1e3;
+        schedule.timer = setTimeout(() => {
+          void this.#runIdleMemoryDream(projectId).catch((cause) => {
+            const error = cause instanceof Error ? cause : new Error(String(cause));
+            void this.#appendDiagnostic(schedule.sessionId, "idle_memory_dream_failed", {
+              clientId: schedule.clientId,
+              message: error.message,
+              stack: shortStack(error)
+            });
+          });
+        }, delayMs);
+        schedule.timer.unref?.();
+        this.#memoryDreams.set(projectId, schedule);
+        await this.#appendDiagnostic(lane.session.header.sessionId, "idle_memory_dream_scheduled", {
+          clientId,
+          projectId,
+          idleMinutes: memory.dreamIdleMinutes
+        });
+      }
+      async #runIdleMemoryDream(projectId) {
+        const schedule = this.#memoryDreams.get(projectId);
+        if (!schedule || schedule.running) {
+          return;
+        }
+        schedule.running = true;
+        schedule.timer = void 0;
+        this.#memoryDreams.set(projectId, schedule);
+        try {
+          const lane = await this.#getLane(schedule.sessionId);
+          const memory = await this.#safeMemorySettingsForRuntime(lane, schedule.clientId);
+          if (!memory.enabled || !memory.autoDream) {
+            return;
+          }
+          const generated = await this.#generateMemoryUpdate(lane, memory);
+          const paths = scorelMemoryPaths({
+            projectId: lane.project.projectId,
+            homeDir: this.#memoryHomeDir,
+            now: this.#now
+          });
+          if (generated?.projectMemory?.trim()) {
+            await writeFile6(paths.projectMemoryPath, normalizeMarkdownFile(generated.projectMemory), "utf8");
+            await this.#appendDiagnostic(lane.session.header.sessionId, "project_memory_updated", {
+              clientId: schedule.clientId,
+              path: paths.projectMemoryPath
+            });
+          }
+          if (memory.promoteRoot && generated?.rootMemory?.trim()) {
+            await writeFile6(paths.rootMemoryPath, normalizeMarkdownFile(generated.rootMemory), "utf8");
+            await this.#appendDiagnostic(lane.session.header.sessionId, "root_memory_updated", {
+              clientId: schedule.clientId,
+              path: paths.rootMemoryPath
+            });
+          }
+        } finally {
+          this.#memoryDreams.delete(projectId);
+        }
+      }
+      async #generateMemoryUpdate(lane, memory) {
+        const selectedModel = await this.#selectedModelFromMeta(
+          { projectId: lane.project.projectId, modelSelection: { role: "auxiliary" } },
+          lane.project
+        );
+        if (!selectedModel) {
+          return void 0;
+        }
+        const context = await buildMemoryContext({
+          projectId: lane.project.projectId,
+          homeDir: this.#memoryHomeDir,
+          now: this.#now
+        });
+        const runtime = await this.#createRuntime({
+          sessionId: lane.session.header.sessionId,
+          project: lane.project,
+          selectedModel,
+          purpose: "memory"
+        });
+        let raw = "";
+        for await (const rawEvent of runtime.executeTurn(
+          [{
+            role: "user",
+            content: [{
+              type: "text",
+              text: [
+                "Consolidate Scorel filesystem memory from recent project daily notes.",
+                "Return only strict JSON with optional keys: projectMemory, rootMemory.",
+                "projectMemory: full replacement markdown for Project MEMORY.md, only durable project preferences/decisions/workflows/open questions.",
+                memory.promoteRoot ? "rootMemory: full replacement markdown for root MEMORY.md, only cross-project stable user preferences. Omit if no global preference." : "Do not return rootMemory.",
+                "Do not store secrets, transient tool noise, or code facts that can be read from the repo.",
+                "Use daily notes as recent evidence, but only promote stable facts and decisions into memory.",
+                "",
+                "<root_memory>",
+                context.rootMemory,
+                "</root_memory>",
+                "<project_memory>",
+                context.projectMemory,
+                "</project_memory>",
+                "<recent_daily>",
+                context.yesterdayDaily,
+                "",
+                context.todayDaily,
+                "</recent_daily>"
+              ].join("\n")
+            }]
+          }],
+          "You are Scorel's automatic memory dreamer. Output strict JSON only.",
+          {}
+        )) {
+          if (rawEvent.type === "text_delta") {
+            raw += rawEvent.delta;
+          } else if (rawEvent.type === "message_end") {
+            raw = assistantText(rawEvent.message) || raw;
+          } else if (rawEvent.type === "error") {
+            throw rawEvent.error;
+          }
+        }
+        return parseMemoryUpdate(raw);
       }
       async #appendSkillHarness(lane, clientId, kind, content) {
         await this.#appendPersistent(lane, {
@@ -4221,16 +5694,19 @@ var init_src4 = __esm({
         }
         const loaded = await loadSession({ sessionsDir: this.#sessionsDir, sessionId });
         const project = await this.#resolveProject(sessionId, loaded.header.meta.projectId);
-        const runtime = await this.#createRuntime({ sessionId, project });
+        const selectedModel = await this.#selectedModelFromMeta(loaded.header.meta, project);
+        const runtime = await this.#createRuntime({ sessionId, project, selectedModel, purpose: "chat" });
         await this.#appendDiagnostic(sessionId, "runtime_created", {
           projectId: project.projectId,
-          workDir: project.workDir
+          workDir: project.workDir,
+          selectedModelId: selectedModel?.modelId
         });
         const lane = {
           session: loaded,
           project,
           runtime,
           queue: Promise.resolve(),
+          appendQueue: Promise.resolve(),
           followUpWaiters: /* @__PURE__ */ new Map()
         };
         this.#registerLaneTools(lane);
@@ -4246,13 +5722,14 @@ var init_src4 = __esm({
           await this.#getLane(sessionId);
           return true;
         } catch (cause) {
-          if (isNodeErrorCode3(cause, "ENOENT")) {
+          if (isNodeErrorCode4(cause, "ENOENT")) {
             return false;
           }
           throw cause;
         }
       }
       async #createLane(sessionId, meta, project) {
+        const selectedModel = await this.#selectedModelFromMeta(meta, project);
         const session = await createSession({
           sessionsDir: this.#sessionsDir,
           header: {
@@ -4261,20 +5738,26 @@ var init_src4 = __esm({
             deviceId: this.#deviceId,
             createdAt: this.#now(),
             meta: {
-              ...meta
+              ...meta,
+              ...selectedModel ? {
+                model: selectedModel.displayName,
+                selectedModel
+              } : {}
             }
           }
         });
-        const runtime = await this.#createRuntime({ sessionId, project });
+        const runtime = await this.#createRuntime({ sessionId, project, selectedModel, purpose: "chat" });
         await this.#appendDiagnostic(sessionId, "runtime_created", {
           projectId: project.projectId,
-          workDir: project.workDir
+          workDir: project.workDir,
+          selectedModelId: selectedModel?.modelId
         });
         const lane = {
           session,
           project,
           runtime,
           queue: Promise.resolve(),
+          appendQueue: Promise.resolve(),
           followUpWaiters: /* @__PURE__ */ new Map()
         };
         this.#registerLaneTools(lane);
@@ -4287,6 +5770,515 @@ var init_src4 = __esm({
             listNames: () => Object.keys(lane.session.tree.controlState.skillIndex).sort()
           })
         );
+      }
+      #syncChannelTool(lane, channelContext) {
+        if (!channelContext) {
+          lane.runtime.unregisterTool("SendChannelMessage");
+          return;
+        }
+        lane.runtime.registerTool(
+          createSendChannelMessageTool({
+            sendCurrent: async (input) => {
+              const current = lane.channelContext;
+              if (!current) {
+                throw new Error("no_channel_context");
+              }
+              if (input.channel && input.channel !== current.channel) {
+                throw new Error(`channel_mismatch: current channel is ${current.channel}`);
+              }
+              const extension = this.#imExtensions.get(current.extensionId);
+              if (!extension) {
+                throw new Error(`channel_adapter_unavailable: ${current.extensionId}`);
+              }
+              await extension.adapter.sendMessage(current.target, { text: input.text });
+              await this.#appendDiagnostic(lane.session.header.sessionId, "channel_message_sent", {
+                extensionId: current.extensionId,
+                channel: current.channel,
+                externalConversationId: current.externalConversationId
+              });
+              return { channel: current.channel, target: "current" };
+            }
+          })
+        );
+      }
+      async #startEnabledImExtensions() {
+        const config = await this.#loadUserConfigProfile();
+        const enabled = Object.entries(config?.extensions ?? {}).filter(([, extension]) => extension.enabled && extension.kind === "im").map(([extensionId]) => extensionId);
+        if (enabled.length === 0) {
+          return;
+        }
+        const manifests = await this.#discoverExtensionManifests();
+        for (const extensionId of enabled) {
+          const manifest = manifests.get(extensionId);
+          if (!manifest) {
+            await this.#appendHostDiagnostic("im_extension_missing", { extensionId });
+            continue;
+          }
+          let adapter;
+          try {
+            adapter = await this.#loadImAdapter(manifest, config?.extensions[extensionId]?.config ?? {});
+          } catch (cause) {
+            await this.#appendHostDiagnostic("im_extension_load_failed", {
+              extensionId,
+              message: cause instanceof Error ? cause.message : String(cause)
+            });
+            continue;
+          }
+          const extension = {
+            manifest,
+            adapter,
+            skillRoots: manifest.skills.map((path) => resolve5(manifest.rootDir, path))
+          };
+          let started = false;
+          await adapter.start({
+            onMessage: async (message) => {
+              await this.#handleImMessage(extension, message);
+            },
+            logger: {
+              info: (message, data) => void this.#appendHostDiagnostic("im_extension_info", { extensionId, message, ...data }),
+              error: (message, data) => void this.#appendHostDiagnostic("im_extension_error", { extensionId, message, ...data })
+            }
+          }).then(() => {
+            started = true;
+          }).catch(async (cause) => {
+            await this.#appendHostDiagnostic("im_extension_start_failed", {
+              extensionId,
+              message: cause instanceof Error ? cause.message : String(cause)
+            });
+            return void 0;
+          });
+          if (!started) {
+            continue;
+          }
+          this.#imExtensions.set(extensionId, extension);
+          await this.#appendHostDiagnostic("im_extension_started", { extensionId });
+        }
+      }
+      async #stopImExtensions() {
+        for (const extension of this.#imExtensions.values()) {
+          await extension.adapter.stop().catch((cause) => {
+            void this.#appendHostDiagnostic("im_extension_stop_failed", {
+              extensionId: extension.manifest.id,
+              message: cause instanceof Error ? cause.message : String(cause)
+            });
+          });
+        }
+        this.#imExtensions.clear();
+      }
+      async #discoverExtensionManifests() {
+        const roots = [
+          this.#builtinExtensionsDir,
+          join10(this.#scorelHomeDir, "extensions")
+        ];
+        const manifests = /* @__PURE__ */ new Map();
+        for (const root of roots) {
+          let children;
+          try {
+            children = await readdir6(root);
+          } catch (cause) {
+            if (isNodeErrorCode4(cause, "ENOENT") || isNodeErrorCode4(cause, "ENOTDIR")) {
+              continue;
+            }
+            throw cause;
+          }
+          for (const child of children.sort()) {
+            const manifestPath = join10(root, child, "scorel.extension.json");
+            try {
+              const manifest = await loadExtensionManifest(manifestPath);
+              manifests.set(manifest.id, manifest);
+            } catch (cause) {
+              await this.#appendHostDiagnostic("extension_manifest_invalid", {
+                path: manifestPath,
+                message: cause instanceof Error ? cause.message : String(cause)
+              });
+            }
+          }
+        }
+        return manifests;
+      }
+      async #loadImAdapter(manifest, config) {
+        const adapterPath = resolve5(manifest.rootDir, manifest.adapter);
+        const mod = await import(pathToFileURL(adapterPath).href);
+        const adapter = mod.createAdapter ? await mod.createAdapter({ config, manifest }) : mod.default;
+        if (!adapter || typeof adapter.start !== "function" || typeof adapter.stop !== "function" || typeof adapter.sendMessage !== "function") {
+          throw new Error(`IM adapter ${adapterPath} must export createAdapter() or default adapter with start/stop/sendMessage`);
+        }
+        return adapter;
+      }
+      async #handleImMessage(extension, message) {
+        const binding = await this.#ensureImBinding(extension.manifest.id, message.externalConversationId);
+        const lane = await this.#getLane(binding.sessionId);
+        const runningBehavior = isSteerMessage(message.text) ? "steer" : "follow_up";
+        const content = stripImCommandPrefix(message.text);
+        const channelContext = {
+          channel: extension.manifest.id,
+          externalConversationId: message.externalConversationId,
+          ...message.conversationType ? { conversationType: message.conversationType } : {},
+          ...message.senderDisplayName ? { senderDisplayName: message.senderDisplayName } : {},
+          ...message.mentionedBot !== void 0 ? { mentionedBot: message.mentionedBot } : {},
+          data: message.target?.data ?? message.data ?? {}
+        };
+        await this.#handleSendMessage(
+          { clientId: asClientId(`im_${extension.manifest.id}`), emit: () => void 0 },
+          {
+            type: "send_message",
+            requestId: asRequestId(`req_im_${this.#createId()}`),
+            sessionId: lane.session.header.sessionId,
+            content,
+            options: {
+              runningBehavior,
+              channelContext
+            }
+          }
+        );
+        return lane.session.header.sessionId;
+      }
+      async #ensureImBinding(extensionId, externalConversationId) {
+        const key = imBindingKey(extensionId, externalConversationId);
+        const existing = this.#imBindings.get(key);
+        if (existing) {
+          existing.updatedAt = this.#now();
+          await this.#saveImBindings();
+          return existing;
+        }
+        const project = await this.#ensureDefaultWorkspaceProject();
+        const sessionId = asSessionId(`ses_${this.#createId()}`);
+        const lane = await this.#createLane(sessionId, {
+          projectId: project.projectId,
+          title: `${extensionId}: ${externalConversationId}`
+        }, project);
+        this.#sessions.set(sessionId, lane);
+        this.#events.set(sessionId, []);
+        this.#seqs.set(sessionId, 0);
+        const binding = {
+          extensionId,
+          externalConversationId,
+          projectId: project.projectId,
+          sessionId,
+          createdAt: this.#now(),
+          updatedAt: this.#now()
+        };
+        this.#imBindings.set(key, binding);
+        await this.#saveImBindings();
+        await this.#appendDiagnostic(sessionId, "im_session_bound", {
+          extensionId,
+          externalConversationId,
+          projectId: project.projectId
+        });
+        return binding;
+      }
+      async #ensureDefaultWorkspaceProject() {
+        const workspace = join10(this.#scorelHomeDir, "workspace");
+        await mkdir6(workspace, { recursive: true });
+        return this.registerProject(workspace);
+      }
+      #extensionSkillRoots() {
+        return [...this.#imExtensions.values()].flatMap(
+          (extension) => extension.skillRoots.map((path) => ({ path, extensionId: extension.manifest.id }))
+        );
+      }
+      async #loadImBindings() {
+        try {
+          const text = await readFile11(this.#imBindingsPath(), "utf8");
+          const value = JSON.parse(text);
+          for (const binding of value.bindings ?? []) {
+            this.#imBindings.set(imBindingKey(binding.extensionId, binding.externalConversationId), binding);
+          }
+        } catch (cause) {
+          if (!isNodeErrorCode4(cause, "ENOENT")) {
+            throw cause;
+          }
+        }
+      }
+      async #saveImBindings() {
+        const path = this.#imBindingsPath();
+        await mkdir6(dirname8(path), { recursive: true });
+        await writeFile6(path, `${JSON.stringify({ bindings: [...this.#imBindings.values()] }, null, 2)}
+`, "utf8");
+      }
+      #imBindingsPath() {
+        return join10(this.#scorelHomeDir, "channels", "im-bindings.json");
+      }
+      async #loadUserConfigProfile() {
+        try {
+          return await loadScorelConfigProfile({ cwd: this.#userHomeDir, homeDir: this.#userHomeDir });
+        } catch (cause) {
+          if (isMissingConfigError(cause)) {
+            return void 0;
+          }
+          throw cause;
+        }
+      }
+      async #listModels(projectId) {
+        let config;
+        try {
+          config = await this.#configProfileForProject(projectId);
+        } catch (cause) {
+          if (!isMissingConfigError(cause)) {
+            throw cause;
+          }
+          config = void 0;
+        }
+        if (!config) {
+          return {
+            providers: [],
+            providerModels: [],
+            models: [],
+            roles: {
+              primary: "",
+              standard: "",
+              auxiliary: ""
+            }
+          };
+        }
+        const configWarnings = "warnings" in config ? config.warnings : void 0;
+        return {
+          providers: listProviderConnections(config),
+          providerModels: listProviderModels(config),
+          models: listAvailableModels(config),
+          roles: config.modelProfile.roles,
+          ...configWarnings ? { warnings: configWarnings } : {}
+        };
+      }
+      async #handleUpsertModelProfile(request) {
+        const project = await this.#registry.require(request.projectId);
+        const configPath = join10(project.workDir, ".scorel", "config.toml");
+        let existingConfigText;
+        try {
+          existingConfigText = await readFile11(configPath, "utf8");
+        } catch (cause) {
+          if (!isNodeErrorCode4(cause, "ENOENT")) {
+            throw cause;
+          }
+        }
+        await mkdir6(join10(project.workDir, ".scorel"), { recursive: true });
+        await writeFile6(
+          configPath,
+          renderModelProfileConfig({
+            providerId: request.providerId,
+            providerType: request.providerType,
+            provider: request.provider,
+            apiKeyEnv: request.apiKeyEnv,
+            apiKey: request.apiKey,
+            api: request.api,
+            baseUrl: request.baseUrl,
+            modelId: request.modelId,
+            providerModelKey: request.providerModelKey,
+            availableModelId: request.availableModelId,
+            addToAvailable: request.addToAvailable,
+            removeAvailableModelId: request.removeAvailableModelId,
+            providerModelId: request.providerModelId,
+            displayName: request.displayName,
+            contextWindow: request.contextWindow,
+            maxTokens: request.maxTokens,
+            reasoning: request.reasoning,
+            supportsDeveloperRole: request.supportsDeveloperRole,
+            supportsImageInput: request.supportsImageInput,
+            roles: request.roles,
+            existingConfigText
+          }),
+          "utf8"
+        );
+        await this.#appendHostDiagnostic("model_profile_upserted", {
+          projectId: project.projectId,
+          workDir: project.workDir,
+          providerId: request.providerId,
+          modelId: request.modelId
+        });
+        return this.#listModels(project.projectId);
+      }
+      async #memorySettingsForProject(projectId) {
+        const config = await this.#configProfileForProject(projectId).catch((cause) => {
+          if (isMissingConfigError(cause)) {
+            return void 0;
+          }
+          throw cause;
+        });
+        return config?.memory ?? disabledMemorySettings();
+      }
+      async #safeMemorySettingsForRuntime(lane, clientId) {
+        try {
+          return await this.#memorySettingsForProject(lane.project.projectId);
+        } catch (cause) {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          await this.#appendDiagnostic(lane.session.header.sessionId, "memory_settings_unavailable", {
+            clientId,
+            message: error.message,
+            stack: shortStack(error)
+          });
+          return disabledMemorySettings();
+        }
+      }
+      async #handleUpsertMemorySettings(request) {
+        const project = await this.#registry.require(request.projectId);
+        const configPath = join10(project.workDir, ".scorel", "config.toml");
+        let existingConfigText;
+        try {
+          existingConfigText = await readFile11(configPath, "utf8");
+        } catch (cause) {
+          if (!isNodeErrorCode4(cause, "ENOENT")) {
+            throw cause;
+          }
+        }
+        await mkdir6(join10(project.workDir, ".scorel"), { recursive: true });
+        await writeFile6(
+          configPath,
+          renderMemoryConfig({
+            enabled: request.enabled,
+            daily: request.daily,
+            autoDream: request.autoDream,
+            promoteRoot: request.promoteRoot,
+            dreamIdleMinutes: request.dreamIdleMinutes,
+            existingConfigText
+          }),
+          "utf8"
+        );
+        await this.#appendHostDiagnostic("memory_settings_upserted", {
+          projectId: project.projectId,
+          workDir: project.workDir
+        });
+        return this.#memorySettingsForProject(project.projectId);
+      }
+      async #extensionSettings(extensionId) {
+        const config = await this.#loadUserConfigProfile().catch((cause) => {
+          if (isMissingConfigError(cause)) {
+            return void 0;
+          }
+          throw cause;
+        });
+        const extension = config?.extensions[extensionId];
+        return {
+          extensionId,
+          enabled: extension?.enabled ?? false,
+          kind: "im",
+          config: extension?.config ?? {},
+          active: this.#imExtensions.has(extensionId)
+        };
+      }
+      async #handleUpsertExtensionSettings(request) {
+        const configPath = join10(this.#scorelHomeDir, "config.toml");
+        let existingConfigText;
+        try {
+          existingConfigText = await readFile11(configPath, "utf8");
+        } catch (cause) {
+          if (!isNodeErrorCode4(cause, "ENOENT")) {
+            throw cause;
+          }
+        }
+        await mkdir6(this.#scorelHomeDir, { recursive: true });
+        await writeFile6(
+          configPath,
+          renderExtensionConfig({
+            extensionId: request.extensionId,
+            enabled: request.enabled,
+            kind: request.kind,
+            config: request.config,
+            existingConfigText
+          }),
+          "utf8"
+        );
+        await this.#appendHostDiagnostic("extension_settings_upserted", {
+          extensionId: request.extensionId,
+          enabled: request.enabled
+        });
+        await this.refreshImExtensions();
+        return this.#extensionSettings(request.extensionId);
+      }
+      async #fetchProviderModels(projectId, providerId) {
+        const project = await this.#registry.require(projectId);
+        const config = await loadScorelConfigProfile({ cwd: project.workDir, includeSecrets: true });
+        if (!config) {
+          throw new Error("Model profile config is not configured");
+        }
+        const provider = config.providers[providerId];
+        if (!provider) {
+          throw new Error(`Provider is not configured: ${providerId}`);
+        }
+        if (provider.type !== "custom" || provider.api !== "openai-completions" && provider.api !== "openai-responses") {
+          throw new Error("Provider catalog fetch currently supports custom OpenAI-compatible providers only");
+        }
+        if (!provider.baseUrl) {
+          throw new Error(`providers.${providerId}.baseUrl is required`);
+        }
+        const apiKeyEnv = "apiKeyEnv" in provider ? provider.apiKeyEnv : void 0;
+        const apiKey = provider.apiKey || (apiKeyEnv ? process.env[apiKeyEnv] : void 0);
+        if (!apiKey) {
+          throw new Error(apiKeyEnv ? `${apiKeyEnv} is not set` : "Provider API key is not configured");
+        }
+        const endpoint = `${provider.baseUrl.replace(/\/+$/, "")}/models`;
+        const response = await fetch(endpoint, {
+          headers: {
+            authorization: `Bearer ${apiKey}`
+          }
+        });
+        if (!response.ok) {
+          throw new Error(`Provider /models request failed: ${response.status} ${response.statusText}`);
+        }
+        const payload = await response.json();
+        const rawModels = Array.isArray(payload.data) ? payload.data : Array.isArray(payload.models) ? payload.models : [];
+        return rawModels.map((model) => {
+          const id = typeof model.id === "string" ? model.id : "";
+          const name = typeof model.name === "string" ? model.name : id;
+          return id ? { id, displayName: name || id } : void 0;
+        }).filter((model) => Boolean(model)).sort((left, right) => left.id.localeCompare(right.id));
+      }
+      async #selectedModelFromMeta(meta, project) {
+        const config = await this.#configForProject(project.projectId);
+        if (!config) {
+          return "selectedModel" in meta ? meta.selectedModel : void 0;
+        }
+        const persistedSelection = "selectedModel" in meta ? meta.selectedModel : void 0;
+        const requestedSelection = "modelSelection" in meta ? meta.modelSelection : void 0;
+        const selection = resolveModelSelection(
+          config,
+          persistedSelection ? { modelId: persistedSelection.modelId, role: persistedSelection.role } : requestedSelection
+        );
+        const model = resolvePiAiModel(selection.config);
+        return {
+          modelId: selection.modelId,
+          role: selection.role,
+          providerId: selection.providerId,
+          provider: model.provider,
+          id: model.id,
+          displayName: selection.displayName,
+          contextWindow: model.contextWindow,
+          maxTokens: model.maxTokens,
+          reasoning: model.reasoning,
+          supportsImageInput: model.input.includes("image")
+        };
+      }
+      async #configForProject(projectId) {
+        if (this.#loadConfig) {
+          if (!projectId) {
+            return this.#modelProfile;
+          }
+          const project = await this.#registry.require(projectId);
+          return this.#loadConfig({ project });
+        }
+        return this.#modelProfile;
+      }
+      async #configProfileForProject(projectId) {
+        if (this.#loadConfigProfile) {
+          if (!projectId) {
+            return this.#modelProfile;
+          }
+          const project = await this.#registry.require(projectId);
+          return this.#loadConfigProfile({ project });
+        }
+        if (this.#loadConfig) {
+          if (!projectId) {
+            return this.#modelProfile;
+          }
+          const project = await this.#registry.require(projectId);
+          try {
+            return await loadScorelConfigProfile({ cwd: project.workDir });
+          } catch (cause) {
+            if (!isMissingConfigError(cause)) {
+              throw cause;
+            }
+          }
+        }
+        return this.#modelProfile;
       }
       #respond(connection, request, data) {
         connection.emit({
@@ -4310,14 +6302,14 @@ var init_src4 = __esm({
           sessionId,
           ...fields
         });
-        await mkdir5(this.#sessionsDir, { recursive: true });
-        await appendFile2(sessionLogFilePath(this.#sessionsDir, sessionId), `${line}
+        await mkdir6(this.#sessionsDir, { recursive: true });
+        await appendFile3(sessionLogFilePath(this.#sessionsDir, sessionId), `${line}
 `, "utf8");
       }
       async #appendHostDiagnostic(event, fields = {}) {
         const line = formatDiagnosticLine({ ts: this.#now(), level: "info", event, ...fields });
-        await mkdir5(this.#sessionsDir, { recursive: true });
-        await appendFile2(join9(this.#sessionsDir, "host.log"), `${line}
+        await mkdir6(this.#sessionsDir, { recursive: true });
+        await appendFile3(join10(this.#sessionsDir, "host.log"), `${line}
 `, "utf8");
       }
       async #resolveProject(sessionId, projectId) {
@@ -4329,6 +6321,7 @@ var init_src4 = __esm({
         return project;
       }
     };
+    isMissingConfigError = (cause) => cause instanceof Error && cause.message.startsWith("Scorel config not found:");
     createEmbeddedTransport = (host) => {
       const handlers = /* @__PURE__ */ new Set();
       const connection = {
@@ -4374,7 +6367,7 @@ var init_src4 = __esm({
         }
       };
     };
-    isNodeErrorCode3 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
+    isNodeErrorCode4 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
     wireErrorCode = (cause) => {
       if (!(cause instanceof ProjectRegistryError)) {
         return "internal_error";
@@ -4396,6 +6389,99 @@ var init_src4 = __esm({
     };
     countContentBlocks = (message, type) => message.content.filter((block) => block.type === type).length;
     normalizeContent = (content) => typeof content === "string" ? [{ type: "text", text: content }] : content;
+    inputText = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
+    assistantText = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
+    disabledMemorySettings = () => ({
+      enabled: false,
+      daily: false,
+      autoDream: false,
+      promoteRoot: false,
+      dreamIdleMinutes: 60
+    });
+    runtimeChannelContextFromWire = (context) => ({
+      extensionId: context.channel,
+      channel: context.channel,
+      externalConversationId: context.externalConversationId,
+      target: {
+        externalConversationId: context.externalConversationId,
+        data: context.data
+      },
+      ...context.conversationType ? { conversationType: context.conversationType } : {},
+      ...context.senderDisplayName ? { senderDisplayName: context.senderDisplayName } : {},
+      ...context.mentionedBot !== void 0 ? { mentionedBot: context.mentionedBot } : {},
+      ...context.data ? { data: context.data } : {}
+    });
+    parseQueuedChannelContext = (value) => {
+      if (!isRecord7(value)) {
+        return void 0;
+      }
+      if (typeof value.channel !== "string" || typeof value.externalConversationId !== "string") {
+        return void 0;
+      }
+      return runtimeChannelContextFromWire({
+        channel: value.channel,
+        externalConversationId: value.externalConversationId,
+        ...typeof value.conversationType === "string" ? { conversationType: value.conversationType } : {},
+        ...typeof value.senderDisplayName === "string" ? { senderDisplayName: value.senderDisplayName } : {},
+        ...typeof value.mentionedBot === "boolean" ? { mentionedBot: value.mentionedBot } : {},
+        ...isRecord7(value.data) ? { data: value.data } : {}
+      });
+    };
+    imBindingKey = (extensionId, externalConversationId) => `${extensionId}:${externalConversationId}`;
+    defaultBuiltinExtensionsDir = () => findBuiltinExtensionsDir([
+      runtimeModuleDir(),
+      process.cwd()
+    ]);
+    runtimeModuleDir = () => {
+      if (typeof __dirname === "string") {
+        return __dirname;
+      }
+      return process.argv[1] ? dirname8(process.argv[1]) : process.cwd();
+    };
+    findBuiltinExtensionsDir = (starts) => {
+      for (const start of starts) {
+        let current = resolve5(start);
+        while (true) {
+          const candidate = join10(current, "extensions", "builtin");
+          if (existsSync3(candidate)) {
+            return candidate;
+          }
+          const next = dirname8(current);
+          if (next === current) {
+            break;
+          }
+          current = next;
+        }
+      }
+      return join10(starts[0] ?? process.cwd(), "extensions", "builtin");
+    };
+    isSteerMessage = (text) => /^\/(?:steer|interrupt)\b/i.test(text.trim());
+    stripImCommandPrefix = (text) => text.trim().replace(/^\/(?:steer|interrupt)\s*/i, "").trim() || text;
+    isRecord7 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    parseMemoryUpdate = (raw) => {
+      const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      if (!text) {
+        return void 0;
+      }
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return void 0;
+      }
+      const record = parsed;
+      return {
+        ...typeof record.projectMemory === "string" && record.projectMemory.trim() ? { projectMemory: record.projectMemory.trim() } : {},
+        ...typeof record.rootMemory === "string" && record.rootMemory.trim() ? { rootMemory: record.rootMemory.trim() } : {}
+      };
+    };
+    normalizeMarkdownFile = (value) => `${value.trimEnd()}
+`;
+    sanitizeSessionTitle = (value) => {
+      const title = value.split(/\r?\n/).map((line) => line.trim()).find(Boolean)?.replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, "").replace(/[.!?。！？]+$/g, "").trim();
+      if (!title) {
+        return "";
+      }
+      return title.slice(0, 80);
+    };
     shortStack = (error) => error.stack?.split("\n").slice(0, 3).join(" | ");
     formatDiagnosticLine = (fields) => Object.entries(fields).filter(([, value]) => value !== void 0 && value !== null).map(([key, value]) => `${key}=${formatDiagnosticValue(value)}`).join(" ");
     formatDiagnosticValue = (value) => {
@@ -4406,8 +6492,8 @@ var init_src4 = __esm({
 });
 
 // apps/cli/src/relay-cli.ts
-import { homedir as homedir4 } from "node:os";
-import { join as join10 } from "node:path";
+import { homedir as homedir5 } from "node:os";
+import { join as join11 } from "node:path";
 var DEFAULT_SCOREL_RELAY_URL, DEFAULT_SCOREL_WEBUI_URL, defaultStateDir, runCliPair, resolveDefaultRelayUrl, parsePairFlags, requireValue, writePairUsage;
 var init_relay_cli = __esm({
   "apps/cli/src/relay-cli.ts"() {
@@ -4415,7 +6501,7 @@ var init_relay_cli = __esm({
     init_src4();
     DEFAULT_SCOREL_RELAY_URL = "wss://scorel-relay.chanler.dev";
     DEFAULT_SCOREL_WEBUI_URL = "https://scorel.chanler.dev";
-    defaultStateDir = () => join10(homedir4(), ".scorel");
+    defaultStateDir = () => join11(homedir5(), ".scorel");
     runCliPair = async (argv, options) => {
       let flags;
       try {
@@ -4478,8 +6564,8 @@ var init_relay_cli = __esm({
 
 // apps/cli/src/daemon-cli.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import { homedir as homedir5 } from "node:os";
-import { join as join11 } from "node:path";
+import { homedir as homedir6 } from "node:os";
+import { join as join12 } from "node:path";
 var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runServeCommand, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep, writeDaemonUsage;
 var init_daemon_cli = __esm({
   "apps/cli/src/daemon-cli.ts"() {
@@ -4490,7 +6576,7 @@ var init_daemon_cli = __esm({
     DEFAULT_PORT = 7777;
     STOP_POLL_INTERVAL_MS = 200;
     STOP_GRACE_MS = 5e3;
-    defaultStateDir2 = () => join11(homedir5(), ".scorel");
+    defaultStateDir2 = () => join12(homedir6(), ".scorel");
     isLoopbackHost = (host) => host === "127.0.0.1" || host === "::1" || host === "localhost";
     formatTimestamp = (epochMs) => new Date(epochMs).toISOString();
     runCliDaemon = async (argv, options) => {
@@ -4542,13 +6628,17 @@ Use --replace to stop it and start a new one.
       const token = flags.token ?? existing?.token ?? randomUUID4();
       const identity = await loadOrCreateHostDeviceIdentity({ stateDir: options.stateDir });
       const daemon = new ScorelHost({
-        sessionsDir: options.sessionsDir ?? scorelSessionsDir(homedir5()),
-        projectsPath: join11(options.stateDir, "projects.json"),
+        sessionsDir: options.sessionsDir ?? scorelSessionsDir(homedir6()),
+        projectsPath: join12(options.stateDir, "projects.json"),
         deviceId: identity.deviceId,
         deviceDisplayName: identity.displayName,
-        createRuntime: async ({ project }) => createRealRuntime({
+        loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir }),
+        loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir }),
+        createRuntime: async ({ project, selectedModel, purpose }) => createRealRuntime({
           cwd: project.workDir,
-          config: await loadScorelConfig({ cwd: project.workDir })
+          config: await loadScorelConfig({ cwd: project.workDir }),
+          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : void 0,
+          includeTools: purpose === "chat"
         })
       });
       await daemon.start();
@@ -4607,18 +6697,18 @@ Use --replace to stop it and start a new one.
       };
       let signalReason = "natural";
       const signalHandlers = /* @__PURE__ */ new Map();
-      const stopWaiter = new Promise((resolve5) => {
+      const stopWaiter = new Promise((resolve7) => {
         if (options.serveSignal) {
           if (options.serveSignal.aborted) {
             signalReason = "abort";
-            resolve5();
+            resolve7();
             return;
           }
           options.serveSignal.addEventListener(
             "abort",
             () => {
               signalReason = "abort";
-              resolve5();
+              resolve7();
             },
             { once: true }
           );
@@ -4627,7 +6717,7 @@ Use --replace to stop it and start a new one.
         const installSignal = (signal) => {
           const handler = () => {
             signalReason = signal;
-            resolve5();
+            resolve7();
           };
           signalHandlers.set(signal, handler);
           process.once(signal, handler);
@@ -4822,8 +6912,8 @@ Use --replace to stop it and start a new one.
       }
       return value;
     };
-    sleep = (ms) => new Promise((resolve5) => {
-      setTimeout(resolve5, ms);
+    sleep = (ms) => new Promise((resolve7) => {
+      setTimeout(resolve7, ms);
     });
     writeDaemonUsage = (output) => {
       output.write(
@@ -5030,8 +7120,8 @@ var init_routing = __esm({
 });
 
 // apps/relay/src/store.ts
-import { mkdir as mkdir6, readFile as readFile10, writeFile as writeFile6 } from "node:fs/promises";
-import { join as join12 } from "node:path";
+import { mkdir as mkdir7, readFile as readFile12, writeFile as writeFile7 } from "node:fs/promises";
+import { join as join13 } from "node:path";
 var FileRelayStore, emptyStoreFile;
 var init_store = __esm({
   "apps/relay/src/store.ts"() {
@@ -5041,7 +7131,7 @@ var init_store = __esm({
       #now;
       #queue = Promise.resolve();
       constructor(options) {
-        this.#filePath = join12(options.dataDir, "relay-store.json");
+        this.#filePath = join13(options.dataDir, "relay-store.json");
         this.#now = options.now ?? Date.now;
       }
       async upsertDevice(record) {
@@ -5084,15 +7174,15 @@ var init_store = __esm({
         this.#queue = this.#queue.then(async () => {
           const file = await this.#read();
           mutator(file);
-          await mkdir6(join12(this.#filePath, ".."), { recursive: true });
-          await writeFile6(this.#filePath, `${JSON.stringify(file, null, 2)}
+          await mkdir7(join13(this.#filePath, ".."), { recursive: true });
+          await writeFile7(this.#filePath, `${JSON.stringify(file, null, 2)}
 `);
         });
         await this.#queue;
       }
       async #read() {
         try {
-          const raw = JSON.parse(await readFile10(this.#filePath, "utf8"));
+          const raw = JSON.parse(await readFile12(this.#filePath, "utf8"));
           if (raw.version !== 1 || !Array.isArray(raw.devices) || !Array.isArray(raw.clients) || !Array.isArray(raw.bindings)) {
             return emptyStoreFile();
           }
@@ -5161,11 +7251,11 @@ var init_server = __esm({
           });
         });
       });
-      await new Promise((resolve5, reject) => {
+      await new Promise((resolve7, reject) => {
         server.once("error", reject);
         server.once("listening", () => {
           server.off("error", reject);
-          resolve5();
+          resolve7();
         });
       });
       const address = server.address();
@@ -5320,11 +7410,11 @@ var init_server = __esm({
         socket.send(JSON.stringify(value));
       }
     };
-    closeWebSocketServer2 = (server) => new Promise((resolve5, reject) => {
+    closeWebSocketServer2 = (server) => new Promise((resolve7, reject) => {
       for (const client of server.clients) {
         client.close();
       }
-      server.close((error) => error ? reject(error) : resolve5());
+      server.close((error) => error ? reject(error) : resolve7());
     });
   }
 });
@@ -5344,8 +7434,8 @@ var init_library = __esm({
 });
 
 // apps/cli/src/relay-server-cli.ts
-import { homedir as homedir6 } from "node:os";
-import { join as join13 } from "node:path";
+import { homedir as homedir7 } from "node:os";
+import { join as join14 } from "node:path";
 var DEFAULT_HOST2, DEFAULT_PORT2, runCliRelay, runRelayServe, parseRelayServeFlags, waitForStop, requireValue3, writeRelayUsage;
 var init_relay_server_cli = __esm({
   "apps/cli/src/relay-server-cli.ts"() {
@@ -5397,7 +7487,7 @@ var init_relay_server_cli = __esm({
     parseRelayServeFlags = (argv) => {
       let host = DEFAULT_HOST2;
       let port = DEFAULT_PORT2;
-      let dataDir = join13(homedir6(), ".scorel", "relay");
+      let dataDir = join14(homedir7(), ".scorel", "relay");
       for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === "--host") {
@@ -5422,19 +7512,19 @@ var init_relay_server_cli = __esm({
       }
       return { host, port, dataDir };
     };
-    waitForStop = (signal) => new Promise((resolve5) => {
+    waitForStop = (signal) => new Promise((resolve7) => {
       if (signal) {
         if (signal.aborted) {
-          resolve5();
+          resolve7();
           return;
         }
-        signal.addEventListener("abort", () => resolve5(), { once: true });
+        signal.addEventListener("abort", () => resolve7(), { once: true });
         return;
       }
       const onSignal = () => {
         process.off("SIGINT", onSignal);
         process.off("SIGTERM", onSignal);
-        resolve5();
+        resolve7();
       };
       process.once("SIGINT", onSignal);
       process.once("SIGTERM", onSignal);
@@ -5454,8 +7544,8 @@ var init_relay_server_cli = __esm({
 
 // apps/cli/src/up-cli.ts
 import { spawn } from "node:child_process";
-import { homedir as homedir7 } from "node:os";
-import { join as join14 } from "node:path";
+import { homedir as homedir8 } from "node:os";
+import { join as join15 } from "node:path";
 import { fileURLToPath } from "node:url";
 var DEFAULT_DAEMON_PORT, DEFAULT_WEBUI_PORT, DEFAULT_DAEMON_READY_TIMEOUT_MS, defaultStateDir3, defaultAttachSigint, runCliUp, parseUpFlags, requireValue4, waitForDaemonReady, pipeWithPrefix, pipeStreamLines, once;
 var init_up_cli = __esm({
@@ -5465,7 +7555,7 @@ var init_up_cli = __esm({
     DEFAULT_DAEMON_PORT = 7777;
     DEFAULT_WEBUI_PORT = 3e3;
     DEFAULT_DAEMON_READY_TIMEOUT_MS = 1e4;
-    defaultStateDir3 = () => join14(homedir7(), ".scorel");
+    defaultStateDir3 = () => join15(homedir8(), ".scorel");
     defaultAttachSigint = (listener) => {
       process.on("SIGINT", listener);
       return () => process.off("SIGINT", listener);
@@ -5703,8 +7793,8 @@ var init_up_cli = __esm({
 
 // apps/cli/src/webui-cli.ts
 import { spawn as spawn2 } from "node:child_process";
-import { existsSync as existsSync3 } from "node:fs";
-import { dirname as dirname7, resolve as resolve4 } from "node:path";
+import { existsSync as existsSync4 } from "node:fs";
+import { dirname as dirname9, resolve as resolve6 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var DEFAULT_PORT3, DEFAULT_HOST3, runCliWebUi, findWebuiAppDir, buildWebUiSpawnPlan, parseWebUiFlags, requireValue5, waitForChildExit;
 var init_webui_cli = __esm({
@@ -5736,13 +7826,13 @@ var init_webui_cli = __esm({
       return await waitForChildExit(child, options);
     };
     findWebuiAppDir = () => {
-      let cursor = dirname7(fileURLToPath2(import.meta.url));
+      let cursor = dirname9(fileURLToPath2(import.meta.url));
       for (let depth = 0; depth < 8; depth += 1) {
-        const candidate = resolve4(cursor, "apps/webui/package.json");
-        if (existsSync3(candidate)) {
-          return resolve4(cursor, "apps/webui");
+        const candidate = resolve6(cursor, "apps/webui/package.json");
+        if (existsSync4(candidate)) {
+          return resolve6(cursor, "apps/webui");
         }
-        const parent = resolve4(cursor, "..");
+        const parent = resolve6(cursor, "..");
         if (parent === cursor) {
           return void 0;
         }
@@ -5756,8 +7846,8 @@ var init_webui_cli = __esm({
         PORT: String(flags.port),
         HOST: flags.host
       };
-      const nextBin = resolve4(webuiAppDir, "node_modules/next/dist/bin/next");
-      if (existsSync3(nextBin)) {
+      const nextBin = resolve6(webuiAppDir, "node_modules/next/dist/bin/next");
+      if (existsSync4(nextBin)) {
         return {
           command: process.execPath,
           argv: [nextBin, "dev", "-p", String(flags.port), "-H", flags.host],
@@ -5825,11 +7915,11 @@ __export(index_exports, {
   runCli: () => runCli
 });
 import { createHash as createHash3 } from "node:crypto";
-import { appendFile as appendFile3, mkdir as mkdir7, readFile as readFile11, realpath as realpath3, readdir as readdir6, writeFile as writeFile7 } from "node:fs/promises";
+import { appendFile as appendFile4, mkdir as mkdir8, readFile as readFile13, realpath as realpath3, readdir as readdir7, writeFile as writeFile8 } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
-import { homedir as homedir8 } from "node:os";
+import { homedir as homedir9 } from "node:os";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { basename as basename2, dirname as dirname8, join as join15 } from "node:path";
+import { basename as basename2, dirname as dirname10, join as join16 } from "node:path";
 var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, createSigintHandler, loadOrCreateSession, parseChatOptions, requireValue6, promptIfInteractive, writeUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
 var init_index = __esm({
   async "apps/cli/src/index.ts"() {
@@ -5845,8 +7935,8 @@ var init_index = __esm({
     cliAppName = "@scorel/app-cli";
     cliClientDependency = clientPackageName;
     cliDaemonDependency = daemonPackageName;
-    defaultSessionsDir = () => scorelSessionsDir(homedir8());
-    defaultStateDir4 = () => join15(homedir8(), ".scorel");
+    defaultSessionsDir = () => scorelSessionsDir(homedir9());
+    defaultStateDir4 = () => join16(homedir9(), ".scorel");
     runCli = async (argv, io = { input: process.stdin, output: process.stdout, error: process.stderr }, runOptions = {}) => {
       const [command, ...rest] = argv;
       if (!command || command === "chat") {
@@ -5981,10 +8071,10 @@ var init_index = __esm({
       }
     };
     runLogs = async (options, io) => {
-      const filePath = options.attach ? await findAttachDiagnosticsFilePath(io.stateDir, options.sessionId, options.remoteUrl) : join15(io.sessionsDir, `${options.sessionId}.log`);
+      const filePath = options.attach ? await findAttachDiagnosticsFilePath(io.stateDir, options.sessionId, options.remoteUrl) : join16(io.sessionsDir, `${options.sessionId}.log`);
       let content;
       try {
-        content = await readFile11(filePath, "utf8");
+        content = await readFile13(filePath, "utf8");
       } catch (cause) {
         io.error.write(`scorel logs error: ${cause instanceof Error ? cause.message : String(cause)}
 `);
@@ -6138,31 +8228,31 @@ var init_index = __esm({
     };
     attachCacheFilePath = (stateDir, scope, sessionId) => {
       const scopeKey = createHash3("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
-      return join15(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
+      return join16(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
     };
     attachDiagnosticsFilePath = (stateDir, scope, sessionId) => {
       const scopeKey = createHash3("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
-      return join15(stateDir, "attach-cache", scopeKey, `${sessionId}.log`);
+      return join16(stateDir, "attach-cache", scopeKey, `${sessionId}.log`);
     };
     findAttachDiagnosticsFilePath = async (stateDir, sessionId, _remoteUrl) => {
-      const root = join15(stateDir, "attach-cache");
-      const scopes = await readdir6(root).catch(() => []);
+      const root = join16(stateDir, "attach-cache");
+      const scopes = await readdir7(root).catch(() => []);
       for (const scope of scopes) {
-        const candidate = join15(root, scope, `${sessionId}.log`);
+        const candidate = join16(root, scope, `${sessionId}.log`);
         try {
-          await readFile11(candidate, "utf8");
+          await readFile13(candidate, "utf8");
           return candidate;
         } catch {
           continue;
         }
       }
-      return join15(root, "__missing__", `${sessionId}.log`);
+      return join16(root, "__missing__", `${sessionId}.log`);
     };
     stateDirFromSessionsDir = (sessionsDir) => {
       if (!sessionsDir) {
         return defaultStateDir4();
       }
-      return basename2(sessionsDir) === "sessions" ? dirname8(sessionsDir) : sessionsDir;
+      return basename2(sessionsDir) === "sessions" ? dirname10(sessionsDir) : sessionsDir;
     };
     AttachDiagnostics = class {
       #stateDir;
@@ -6214,14 +8304,14 @@ var init_index = __esm({
         }
         const filePath = attachDiagnosticsFilePath(this.#stateDir, this.#scope, this.#sessionId);
         this.#writes.push(
-          mkdir7(dirname8(filePath), { recursive: true }).then(() => appendFile3(filePath, `${line}
+          mkdir8(dirname10(filePath), { recursive: true }).then(() => appendFile4(filePath, `${line}
 `, "utf8"))
         );
       }
     };
     readAttachCache = async (stateDir, scope, sessionId) => {
       try {
-        const raw = JSON.parse(await readFile11(attachCacheFilePath(stateDir, scope, sessionId), "utf8"));
+        const raw = JSON.parse(await readFile13(attachCacheFilePath(stateDir, scope, sessionId), "utf8"));
         if (raw.version !== 1 || raw.sessionId !== String(sessionId) || raw.scope.kind !== scope.kind || raw.scope.locator !== scope.locator || !Array.isArray(raw.events)) {
           return emptyAttachCacheSnapshot();
         }
@@ -6244,8 +8334,8 @@ var init_index = __esm({
       const filePath = attachCacheFilePath(stateDir, scope, sessionId);
       const uniqueEvents = mergePersistentEvents(snapshot.events);
       const transients = removeCompletedTransients(snapshot.transients, uniqueEvents);
-      await mkdir7(dirname8(filePath), { recursive: true });
-      await writeFile7(
+      await mkdir8(dirname10(filePath), { recursive: true });
+      await writeFile8(
         filePath,
         `${JSON.stringify({ version: 1, scope, sessionId: String(sessionId), events: uniqueEvents, transients }, null, 2)}
 `
@@ -6306,8 +8396,8 @@ var init_index = __esm({
       }
       async next() {
         while (this.#items.length === 0 && !this.#closed) {
-          await new Promise((resolve5) => {
-            this.#notify = resolve5;
+          await new Promise((resolve7) => {
+            this.#notify = resolve7;
           });
         }
         return this.#items.shift() ?? null;
@@ -6381,13 +8471,18 @@ var init_index = __esm({
       return { sessionId, tail, attach, remoteUrl };
     };
     runChat = async (options, io) => {
+      const loadProjectConfig = async (project2) => options.config ?? await loadScorelConfig({ cwd: project2.workDir });
       const daemon = new ScorelHost({
         sessionsDir: options.sessionsDir,
-        projectsPath: join15(options.stateDir, "projects.json"),
+        projectsPath: join16(options.stateDir, "projects.json"),
         deviceId: asDeviceId("device_local"),
-        createRuntime: async ({ project: project2 }) => createRealRuntime({
+        loadConfig: async ({ project: project2 }) => loadProjectConfig(project2),
+        loadConfigProfile: async ({ project: project2 }) => loadScorelConfigProfile({ cwd: project2.workDir }),
+        createRuntime: async ({ project: project2, selectedModel, purpose }) => createRealRuntime({
           cwd: project2.workDir,
-          config: options.config ?? await loadScorelConfig({ cwd: project2.workDir })
+          config: await loadProjectConfig(project2),
+          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : void 0,
+          includeTools: purpose === "chat"
         })
       });
       const client = new DaemonClient(createEmbeddedTransport(daemon), {

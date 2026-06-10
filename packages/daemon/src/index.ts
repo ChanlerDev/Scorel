@@ -30,6 +30,7 @@ import {
   loadExtensionManifest,
   loadSession,
   renderMemoryConfig,
+  renderExtensionConfig,
   renderMemoryHarness,
   renderSkillDelta,
   renderSkillListing,
@@ -85,6 +86,7 @@ import {
   type Unsubscribe,
   type ClientRequestMap,
   type ChannelContext,
+  type ExtensionSettings,
   type MemorySettings,
 } from "@scorel/protocol";
 
@@ -597,7 +599,7 @@ export class ScorelHost {
     this.#deviceDisplayName = options.deviceDisplayName;
     this.#scorelHomeDir = resolve(options.scorelHomeDir ?? dirname(options.projectsPath));
     this.#userHomeDir = dirname(this.#scorelHomeDir);
-    this.#builtinExtensionsDir = resolve(options.builtinExtensionsDir ?? findBuiltinExtensionsDir(process.cwd()));
+    this.#builtinExtensionsDir = resolve(options.builtinExtensionsDir ?? defaultBuiltinExtensionsDir());
     this.#modelProfile = options.modelProfile;
     this.#loadConfig = options.loadConfig;
     this.#loadConfigProfile = options.loadConfigProfile;
@@ -627,17 +629,15 @@ export class ScorelHost {
       }
     }
     this.#memoryDreams.clear();
-    for (const extension of this.#imExtensions.values()) {
-      await extension.adapter.stop().catch((cause) => {
-        void this.#appendHostDiagnostic("im_extension_stop_failed", {
-          extensionId: extension.manifest.id,
-          message: cause instanceof Error ? cause.message : String(cause),
-        });
-      });
-    }
-    this.#imExtensions.clear();
+    await this.#stopImExtensions();
     this.#connections.clear();
     this.#started = false;
+  }
+
+  async refreshImExtensions(): Promise<void> {
+    this.#assertStarted();
+    await this.#stopImExtensions();
+    await this.#startEnabledImExtensions();
   }
 
   connect(connection: Connection, sessionId?: SessionId): ConnectResult {
@@ -805,6 +805,14 @@ export class ScorelHost {
       }
       case "upsert_memory_settings": {
         this.#respond(connection, message, { memory: await this.#handleUpsertMemorySettings(message) });
+        break;
+      }
+      case "get_extension_settings": {
+        this.#respond(connection, message, { extension: await this.#extensionSettings(message.extensionId) });
+        break;
+      }
+      case "upsert_extension_settings": {
+        this.#respond(connection, message, { extension: await this.#handleUpsertExtensionSettings(message) });
         break;
       }
       case "list_directories": {
@@ -2076,6 +2084,18 @@ export class ScorelHost {
     }
   }
 
+  async #stopImExtensions(): Promise<void> {
+    for (const extension of this.#imExtensions.values()) {
+      await extension.adapter.stop().catch((cause) => {
+        void this.#appendHostDiagnostic("im_extension_stop_failed", {
+          extensionId: extension.manifest.id,
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+      });
+    }
+    this.#imExtensions.clear();
+  }
+
   async #discoverExtensionManifests(): Promise<Map<string, ExtensionManifest>> {
     const roots = [
       this.#builtinExtensionsDir,
@@ -2381,6 +2401,53 @@ export class ScorelHost {
     return this.#memorySettingsForProject(project.projectId);
   }
 
+  async #extensionSettings(extensionId: string): Promise<ExtensionSettings> {
+    const config = await this.#loadUserConfigProfile().catch((cause) => {
+      if (isMissingConfigError(cause)) {
+        return undefined;
+      }
+      throw cause;
+    });
+    const extension = config?.extensions[extensionId];
+    return {
+      extensionId,
+      enabled: extension?.enabled ?? false,
+      kind: "im",
+      config: extension?.config ?? {},
+      active: this.#imExtensions.has(extensionId),
+    };
+  }
+
+  async #handleUpsertExtensionSettings(request: ClientRequest<"upsert_extension_settings">): Promise<ExtensionSettings> {
+    const configPath = join(this.#scorelHomeDir, "config.toml");
+    let existingConfigText: string | undefined;
+    try {
+      existingConfigText = await readFile(configPath, "utf8");
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+    await mkdir(this.#scorelHomeDir, { recursive: true });
+    await writeFile(
+      configPath,
+      renderExtensionConfig({
+        extensionId: request.extensionId,
+        enabled: request.enabled,
+        kind: request.kind,
+        config: request.config,
+        existingConfigText,
+      }),
+      "utf8",
+    );
+    await this.#appendHostDiagnostic("extension_settings_upserted", {
+      extensionId: request.extensionId,
+      enabled: request.enabled,
+    });
+    await this.refreshImExtensions();
+    return this.#extensionSettings(request.extensionId);
+  }
+
   async #fetchProviderModels(projectId: ProjectId, providerId: string): Promise<ProviderCatalogModelSummary[]> {
     const project = await this.#registry.require(projectId);
     const config = await loadScorelConfigProfile({ cwd: project.workDir, includeSecrets: true });
@@ -2673,19 +2740,35 @@ const parseQueuedChannelContext = (value: unknown): RuntimeChannelContext | unde
 const imBindingKey = (extensionId: string, externalConversationId: string): string =>
   `${extensionId}:${externalConversationId}`;
 
-const findBuiltinExtensionsDir = (start: string): string => {
-  let current = resolve(start);
-  while (true) {
-    const candidate = join(current, "extensions", "builtin");
-    if (existsSync(candidate)) {
-      return candidate;
-    }
-    const next = dirname(current);
-    if (next === current) {
-      return join(start, "extensions", "builtin");
-    }
-    current = next;
+const defaultBuiltinExtensionsDir = (): string =>
+  findBuiltinExtensionsDir([
+    runtimeModuleDir(),
+    process.cwd(),
+  ]);
+
+const runtimeModuleDir = (): string => {
+  if (typeof __dirname === "string") {
+    return __dirname;
   }
+  return process.argv[1] ? dirname(process.argv[1]) : process.cwd();
+};
+
+const findBuiltinExtensionsDir = (starts: string[]): string => {
+  for (const start of starts) {
+    let current = resolve(start);
+    while (true) {
+      const candidate = join(current, "extensions", "builtin");
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+      const next = dirname(current);
+      if (next === current) {
+        break;
+      }
+      current = next;
+    }
+  }
+  return join(starts[0] ?? process.cwd(), "extensions", "builtin");
 };
 
 const isSteerMessage = (text: string): boolean =>

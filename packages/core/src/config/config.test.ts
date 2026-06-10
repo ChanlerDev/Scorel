@@ -8,6 +8,7 @@ import {
   SCOREL_CONFIG_SCHEMA,
   loadScorelConfig,
   loadScorelConfigProfile,
+  renderExtensionConfig,
   renderMemoryConfig,
   renderModelProfileConfig,
   scorelProjectConfigPath,
@@ -176,6 +177,41 @@ pollIntervalMs = 1000
         },
       },
     });
+  });
+
+  it("renders extension settings without touching provider or memory config", () => {
+    const existing = renderMemoryConfig({
+      enabled: true,
+      daily: true,
+      autoDream: false,
+      promoteRoot: false,
+      dreamIdleMinutes: 60,
+    });
+
+    const rendered = renderExtensionConfig({
+      existingConfigText: existing,
+      extensionId: "telegram",
+      enabled: true,
+      kind: "im",
+      config: {
+        credentialMode: "direct",
+        botTokenEnv: "SCOREL_TELEGRAM_BOT_TOKEN",
+        apiKey: "123:direct",
+        pollIntervalMs: 1000,
+        allowedChatIds: "-100,123",
+      },
+    });
+
+    expect(rendered).toContain("[memory]");
+    expect(rendered).toContain("[extensions.telegram]");
+    expect(rendered).toContain("enabled = true");
+    expect(rendered).toContain('kind = "im"');
+    expect(rendered).toContain("[extensions.telegram.config]");
+    expect(rendered).toContain('credentialMode = "direct"');
+    expect(rendered).toContain('apiKey = "123:direct"');
+    expect(rendered).toContain('botTokenEnv = "SCOREL_TELEGRAM_BOT_TOKEN"');
+    expect(rendered).toContain("pollIntervalMs = 1000");
+    expect(rendered).toContain('allowedChatIds = "-100,123"');
   });
 
   it("loads custom pi-ai provider models with model metadata", async () => {

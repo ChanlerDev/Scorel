@@ -9,6 +9,7 @@
   },
   "files": [
     "dist",
+    "extensions",
     "README.md",
     "docs/SHIP.md",
     "docs/ROADMAP.md",

@@ -17,6 +17,7 @@ import {
   type DaemonTransport,
   type DeviceId,
   type EventId,
+  type ExtensionSettings,
   type HostProject,
   type AvailableModelSummary,
   type ModelRole,
@@ -25,6 +26,7 @@ import {
   type ProviderModelSummary,
   type UpsertModelProfileInput,
   type MemorySettings,
+  type UpsertExtensionSettingsInput,
   type UpsertMemorySettingsInput,
   type PersistentEvent,
   type ProjectId,
@@ -315,6 +317,16 @@ export class DaemonClient {
   async upsertMemorySettings(input: UpsertMemorySettingsInput): Promise<MemorySettings> {
     this.#assertDaemonConnected();
     return (await this.#request("upsert_memory_settings", input)).memory;
+  }
+
+  async getExtensionSettings(input: { extensionId: string }): Promise<ExtensionSettings> {
+    this.#assertDaemonConnected();
+    return (await this.#request("get_extension_settings", input)).extension;
+  }
+
+  async upsertExtensionSettings(input: UpsertExtensionSettingsInput): Promise<ExtensionSettings> {
+    this.#assertDaemonConnected();
+    return (await this.#request("upsert_extension_settings", input)).extension;
   }
 
   async listDirectories(path?: string): Promise<DirectoryListing> {

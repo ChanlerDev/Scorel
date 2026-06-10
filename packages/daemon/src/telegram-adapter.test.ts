@@ -89,6 +89,25 @@ describe("Telegram IM adapter", () => {
     }
   });
 
+  it("accepts a direct apiKey without requiring the token env", () => {
+    const previous = process.env.SCOREL_TELEGRAM_BOT_TOKEN;
+    delete process.env.SCOREL_TELEGRAM_BOT_TOKEN;
+    try {
+      expect(() => createAdapter({
+        config: {
+          apiKey: "123:direct_token",
+          apiBaseUrl: "http://127.0.0.1:1",
+        },
+      })).not.toThrow();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.SCOREL_TELEGRAM_BOT_TOKEN;
+      } else {
+        process.env.SCOREL_TELEGRAM_BOT_TOKEN = previous;
+      }
+    }
+  });
+
   it("polls Telegram updates and sends messages through a local API stub", async () => {
     const requests: Array<{ method: string; body: unknown }> = [];
     let getUpdatesCalls = 0;

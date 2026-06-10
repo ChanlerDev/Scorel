@@ -20,16 +20,36 @@ pnpm install
 pnpm scorel
 ```
 
-启动桌面 GUI：
+启动桌面 GUI，本机会启动 embedded Host：
 
 ```bash
 pnpm gui
 ```
 
-启动本机 Host，并连接默认 Relay：
+启动本机 Host：
 
 ```bash
 pnpm scorel host serve
+```
+
+指定初始 Project、端口或 token：
+
+```bash
+pnpm scorel host serve --project /path/to/project --host 127.0.0.1 --port 7777 --token <token>
+```
+
+查看、停止或重置本机 Host：
+
+```bash
+pnpm scorel host status --show-token
+pnpm scorel host stop
+pnpm scorel host reset
+```
+
+连接 Relay，并用 hosted WebUI 控制本机 Host：
+
+```bash
+pnpm scorel host serve --relay wss://scorel-relay.chanler.dev
 ```
 
 打开 hosted WebUI：
@@ -41,8 +61,44 @@ https://scorel.chanler.dev
 WebUI 显示 pair code 后，在本机授权：
 
 ```bash
-pnpm scorel pair <pair-code>
+pnpm scorel pair <pair-code> --relay wss://scorel-relay.chanler.dev
 ```
+
+配对只是授权远端 Entry 访问这个 Host；Project、Session、Runtime 仍然在本机 Host 上。
+
+启动本地 WebUI：
+
+```bash
+pnpm scorel webui --port 3000
+```
+
+Telegram IM 入口可以在 GUI 的 Settings -> IM 里启用，也可以手写用户级配置：
+
+```toml
+[extensions.telegram]
+enabled = true
+kind = "im"
+
+[extensions.telegram.config]
+credentialMode = "env"
+botTokenEnv = "SCOREL_TELEGRAM_BOT_TOKEN"
+pollIntervalMs = 1000
+```
+
+或者直接把 Bot API key 写进本机配置：
+
+```toml
+[extensions.telegram]
+enabled = true
+kind = "im"
+
+[extensions.telegram.config]
+credentialMode = "direct"
+apiKey = "123456:telegram-bot-token"
+pollIntervalMs = 1000
+```
+
+然后启动本机 Host 或 GUI。Telegram 使用 Bot API long polling，不需要 Relay 或 webhook。
 
 本地开发常用检查：
 
@@ -157,6 +213,73 @@ Skill({ name: "..." })
 
 Scorel 根据 index 找到对应 `SKILL.md`，把完整内容作为工具结果返回。V1 不执行 skill 里的脚本，也不做 marketplace、embedding search 或自动 ranking。
 
+## Extensions And IM Channels
+
+Extension 是 Scorel 的外部能力容器。当前落地的是 manifest-driven IM extension；它先服务 Telegram 这类消息入口，后续可以继续承载 skills、MCP 声明和更多 adapter。
+
+一个 extension 目录的核心结构是：
+
+```text
+extensions/builtin/telegram/
+  scorel.extension.json
+  adapter.js
+  skills/
+    telegram/
+      SKILL.md
+```
+
+Manifest 里声明 extension id、类型、adapter 和 skill roots：
+
+```json
+{
+  "id": "telegram",
+  "kind": "im",
+  "displayName": "Telegram",
+  "adapter": "./adapter.js",
+  "skills": ["./skills"]
+}
+```
+
+Host 启动或 GUI 更新 IM 设置时读取 `~/.scorel/config.toml` 中 enabled 的 extension。内置 extension 随包放在 `extensions/builtin/`，用户 extension 放在 `~/.scorel/extensions/`。单个 adapter 启动失败只写 diagnostics，不影响 Host、Session 或其他 extension。
+
+IM channel 的运行链路是：
+
+```text
+IM Adapter
+  -> ScorelHost channel bridge
+  -> fixed Session binding
+  -> existing send_message runtime path
+  -> SendChannelMessage tool
+  -> IM Adapter
+```
+
+Adapter 只负责平台 IO：轮询或接收外部消息、把消息转成 `ImIncomingMessage`、把 outgoing text 发回平台。它不创建 Session，不写 JSONL，不实现 follow-up / steer，也不读写 memory。
+
+Host bridge 负责：
+
+- 把 `(extensionId, externalConversationId)` 绑定到固定 `sessionId`。
+- 使用默认 workspace：`~/.scorel/workspace`。
+- 把 IM 消息提交到现有 `send_message` 路径。
+- 在用户消息前注入 hidden `harness_item kind="channel_context"`，说明来源 channel、conversation type、sender display name、是否 mention bot。
+- 为当前 IM turn 暴露 `SendChannelMessage`。
+
+`SendChannelMessage` 是模型回复 IM 的唯一工具面：
+
+```text
+SendChannelMessage({ text: "..." })
+```
+
+模型不需要也不应该填写 Telegram chat id、飞书 open id、Slack channel id 这类 raw routing id。raw id 只存在 adapter/bridge context 里；模型看到的是“这条消息来自 Telegram 群聊/私聊，当前应该回复这个 conversation”。
+
+Telegram 是第一个 built-in IM provider：
+
+- 私聊消息直接进入固定 session。
+- 群聊 / supergroup 只有 mention bot 或 reply bot 时进入 Scorel。
+- 同一个 Telegram chat 复用同一个 Scorel session。
+- `credentialMode = "env"` 时从 `botTokenEnv` 读取 token。
+- `credentialMode = "direct"` 时直接读取 `apiKey`。
+- V1 只发纯文本，不做 webhook、媒体、inline keyboard 或主动跨 chat 发送。
+
 ## Editing Mode
 
 Coding 能力由内置工具提供，不让模型直接把所有事情都塞进 shell。
@@ -216,6 +339,7 @@ GUI 更偏本地桌面工作台，WebUI 更偏 hosted/remote control。二者都
 - follow-up / steer / cancel。
 - provider/model settings。
 - memory settings。
+- IM settings，包括 Telegram enable、env/direct token、allowed chats。
 - Relay device pairing 和 remote project 选择。
 
 ## Status
@@ -234,6 +358,9 @@ GUI 更偏本地桌面工作台，WebUI 更偏 hosted/remote control。二者都
 - Skill index + Skill tool。
 - memory harness + AppendDaily + idle dream。
 - provider/model profile 和 auxiliary model。
+- extension manifest + IM channel bridge。
+- built-in Telegram IM extension。
+- GUI IM settings。
 
 计划中的方向：
 
@@ -252,6 +379,8 @@ GUI 更偏本地桌面工作台，WebUI 更偏 hosted/remote control。二者都
 - [docs/spec/session.md](docs/spec/session.md)
 - [docs/spec/runtime.md](docs/spec/runtime.md)
 - [docs/spec/tools.md](docs/spec/tools.md)
+- [docs/spec/extensions.md](docs/spec/extensions.md)
+- [docs/spec/channels.md](docs/spec/channels.md)
 - [docs/spec/daemon.md](docs/spec/daemon.md)
 - [docs/spec/client.md](docs/spec/client.md)
 - [docs/spec/relay.md](docs/spec/relay.md)

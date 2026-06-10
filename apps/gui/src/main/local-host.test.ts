@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -123,6 +123,53 @@ describe("GUI local Host service", () => {
       expect(seen).toContain("user_message");
       expect(seen).toContain("assistant_message");
       unsubscribe();
+    } finally {
+      await service.stop();
+    }
+  });
+
+  it("updates local IM extension settings through the embedded Host", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-extension-"));
+    const scorelHomeDir = join(root, ".scorel");
+    const service = createGuiLocalHostService({
+      stateDir: join(root, "gui"),
+      scorelHomeDir,
+      deviceId: "device_gui_test",
+      createRuntime: async () => new ScorelRuntime({ provider }),
+    });
+
+    await service.start();
+    try {
+      await expect(service.getLocalExtensionSettings("telegram")).resolves.toMatchObject({
+        extensionId: "telegram",
+        enabled: false,
+        active: false,
+      });
+
+      const next = await service.upsertLocalExtensionSettings({
+        extensionId: "telegram",
+        enabled: true,
+        kind: "im",
+        config: {
+          credentialMode: "direct",
+          apiKey: "123:direct_token",
+          apiBaseUrl: "http://127.0.0.1:1",
+          pollIntervalMs: 1000,
+        },
+      });
+
+      expect(next).toMatchObject({
+        extensionId: "telegram",
+        enabled: true,
+        active: true,
+      });
+      const config = await readFile(join(scorelHomeDir, "config.toml"), "utf8");
+      expect(config).toContain("[extensions.telegram]");
+      expect(config).toContain("[extensions.telegram.config]");
+      expect(config).toContain('credentialMode = "direct"');
+      expect(config).toContain('apiKey = "123:direct_token"');
+      expect(config).toContain('apiBaseUrl = "http://127.0.0.1:1"');
+      expect(config).not.toContain("botTokenEnv");
     } finally {
       await service.stop();
     }

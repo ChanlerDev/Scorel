@@ -209,6 +209,16 @@ export type UpsertMemoryConfigInput = Partial<MemoryConfig> & {
   existingConfigText?: string;
 };
 
+export type ConfigValue = string | number | boolean;
+
+export type UpsertExtensionConfigInput = {
+  extensionId: string;
+  enabled?: boolean;
+  kind?: "im";
+  config?: Record<string, ConfigValue | undefined>;
+  existingConfigText?: string;
+};
+
 export const scorelUserRoot = (homeDir: string): string => join(homeDir, ".scorel");
 
 export const scorelUserConfigPath = (homeDir: string): string => join(scorelUserRoot(homeDir), "config.toml");
@@ -266,8 +276,6 @@ type ConfigSection =
   | { kind: "memory" }
   | { kind: "extension"; id: string }
   | { kind: "extensionConfig"; id: string };
-type ConfigValue = string | number | boolean;
-
 export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promise<ScorelConfig> => {
   const env = options.env ?? process.env;
   const raw = parseToml(await readConfigText(options));
@@ -540,6 +548,29 @@ export const renderMemoryConfig = (input: UpsertMemoryConfigInput): string => {
     ...(input.autoDream !== undefined ? { autoDream: requireBoolean(input.autoDream, "memory.autoDream") } : {}),
     ...(input.promoteRoot !== undefined ? { promoteRoot: requireBoolean(input.promoteRoot, "memory.promoteRoot") } : {}),
     ...(input.dreamIdleMinutes !== undefined ? { dreamIdleMinutes: requireNonNegativeNumber(input.dreamIdleMinutes, "memory.dreamIdleMinutes") } : {}),
+  };
+  return renderRawConfig(raw);
+};
+
+export const renderExtensionConfig = (input: UpsertExtensionConfigInput): string => {
+  const raw = parseEditableConfig(input.existingConfigText);
+  const extensionId = requireIdentifier(input.extensionId, "extensionId");
+  const existing = raw.extensions[extensionId] ?? {};
+  const config = { ...(existing.config ?? {}) };
+  for (const [key, value] of Object.entries(input.config ?? {})) {
+    if (!/^[A-Za-z0-9_-]+$/.test(key)) {
+      throw new Error(`Unsupported config key: ${key}`);
+    }
+    if (value === undefined || value === "") {
+      delete config[key];
+    } else {
+      config[key] = value;
+    }
+  }
+  raw.extensions[extensionId] = {
+    enabled: input.enabled ?? existing.enabled ?? false,
+    kind: input.kind ?? (existing.kind === "im" ? "im" : "im"),
+    ...(Object.keys(config).length > 0 ? { config } : {}),
   };
   return renderRawConfig(raw);
 };

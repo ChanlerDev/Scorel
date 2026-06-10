@@ -105,6 +105,21 @@ export type UpsertMemorySettingsInput = Partial<MemorySettings> & {
   projectId: ProjectId;
 };
 
+export type ExtensionSettings = {
+  extensionId: string;
+  enabled: boolean;
+  kind: "im";
+  config: Record<string, string | number | boolean>;
+  active: boolean;
+};
+
+export type UpsertExtensionSettingsInput = {
+  extensionId: string;
+  enabled?: boolean;
+  kind?: "im";
+  config?: Record<string, string | number | boolean | undefined>;
+};
+
 export type SelectedModelSummary = {
   modelId: string;
   role?: ModelRole;

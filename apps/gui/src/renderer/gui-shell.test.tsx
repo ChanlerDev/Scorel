@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { GuiModelProfileView, GuiProjectView } from "../shared/ipc.js";
 import { ProjectPickerMenu } from "./composer/ProjectPickerMenu.js";
 import { MemorySection } from "./settings/sections/MemorySection.js";
+import { ImSection } from "./settings/sections/ImSection.js";
 import { ProviderSection } from "./settings/sections/ProviderSection.js";
 import { SettingsShell } from "./settings/SettingsShell.js";
 import { Sidebar } from "./shell/Sidebar.js";
@@ -62,6 +63,14 @@ const memorySettings = {
   autoDream: true,
   promoteRoot: true,
   dreamIdleMinutes: 60,
+};
+
+const telegramSettings = {
+  extensionId: "telegram",
+  enabled: false,
+  kind: "im" as const,
+  config: {},
+  active: false,
 };
 
 const modelProps = {
@@ -269,8 +278,10 @@ describe("GUI shell rendering contract", () => {
         project={{ source: "local", projectId: localProject.projectId }}
         modelProfile={modelProfile}
         memory={memorySettings}
+        telegram={telegramSettings}
         onModelProfileChange={noop}
         onMemoryChange={noop}
+        onTelegramChange={noop}
         busy={false}
         setBusy={noop}
         setError={noop}
@@ -313,8 +324,10 @@ describe("GUI shell rendering contract", () => {
         project={{ source: "local", projectId: localProject.projectId }}
         modelProfile={modelProfile}
         memory={memorySettings}
+        telegram={telegramSettings}
         onModelProfileChange={noop}
         onMemoryChange={noop}
+        onTelegramChange={noop}
         busy={false}
         setBusy={noop}
         setError={noop}
@@ -390,5 +403,23 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("自动 dream");
     expect(html).toContain("Dream 延迟");
     expect(html).toContain("提升到全局");
+  });
+
+  it("renders Telegram IM credential controls", () => {
+    const html = renderToStaticMarkup(
+      <ImSection
+        telegram={{ ...telegramSettings, config: { credentialMode: "direct" } }}
+        busy={false}
+        setBusy={noop}
+        setError={noop}
+        onTelegramChange={noop}
+      />,
+    );
+
+    expect(html).toContain("Telegram");
+    expect(html).toContain("凭证方式");
+    expect(html).toContain("直接填写");
+    expect(html).toContain("Bot API Key");
+    expect(html).toContain("Allowed Chats");
   });
 });

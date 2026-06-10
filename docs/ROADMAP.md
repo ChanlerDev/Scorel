@@ -652,6 +652,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 |---|---|---|---|
 | M12.1 | [`S0083`](spec/ship/S0083-extension-manifest-and-im-channel-runtime.md) | Extension manifest、IM channel bridge、fixed session、default workspace、source reminder、SendChannelMessage、loopback IM | Done |
 | M12.2 | [`S0084`](spec/ship/S0084-built-in-telegram-im-extension.md) | Built-in Telegram IM extension、Bot API long polling、DM/group mention、local HTTP stub coverage | Done |
+| M12.3 | [`S0085`](spec/ship/S0085-gui-im-extension-settings.md) | GUI IM settings、Telegram toggle、extension config IPC、built-in package discovery | Done |
 
 ---
 
@@ -739,6 +740,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0078`](spec/ship/S0078-gui-provider-settings-forward-config-and-simplification.md) | GUI Settings 前向 provider/model profile 和 Provider/Model 表单简化 | Done |
 | [`S0083`](spec/ship/S0083-extension-manifest-and-im-channel-runtime.md) | Extension manifest、IM channel bridge、fixed session、source reminder 与 SendChannelMessage | Done |
 | [`S0084`](spec/ship/S0084-built-in-telegram-im-extension.md) | Built-in Telegram IM extension with Bot API long polling | Done |
+| [`S0085`](spec/ship/S0085-gui-im-extension-settings.md) | GUI IM extension settings and Telegram toggle | Done |
 
 ---
 

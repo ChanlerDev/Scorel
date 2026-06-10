@@ -17,6 +17,7 @@ import "./styles.css";
 import type {
   GuiProjectRef,
   GuiProjectView,
+  GuiExtensionSettingsView,
   GuiMemorySettingsView,
   GuiModelProfileView,
   GuiRelayDeviceView,
@@ -36,6 +37,14 @@ const defaultMemorySettings = (): GuiMemorySettingsView => ({
   autoDream: true,
   promoteRoot: true,
   dreamIdleMinutes: 60,
+});
+
+const defaultTelegramSettings = (): GuiExtensionSettingsView => ({
+  extensionId: "telegram",
+  enabled: false,
+  kind: "im",
+  config: {},
+  active: false,
 });
 
 const projectRef = (project: GuiProjectView): GuiProjectRef =>
@@ -62,6 +71,7 @@ export function App() {
   const [message, setMessage] = useState<string>("");
   const [modelProfile, setModelProfile] = useState<GuiModelProfileView>({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
   const [memorySettings, setMemorySettings] = useState<GuiMemorySettingsView>(defaultMemorySettings());
+  const [telegramSettings, setTelegramSettings] = useState<GuiExtensionSettingsView>(defaultTelegramSettings());
   const [selectedModelId, setSelectedModelId] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
   const [pickerAnchor, setPickerAnchor] = useState<{ left: number; top: number } | undefined>(undefined);
@@ -214,6 +224,7 @@ export function App() {
         if (snapshot.projects[0]) {
           await refreshSessionsForProject(snapshot.projects[0]);
         }
+        setTelegramSettings(await window.scorel.getExtensionSettings("telegram"));
         setError(null);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -421,6 +432,7 @@ export function App() {
         }}
         modelProfile={modelProfile}
         memory={memorySettings}
+        telegram={telegramSettings}
         onModelProfileChange={(profile) => {
           setModelProfile(profile);
           setSelectedModelId((current) => {
@@ -429,6 +441,7 @@ export function App() {
           });
         }}
         onMemoryChange={setMemorySettings}
+        onTelegramChange={setTelegramSettings}
         onBack={() => setView("workspace")}
       />
     );

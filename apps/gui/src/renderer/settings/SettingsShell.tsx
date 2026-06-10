@@ -4,9 +4,11 @@ import {
   Box,
   FileText,
   Server,
+  Smartphone,
 } from "../icons/index.js";
-import type { GuiMemorySettingsView, GuiModelProfileView, GuiProjectRef, GuiRelayDeviceView } from "../../shared/ipc.js";
+import type { GuiExtensionSettingsView, GuiMemorySettingsView, GuiModelProfileView, GuiProjectRef, GuiRelayDeviceView } from "../../shared/ipc.js";
 import { ConfigSection } from "./sections/ConfigSection.js";
+import { ImSection } from "./sections/ImSection.js";
 import { MemorySection } from "./sections/MemorySection.js";
 import { ModelSection } from "./sections/ModelSection.js";
 import { ProviderSection } from "./sections/ProviderSection.js";
@@ -17,8 +19,10 @@ export type SettingsShellProps = {
   project: GuiProjectRef | null;
   modelProfile: GuiModelProfileView;
   memory: GuiMemorySettingsView;
+  telegram: GuiExtensionSettingsView;
   onModelProfileChange(profile: GuiModelProfileView): void;
   onMemoryChange(memory: GuiMemorySettingsView): void;
+  onTelegramChange(extension: GuiExtensionSettingsView): void;
   busy: boolean;
   setBusy(value: boolean): void;
   setError(message: string | null): void;
@@ -33,6 +37,7 @@ const NAV_GROUPS: SettingsNavGroup[] = [
       { id: "model", label: "模型", icon: <Box size={14} /> },
       { id: "provider", label: "Provider", icon: <Box size={14} /> },
       { id: "memory", label: "记忆", icon: <FileText size={14} /> },
+      { id: "im", label: "IM", icon: <Smartphone size={14} /> },
       { id: "connections", label: "连接", icon: <Server size={14} /> },
     ],
   },
@@ -76,6 +81,17 @@ export function SettingsShell(props: SettingsShellProps) {
           setBusy={props.setBusy}
           setError={props.setError}
           onMemoryChange={props.onMemoryChange}
+        />
+      );
+      break;
+    case "im":
+      content = (
+        <ImSection
+          telegram={props.telegram}
+          busy={props.busy}
+          setBusy={props.setBusy}
+          setError={props.setError}
+          onTelegramChange={props.onTelegramChange}
         />
       );
       break;

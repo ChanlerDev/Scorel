@@ -20,11 +20,13 @@ import {
   type AvailableModelSummary,
   type ModelRole,
   type MemorySettings,
+  type ExtensionSettings,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
   type ProviderModelSummary,
   type UpsertModelProfileInput,
   type UpsertMemorySettingsInput,
+  type UpsertExtensionSettingsInput,
   type PersistentEvent,
   type ProjectId,
   type ScorelEvent,
@@ -36,6 +38,7 @@ type RuntimeFactory = ScorelHostOptions["createRuntime"];
 
 export type GuiLocalHostServiceOptions = {
   stateDir: string;
+  scorelHomeDir?: string;
   deviceId?: string;
   deviceDisplayName?: string;
   createRuntime?: RuntimeFactory;
@@ -54,6 +57,8 @@ export type GuiLocalHostService = {
   fetchLocalProviderModels(projectId: string, providerId: string): Promise<ProviderCatalogModelSummary[]>;
   getLocalMemorySettings(projectId: string): Promise<MemorySettings>;
   upsertLocalMemorySettings(input: UpsertMemorySettingsInput): Promise<MemorySettings>;
+  getLocalExtensionSettings(extensionId: string): Promise<ExtensionSettings>;
+  upsertLocalExtensionSettings(input: UpsertExtensionSettingsInput): Promise<ExtensionSettings>;
   createLocalSession(projectId: string, modelSelection?: ModelSelectionInput): Promise<SessionId>;
   openLocalSession(sessionId: string): Promise<PersistentEvent[]>;
   attachLocalSession(sessionId: string, handler: GuiLocalSubscriber): Promise<{
@@ -70,6 +75,7 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
   const host = new ScorelHost({
     sessionsDir,
     projectsPath,
+    ...(options.scorelHomeDir ? { scorelHomeDir: options.scorelHomeDir } : {}),
     deviceId: asDeviceId(options.deviceId ?? "device_gui_local"),
     deviceDisplayName: options.deviceDisplayName ?? "Local",
     ...(options.createRuntime
@@ -135,6 +141,12 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     },
     upsertLocalMemorySettings(input) {
       return client.upsertMemorySettings(input);
+    },
+    getLocalExtensionSettings(extensionId) {
+      return client.getExtensionSettings({ extensionId });
+    },
+    upsertLocalExtensionSettings(input) {
+      return client.upsertExtensionSettings(input);
     },
     createLocalSession(projectId, modelSelection) {
       return client.createSession({ meta: { projectId: asProjectId(projectId) as ProjectId, modelSelection } });

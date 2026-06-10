@@ -52,14 +52,16 @@ kind = "im"
 
 [extensions.telegram.config]
 botTokenEnv = "SCOREL_TELEGRAM_BOT_TOKEN"
+# Or store a direct bot API key when local plaintext config is acceptable:
+# apiKey = "123456:telegram-bot-token"
 pollIntervalMs = 1000
 allowedChatIds = "-1001234567890,123456789"
 ```
 
 Rules:
 
-- `botTokenEnv` is required when enabled;
-- the raw bot token is read from env at runtime only;
+- either `apiKey` or `botTokenEnv` is required when enabled;
+- `apiKey` is stored directly in config; `botTokenEnv` reads the raw bot token from env at runtime;
 - `allowedChatIds` is an optional comma-separated string in V1 and defaults to no allow-list in local dev;
 - diagnostics must never print the raw bot token.
 
@@ -149,7 +151,7 @@ Then:
 ## Acceptance Criteria
 
 - Telegram built-in extension is discoverable through the S0083 manifest loader.
-- Telegram starts only when enabled and `botTokenEnv` resolves.
+- Telegram starts only when enabled and either direct `apiKey` exists or `botTokenEnv` resolves.
 - Telegram long polling receives private text messages.
 - Telegram group messages are accepted only when bot mention/reply rules pass.
 - incoming Telegram messages reuse the fixed session for the Telegram conversation.

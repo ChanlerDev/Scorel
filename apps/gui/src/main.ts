@@ -8,6 +8,7 @@ import { createGuiRelayService, type GuiRelayService } from "./main/relay-servic
 import {
   guiIpcChannels,
   type GuiHostStatus,
+  type GuiUpsertExtensionSettingsInput,
   type GuiModelSelection,
   type GuiUpsertMemorySettingsInput,
   type GuiUpsertModelProfileInput,
@@ -35,6 +36,7 @@ const startLocalHost = async (): Promise<void> => {
   relayService = createGuiRelayService(guiStore);
   localHost = createGuiLocalHostService({
     stateDir: guiStateDir(),
+    scorelHomeDir: join(homedir(), ".scorel"),
     deviceId: "device_gui_local",
     deviceDisplayName: "Local",
   });
@@ -145,6 +147,12 @@ const registerIpc = (): void => {
       ? requireConnectedLocalHost().upsertLocalMemorySettings(payload)
       : relayService.upsertRemoteMemorySettings(requireRelayDeviceId(ref), payload);
   });
+  ipcMain.handle(guiIpcChannels.getExtensionSettings, async (_event, extensionId: string) =>
+    requireConnectedLocalHost().getLocalExtensionSettings(extensionId),
+  );
+  ipcMain.handle(guiIpcChannels.upsertExtensionSettings, async (_event, input: GuiUpsertExtensionSettingsInput) =>
+    requireConnectedLocalHost().upsertLocalExtensionSettings(input),
+  );
   ipcMain.handle(guiIpcChannels.createSession, async (_event, project: GuiProjectRef, modelSelection?: GuiModelSelection) => {
     const ref = normalizeProjectRef(project);
     return ref.source === "local"
