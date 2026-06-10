@@ -53,14 +53,14 @@ kind = "im"
 [extensions.telegram.config]
 botTokenEnv = "SCOREL_TELEGRAM_BOT_TOKEN"
 pollIntervalMs = 1000
-allowedChatIds = []
+allowedChatIds = "-1001234567890,123456789"
 ```
 
 Rules:
 
 - `botTokenEnv` is required when enabled;
 - the raw bot token is read from env at runtime only;
-- `allowedChatIds` is optional and defaults to no allow-list in local dev;
+- `allowedChatIds` is an optional comma-separated string in V1 and defaults to no allow-list in local dev;
 - diagnostics must never print the raw bot token.
 
 ### 3. Telegram Adapter

@@ -1,0 +1,7 @@
+{
+  "id": "telegram",
+  "kind": "im",
+  "displayName": "Telegram",
+  "adapter": "./adapter.js",
+  "skills": ["./skills"]
+}

@@ -651,7 +651,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | Item | Spec | Scope | Status |
 |---|---|---|---|
 | M12.1 | [`S0083`](spec/ship/S0083-extension-manifest-and-im-channel-runtime.md) | Extension manifest、IM channel bridge、fixed session、default workspace、source reminder、SendChannelMessage、loopback IM | Done |
-| M12.2 | [`S0084`](spec/ship/S0084-built-in-telegram-im-extension.md) | Built-in Telegram IM extension、Bot API long polling、DM/group mention、real manual smoke | Planned |
+| M12.2 | [`S0084`](spec/ship/S0084-built-in-telegram-im-extension.md) | Built-in Telegram IM extension、Bot API long polling、DM/group mention、local HTTP stub coverage | Done |
 
 ---
 
@@ -738,7 +738,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0077`](spec/ship/S0077-auxiliary-session-title-generation.md) | 第一条 chat 后用 auxiliary model 生成持久 session title | Done |
 | [`S0078`](spec/ship/S0078-gui-provider-settings-forward-config-and-simplification.md) | GUI Settings 前向 provider/model profile 和 Provider/Model 表单简化 | Done |
 | [`S0083`](spec/ship/S0083-extension-manifest-and-im-channel-runtime.md) | Extension manifest、IM channel bridge、fixed session、source reminder 与 SendChannelMessage | Done |
-| [`S0084`](spec/ship/S0084-built-in-telegram-im-extension.md) | Built-in Telegram IM extension with Bot API long polling | Planned |
+| [`S0084`](spec/ship/S0084-built-in-telegram-im-extension.md) | Built-in Telegram IM extension with Bot API long polling | Done |
 
 ---
 
