@@ -176,7 +176,7 @@ describe("@scorel/app-cli", () => {
         sessionsDir,
       );
 
-      expect(result.code).toBe(0);
+      expect(result.code, result.stderr).toBe(0);
       const canonicalWorkDir = await realpath(workspaceDir);
       const registry = JSON.parse(await readFile(join(stateDir, "projects.json"), "utf8")) as { version: 1; projects: Array<{ projectId: string; displayName: string; workDir: string }> };
       expect(registry.version).toBe(1);
@@ -206,7 +206,7 @@ describe("@scorel/app-cli", () => {
         workspaceDir,
       );
 
-      expect(result.code).toBe(0);
+      expect(result.code, result.stderr).toBe(0);
       expect(result.stdout).toContain("Default command response.");
       const registry = JSON.parse(await readFile(join(stateDir, "projects.json"), "utf8")) as { projects: Array<{ workDir: string }> };
       expect(registry.projects[0]?.workDir).toBe(await realpath(workspaceDir));
@@ -1074,7 +1074,7 @@ describe("@scorel/app-cli", () => {
         sessionsDir,
       );
 
-      expect(first.code).toBe(0);
+      expect(first.code, first.stderr).toBe(0);
       expect(first.stderr).toContain("created session ses_cli_real_coding_alpha");
       for (const toolName of ["TodoWrite", "Grep", "Read", "Edit", "Bash"]) {
         expect(first.stdout).toContain(`[tool:${toolName}]`);
@@ -1371,6 +1371,12 @@ const testConfig = (baseURL: string): ScorelConfig => ({
       standard: "main",
       auxiliary: "main",
     },
+  },
+  memory: {
+    enabled: false,
+    daily: false,
+    autoDream: false,
+    promoteRoot: false,
   },
 });
 

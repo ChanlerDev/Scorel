@@ -8,8 +8,10 @@ import { listSessionSummaries } from "./projects/sessions.js";
 
 import {
   ScorelRuntime,
+  appendDailyEntry,
   buildContext,
   buildInstructionSnapshot,
+  buildMemoryContext,
   corePackageName,
   createCodingTools,
   createSkillTool,
@@ -23,6 +25,10 @@ import {
   loadScorelConfig,
   loadScorelConfigProfile,
   loadSession,
+  mergeMemoryMarkdown,
+  renderAutomaticDailyEntry,
+  renderMemoryConfig,
+  renderMemoryHarness,
   renderSkillDelta,
   renderSkillListing,
   renderSystemPrompt,
@@ -32,6 +38,7 @@ import {
   scanSkillIndex,
   sessionLogFilePath,
   scorelSessionsDir,
+  scorelMemoryPaths,
   type ScorelConfig,
   type ScorelConfigProfile,
   type JsonlSession,
@@ -73,6 +80,7 @@ import {
   type TransientEvent,
   type Unsubscribe,
   type ClientRequestMap,
+  type MemorySettings,
 } from "@scorel/protocol";
 
 export const daemonPackageName = "@scorel/daemon" as const;
@@ -418,7 +426,8 @@ export type ScorelHostOptions = {
   modelProfile?: ScorelConfig;
   loadConfig?: (options: { project: HostProject }) => Promise<ScorelConfig>;
   loadConfigProfile?: (options: { project: HostProject }) => Promise<ScorelConfigProfile>;
-  createRuntime: (options: { sessionId: SessionId; project: HostProject; selectedModel?: SelectedModelSummary; purpose: "chat" | "title" }) => Promise<ScorelRuntime>;
+  createRuntime: (options: { sessionId: SessionId; project: HostProject; selectedModel?: SelectedModelSummary; purpose: "chat" | "title" | "memory" }) => Promise<ScorelRuntime>;
+  memoryHomeDir?: string;
   now?: () => number;
   createId?: () => string;
 };
@@ -495,6 +504,7 @@ export class ScorelHost {
   readonly #loadConfig: ((options: { project: HostProject }) => Promise<ScorelConfig>) | undefined;
   readonly #loadConfigProfile: ((options: { project: HostProject }) => Promise<ScorelConfigProfile>) | undefined;
   readonly #createRuntime: ScorelHostOptions["createRuntime"];
+  readonly #memoryHomeDir: string | undefined;
   readonly #now: () => number;
   readonly #createId: () => string;
   readonly #sessions = new Map<SessionId, SessionLane>();
@@ -512,6 +522,7 @@ export class ScorelHost {
     this.#loadConfig = options.loadConfig;
     this.#loadConfigProfile = options.loadConfigProfile;
     this.#createRuntime = options.createRuntime;
+    this.#memoryHomeDir = options.memoryHomeDir;
     this.#now = options.now ?? Date.now;
     this.#createId = options.createId ?? (() => crypto.randomUUID());
     this.#registry = new ProjectRegistry({
@@ -677,6 +688,14 @@ export class ScorelHost {
         this.#respond(connection, message, { models: await this.#fetchProviderModels(message.projectId, message.providerId) });
         break;
       }
+      case "get_memory_settings": {
+        this.#respond(connection, message, { memory: await this.#memorySettingsForProject(message.projectId) });
+        break;
+      }
+      case "upsert_memory_settings": {
+        this.#respond(connection, message, { memory: await this.#handleUpsertMemorySettings(message) });
+        break;
+      }
       case "list_directories": {
         this.#respond(connection, message, await this.listDirectories(message.path));
         break;
@@ -825,6 +844,7 @@ export class ScorelHost {
     });
     const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, clientId);
     await this.#syncSkillIndex(lane, clientId);
+    await this.#ensureMemoryHarness(lane, clientId);
     const userEventId = asEventId(this.#createId());
     const userEvent = await this.#appendPersistent(lane, {
       type: "user_message",
@@ -869,6 +889,15 @@ export class ScorelHost {
     )) {
       await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
     }
+
+    await this.#runAutomaticMemory(lane, clientId, userEvent, state.finalAssistantEventId).catch((cause) => {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      void this.#appendDiagnostic(sessionId, "automatic_memory_failed", {
+        clientId,
+        message: error.message,
+        stack: shortStack(error),
+      });
+    });
 
     const result = { userEventId, assistantEventId: state.finalAssistantEventId };
     await this.#appendDiagnostic(sessionId, "send_message_finished", {
@@ -1381,6 +1410,195 @@ export class ScorelHost {
     await this.#appendSkillHarness(lane, clientId, "skill_delta", renderSkillDelta(delta));
   }
 
+  async #ensureMemoryHarness(lane: SessionLane, clientId: ClientId): Promise<void> {
+    const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
+    if (!memory.enabled) {
+      return;
+    }
+    const today = scorelMemoryPaths({
+      projectId: lane.project.projectId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+    }).today;
+    for (const event of lane.session.tree) {
+      if (
+        event.type === "harness_item" &&
+        event.item.kind === "memory" &&
+        event.item.data?.date === today &&
+        event.item.data?.projectId === lane.project.projectId
+      ) {
+        return;
+      }
+    }
+    const context = await buildMemoryContext({
+      projectId: lane.project.projectId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+    });
+    await this.#appendPersistent(lane, {
+      type: "harness_item",
+      id: asEventId(this.#createId()),
+      parentId: lane.session.activeLeafId,
+      sessionId: lane.session.header.sessionId,
+      clientId,
+      ts: this.#now(),
+      item: {
+        kind: "memory",
+        origin: "system",
+        content: renderMemoryHarness(context),
+        visibility: "hidden",
+        data: {
+          date: context.paths.today,
+          projectId: lane.project.projectId,
+        },
+      },
+    });
+  }
+
+  async #runAutomaticMemory(
+    lane: SessionLane,
+    clientId: ClientId,
+    userEvent: Extract<PersistentEvent, { type: "user_message" }>,
+    assistantEventId: EventId,
+  ): Promise<void> {
+    const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
+    if (!memory.enabled) {
+      return;
+    }
+    const assistantEvent = lane.session.tree.get(assistantEventId)?.event;
+    if (!assistantEvent || assistantEvent.type !== "assistant_message") {
+      return;
+    }
+    const userText = inputText(userEvent.message);
+    const assistantBody = assistantText(assistantEvent.message);
+    let dailyText = renderAutomaticDailyEntry({ userText, assistantText: assistantBody });
+    let projectMemory: string | undefined;
+    let rootMemory: string | undefined;
+
+    if (memory.autoDream) {
+      const generated = await this.#generateMemoryUpdate(lane, userText, assistantBody, memory).catch((cause) => {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        void this.#appendDiagnostic(lane.session.header.sessionId, "automatic_memory_model_failed", {
+          clientId,
+          message: error.message,
+          stack: shortStack(error),
+        });
+        return undefined;
+      });
+      if (generated?.daily) {
+        dailyText = generated.daily;
+      }
+      projectMemory = generated?.projectMemory;
+      rootMemory = generated?.rootMemory;
+    }
+
+    if (memory.daily && dailyText.trim()) {
+      const result = await appendDailyEntry({
+        projectId: lane.project.projectId,
+        homeDir: this.#memoryHomeDir,
+        now: this.#now,
+        text: dailyText,
+      });
+      await this.#appendDiagnostic(lane.session.header.sessionId, "memory_daily_appended", {
+        clientId,
+        path: result.path,
+        date: result.date,
+      });
+    }
+
+    const paths = scorelMemoryPaths({
+      projectId: lane.project.projectId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+    });
+    if (projectMemory?.trim()) {
+      await writeFile(paths.projectMemoryPath, normalizeMarkdownFile(projectMemory), "utf8");
+      await this.#appendDiagnostic(lane.session.header.sessionId, "project_memory_updated", {
+        clientId,
+        path: paths.projectMemoryPath,
+      });
+    } else if (memory.autoDream && dailyText.trim()) {
+      const current = await readFile(paths.projectMemoryPath, "utf8").catch(() => "# Project Memory\n");
+      await writeFile(paths.projectMemoryPath, mergeMemoryMarkdown(current, dailyText), "utf8");
+    }
+    if (memory.promoteRoot && rootMemory?.trim()) {
+      await writeFile(paths.rootMemoryPath, normalizeMarkdownFile(rootMemory), "utf8");
+      await this.#appendDiagnostic(lane.session.header.sessionId, "root_memory_updated", {
+        clientId,
+        path: paths.rootMemoryPath,
+      });
+    }
+  }
+
+  async #generateMemoryUpdate(
+    lane: SessionLane,
+    userText: string,
+    assistantBody: string,
+    memory: MemorySettings,
+  ): Promise<{ daily?: string; projectMemory?: string; rootMemory?: string } | undefined> {
+    const selectedModel = await this.#selectedModelFromMeta(
+      { projectId: lane.project.projectId, modelSelection: { role: "auxiliary" } },
+      lane.project,
+    );
+    if (!selectedModel) {
+      return undefined;
+    }
+    const context = await buildMemoryContext({
+      projectId: lane.project.projectId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+    });
+    const runtime = await this.#createRuntime({
+      sessionId: lane.session.header.sessionId,
+      project: lane.project,
+      selectedModel,
+      purpose: "memory",
+    });
+    let raw = "";
+    for await (const rawEvent of runtime.executeTurn(
+      [{
+        role: "user",
+        content: [{
+          type: "text",
+          text: [
+            "Update Scorel filesystem memory from this completed turn.",
+            "Return only strict JSON with optional keys: daily, projectMemory, rootMemory.",
+            "daily: one short Chinese or English bullet sentence about durable progress.",
+            "projectMemory: full replacement markdown for Project MEMORY.md, only durable project preferences/decisions/workflows/open questions.",
+            memory.promoteRoot
+              ? "rootMemory: full replacement markdown for root MEMORY.md, only cross-project stable user preferences. Omit if no global preference."
+              : "Do not return rootMemory.",
+            "Do not store secrets, transient tool noise, or code facts that can be read from the repo.",
+            "",
+            "<root_memory>",
+            context.rootMemory,
+            "</root_memory>",
+            "<project_memory>",
+            context.projectMemory,
+            "</project_memory>",
+            "<user_turn>",
+            userText,
+            "</user_turn>",
+            "<assistant_turn>",
+            assistantBody,
+            "</assistant_turn>",
+          ].join("\n"),
+        }],
+      }],
+      "You are Scorel's automatic memory dreamer. Output strict JSON only.",
+      {},
+    )) {
+      if (rawEvent.type === "text_delta") {
+        raw += rawEvent.delta;
+      } else if (rawEvent.type === "message_end") {
+        raw = assistantText(rawEvent.message) || raw;
+      } else if (rawEvent.type === "error") {
+        throw rawEvent.error;
+      }
+    }
+    return parseMemoryUpdate(raw);
+  }
+
   async #appendSkillHarness(
     lane: SessionLane,
     clientId: ClientId,
@@ -1693,6 +1911,60 @@ export class ScorelHost {
     return this.#listModels(project.projectId);
   }
 
+  async #memorySettingsForProject(projectId: ProjectId): Promise<MemorySettings> {
+    const config = await this.#configProfileForProject(projectId).catch((cause) => {
+      if (isMissingConfigError(cause)) {
+        return undefined;
+      }
+      throw cause;
+    });
+    return config?.memory ?? disabledMemorySettings();
+  }
+
+  async #safeMemorySettingsForRuntime(lane: SessionLane, clientId: ClientId): Promise<MemorySettings> {
+    try {
+      return await this.#memorySettingsForProject(lane.project.projectId);
+    } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      await this.#appendDiagnostic(lane.session.header.sessionId, "memory_settings_unavailable", {
+        clientId,
+        message: error.message,
+        stack: shortStack(error),
+      });
+      return disabledMemorySettings();
+    }
+  }
+
+  async #handleUpsertMemorySettings(request: ClientRequest<"upsert_memory_settings">): Promise<MemorySettings> {
+    const project = await this.#registry.require(request.projectId);
+    const configPath = join(project.workDir, ".scorel", "config.toml");
+    let existingConfigText: string | undefined;
+    try {
+      existingConfigText = await readFile(configPath, "utf8");
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+    await mkdir(join(project.workDir, ".scorel"), { recursive: true });
+    await writeFile(
+      configPath,
+      renderMemoryConfig({
+        enabled: request.enabled,
+        daily: request.daily,
+        autoDream: request.autoDream,
+        promoteRoot: request.promoteRoot,
+        existingConfigText,
+      }),
+      "utf8",
+    );
+    await this.#appendHostDiagnostic("memory_settings_upserted", {
+      projectId: project.projectId,
+      workDir: project.workDir,
+    });
+    return this.#memorySettingsForProject(project.projectId);
+  }
+
   async #fetchProviderModels(projectId: ProjectId, providerId: string): Promise<ProviderCatalogModelSummary[]> {
     const project = await this.#registry.require(projectId);
     const config = await loadScorelConfigProfile({ cwd: project.workDir, includeSecrets: true });
@@ -1942,6 +2214,32 @@ const assistantText = (message: ScorelMessage): string =>
     .map((block) => block.text)
     .join("\n")
     .trim();
+
+const disabledMemorySettings = (): MemorySettings => ({
+  enabled: false,
+  daily: false,
+  autoDream: false,
+  promoteRoot: false,
+});
+
+const parseMemoryUpdate = (raw: string): { daily?: string; projectMemory?: string; rootMemory?: string } | undefined => {
+  const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  if (!text) {
+    return undefined;
+  }
+  const parsed = JSON.parse(text) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const record = parsed as Record<string, unknown>;
+  return {
+    ...(typeof record.daily === "string" && record.daily.trim() ? { daily: record.daily.trim() } : {}),
+    ...(typeof record.projectMemory === "string" && record.projectMemory.trim() ? { projectMemory: record.projectMemory.trim() } : {}),
+    ...(typeof record.rootMemory === "string" && record.rootMemory.trim() ? { rootMemory: record.rootMemory.trim() } : {}),
+  };
+};
+
+const normalizeMarkdownFile = (value: string): string => `${value.trimEnd()}\n`;
 
 const sanitizeSessionTitle = (value: string): string => {
   const title = value

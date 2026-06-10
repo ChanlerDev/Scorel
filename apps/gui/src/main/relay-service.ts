@@ -11,10 +11,12 @@ import {
   type ModelSelectionInput,
   type AvailableModelSummary,
   type ModelRole,
+  type MemorySettings,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
   type ProviderModelSummary,
   type UpsertModelProfileInput,
+  type UpsertMemorySettingsInput,
   type PersistentEvent,
   type ProjectId,
   type RelayAuthorizedDevice,
@@ -50,6 +52,8 @@ export type GuiRelayService = {
   listRemoteModels(deviceId: string, projectId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
   upsertRemoteModelProfile(deviceId: string, input: UpsertModelProfileInput): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
   fetchRemoteProviderModels(deviceId: string, projectId: string, providerId: string): Promise<ProviderCatalogModelSummary[]>;
+  getRemoteMemorySettings(deviceId: string, projectId: string): Promise<MemorySettings>;
+  upsertRemoteMemorySettings(deviceId: string, input: UpsertMemorySettingsInput): Promise<MemorySettings>;
   createRemoteSession(deviceId: string, projectId: string, modelSelection?: ModelSelectionInput): Promise<SessionId>;
   openRemoteSession(deviceId: string, sessionId: string): Promise<PersistentEvent[]>;
   attachRemoteSession(
@@ -139,6 +143,12 @@ export const createGuiRelayService = (store: GuiStore): GuiRelayService => {
     },
     async fetchRemoteProviderModels(deviceId, projectId, providerId) {
       return (await connectedClient(deviceId)).fetchProviderModels({ projectId: asProjectId(projectId) as ProjectId, providerId });
+    },
+    async getRemoteMemorySettings(deviceId, projectId) {
+      return (await connectedClient(deviceId)).getMemorySettings({ projectId: asProjectId(projectId) as ProjectId });
+    },
+    async upsertRemoteMemorySettings(deviceId, input) {
+      return (await connectedClient(deviceId)).upsertMemorySettings(input);
     },
     async createRemoteSession(deviceId, projectId, modelSelection) {
       return (await connectedClient(deviceId)).createSession({ meta: { projectId: asProjectId(projectId) as ProjectId, modelSelection } });

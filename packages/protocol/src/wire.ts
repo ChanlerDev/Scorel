@@ -11,6 +11,8 @@ import type {
   ProviderCatalogModelSummary,
   ProviderModelSummary,
   UpsertModelProfileInput,
+  MemorySettings,
+  UpsertMemorySettingsInput,
   PersistentEvent,
   QueueItem,
   QueueName,
@@ -67,6 +69,14 @@ export type ClientRequestMap = {
   fetch_provider_models: {
     request: { projectId: ProjectId; providerId: string };
     response: { models: ProviderCatalogModelSummary[] };
+  };
+  get_memory_settings: {
+    request: { projectId: ProjectId };
+    response: { memory: MemorySettings };
+  };
+  upsert_memory_settings: {
+    request: UpsertMemorySettingsInput;
+    response: { memory: MemorySettings };
   };
   list_directories: {
     request: { path?: string };

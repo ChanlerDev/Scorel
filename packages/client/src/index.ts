@@ -24,6 +24,8 @@ import {
   type ProviderConnectionSummary,
   type ProviderModelSummary,
   type UpsertModelProfileInput,
+  type MemorySettings,
+  type UpsertMemorySettingsInput,
   type PersistentEvent,
   type ProjectId,
   type QueueItem,
@@ -303,6 +305,16 @@ export class DaemonClient {
   async fetchProviderModels(input: { projectId: ProjectId; providerId: string }): Promise<ProviderCatalogModelSummary[]> {
     this.#assertDaemonConnected();
     return (await this.#request("fetch_provider_models", input)).models;
+  }
+
+  async getMemorySettings(input: { projectId: ProjectId }): Promise<MemorySettings> {
+    this.#assertDaemonConnected();
+    return (await this.#request("get_memory_settings", input)).memory;
+  }
+
+  async upsertMemorySettings(input: UpsertMemorySettingsInput): Promise<MemorySettings> {
+    this.#assertDaemonConnected();
+    return (await this.#request("upsert_memory_settings", input)).memory;
   }
 
   async listDirectories(path?: string): Promise<DirectoryListing> {

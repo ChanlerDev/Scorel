@@ -24,6 +24,9 @@ export const SCOREL_CONFIG_SCHEMA = {
     modelProfileRoles: {
       keys: ["primary", "standard", "auxiliary"],
     },
+    memory: {
+      keys: ["enabled", "daily", "autoDream", "promoteRoot"],
+    },
   },
 } as const;
 
@@ -90,6 +93,14 @@ export type ScorelConfig = {
   modelProfile: {
     roles: Record<ModelRole, string>;
   };
+  memory: MemoryConfig;
+};
+
+export type MemoryConfig = {
+  enabled: boolean;
+  daily: boolean;
+  autoDream: boolean;
+  promoteRoot: boolean;
 };
 
 export type ProviderConnectionSummary = {
@@ -114,6 +125,7 @@ export type ScorelConfigProfile = {
   modelProfile: {
     roles: Record<ModelRole, string>;
   };
+  memory: MemoryConfig;
   warnings?: string[];
 };
 
@@ -178,6 +190,10 @@ export type UpsertModelProfileConfigInput = {
   existingConfigText?: string;
 };
 
+export type UpsertMemoryConfigInput = Partial<MemoryConfig> & {
+  existingConfigText?: string;
+};
+
 export const scorelUserRoot = (homeDir: string): string => join(homeDir, ".scorel");
 
 export const scorelUserConfigPath = (homeDir: string): string => join(scorelUserRoot(homeDir), "config.toml");
@@ -218,6 +234,7 @@ type RawConfig = {
   modelProfile?: {
     roles?: Partial<Record<ModelRole, string>>;
   };
+  memory?: Partial<MemoryConfig>;
 };
 
 type ConfigSection =
@@ -225,7 +242,8 @@ type ConfigSection =
   | { kind: "provider"; id: string }
   | { kind: "providerModel"; id: string }
   | { kind: "availableModel"; id: string }
-  | { kind: "modelProfileRoles" };
+  | { kind: "modelProfileRoles" }
+  | { kind: "memory" };
 type ConfigValue = string | number | boolean;
 
 export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promise<ScorelConfig> => {
@@ -241,6 +259,7 @@ export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promis
     providerModels,
     models,
     modelProfile: { roles },
+    memory: loadMemory(raw),
   };
 };
 
@@ -257,6 +276,7 @@ export const loadScorelConfigProfile = async (options: LoadScorelConfigOptions &
     providerModels,
     models,
     modelProfile: { roles },
+    memory: loadMemory(raw),
   };
 };
 
@@ -486,6 +506,32 @@ export const renderModelProfileConfig = (input: UpsertModelProfileConfigInput): 
 
   return renderRawConfig(raw);
 };
+
+export const renderMemoryConfig = (input: UpsertMemoryConfigInput): string => {
+  const raw = parseEditableConfig(input.existingConfigText);
+  raw.memory = {
+    ...loadMemory(raw),
+    ...(input.enabled !== undefined ? { enabled: requireBoolean(input.enabled, "memory.enabled") } : {}),
+    ...(input.daily !== undefined ? { daily: requireBoolean(input.daily, "memory.daily") } : {}),
+    ...(input.autoDream !== undefined ? { autoDream: requireBoolean(input.autoDream, "memory.autoDream") } : {}),
+    ...(input.promoteRoot !== undefined ? { promoteRoot: requireBoolean(input.promoteRoot, "memory.promoteRoot") } : {}),
+  };
+  return renderRawConfig(raw);
+};
+
+const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
+  enabled: true,
+  daily: true,
+  autoDream: true,
+  promoteRoot: true,
+};
+
+const loadMemory = (raw: RawConfig): MemoryConfig => ({
+  enabled: raw.memory?.enabled ?? DEFAULT_MEMORY_CONFIG.enabled,
+  daily: raw.memory?.daily ?? DEFAULT_MEMORY_CONFIG.daily,
+  autoDream: raw.memory?.autoDream ?? DEFAULT_MEMORY_CONFIG.autoDream,
+  promoteRoot: raw.memory?.promoteRoot ?? DEFAULT_MEMORY_CONFIG.promoteRoot,
+});
 
 const loadProviders = (raw: RawConfig, env: Record<string, string | undefined>): Record<string, ScorelProviderConfig> => {
   const providers: Record<string, ScorelProviderConfig> = {};
@@ -777,6 +823,15 @@ const renderRawConfig = (raw: RawConfig): string => {
     lines.push(`auxiliary = ${tomlString(requireIdentifier(raw.modelProfile.roles.auxiliary, "model_profile.roles.auxiliary"))}`);
     lines.push("");
   }
+  if (raw.memory) {
+    const memory = loadMemory(raw);
+    lines.push("[memory]");
+    lines.push(`enabled = ${memory.enabled}`);
+    lines.push(`daily = ${memory.daily}`);
+    lines.push(`autoDream = ${memory.autoDream}`);
+    lines.push(`promoteRoot = ${memory.promoteRoot}`);
+    lines.push("");
+  }
   return lines.join("\n");
 };
 
@@ -901,6 +956,9 @@ const requireSection = (section: string): ConfigSection => {
   if (section === "model_profile.roles") {
     return { kind: "modelProfileRoles" };
   }
+  if (section === "memory") {
+    return { kind: "memory" };
+  }
   throw new Error(`Unsupported config section: ${section}`);
 };
 
@@ -914,6 +972,8 @@ const ensureSection = (config: RawConfig, section: ConfigSection): void => {
   } else if (section.kind === "modelProfileRoles") {
     config.modelProfile ??= {};
     config.modelProfile.roles ??= {};
+  } else if (section.kind === "memory") {
+    config.memory ??= {};
   }
 };
 
@@ -932,6 +992,9 @@ const setConfigValue = (config: RawConfig, section: ConfigSection, key: string, 
     config.modelProfile ??= {};
     config.modelProfile.roles ??= {};
     setValue(config.modelProfile.roles, key, value);
+  } else if (section.kind === "memory") {
+    config.memory ??= {};
+    setValue(config.memory, key, value);
   }
 };
 

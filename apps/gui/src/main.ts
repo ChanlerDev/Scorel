@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -9,6 +9,7 @@ import {
   guiIpcChannels,
   type GuiHostStatus,
   type GuiModelSelection,
+  type GuiUpsertMemorySettingsInput,
   type GuiUpsertModelProfileInput,
   type GuiProjectRef,
   type GuiRemoteProjectView,
@@ -131,6 +132,19 @@ const registerIpc = (): void => {
       ? requireConnectedLocalHost().fetchLocalProviderModels(ref.projectId, providerId)
       : relayService.fetchRemoteProviderModels(requireRelayDeviceId(ref), ref.projectId, providerId);
   });
+  ipcMain.handle(guiIpcChannels.getMemorySettings, async (_event, project: GuiProjectRef) => {
+    const ref = normalizeProjectRef(project);
+    return ref.source === "local"
+      ? requireConnectedLocalHost().getLocalMemorySettings(ref.projectId)
+      : relayService.getRemoteMemorySettings(requireRelayDeviceId(ref), ref.projectId);
+  });
+  ipcMain.handle(guiIpcChannels.upsertMemorySettings, async (_event, project: GuiProjectRef, input: GuiUpsertMemorySettingsInput) => {
+    const ref = normalizeProjectRef(project);
+    const payload = { ...input, projectId: ref.projectId as never };
+    return ref.source === "local"
+      ? requireConnectedLocalHost().upsertLocalMemorySettings(payload)
+      : relayService.upsertRemoteMemorySettings(requireRelayDeviceId(ref), payload);
+  });
   ipcMain.handle(guiIpcChannels.createSession, async (_event, project: GuiProjectRef, modelSelection?: GuiModelSelection) => {
     const ref = normalizeProjectRef(project);
     return ref.source === "local"
@@ -182,6 +196,34 @@ const createWindow = async (): Promise<void> => {
   });
 
   await win.loadFile(join(here, "index.html"));
+};
+
+const installApplicationMenu = (): void => {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {
+      label: "Scorel",
+      submenu: [
+        {
+          label: "Settings...",
+          accelerator: "CommandOrControl+,",
+          click: () => {
+            mainWindow?.webContents.send(guiIpcChannels.openSettings);
+          },
+        },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    {
+      role: "editMenu",
+    },
+    {
+      role: "viewMenu",
+    },
+    {
+      role: "windowMenu",
+    },
+  ]));
 };
 
 registerIpc();
@@ -269,6 +311,7 @@ app.whenReady().then(async () => {
       message: cause instanceof Error ? cause.message : String(cause),
     };
   }
+  installApplicationMenu();
   await createWindow();
 });
 

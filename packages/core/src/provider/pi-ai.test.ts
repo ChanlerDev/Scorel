@@ -208,6 +208,12 @@ const builtinProfile: ScorelConfig = {
       auxiliary: "aux",
     },
   },
+  memory: {
+    enabled: true,
+    daily: true,
+    autoDream: true,
+    promoteRoot: true,
+  },
 };
 
 const customProfile: ScorelConfig = {
@@ -240,6 +246,12 @@ const customProfile: ScorelConfig = {
       standard: "aux",
       auxiliary: "aux",
     },
+  },
+  memory: {
+    enabled: true,
+    daily: true,
+    autoDream: true,
+    promoteRoot: true,
   },
 };
 

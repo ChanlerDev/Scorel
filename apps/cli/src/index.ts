@@ -723,7 +723,7 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
       cwd: project.workDir,
       config: await loadProjectConfig(project),
       modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
-      includeTools: purpose !== "title",
+      includeTools: purpose === "chat",
     }),
   });
   const client = new DaemonClient(createEmbeddedTransport(daemon), {

@@ -93,6 +93,17 @@ export type UpsertModelProfileInput = {
   roles?: Partial<Record<ModelRole, string>>;
 };
 
+export type MemorySettings = {
+  enabled: boolean;
+  daily: boolean;
+  autoDream: boolean;
+  promoteRoot: boolean;
+};
+
+export type UpsertMemorySettingsInput = Partial<MemorySettings> & {
+  projectId: ProjectId;
+};
+
 export type SelectedModelSummary = {
   modelId: string;
   role?: ModelRole;

@@ -7,6 +7,7 @@ export type CoreScorelEvent = ScorelEvent;
 
 export * from "./config/index.js";
 export * from "./instructions/index.js";
+export * from "./memory/index.js";
 export * from "./provider/pi-ai.js";
 export * from "./runtime/index.js";
 export * from "./session/index.js";

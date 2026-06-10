@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { GuiModelProfileView, GuiProjectView } from "../shared/ipc.js";
 import { ProjectPickerMenu } from "./composer/ProjectPickerMenu.js";
+import { MemorySection } from "./settings/sections/MemorySection.js";
 import { ProviderSection } from "./settings/sections/ProviderSection.js";
 import { SettingsShell } from "./settings/SettingsShell.js";
 import { Sidebar } from "./shell/Sidebar.js";
@@ -53,6 +54,13 @@ const modelProfile: GuiModelProfileView = {
     standard: "main",
     auxiliary: "main",
   },
+};
+
+const memorySettings = {
+  enabled: true,
+  daily: true,
+  autoDream: true,
+  promoteRoot: true,
 };
 
 const modelProps = {
@@ -259,7 +267,9 @@ describe("GUI shell rendering contract", () => {
         devices={[]}
         project={{ source: "local", projectId: localProject.projectId }}
         modelProfile={modelProfile}
+        memory={memorySettings}
         onModelProfileChange={noop}
+        onMemoryChange={noop}
         busy={false}
         setBusy={noop}
         setError={noop}
@@ -270,6 +280,7 @@ describe("GUI shell rendering contract", () => {
 
     expect(html).toContain("模型");
     expect(html).toContain("Provider");
+    expect(html).toContain("记忆");
     expect(html).toContain("Main Model");
     expect(html).toContain("工作模型");
     expect(html).toContain("已选用模型");
@@ -300,7 +311,9 @@ describe("GUI shell rendering contract", () => {
         devices={[]}
         project={{ source: "local", projectId: localProject.projectId }}
         modelProfile={modelProfile}
+        memory={memorySettings}
         onModelProfileChange={noop}
+        onMemoryChange={noop}
         busy={false}
         setBusy={noop}
         setError={noop}
@@ -311,6 +324,7 @@ describe("GUI shell rendering contract", () => {
 
     expect(html).toContain("模型");
     expect(html).toContain("Provider");
+    expect(html).toContain("记忆");
     expect(html).toContain("连接");
     expect(html).toContain("已选用模型");
     expect(html).not.toContain("加入可用模型");
@@ -356,5 +370,23 @@ describe("GUI shell rendering contract", () => {
     expect(html).not.toContain("chanleramp");
     expect(html).not.toContain("deepseek-v4-flash");
     expect(html).not.toContain("Relay URL");
+  });
+
+  it("renders real memory settings controls", () => {
+    const html = renderToStaticMarkup(
+      <MemorySection
+        project={{ source: "local", projectId: localProject.projectId }}
+        memory={memorySettings}
+        busy={false}
+        setBusy={noop}
+        setError={noop}
+        onMemoryChange={noop}
+      />,
+    );
+
+    expect(html).toContain("启用记忆");
+    expect(html).toContain("自动 daily");
+    expect(html).toContain("自动 dream");
+    expect(html).toContain("提升到全局");
   });
 });

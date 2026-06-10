@@ -2,10 +2,12 @@ import { useState, type ReactNode } from "react";
 
 import {
   Box,
+  FileText,
   Server,
 } from "../icons/index.js";
-import type { GuiModelProfileView, GuiProjectRef, GuiRelayDeviceView } from "../../shared/ipc.js";
+import type { GuiMemorySettingsView, GuiModelProfileView, GuiProjectRef, GuiRelayDeviceView } from "../../shared/ipc.js";
 import { ConfigSection } from "./sections/ConfigSection.js";
+import { MemorySection } from "./sections/MemorySection.js";
 import { ModelSection } from "./sections/ModelSection.js";
 import { ProviderSection } from "./sections/ProviderSection.js";
 import { SettingsNav, type SettingsNavGroup } from "./SettingsNav.js";
@@ -14,7 +16,9 @@ export type SettingsShellProps = {
   devices: GuiRelayDeviceView[];
   project: GuiProjectRef | null;
   modelProfile: GuiModelProfileView;
+  memory: GuiMemorySettingsView;
   onModelProfileChange(profile: GuiModelProfileView): void;
+  onMemoryChange(memory: GuiMemorySettingsView): void;
   busy: boolean;
   setBusy(value: boolean): void;
   setError(message: string | null): void;
@@ -28,6 +32,7 @@ const NAV_GROUPS: SettingsNavGroup[] = [
     items: [
       { id: "model", label: "模型", icon: <Box size={14} /> },
       { id: "provider", label: "Provider", icon: <Box size={14} /> },
+      { id: "memory", label: "记忆", icon: <FileText size={14} /> },
       { id: "connections", label: "连接", icon: <Server size={14} /> },
     ],
   },
@@ -59,6 +64,18 @@ export function SettingsShell(props: SettingsShellProps) {
           setBusy={props.setBusy}
           setError={props.setError}
           onModelProfileChange={props.onModelProfileChange}
+        />
+      );
+      break;
+    case "memory":
+      content = (
+        <MemorySection
+          project={props.project}
+          memory={props.memory}
+          busy={props.busy}
+          setBusy={props.setBusy}
+          setError={props.setError}
+          onMemoryChange={props.onMemoryChange}
         />
       );
       break;

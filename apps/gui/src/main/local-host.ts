@@ -19,10 +19,12 @@ import {
   type ModelSelectionInput,
   type AvailableModelSummary,
   type ModelRole,
+  type MemorySettings,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
   type ProviderModelSummary,
   type UpsertModelProfileInput,
+  type UpsertMemorySettingsInput,
   type PersistentEvent,
   type ProjectId,
   type ScorelEvent,
@@ -50,6 +52,8 @@ export type GuiLocalHostService = {
   listLocalModels(projectId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
   upsertLocalModelProfile(input: UpsertModelProfileInput): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
   fetchLocalProviderModels(projectId: string, providerId: string): Promise<ProviderCatalogModelSummary[]>;
+  getLocalMemorySettings(projectId: string): Promise<MemorySettings>;
+  upsertLocalMemorySettings(input: UpsertMemorySettingsInput): Promise<MemorySettings>;
   createLocalSession(projectId: string, modelSelection?: ModelSelectionInput): Promise<SessionId>;
   openLocalSession(sessionId: string): Promise<PersistentEvent[]>;
   attachLocalSession(sessionId: string, handler: GuiLocalSubscriber): Promise<{
@@ -81,7 +85,7 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
           cwd: project.workDir,
           config: await loadScorelConfig({ cwd: project.workDir }),
           modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
-          includeTools: purpose !== "title",
+          includeTools: purpose === "chat",
         })),
   });
   const client = new DaemonClient(createEmbeddedTransport(host), {
@@ -125,6 +129,12 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     },
     fetchLocalProviderModels(projectId, providerId) {
       return client.fetchProviderModels({ projectId: asProjectId(projectId) as ProjectId, providerId });
+    },
+    getLocalMemorySettings(projectId) {
+      return client.getMemorySettings({ projectId: asProjectId(projectId) as ProjectId });
+    },
+    upsertLocalMemorySettings(input) {
+      return client.upsertMemorySettings(input);
     },
     createLocalSession(projectId, modelSelection) {
       return client.createSession({ meta: { projectId: asProjectId(projectId) as ProjectId, modelSelection } });

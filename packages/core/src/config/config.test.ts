@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -8,6 +8,7 @@ import {
   SCOREL_CONFIG_SCHEMA,
   loadScorelConfig,
   loadScorelConfigProfile,
+  renderMemoryConfig,
   renderModelProfileConfig,
   scorelProjectConfigPath,
   scorelSessionsDir,
@@ -91,7 +92,60 @@ auxiliary = "aux"
           auxiliary: "aux",
         },
       },
+      memory: {
+        enabled: true,
+        daily: true,
+        autoDream: true,
+        promoteRoot: true,
+      },
     });
+  });
+
+  it("loads and renders memory settings", async () => {
+    const cwd = await mkProject(`
+[providers.openai]
+type = "builtin"
+provider = "openai"
+apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.openai_gpt_54_mini]
+provider = "openai"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.main]
+model = "openai_gpt_54_mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
+
+[memory]
+enabled = true
+daily = false
+autoDream = true
+promoteRoot = false
+`);
+
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "secret" } })).resolves.toMatchObject({
+      memory: {
+        enabled: true,
+        daily: false,
+        autoDream: true,
+        promoteRoot: false,
+      },
+    });
+
+    const rendered = renderMemoryConfig({
+      existingConfigText: await readProjectConfig(cwd),
+      daily: true,
+      promoteRoot: true,
+    });
+
+    expect(rendered).toContain("[memory]");
+    expect(rendered).toContain("daily = true");
+    expect(rendered).toContain("promoteRoot = true");
   });
 
   it("loads custom pi-ai provider models with model metadata", async () => {
@@ -547,3 +601,6 @@ const mkProject = async (config: string): Promise<string> => {
   await writeFile(join(cwd, ".scorel", "config.toml"), config);
   return cwd;
 };
+
+const readProjectConfig = (cwd: string): Promise<string> =>
+  readFile(join(cwd, ".scorel", "config.toml"), "utf8");

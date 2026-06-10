@@ -17,6 +17,7 @@ import "./styles.css";
 import type {
   GuiProjectRef,
   GuiProjectView,
+  GuiMemorySettingsView,
   GuiModelProfileView,
   GuiRelayDeviceView,
   GuiRemoteProjectView,
@@ -28,6 +29,13 @@ type ViewMode = "workspace" | "settings";
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 420;
 const SIDEBAR_DEFAULT_WIDTH = 278;
+
+const defaultMemorySettings = (): GuiMemorySettingsView => ({
+  enabled: true,
+  daily: true,
+  autoDream: true,
+  promoteRoot: true,
+});
 
 const projectRef = (project: GuiProjectView): GuiProjectRef =>
   project.source === "local"
@@ -52,6 +60,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string>("");
   const [modelProfile, setModelProfile] = useState<GuiModelProfileView>({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
+  const [memorySettings, setMemorySettings] = useState<GuiMemorySettingsView>(defaultMemorySettings());
   const [selectedModelId, setSelectedModelId] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
   const [pickerAnchor, setPickerAnchor] = useState<{ left: number; top: number } | undefined>(undefined);
@@ -192,6 +201,10 @@ export function App() {
     };
   }, [ingestEvent, refreshSessionsForProject, selectedProject]);
 
+  useEffect(() => window.scorel.onOpenSettings(() => {
+    setView("settings");
+  }), []);
+
   useEffect(() => {
     void (async () => {
       setBusy(true);
@@ -222,6 +235,7 @@ export function App() {
   useEffect(() => {
     if (!selectedProject) {
       setModelProfile({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
+      setMemorySettings(defaultMemorySettings());
       setSelectedModelId("");
       return;
     }
@@ -236,6 +250,14 @@ export function App() {
       .catch((cause) => {
         setModelProfile({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
         setSelectedModelId("");
+        setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    void window.scorel.getMemorySettings(projectRef(selectedProject))
+      .then((memory) => {
+        setMemorySettings(memory);
+      })
+      .catch((cause) => {
+        setMemorySettings(defaultMemorySettings());
         setError(cause instanceof Error ? cause.message : String(cause));
       });
   }, [selectedProject]);
@@ -397,6 +419,7 @@ export function App() {
           await refreshSnapshot();
         }}
         modelProfile={modelProfile}
+        memory={memorySettings}
         onModelProfileChange={(profile) => {
           setModelProfile(profile);
           setSelectedModelId((current) => {
@@ -404,6 +427,7 @@ export function App() {
             return profile.roles.standard || profile.models[0]?.modelId || "";
           });
         }}
+        onMemoryChange={setMemorySettings}
         onBack={() => setView("workspace")}
       />
     );

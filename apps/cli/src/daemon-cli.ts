@@ -127,7 +127,7 @@ const runServeCommand = async (
       cwd: project.workDir,
       config: await loadScorelConfig({ cwd: project.workDir }),
       modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
-      includeTools: purpose !== "title",
+      includeTools: purpose === "chat",
     }),
   });
   await daemon.start();

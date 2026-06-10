@@ -16,6 +16,8 @@ const api: GuiApi = {
   listModels: (project) => ipcRenderer.invoke(guiIpcChannels.listModels, project),
   upsertModelProfile: (project, input) => ipcRenderer.invoke(guiIpcChannels.upsertModelProfile, project, input),
   fetchProviderModels: (project, providerId) => ipcRenderer.invoke(guiIpcChannels.fetchProviderModels, project, providerId),
+  getMemorySettings: (project) => ipcRenderer.invoke(guiIpcChannels.getMemorySettings, project),
+  upsertMemorySettings: (project, input) => ipcRenderer.invoke(guiIpcChannels.upsertMemorySettings, project, input),
   createSession: (project, modelSelection) => ipcRenderer.invoke(guiIpcChannels.createSession, project, modelSelection),
   openSession: (project, sessionId) => ipcRenderer.invoke(guiIpcChannels.openSession, project, sessionId),
   attachSession: (project, sessionId) => ipcRenderer.invoke(guiIpcChannels.attachSession, project, sessionId),
@@ -28,6 +30,15 @@ const api: GuiApi = {
     ipcRenderer.on(guiIpcChannels.sessionEvent, listener);
     return () => {
       ipcRenderer.off(guiIpcChannels.sessionEvent, listener);
+    };
+  },
+  onOpenSettings: (handler) => {
+    const listener = (): void => {
+      handler();
+    };
+    ipcRenderer.on(guiIpcChannels.openSettings, listener);
+    return () => {
+      ipcRenderer.off(guiIpcChannels.openSettings, listener);
     };
   },
 };

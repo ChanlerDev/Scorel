@@ -69,6 +69,12 @@ const modelProfile: ScorelConfig = {
       auxiliary: "aux",
     },
   },
+  memory: {
+    enabled: true,
+    daily: true,
+    autoDream: true,
+    promoteRoot: true,
+  },
 };
 
 const fixture = async () => {
@@ -102,6 +108,7 @@ const fixtureWithModelProfile = async () => {
     projectsPath,
     deviceId: asDeviceId("device_test"),
     modelProfile,
+    memoryHomeDir: root,
     createRuntime: async ({ selectedModel }) => {
       runtimeSelections.push(selectedModel?.modelId ?? "none");
       return new ScorelRuntime({ provider });
@@ -223,6 +230,40 @@ describe("ScorelHost + embedded transport", () => {
     });
     if (resolved.type !== "response") throw new Error("expected response");
     expect(JSON.stringify(resolved.data)).not.toContain("secret");
+  });
+
+  it("injects memory context and appends automatic daily notes", async () => {
+    const { root, host } = await fixtureWithModelProfile();
+    const repo = join(root, "repo-memory");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_memory") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_memory_create"),
+      sessionId: asSessionId("ses_memory"),
+      meta: { projectId: project.projectId },
+    });
+    const response = waitForResponse(transport, "req_memory_send");
+
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_memory_send"),
+      sessionId: asSessionId("ses_memory"),
+      content: "记住这个项目的 memory 设计方向",
+    });
+
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    const daily = await readFile(
+      join(root, ".scorel", "memory", "projects", project.projectId, "daily", "1970-01-01.md"),
+      "utf8",
+    );
+    expect(daily).toContain("记住这个项目的 memory 设计方向");
+
+    const sessionFile = await readFile(join(root, "sessions", "ses_memory.jsonl"), "utf8");
+    expect(sessionFile).toContain('"type":"harness_item"');
+    expect(sessionFile).toContain('"kind":"memory"');
   });
 
   it("returns an empty model profile when project config is missing", async () => {
@@ -670,6 +711,7 @@ apiKey = "secret"
       projectsPath,
       deviceId: asDeviceId("device_test"),
       modelProfile,
+      memoryHomeDir: root,
       createRuntime: async ({ selectedModel }) => {
         restoredSelections.push(selectedModel?.modelId ?? "none");
         return new ScorelRuntime({ provider });
@@ -723,7 +765,7 @@ apiKey = "secret"
       source: "model",
       model: expect.objectContaining({ modelId: "aux" }),
     }));
-    expect(runtimeSelections).toEqual(["main", "aux"]);
+    expect(runtimeSelections).toEqual(["main", "aux", "aux"]);
 
     const listResponse = waitForResponse(transport, "req_list_title");
     await transport.send({
@@ -769,7 +811,7 @@ apiKey = "secret"
 
     const file = await readFile(join(sessionsDir, "ses_explicit_title.jsonl"), "utf8");
     expect(file).not.toContain("session_title_updated");
-    expect(runtimeSelections).toEqual(["main"]);
+    expect(runtimeSelections).toEqual(["main", "aux"]);
   });
 
   it("persists project ownership in session headers and restores lanes through the registry", async () => {

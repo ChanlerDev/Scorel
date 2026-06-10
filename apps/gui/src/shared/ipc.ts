@@ -3,6 +3,7 @@ import type {
   AvailableModelSummary,
   HostProject,
   ModelRole,
+  MemorySettings,
   ProviderCatalogModelSummary,
   ProviderConnectionSummary,
   ProviderModelSummary,
@@ -11,6 +12,7 @@ import type {
   SessionId,
   SessionSummary,
   UpsertModelProfileInput,
+  UpsertMemorySettingsInput,
 } from "@scorel/protocol";
 
 export type GuiHostStatus = {
@@ -69,6 +71,10 @@ export type GuiModelProfileView = {
 
 export type GuiUpsertModelProfileInput = Omit<UpsertModelProfileInput, "projectId">;
 
+export type GuiMemorySettingsView = MemorySettings;
+
+export type GuiUpsertMemorySettingsInput = Omit<UpsertMemorySettingsInput, "projectId">;
+
 export type GuiProviderCatalogModelView = ProviderCatalogModelSummary;
 
 export type GuiRelayPairSessionView = {
@@ -101,12 +107,15 @@ export type GuiApi = {
   listModels(project: GuiProjectRef): Promise<GuiModelProfileView>;
   upsertModelProfile(project: GuiProjectRef, input: GuiUpsertModelProfileInput): Promise<GuiModelProfileView>;
   fetchProviderModels(project: GuiProjectRef, providerId: string): Promise<GuiProviderCatalogModelView[]>;
+  getMemorySettings(project: GuiProjectRef): Promise<GuiMemorySettingsView>;
+  upsertMemorySettings(project: GuiProjectRef, input: GuiUpsertMemorySettingsInput): Promise<GuiMemorySettingsView>;
   createSession(project: GuiProjectRef, modelSelection?: GuiModelSelection): Promise<SessionId>;
   openSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
   attachSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
   detachSession(sessionId: string): Promise<void>;
   sendMessage(project: GuiProjectRef, sessionId: string, content: string): Promise<GuiSendMessageAck>;
   onSessionEvent(handler: (payload: GuiSessionEventPayload) => void): () => void;
+  onOpenSettings(handler: () => void): () => void;
 };
 
 export const guiIpcChannels = {
@@ -123,10 +132,13 @@ export const guiIpcChannels = {
   listModels: "scorel:listModels",
   upsertModelProfile: "scorel:upsertModelProfile",
   fetchProviderModels: "scorel:fetchProviderModels",
+  getMemorySettings: "scorel:getMemorySettings",
+  upsertMemorySettings: "scorel:upsertMemorySettings",
   createSession: "scorel:createSession",
   openSession: "scorel:openSession",
   attachSession: "scorel:attachSession",
   detachSession: "scorel:detachSession",
   sendMessage: "scorel:sendMessage",
   sessionEvent: "scorel:sessionEvent",
+  openSettings: "scorel:openSettings",
 } as const;
