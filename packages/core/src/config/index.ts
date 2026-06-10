@@ -27,6 +27,12 @@ export const SCOREL_CONFIG_SCHEMA = {
     memory: {
       keys: ["enabled", "daily", "autoDream", "promoteRoot", "dreamIdleMinutes"],
     },
+    extension: {
+      keys: ["enabled", "kind"],
+    },
+    extensionConfig: {
+      keys: [],
+    },
   },
 } as const;
 
@@ -94,6 +100,7 @@ export type ScorelConfig = {
     roles: Record<ModelRole, string>;
   };
   memory: MemoryConfig;
+  extensions: Record<string, ExtensionConfig>;
 };
 
 export type MemoryConfig = {
@@ -102,6 +109,12 @@ export type MemoryConfig = {
   autoDream: boolean;
   promoteRoot: boolean;
   dreamIdleMinutes: number;
+};
+
+export type ExtensionConfig = {
+  enabled: boolean;
+  kind: "im";
+  config: Record<string, string | number | boolean>;
 };
 
 export type ProviderConnectionSummary = {
@@ -127,6 +140,7 @@ export type ScorelConfigProfile = {
     roles: Record<ModelRole, string>;
   };
   memory: MemoryConfig;
+  extensions: Record<string, ExtensionConfig>;
   warnings?: string[];
 };
 
@@ -236,6 +250,11 @@ type RawConfig = {
     roles?: Partial<Record<ModelRole, string>>;
   };
   memory?: Partial<MemoryConfig>;
+  extensions: Record<string, {
+    enabled?: boolean;
+    kind?: string;
+    config?: Record<string, ConfigValue>;
+  }>;
 };
 
 type ConfigSection =
@@ -244,7 +263,9 @@ type ConfigSection =
   | { kind: "providerModel"; id: string }
   | { kind: "availableModel"; id: string }
   | { kind: "modelProfileRoles" }
-  | { kind: "memory" };
+  | { kind: "memory" }
+  | { kind: "extension"; id: string }
+  | { kind: "extensionConfig"; id: string };
 type ConfigValue = string | number | boolean;
 
 export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promise<ScorelConfig> => {
@@ -261,6 +282,7 @@ export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promis
     models,
     modelProfile: { roles },
     memory: loadMemory(raw),
+    extensions: loadExtensions(raw),
   };
 };
 
@@ -278,6 +300,7 @@ export const loadScorelConfigProfile = async (options: LoadScorelConfigOptions &
     models,
     modelProfile: { roles },
     memory: loadMemory(raw),
+    extensions: loadExtensions(raw),
   };
 };
 
@@ -536,6 +559,21 @@ const loadMemory = (raw: RawConfig): MemoryConfig => ({
   promoteRoot: raw.memory?.promoteRoot ?? DEFAULT_MEMORY_CONFIG.promoteRoot,
   dreamIdleMinutes: requireNonNegativeNumber(raw.memory?.dreamIdleMinutes ?? DEFAULT_MEMORY_CONFIG.dreamIdleMinutes, "memory.dreamIdleMinutes"),
 });
+
+const loadExtensions = (raw: RawConfig): Record<string, ExtensionConfig> => {
+  const extensions: Record<string, ExtensionConfig> = {};
+  for (const [extensionId, extension] of Object.entries(raw.extensions)) {
+    if (extension.kind !== "im") {
+      throw new Error(`extensions.${extensionId}.kind must be im`);
+    }
+    extensions[extensionId] = {
+      enabled: extension.enabled === true,
+      kind: "im",
+      config: extension.config ?? {},
+    };
+  }
+  return extensions;
+};
 
 const loadProviders = (raw: RawConfig, env: Record<string, string | undefined>): Record<string, ScorelProviderConfig> => {
   const providers: Record<string, ScorelProviderConfig> = {};
@@ -837,6 +875,19 @@ const renderRawConfig = (raw: RawConfig): string => {
     lines.push(`dreamIdleMinutes = ${memory.dreamIdleMinutes}`);
     lines.push("");
   }
+  for (const [extensionId, extension] of Object.entries(raw.extensions).sort(([left], [right]) => left.localeCompare(right))) {
+    lines.push(`[extensions.${extensionId}]`);
+    lines.push(`enabled = ${extension.enabled === true}`);
+    lines.push(`kind = ${tomlString(extension.kind === "im" ? "im" : requireString(extension.kind, `extensions.${extensionId}.kind`))}`);
+    lines.push("");
+    if (extension.config && Object.keys(extension.config).length > 0) {
+      lines.push(`[extensions.${extensionId}.config]`);
+      for (const [key, value] of Object.entries(extension.config).sort(([left], [right]) => left.localeCompare(right))) {
+        lines.push(`${key} = ${renderTomlValue(value)}`);
+      }
+      lines.push("");
+    }
+  }
   return lines.join("\n");
 };
 
@@ -844,6 +895,7 @@ const emptyRawConfig = (): RawConfig => ({
   providers: {},
   providerModels: {},
   availableModels: {},
+  extensions: {},
 });
 
 const stripComment = (line: string): string => {
@@ -972,6 +1024,14 @@ const requireSection = (section: string): ConfigSection => {
   if (section === "memory") {
     return { kind: "memory" };
   }
+  const extensionConfigMatch = /^extensions\.([A-Za-z0-9_-]+)\.config$/.exec(section);
+  if (extensionConfigMatch?.[1]) {
+    return { kind: "extensionConfig", id: extensionConfigMatch[1] };
+  }
+  const extensionMatch = /^extensions\.([A-Za-z0-9_-]+)$/.exec(section);
+  if (extensionMatch?.[1]) {
+    return { kind: "extension", id: extensionMatch[1] };
+  }
   throw new Error(`Unsupported config section: ${section}`);
 };
 
@@ -987,6 +1047,11 @@ const ensureSection = (config: RawConfig, section: ConfigSection): void => {
     config.modelProfile.roles ??= {};
   } else if (section.kind === "memory") {
     config.memory ??= {};
+  } else if (section.kind === "extension") {
+    config.extensions[section.id] ??= {};
+  } else if (section.kind === "extensionConfig") {
+    config.extensions[section.id] ??= {};
+    config.extensions[section.id].config ??= {};
   }
 };
 
@@ -1008,11 +1073,25 @@ const setConfigValue = (config: RawConfig, section: ConfigSection, key: string, 
   } else if (section.kind === "memory") {
     config.memory ??= {};
     setValue(config.memory, key, value);
+  } else if (section.kind === "extension") {
+    config.extensions[section.id] ??= {};
+    setValue(config.extensions[section.id], key, value);
+  } else if (section.kind === "extensionConfig") {
+    config.extensions[section.id] ??= {};
+    const extensionConfig = config.extensions[section.id].config ?? {};
+    config.extensions[section.id].config = extensionConfig;
+    setValue(extensionConfig, key, value);
   }
 };
 
 const assertKnownKey = (section: ConfigSection, key: string): void => {
   const schemaSection = section.kind;
+  if (schemaSection === "extensionConfig") {
+    if (!/^[A-Za-z0-9_-]+$/.test(key)) {
+      throw new Error(`Unsupported config key: ${key}`);
+    }
+    return;
+  }
   const allowed = SCOREL_CONFIG_SCHEMA.sections[schemaSection].keys;
   if (!(allowed as readonly string[]).includes(key)) {
     throw new Error(`Unsupported config key: ${key}`);
@@ -1052,6 +1131,9 @@ const requireIdentifier = (value: string | undefined, name: string): string => {
 };
 
 const tomlString = (value: string): string => `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
+
+const renderTomlValue = (value: ConfigValue): string =>
+  typeof value === "string" ? tomlString(value) : String(value);
 
 const requireModelRole = (
   value: string | undefined,

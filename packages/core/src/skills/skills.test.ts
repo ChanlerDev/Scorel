@@ -33,6 +33,31 @@ describe("skills", () => {
     ]);
   });
 
+  it("loads enabled extension skill roots after project and user skills", async () => {
+    const root = await tempRoot();
+    const home = join(root, "home");
+    const repo = join(root, "repo");
+    const extension = join(root, "extension-skills");
+    await mkdir(join(home, ".scorel", "skills", "reply"), { recursive: true });
+    await mkdir(join(repo, ".scorel", "skills", "verify"), { recursive: true });
+    await mkdir(join(extension, "telegram"), { recursive: true });
+    await writeFile(join(home, ".scorel", "skills", "reply", "SKILL.md"), "---\ndescription: user reply\n---\n");
+    await writeFile(join(repo, ".scorel", "skills", "verify", "SKILL.md"), "---\ndescription: project verify\n---\n");
+    await writeFile(join(extension, "telegram", "SKILL.md"), "---\ndescription: telegram reply\n---\n");
+
+    const entries = await scanSkillIndex({
+      cwd: repo,
+      homeDir: home,
+      extensionSkillRoots: [{ path: extension, extensionId: "telegram" }],
+    });
+
+    expect(entries.map((entry) => [entry.name, entry.scope])).toEqual([
+      ["reply", "user"],
+      ["telegram", "extension"],
+      ["verify", "project"],
+    ]);
+  });
+
   it("diffs skill index snapshots and loads Skill tool content from the indexed path", async () => {
     const root = await tempRoot();
     const home = join(root, "home");

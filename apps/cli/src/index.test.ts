@@ -1379,6 +1379,7 @@ const testConfig = (baseURL: string): ScorelConfig => ({
     promoteRoot: false,
     dreamIdleMinutes: 60,
   },
+  extensions: {},
 });
 
 const readJson = async (request: IncomingMessage): Promise<unknown> => {

@@ -153,6 +153,31 @@ dreamIdleMinutes = 15
     expect(rendered).toContain("dreamIdleMinutes = 60");
   });
 
+  it("loads extension enablement and config without resolving secrets", async () => {
+    const cwd = await mkProject(`
+[extensions.loopback]
+enabled = true
+kind = "im"
+
+[extensions.loopback.config]
+botTokenEnv = "SCOREL_LOOPBACK_TOKEN"
+pollIntervalMs = 1000
+`);
+
+    await expect(loadScorelConfigProfile({ cwd, env: {} })).resolves.toMatchObject({
+      extensions: {
+        loopback: {
+          enabled: true,
+          kind: "im",
+          config: {
+            botTokenEnv: "SCOREL_LOOPBACK_TOKEN",
+            pollIntervalMs: 1000,
+          },
+        },
+      },
+    });
+  });
+
   it("loads custom pi-ai provider models with model metadata", async () => {
     const cwd = await mkProject(`
 [providers.chanleramp]

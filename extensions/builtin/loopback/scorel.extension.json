@@ -1,0 +1,7 @@
+{
+  "id": "loopback",
+  "kind": "im",
+  "displayName": "Loopback IM",
+  "adapter": "./adapter.js",
+  "skills": ["./skills"]
+}

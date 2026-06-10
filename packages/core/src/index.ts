@@ -6,6 +6,8 @@ export const coreProtocolVersion = protocolVersion;
 export type CoreScorelEvent = ScorelEvent;
 
 export * from "./config/index.js";
+export * from "./channel/index.js";
+export * from "./extensions/index.js";
 export * from "./instructions/index.js";
 export * from "./memory/index.js";
 export * from "./provider/pi-ai.js";

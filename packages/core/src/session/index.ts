@@ -502,7 +502,7 @@ const isSkillIndexEntry = (value: unknown): value is SkillIndexEntry =>
   isRecord(value) &&
   typeof value.name === "string" &&
   typeof value.path === "string" &&
-  (value.scope === "user" || value.scope === "project") &&
+  (value.scope === "user" || value.scope === "project" || value.scope === "extension") &&
   typeof value.description === "string" &&
   typeof value.mtimeMs === "number" &&
   typeof value.size === "number" &&

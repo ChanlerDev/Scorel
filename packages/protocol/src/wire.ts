@@ -25,6 +25,16 @@ import type { ContentBlock } from "./messages.js";
 export type SendMessageOptions = {
   parentId?: EventId | null;
   runningBehavior?: QueueName;
+  channelContext?: ChannelContext;
+};
+
+export type ChannelContext = {
+  channel: string;
+  externalConversationId: string;
+  conversationType?: string;
+  senderDisplayName?: string;
+  mentionedBot?: boolean;
+  data?: Record<string, unknown>;
 };
 
 export type SendMessageResponse = {

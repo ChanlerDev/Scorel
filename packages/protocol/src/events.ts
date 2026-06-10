@@ -193,6 +193,7 @@ export type HarnessItemKind =
   | "skill_listing"
   | "skill_delta"
   | "memory"
+  | "channel_context"
   | "date_change"
   | "steer"
   | "runtime_notice";
@@ -234,7 +235,7 @@ export type QueueUpdateEvent = PersistentEventBase & {
 export type SkillIndexEntry = {
   name: string;
   path: string;
-  scope: "user" | "project";
+  scope: "user" | "project" | "extension";
   description: string;
   displayName?: string;
   mtimeMs: number;

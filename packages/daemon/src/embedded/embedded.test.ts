@@ -76,6 +76,7 @@ const modelProfile: ScorelConfig = {
     promoteRoot: true,
     dreamIdleMinutes: 60,
   },
+  extensions: {},
 };
 
 const fixture = async () => {
@@ -441,8 +442,86 @@ describe("ScorelHost + embedded transport", () => {
       const memory = await readFile(join(root, ".scorel", "memory", "projects", project.projectId, "MEMORY.md"), "utf8");
       return memory.includes("Daily is written by AppendDaily");
     });
-    const rootMemory = await readFile(join(root, ".scorel", "memory", "MEMORY.md"), "utf8");
-    expect(rootMemory).toContain("messages assembly");
+    await waitUntil(async () => {
+      const rootMemory = await readFile(join(root, ".scorel", "memory", "MEMORY.md"), "utf8");
+      return rootMemory.includes("messages assembly");
+    });
+  });
+
+  it("routes loopback IM messages through fixed session, channel reminder, skill index, and SendChannelMessage", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-im-loopback-"));
+    const scorelHomeDir = join(root, ".scorel");
+    const sessionsDir = join(scorelHomeDir, "sessions");
+    const projectsPath = join(scorelHomeDir, "projects.json");
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(join(scorelHomeDir, "config.toml"), [
+      "[extensions.loopback]",
+      "enabled = true",
+      'kind = "im"',
+      "",
+    ].join("\n"));
+
+    const providerTurns: RuntimeProviderTurn[] = [];
+    let requestedChannelReplies = 0;
+    const imProvider: RuntimeProvider = {
+      streamTurn: async function* (turn) {
+        providerTurns.push(turn);
+        if (turn.context.at(-1)?.role === "user" && turn.tools.some((tool) => tool.name === "SendChannelMessage")) {
+          requestedChannelReplies += 1;
+          return {
+            role: "assistant",
+            content: [{
+              type: "tool_call",
+              toolCallId: `call_channel_reply_${requestedChannelReplies}`,
+              toolName: "SendChannelMessage",
+              args: { text: "loopback reply" },
+            }],
+            stopReason: "tool_call",
+          };
+        }
+        return assistantMessage("done");
+      },
+    };
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      scorelHomeDir,
+      builtinExtensionsDir: join(process.cwd(), "..", "..", "extensions", "builtin"),
+      deviceId: asDeviceId("device_test"),
+      modelProfile,
+      createRuntime: async () => new ScorelRuntime({ provider: imProvider }),
+      now: () => 1_000,
+    });
+    await host.start();
+
+    const sessionId = await host.receiveImMessage("loopback", {
+      externalConversationId: "dm:test-user",
+      text: "hello from im",
+      conversationType: "private",
+      senderDisplayName: "Chanler",
+      target: { externalConversationId: "dm:test-user" },
+    });
+    const sessionIdAgain = await host.receiveImMessage("loopback", {
+      externalConversationId: "dm:test-user",
+      text: "second message",
+      conversationType: "private",
+      target: { externalConversationId: "dm:test-user" },
+    });
+
+    expect(sessionIdAgain).toBe(sessionId);
+    expect(host.loopbackOutbox()).toEqual([{ text: "loopback reply" }, { text: "loopback reply" }]);
+    const workspace = await realpath(join(scorelHomeDir, "workspace"));
+    expect((await host.listProjects()).some((project) => project.workDir === workspace)).toBe(true);
+
+    const sessionFile = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
+    expect(sessionFile).toContain('"kind":"channel_context"');
+    expect(sessionFile).toContain('"channel":"loopback"');
+    expect(sessionFile).toContain('"scope":"extension"');
+    expect(providerTurns[0]?.tools.map((tool) => tool.name)).toContain("SendChannelMessage");
+    expect(providerTurns[0]?.context.some((message) =>
+      message.meta?.source === "harness_item" &&
+      message.meta.harnessKind === "channel_context"
+    )).toBe(true);
   });
 
   it("returns an empty model profile when project config is missing", async () => {

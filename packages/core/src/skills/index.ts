@@ -11,6 +11,7 @@ import { defineTool, type AgentTool } from "../tools/index.js";
 export type ScanSkillIndexOptions = {
   cwd: string;
   homeDir?: string;
+  extensionSkillRoots?: Array<{ path: string; extensionId: string }>;
 };
 
 export type SkillIndexDelta = {
@@ -30,6 +31,11 @@ export const scanSkillIndex = async (options: ScanSkillIndexOptions): Promise<Sk
   const roots = [
     ...projectSkillRoots(cwd, homeDir),
     { path: join(homeDir, ".scorel", "skills"), scope: "user" as const, priority: 0 },
+    ...(options.extensionSkillRoots ?? []).map((root, index) => ({
+      path: root.path,
+      scope: "extension" as const,
+      priority: -100 - index,
+    })),
   ];
   const byName = new Map<string, SkillIndexEntry>();
 
@@ -170,7 +176,7 @@ const projectSkillRoots = (cwd: string, homeDir: string): Array<{ path: string; 
 const readSkillEntry = async (options: {
   name: string;
   skillPath: string;
-  scope: "user" | "project";
+  scope: "user" | "project" | "extension";
   priority: number;
 }): Promise<SkillIndexEntry | undefined> => {
   let fileStat;

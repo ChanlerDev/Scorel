@@ -1,5 +1,7 @@
-import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { listDirectories as browseDirectories } from "./projects/directories.js";
@@ -14,6 +16,7 @@ import {
   corePackageName,
   createAppendDailyTool,
   createCodingTools,
+  createSendChannelMessageTool,
   createSkillTool,
   diffSkillIndex,
   createPiAiProvider,
@@ -24,6 +27,7 @@ import {
   listProviderModels,
   loadScorelConfig,
   loadScorelConfigProfile,
+  loadExtensionManifest,
   loadSession,
   renderMemoryConfig,
   renderMemoryHarness,
@@ -37,6 +41,7 @@ import {
   sessionLogFilePath,
   scorelSessionsDir,
   scorelMemoryPaths,
+  type ExtensionManifest,
   type ScorelConfig,
   type ScorelConfigProfile,
   type JsonlSession,
@@ -46,6 +51,7 @@ import {
   asClientId,
   asDeviceId,
   asEventId,
+  asRequestId,
   asSeq,
   asSessionId,
   protocolPackageName,
@@ -78,6 +84,7 @@ import {
   type TransientEvent,
   type Unsubscribe,
   type ClientRequestMap,
+  type ChannelContext,
   type MemorySettings,
 } from "@scorel/protocol";
 
@@ -421,6 +428,8 @@ export type ScorelHostOptions = {
   projectsPath: string;
   deviceId: DeviceId;
   deviceDisplayName?: string;
+  scorelHomeDir?: string;
+  builtinExtensionsDir?: string;
   modelProfile?: ScorelConfig;
   loadConfig?: (options: { project: HostProject }) => Promise<ScorelConfig>;
   loadConfigProfile?: (options: { project: HostProject }) => Promise<ScorelConfigProfile>;
@@ -428,6 +437,41 @@ export type ScorelHostOptions = {
   memoryHomeDir?: string;
   now?: () => number;
   createId?: () => string;
+};
+
+export type ImIncomingMessage = {
+  externalConversationId: string;
+  text: string;
+  conversationType?: string;
+  senderDisplayName?: string;
+  mentionedBot?: boolean;
+  target?: ImTarget;
+  data?: Record<string, unknown>;
+};
+
+export type ImTarget = {
+  externalConversationId: string;
+  data?: Record<string, unknown>;
+};
+
+export type ImOutgoingMessage = {
+  text: string;
+};
+
+export type ImAdapterContext = {
+  onMessage(message: ImIncomingMessage): Promise<void>;
+  logger: {
+    info(message: string, data?: Record<string, unknown>): void;
+    error(message: string, data?: Record<string, unknown>): void;
+  };
+};
+
+export type ImAdapter = {
+  start(ctx: ImAdapterContext): Promise<void>;
+  stop(): Promise<void>;
+  sendMessage(target: ImTarget, message: ImOutgoingMessage): Promise<void>;
+  setTyping?(target: ImTarget, typing: boolean): Promise<void>;
+  getOutbox?(): ImOutgoingMessage[];
 };
 
 export const createRealRuntime = (options: RuntimeFactoryOptions): ScorelRuntime => {
@@ -454,6 +498,27 @@ type SessionLane = {
   queue: Promise<unknown>;
   appendQueue: Promise<void>;
   followUpWaiters: Map<string, { connection: Connection; request: ClientRequest<"send_message"> }>;
+  channelContext?: RuntimeChannelContext;
+};
+
+type RuntimeChannelContext = ChannelContext & {
+  extensionId: string;
+  target: ImTarget;
+};
+
+type LoadedImExtension = {
+  manifest: ExtensionManifest;
+  adapter: ImAdapter;
+  skillRoots: string[];
+};
+
+type ImSessionBinding = {
+  extensionId: string;
+  externalConversationId: string;
+  projectId: ProjectId;
+  sessionId: SessionId;
+  createdAt: number;
+  updatedAt: number;
 };
 
 type MemoryDreamSchedule = {
@@ -506,6 +571,9 @@ export class ScorelHost {
   readonly #sessionsDir: string;
   readonly #deviceId: DeviceId;
   readonly #deviceDisplayName: string | undefined;
+  readonly #scorelHomeDir: string;
+  readonly #userHomeDir: string;
+  readonly #builtinExtensionsDir: string;
   readonly #modelProfile: ScorelConfig | undefined;
   readonly #loadConfig: ((options: { project: HostProject }) => Promise<ScorelConfig>) | undefined;
   readonly #loadConfigProfile: ((options: { project: HostProject }) => Promise<ScorelConfigProfile>) | undefined;
@@ -518,6 +586,8 @@ export class ScorelHost {
   readonly #events = new Map<SessionId, ScorelEvent[]>();
   readonly #seqs = new Map<SessionId, number>();
   readonly #memoryDreams = new Map<ProjectId, MemoryDreamSchedule>();
+  readonly #imExtensions = new Map<string, LoadedImExtension>();
+  readonly #imBindings = new Map<string, ImSessionBinding>();
   readonly #registry: ProjectRegistry;
   #started = false;
 
@@ -525,6 +595,9 @@ export class ScorelHost {
     this.#sessionsDir = options.sessionsDir;
     this.#deviceId = options.deviceId;
     this.#deviceDisplayName = options.deviceDisplayName;
+    this.#scorelHomeDir = resolve(options.scorelHomeDir ?? dirname(options.projectsPath));
+    this.#userHomeDir = dirname(this.#scorelHomeDir);
+    this.#builtinExtensionsDir = resolve(options.builtinExtensionsDir ?? findBuiltinExtensionsDir(process.cwd()));
     this.#modelProfile = options.modelProfile;
     this.#loadConfig = options.loadConfig;
     this.#loadConfigProfile = options.loadConfigProfile;
@@ -542,6 +615,9 @@ export class ScorelHost {
 
   async start(): Promise<void> {
     this.#started = true;
+    await mkdir(this.#scorelHomeDir, { recursive: true });
+    await this.#loadImBindings();
+    await this.#startEnabledImExtensions();
   }
 
   async shutdown(): Promise<void> {
@@ -551,6 +627,15 @@ export class ScorelHost {
       }
     }
     this.#memoryDreams.clear();
+    for (const extension of this.#imExtensions.values()) {
+      await extension.adapter.stop().catch((cause) => {
+        void this.#appendHostDiagnostic("im_extension_stop_failed", {
+          extensionId: extension.manifest.id,
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+      });
+    }
+    this.#imExtensions.clear();
     this.#connections.clear();
     this.#started = false;
   }
@@ -634,6 +719,19 @@ export class ScorelHost {
       workDir: project.workDir,
     });
     return removed;
+  }
+
+  async receiveImMessage(extensionId: string, message: ImIncomingMessage): Promise<SessionId> {
+    this.#assertStarted();
+    const extension = this.#imExtensions.get(extensionId);
+    if (!extension) {
+      throw new Error(`IM extension is not enabled: ${extensionId}`);
+    }
+    return this.#handleImMessage(extension, message);
+  }
+
+  loopbackOutbox(extensionId = "loopback"): ImOutgoingMessage[] {
+    return this.#imExtensions.get(extensionId)?.adapter.getOutbox?.() ?? [];
   }
 
   async #handleMessage(connection: Connection, message: ClientMessage): Promise<void> {
@@ -812,6 +910,7 @@ export class ScorelHost {
         content: normalizeContent(request.content),
         parentId: request.options?.parentId,
         source: "user",
+        channelContext: request.options?.channelContext ? runtimeChannelContextFromWire(request.options.channelContext) : undefined,
         onComplete: (result) => this.#respond(connection, request, { ...result, status: "completed" }),
       });
       await this.#drainFollowUps(lane);
@@ -846,6 +945,7 @@ export class ScorelHost {
       parentId?: EventId | null;
       source: "user" | "follow_up";
       queueItemId?: string;
+      channelContext?: RuntimeChannelContext;
       onComplete?: (result: Required<Pick<ClientRequestMap["send_message"]["response"], "userEventId" | "assistantEventId">>) => void;
     },
   ): Promise<ClientRequestMap["send_message"]["response"]> {
@@ -859,11 +959,17 @@ export class ScorelHost {
     await this.#syncSkillIndex(lane, clientId);
     await this.#ensureMemoryHarness(lane, clientId);
     await this.#syncMemoryTools(lane, clientId);
+    this.#syncChannelTool(lane, input.channelContext);
+    let parentId = input.parentId === undefined ? lane.session.activeLeafId : input.parentId;
+    if (input.channelContext) {
+      const channelHarness = await this.#appendChannelHarness(lane, clientId, input.channelContext, parentId);
+      parentId = channelHarness.id;
+    }
     const userEventId = asEventId(this.#createId());
     const userEvent = await this.#appendPersistent(lane, {
       type: "user_message",
       id: userEventId,
-      parentId: input.parentId === undefined ? lane.session.activeLeafId : input.parentId,
+      parentId,
       sessionId,
       clientId,
       ts: this.#now(),
@@ -891,17 +997,23 @@ export class ScorelHost {
       finalAssistantEventId: firstAssistantEventId,
     };
 
-    for await (const rawEvent of lane.runtime.executeTurn(
-      buildContext(lane.session.tree, userEvent.id),
-      renderSystemPrompt(instructionSnapshot),
-      {
-        refreshContext: async () => {
-          await this.#consumeSteer(lane, clientId, state);
-          return buildContext(lane.session.tree, lane.session.activeLeafId ?? state.parentId);
+    lane.channelContext = input.channelContext;
+    try {
+      for await (const rawEvent of lane.runtime.executeTurn(
+        buildContext(lane.session.tree, userEvent.id),
+        renderSystemPrompt(instructionSnapshot),
+        {
+          refreshContext: async () => {
+            await this.#consumeSteer(lane, clientId, state);
+            return buildContext(lane.session.tree, lane.session.activeLeafId ?? state.parentId);
+          },
         },
-      },
-    )) {
-      await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
+      )) {
+        await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
+      }
+    } finally {
+      lane.channelContext = undefined;
+      lane.runtime.unregisterTool("SendChannelMessage");
     }
 
     const result = { userEventId, assistantEventId: state.finalAssistantEventId };
@@ -1068,6 +1180,7 @@ export class ScorelHost {
       createdAt: now,
       updatedAt: now,
       clientId: connection.clientId,
+      ...(request.options?.channelContext ? { data: { channelContext: request.options.channelContext } } : {}),
     };
     lane.followUpWaiters.set(item.id, { connection, request });
     await this.#appendQueueRewrite(lane, "follow_up", [...lane.session.tree.controlState.queues.follow_up, item], {
@@ -1093,6 +1206,7 @@ export class ScorelHost {
       createdAt: now,
       updatedAt: now,
       clientId: connection.clientId,
+      ...(request.options?.channelContext ? { data: { channelContext: request.options.channelContext } } : {}),
     };
     await this.#appendQueueRewrite(lane, "steer", [...lane.session.tree.controlState.queues.steer, item], {
       clientId: connection.clientId,
@@ -1125,6 +1239,7 @@ export class ScorelHost {
         parentId: lane.session.activeLeafId,
         source: "follow_up",
         queueItemId: item.id,
+        channelContext: parseQueuedChannelContext(item.data?.channelContext),
         onComplete: waiter
           ? (result) => this.#respond(waiter.connection, waiter.request, { ...result, status: "completed" })
           : undefined,
@@ -1380,7 +1495,7 @@ export class ScorelHost {
   }
 
   async #syncSkillIndex(lane: SessionLane, clientId: ClientId): Promise<void> {
-    const entries = await scanSkillIndex({ cwd: lane.project.workDir });
+    const entries = await scanSkillIndex({ cwd: lane.project.workDir, extensionSkillRoots: this.#extensionSkillRoots() });
     if (!lane.session.tree.controlState.skillIndexInitialized) {
       await this.#appendPersistent(lane, {
         type: "skill_index_snapshot",
@@ -1474,6 +1589,45 @@ export class ScorelHost {
         },
       }),
     );
+  }
+
+  async #appendChannelHarness(
+    lane: SessionLane,
+    clientId: ClientId,
+    context: RuntimeChannelContext,
+    parentId: EventId | null,
+  ): Promise<Extract<PersistentEvent, { type: "harness_item" }>> {
+    const lines = [
+      "This message came from an IM channel.",
+      "",
+      `channel: ${context.channel}`,
+      ...(context.conversationType ? [`conversation_type: ${context.conversationType}`] : []),
+      ...(context.senderDisplayName ? [`sender_display_name: ${context.senderDisplayName}`] : []),
+      ...(context.mentionedBot !== undefined ? [`mentioned_bot: ${context.mentionedBot}`] : []),
+      "",
+      "Use SendChannelMessage to reply to the current conversation when needed.",
+    ];
+    return this.#appendPersistent(lane, {
+      type: "harness_item",
+      id: asEventId(this.#createId()),
+      parentId,
+      sessionId: lane.session.header.sessionId,
+      clientId,
+      ts: this.#now(),
+      item: {
+        kind: "channel_context",
+        origin: "system",
+        content: lines.join("\n"),
+        visibility: "hidden",
+        data: {
+          extensionId: context.extensionId,
+          channel: context.channel,
+          externalConversationId: context.externalConversationId,
+          ...(context.conversationType ? { conversationType: context.conversationType } : {}),
+          ...(context.mentionedBot !== undefined ? { mentionedBot: context.mentionedBot } : {}),
+        },
+      },
+    }) as Promise<Extract<PersistentEvent, { type: "harness_item" }>>;
   }
 
   async #scheduleMemoryDream(lane: SessionLane, clientId: ClientId): Promise<void> {
@@ -1833,6 +1987,249 @@ export class ScorelHost {
         listNames: () => Object.keys(lane.session.tree.controlState.skillIndex).sort(),
       }),
     );
+  }
+
+  #syncChannelTool(lane: SessionLane, channelContext: RuntimeChannelContext | undefined): void {
+    if (!channelContext) {
+      lane.runtime.unregisterTool("SendChannelMessage");
+      return;
+    }
+    lane.runtime.registerTool(
+      createSendChannelMessageTool({
+        sendCurrent: async (input) => {
+          const current = lane.channelContext;
+          if (!current) {
+            throw new Error("no_channel_context");
+          }
+          if (input.channel && input.channel !== current.channel) {
+            throw new Error(`channel_mismatch: current channel is ${current.channel}`);
+          }
+          const extension = this.#imExtensions.get(current.extensionId);
+          if (!extension) {
+            throw new Error(`channel_adapter_unavailable: ${current.extensionId}`);
+          }
+          await extension.adapter.sendMessage(current.target, { text: input.text });
+          await this.#appendDiagnostic(lane.session.header.sessionId, "channel_message_sent", {
+            extensionId: current.extensionId,
+            channel: current.channel,
+            externalConversationId: current.externalConversationId,
+          });
+          return { channel: current.channel, target: "current" };
+        },
+      }),
+    );
+  }
+
+  async #startEnabledImExtensions(): Promise<void> {
+    const config = await this.#loadUserConfigProfile();
+    const enabled = Object.entries(config?.extensions ?? {})
+      .filter(([, extension]) => extension.enabled && extension.kind === "im")
+      .map(([extensionId]) => extensionId);
+    if (enabled.length === 0) {
+      return;
+    }
+    const manifests = await this.#discoverExtensionManifests();
+    for (const extensionId of enabled) {
+      const manifest = manifests.get(extensionId);
+      if (!manifest) {
+        await this.#appendHostDiagnostic("im_extension_missing", { extensionId });
+        continue;
+      }
+      let adapter: ImAdapter;
+      try {
+        adapter = await this.#loadImAdapter(manifest, config?.extensions[extensionId]?.config ?? {});
+      } catch (cause) {
+        await this.#appendHostDiagnostic("im_extension_load_failed", {
+          extensionId,
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+        continue;
+      }
+      const extension: LoadedImExtension = {
+        manifest,
+        adapter,
+        skillRoots: manifest.skills.map((path) => resolve(manifest.rootDir, path)),
+      };
+      let started = false;
+      await adapter.start({
+        onMessage: async (message) => {
+          await this.#handleImMessage(extension, message);
+        },
+        logger: {
+          info: (message, data) => void this.#appendHostDiagnostic("im_extension_info", { extensionId, message, ...data }),
+          error: (message, data) => void this.#appendHostDiagnostic("im_extension_error", { extensionId, message, ...data }),
+        },
+      }).then(() => {
+        started = true;
+      }).catch(async (cause) => {
+        await this.#appendHostDiagnostic("im_extension_start_failed", {
+          extensionId,
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+        return undefined;
+      });
+      if (!started) {
+        continue;
+      }
+      this.#imExtensions.set(extensionId, extension);
+      await this.#appendHostDiagnostic("im_extension_started", { extensionId });
+    }
+  }
+
+  async #discoverExtensionManifests(): Promise<Map<string, ExtensionManifest>> {
+    const roots = [
+      this.#builtinExtensionsDir,
+      join(this.#scorelHomeDir, "extensions"),
+    ];
+    const manifests = new Map<string, ExtensionManifest>();
+    for (const root of roots) {
+      let children: string[];
+      try {
+        children = await readdir(root);
+      } catch (cause) {
+        if (isNodeErrorCode(cause, "ENOENT") || isNodeErrorCode(cause, "ENOTDIR")) {
+          continue;
+        }
+        throw cause;
+      }
+      for (const child of children.sort()) {
+        const manifestPath = join(root, child, "scorel.extension.json");
+        try {
+          const manifest = await loadExtensionManifest(manifestPath);
+          manifests.set(manifest.id, manifest);
+        } catch (cause) {
+          await this.#appendHostDiagnostic("extension_manifest_invalid", {
+            path: manifestPath,
+            message: cause instanceof Error ? cause.message : String(cause),
+          });
+        }
+      }
+    }
+    return manifests;
+  }
+
+  async #loadImAdapter(manifest: ExtensionManifest, config: Record<string, string | number | boolean>): Promise<ImAdapter> {
+    const adapterPath = resolve(manifest.rootDir, manifest.adapter);
+    const mod = await import(pathToFileURL(adapterPath).href) as {
+      createAdapter?: (options: { config: Record<string, string | number | boolean>; manifest: ExtensionManifest }) => ImAdapter | Promise<ImAdapter>;
+      default?: ImAdapter;
+    };
+    const adapter = mod.createAdapter ? await mod.createAdapter({ config, manifest }) : mod.default;
+    if (!adapter || typeof adapter.start !== "function" || typeof adapter.stop !== "function" || typeof adapter.sendMessage !== "function") {
+      throw new Error(`IM adapter ${adapterPath} must export createAdapter() or default adapter with start/stop/sendMessage`);
+    }
+    return adapter;
+  }
+
+  async #handleImMessage(extension: LoadedImExtension, message: ImIncomingMessage): Promise<SessionId> {
+    const binding = await this.#ensureImBinding(extension.manifest.id, message.externalConversationId);
+    const lane = await this.#getLane(binding.sessionId);
+    const runningBehavior = isSteerMessage(message.text) ? "steer" : "follow_up";
+    const content = stripImCommandPrefix(message.text);
+    const channelContext: ChannelContext = {
+      channel: extension.manifest.id,
+      externalConversationId: message.externalConversationId,
+      ...(message.conversationType ? { conversationType: message.conversationType } : {}),
+      ...(message.senderDisplayName ? { senderDisplayName: message.senderDisplayName } : {}),
+      ...(message.mentionedBot !== undefined ? { mentionedBot: message.mentionedBot } : {}),
+      data: message.target?.data ?? message.data ?? {},
+    };
+    await this.#handleSendMessage(
+      { clientId: asClientId(`im_${extension.manifest.id}`), emit: () => undefined },
+      {
+        type: "send_message",
+        requestId: asRequestId(`req_im_${this.#createId()}`),
+        sessionId: lane.session.header.sessionId,
+        content,
+        options: {
+          runningBehavior,
+          channelContext,
+        },
+      },
+    );
+    return lane.session.header.sessionId;
+  }
+
+  async #ensureImBinding(extensionId: string, externalConversationId: string): Promise<ImSessionBinding> {
+    const key = imBindingKey(extensionId, externalConversationId);
+    const existing = this.#imBindings.get(key);
+    if (existing) {
+      existing.updatedAt = this.#now();
+      await this.#saveImBindings();
+      return existing;
+    }
+    const project = await this.#ensureDefaultWorkspaceProject();
+    const sessionId = asSessionId(`ses_${this.#createId()}`);
+    const lane = await this.#createLane(sessionId, {
+      projectId: project.projectId,
+      title: `${extensionId}: ${externalConversationId}`,
+    }, project);
+    this.#sessions.set(sessionId, lane);
+    this.#events.set(sessionId, []);
+    this.#seqs.set(sessionId, 0);
+    const binding: ImSessionBinding = {
+      extensionId,
+      externalConversationId,
+      projectId: project.projectId,
+      sessionId,
+      createdAt: this.#now(),
+      updatedAt: this.#now(),
+    };
+    this.#imBindings.set(key, binding);
+    await this.#saveImBindings();
+    await this.#appendDiagnostic(sessionId, "im_session_bound", {
+      extensionId,
+      externalConversationId,
+      projectId: project.projectId,
+    });
+    return binding;
+  }
+
+  async #ensureDefaultWorkspaceProject(): Promise<HostProject> {
+    const workspace = join(this.#scorelHomeDir, "workspace");
+    await mkdir(workspace, { recursive: true });
+    return this.registerProject(workspace);
+  }
+
+  #extensionSkillRoots(): Array<{ path: string; extensionId: string }> {
+    return [...this.#imExtensions.values()].flatMap((extension) =>
+      extension.skillRoots.map((path) => ({ path, extensionId: extension.manifest.id })),
+    );
+  }
+
+  async #loadImBindings(): Promise<void> {
+    try {
+      const text = await readFile(this.#imBindingsPath(), "utf8");
+      const value = JSON.parse(text) as { bindings?: ImSessionBinding[] };
+      for (const binding of value.bindings ?? []) {
+        this.#imBindings.set(imBindingKey(binding.extensionId, binding.externalConversationId), binding);
+      }
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+  }
+
+  async #saveImBindings(): Promise<void> {
+    const path = this.#imBindingsPath();
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify({ bindings: [...this.#imBindings.values()] }, null, 2)}\n`, "utf8");
+  }
+
+  #imBindingsPath(): string {
+    return join(this.#scorelHomeDir, "channels", "im-bindings.json");
+  }
+
+  async #loadUserConfigProfile(): Promise<ScorelConfigProfile | undefined> {
+    try {
+      return await loadScorelConfigProfile({ cwd: this.#userHomeDir, homeDir: this.#userHomeDir });
+    } catch (cause) {
+      if (isMissingConfigError(cause)) {
+        return undefined;
+      }
+      throw cause;
+    }
   }
 
   async #listModels(projectId?: ProjectId): Promise<{
@@ -2241,6 +2638,64 @@ const disabledMemorySettings = (): MemorySettings => ({
   promoteRoot: false,
   dreamIdleMinutes: 60,
 });
+
+const runtimeChannelContextFromWire = (context: ChannelContext): RuntimeChannelContext => ({
+  extensionId: context.channel,
+  channel: context.channel,
+  externalConversationId: context.externalConversationId,
+  target: {
+    externalConversationId: context.externalConversationId,
+    data: context.data,
+  },
+  ...(context.conversationType ? { conversationType: context.conversationType } : {}),
+  ...(context.senderDisplayName ? { senderDisplayName: context.senderDisplayName } : {}),
+  ...(context.mentionedBot !== undefined ? { mentionedBot: context.mentionedBot } : {}),
+  ...(context.data ? { data: context.data } : {}),
+});
+
+const parseQueuedChannelContext = (value: unknown): RuntimeChannelContext | undefined => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  if (typeof value.channel !== "string" || typeof value.externalConversationId !== "string") {
+    return undefined;
+  }
+  return runtimeChannelContextFromWire({
+    channel: value.channel,
+    externalConversationId: value.externalConversationId,
+    ...(typeof value.conversationType === "string" ? { conversationType: value.conversationType } : {}),
+    ...(typeof value.senderDisplayName === "string" ? { senderDisplayName: value.senderDisplayName } : {}),
+    ...(typeof value.mentionedBot === "boolean" ? { mentionedBot: value.mentionedBot } : {}),
+    ...(isRecord(value.data) ? { data: value.data } : {}),
+  });
+};
+
+const imBindingKey = (extensionId: string, externalConversationId: string): string =>
+  `${extensionId}:${externalConversationId}`;
+
+const findBuiltinExtensionsDir = (start: string): string => {
+  let current = resolve(start);
+  while (true) {
+    const candidate = join(current, "extensions", "builtin");
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+    const next = dirname(current);
+    if (next === current) {
+      return join(start, "extensions", "builtin");
+    }
+    current = next;
+  }
+};
+
+const isSteerMessage = (text: string): boolean =>
+  /^\/(?:steer|interrupt)\b/i.test(text.trim());
+
+const stripImCommandPrefix = (text: string): string =>
+  text.trim().replace(/^\/(?:steer|interrupt)\s*/i, "").trim() || text;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const parseMemoryUpdate = (raw: string): { projectMemory?: string; rootMemory?: string } | undefined => {
   const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();

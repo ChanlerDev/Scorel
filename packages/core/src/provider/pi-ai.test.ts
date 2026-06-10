@@ -215,6 +215,7 @@ const builtinProfile: ScorelConfig = {
     promoteRoot: true,
     dreamIdleMinutes: 60,
   },
+  extensions: {},
 };
 
 const customProfile: ScorelConfig = {
@@ -255,6 +256,7 @@ const customProfile: ScorelConfig = {
     promoteRoot: true,
     dreamIdleMinutes: 60,
   },
+  extensions: {},
 };
 
 const user = (text: string): ScorelMessage => ({

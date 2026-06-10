@@ -1,156 +1,153 @@
-# Channel — Daemon 内部的消息注入适配器
+# Channel — Extension-Backed IM Bridge
 
-> 上游：`architecture.md`、`spec/daemon.md`
-> 主题：把 IM 消息、cron 触发等外部输入归一为 Daemon 内部的 `AgentMessage` 注入。
-
----
-
-## 1. 设计目标
-
-Channel 是 **Daemon 内部的子模块**，负责将非交互式的外部输入（IM、cron、webhook）转化为标准的 `AgentMessage` 注入 Runtime。
-
-**不再是**：Entry 的统一入口（Entry 通过 DaemonClient 协议直连 Daemon）。
-
-Channel 只处理那些"不是人坐在终端前打字"的输入源。CLI / GUI / WebUI 这些交互式 Entry 直接通过 DaemonClient 协议发送指令，不经过 Channel。
+> 上游：`architecture.md`、`spec/daemon.md`、`spec/extensions.md`
+> 当前落地：S0083 Extension Manifest And IM Channel Runtime
 
 ---
 
-## 2. Channel 与 Entry 的区别
+## 1. 定位
 
-| | Entry（交互式） | Channel（非交互式） |
-|---|---|---|
-| 例子 | CLI / GUI / WebUI | Telegram Bot / cron / webhook |
-| 连接方式 | DaemonClient 协议 | Daemon 内部模块 |
-| 生命周期 | 用户主动连接/断开 | Daemon 启动时加载，持续运行 |
-| 双向通信 | ✅ 收发 event | ❌ 只注入消息，不接收实时事件流 |
-| 输出回传 | DaemonClient event stream | Channel 自行轮询或 hook 回调 |
+Channel 是外部消息入口。S0083 后，IM Channel 通过 Extension manifest 接入 Host：
+
+```text
+IM Adapter -> Channel Bridge -> ScorelHost -> ScorelRuntime -> SendChannelMessage -> IM Adapter
+```
+
+Channel 不拥有 Runtime、Session、queue、memory 或 replay。它只把外部 IM 消息转成现有 Host turn，并把模型通过 `SendChannelMessage` 发出的文本送回当前 IM 会话。
+
+CLI / GUI / WebUI 仍然直接通过 DaemonClient / Host application service 操作 Host，不经过 Channel。
 
 ---
 
-## 3. ChannelAdapter 接口
+## 2. Extension Manifest
+
+IM channel 由 extension 提供：
+
+```json
+{
+  "id": "telegram",
+  "kind": "im",
+  "displayName": "Telegram",
+  "adapter": "./adapter.js",
+  "skills": ["./skills"]
+}
+```
+
+`id` 同时是 extension id 和 channel id。启用 extension 后，其 `skills` 目录进入现有 Skill index。
+
+---
+
+## 3. Adapter Contract
+
+Adapter 只处理平台 IO：
 
 ```typescript
-interface ChannelAdapter {
-  readonly id: string;                       // 'telegram' | 'wechat' | 'cron' | 'webhook'
-  start(ctx: ChannelContext): Promise<void>;
+interface ImAdapter {
+  start(ctx: ImAdapterContext): Promise<void>;
   stop(): Promise<void>;
+  sendMessage(target: ImTarget, message: ImOutgoingMessage): Promise<void>;
+  setTyping?(target: ImTarget, typing: boolean): Promise<void>;
 }
 
-interface ChannelContext {
-  inject: MessageInjector;
-  subscribe: (cb: (event: ScorelEvent) => void) => () => void;
-  config: ChannelConfig;
+interface ImAdapterContext {
+  onMessage(message: ImIncomingMessage): Promise<void>;
+  logger: Logger;
 }
-
-type MessageInjector = (msg: AgentMessage) => Promise<void>;
 ```
 
-Channel 职责：
-1. 从外部源接收消息
-2. 调 `inject(msg)` 注入 Daemon
-3. 可选：订阅 event 流用于回传结果（如 Telegram bot 需要把 assistant 回复发回群里）
+Adapter 不创建 session，不写 JSONL，不实现 follow-up / steer，不读写 memory。
 
 ---
 
-## 4. Injector：Daemon 内部路由
+## 4. Channel Bridge
+
+Host 内部 bridge 负责：
+
+- `(extensionId, externalConversationId) -> sessionId` 固定绑定；
+- 创建 / 注册默认 workspace：`~/.scorel/workspace`；
+- 通过现有 `send_message` 路径提交用户消息；
+- 注入 channel source `harness_item kind="channel_context"`；
+- 为当前 channel turn 暴露 `SendChannelMessage` tool。
+
+Binding 持久化在：
+
+```text
+~/.scorel/channels/im-bindings.json
+```
+
+---
+
+## 5. Runtime Semantics
+
+IM 消息复用现有 runtime 行为：
+
+```text
+idle session     -> ordinary user_message
+running default  -> follow_up queue
+/steer message   -> steer queue
+/interrupt msg   -> steer queue
+```
+
+不新增 IM runtime，不新增 IM queue。
+
+---
+
+## 6. Source Reminder
+
+每个 IM turn 会在用户消息前注入 hidden channel reminder：
+
+```xml
+<system-reminder>
+This message came from an IM channel.
+
+channel: telegram
+conversation_type: group
+sender_display_name: Chanler
+mentioned_bot: true
+
+Use SendChannelMessage to reply to the current conversation when needed.
+</system-reminder>
+```
+
+模型可见的是来源语义，不是 raw platform id。raw chat id / open id 只作为 routing data 保存在 bridge/adapter context。
+
+---
+
+## 7. Reply Tool
+
+当前已落地的回复工具：
 
 ```typescript
-// Daemon 内部实现
-function createInjector(daemon: Daemon): MessageInjector {
-  return async (msg) => {
-    // 走 session lane 串行化，与 DaemonClient.prompt() 同等待遇
-    await daemon.enqueue({ method: "prompt", params: { text: msg } });
-  };
-}
+SendChannelMessage({ text: string })
 ```
 
-Channel 注入的消息和 DaemonClient 发来的 prompt **走同一条路径**，享受同样的并发控制和事件广播。
+规则：
+
+- 默认目标是当前 IM conversation；
+- 模型不填写 Telegram chat id、飞书 open id、Slack channel id 等 raw id；
+- 无 channel context 时返回 `no_channel_context`；
+- adapter send 失败时返回 tool error 并写 diagnostics。
 
 ---
 
-## 5. 消息载体：`<system_reminder>` 包裹
+## 8. Built-In Channels
 
-非交互式 Channel 注入时，用 `<system_reminder>` XML 包裹，让 LLM 区分来源：
+当前 foundation 提供 built-in `loopback` IM extension，用于真实 Host/JSONL/tool 链路验证。
 
-```typescript
-await inject({
-  role: 'user',
-  content: `<system_reminder source="telegram" from="${msg.from}">
-${msg.content}
-</system_reminder>`,
-  timestamp: Date.now(),
-});
-```
+后续真实 provider：
 
----
-
-## 6. 初期落地的 Channel
-
-| Channel | 形态 | 阶段 |
-|---------|------|------|
-| `telegram` | Bot API，收到 mention/DM 时注入 | 后期 |
-| `wechat` | WeCom / 非官方桥 | 后期 |
-| `cron` | 定时任务触发（`node-cron`） | 后期 |
-| `webhook` | HTTP POST 触发注入 | 后期 |
-
-**初期不需要任何 Channel**。CLI/GUI 通过 DaemonClient 直连 Daemon，Channel 是 IM/自动化场景的补充。
-
----
-
-## 7. Channel 输出回传
-
-IM Bot 需要把 agent 回复发回对话。两种方式：
-
-**方式 A：subscribe event stream（推荐）**
-```typescript
-class TelegramChannel implements ChannelAdapter {
-  async start(ctx: ChannelContext) {
-    // 订阅 assistant 消息，发回 Telegram
-    ctx.subscribe((event) => {
-      if (event.type === "message_end" && event.message.role === "assistant") {
-        this.sendToTelegram(event.message);
-      }
-    });
-    // 监听 Telegram 消息，注入 Daemon
-    this.bot.on("message", (msg) => ctx.inject(wrapMessage(msg)));
-  }
-}
-```
-
-**方式 B：afterTurn hook（简单场景）**
-```typescript
-// 作为 Extension 实现，在每轮结束后回传
-onEvent: async (event) => {
-  if (event.type === "turn_end") { ... }
-}
-```
-
----
-
-## 8. 与 Daemon 的关系
-
-```
-Daemon
-  ├── DaemonServer（处理 client 连接：CLI/GUI/WebUI）
-  ├── ChannelManager（管理非交互式输入源）
-  │     ├── TelegramChannel
-  │     ├── CronChannel
-  │     └── WebhookChannel
-  ├── SessionManager
-  └── ScorelRuntime
-```
-
-Channel 是 Daemon 的可选模块。纯本地 embedded 模式下不加载任何 Channel。
+- S0084: Telegram Bot API long polling；
+- Feishu；
+- Slack 或 Discord；
+- WeCom，而不是微信个人号优先。
 
 ---
 
 ## 9. 延后项
 
-- IM Channel 具体实现（Telegram、企业微信、Slack）
-- cron Channel 调度模型
-- Channel 级别的消息去重/防抖（IM 群消息风暴）
-- Channel 权限（哪些群/用户能触发 agent）
-
----
-
-*Channel 从"所有输入的统一入口"收窄为"Daemon 内部的非交互式消息源适配器"。交互式 Entry 通过 DaemonClient 协议直连，不经过 Channel。*
+- Telegram webhook mode；
+- GUI extension management；
+- extension marketplace / signing / sandbox；
+- extension MCP server startup；
+- proactive cross-conversation send；
+- cron / webhook channel。

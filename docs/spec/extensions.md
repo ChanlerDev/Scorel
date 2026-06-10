@@ -57,45 +57,42 @@ type ScorelEvent =
 
 ## 3. Extensions 系统
 
-### 3.1 接口
+S0083 后，已落地的 Extension 形态是 manifest-driven IM extension。它先服务 IM channel 接入，不把完整 plugin marketplace 一次性做完。
 
-```typescript
-interface Extension {
-  id: string;
-  name: string;
-  version: string;
+### 3.1 Manifest
 
-  activate?(ctx: ExtensionContext): Promise<void>;
-  deactivate?(): Promise<void>;
+每个 extension 目录包含：
 
-  tools?(): AgentTool[];                           // 追加工具
-  commands?(): Record<string, SlashCommand>;        // 追加斜杠命令
-  onEvent?(event: ScorelEvent, ctx: ExtensionContext): Promise<void>;
-  hooks?(): Partial<{
-    beforeToolCall: BeforeToolCallHook;
-    afterToolCall: AfterToolCallHook;
-    transformContext: TransformContextHook;
-  }>;
-}
-
-interface ExtensionContext {
-  readonly agent: Agent;
-  readonly session: SessionStore;
-  readonly config: Config;
-  readonly logger: Logger;
-}
+```text
+scorel.extension.json
+adapter.js
+skills/
 ```
 
-Extension 可以注入四种能力：工具、斜杠命令、事件监听、原生 Hook。四种都不是必选，一个扩展可以只做最小的一件事。
+最小 schema：
+
+```typescript
+type ExtensionManifest = {
+  id: string;
+  kind: "im";
+  displayName: string;
+  adapter: string;
+  skills?: string[];
+  mcp?: unknown[];
+};
+```
+
+`mcp` 在 S0083 只解析保留，不启动 MCP server。
 
 ### 3.2 加载路径与时机
 
-```
-~/.scorel/extensions/    ← 全局
-.scorel/extensions/       ← 项目级
+```text
+extensions/builtin/       ← 内置，只读，随包发布
+~/.scorel/extensions/     ← 用户级
+.scorel/extensions/       ← 项目级，后续扩展
 ```
 
-启动时扫描 `.ts` / `.js`，动态 `import()`，调用 `activate()`。项目级覆盖全局。
+Host 启动时读取 config 中 enabled 的 extension，然后加载对应 manifest。V1 已实现 built-in/user root；项目级 root 仍是后续扩展点。
 
 ### 3.3 错误隔离
 
@@ -117,7 +114,7 @@ class ExtensionRunner {
 }
 ```
 
-**单个 Extension 挂掉绝不影响核心和其他 Extension。** 原生 Hook 的链式包装里同样有 try/catch 兜底，但拦截失败会直接跳过该层。
+**单个 Extension 挂掉绝不影响核心和其他 Extension。** IM adapter 启动失败只写 diagnostics 并跳过该 extension。
 
 ---
 
@@ -285,20 +282,24 @@ name = "github"
 transport = "stdio"
 command = "mcp-server-github"
 
-[extensions]
-disabled = ["experimental-memory"]
+[extensions.loopback]
+enabled = true
+kind = "im"
+
+[extensions.loopback.config]
+botTokenEnv = "SCOREL_LOOPBACK_TOKEN"
 ```
 
 ### 5.3 Schema 规则
 
 配置必须通过 `SCOREL_CONFIG_SCHEMA` 校验。未知 section 和未知 key 都应由通用 schema 校验拒绝，例如根级 `sessionsDir = "/tmp/nope"` 必须报 `Unsupported config key: sessionsDir`，不能为单个字段写特殊判断。
 
-当前已落地的稳定 section 是 `[providers.*]`、`[provider_models.*]`、`[available_models.*]` 和 `[model_profile.roles]`。未来新增 `[tools]` / `[mcp]` / `[extensions]` 时，必须先把字段加入 schema，再接入加载逻辑和测试。
+当前已落地的稳定 section 是 `[providers.*]`、`[provider_models.*]`、`[available_models.*]`、`[model_profile.roles]`、`[memory]`、`[extensions.*]` 和 `[extensions.*.config]`。未来新增 `[tools]` / `[mcp]` 时，必须先把字段加入 schema，再接入加载逻辑和测试。
 
 ### 5.4 延后段落
 
 - `[permissions]` — 权限策略。初期工具默认全允许，权限审批整体后补
-- `[channels.telegram]` / `[channels.wechat]` — IM Channel 配置
+- 真实 IM 配置，例如 Telegram bot token env，由对应 extension spec 定义
 - `[mcp.servers.*.tier]` / `keywords` — MCP 分级加载配置
 
 这些段落的 schema 会在对应模块落地时补入，初期不预留任何半成品字段。
@@ -318,7 +319,7 @@ disabled = ["experimental-memory"]
 - Extension 的沙箱与权限边界（现阶段信任本地扩展）
 - Prompt 的模板化与多语种切换
 - 热更新配置（初期启动时读一次即可）
-- `[tools]` / `[channels]` / `[mcp]` / `[extensions]` 的完整配置 schema
+- `[tools]` / `[mcp]` 的完整配置 schema
 - Skills 加载（`~/.scorel/skills/*/SKILL.md`）
 
 ---
