@@ -1,5 +1,7 @@
 # S0081: Automatic Memory Context And Dreaming
 
+> Updated by [`S0082`](S0082-memory-journal-tool-and-idle-dream.md): daily is now written through the agent-owned `AppendDaily` tool, and dream consolidation runs after project idle time instead of immediately after every turn.
+
 ## Goal
 
 Ship Scorel's first automatic memory loop:

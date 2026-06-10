@@ -1377,6 +1377,7 @@ const testConfig = (baseURL: string): ScorelConfig => ({
     daily: false,
     autoDream: false,
     promoteRoot: false,
+    dreamIdleMinutes: 60,
   },
 });
 

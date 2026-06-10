@@ -35,6 +35,7 @@ const defaultMemorySettings = (): GuiMemorySettingsView => ({
   daily: true,
   autoDream: true,
   promoteRoot: true,
+  dreamIdleMinutes: 60,
 });
 
 const projectRef = (project: GuiProjectView): GuiProjectRef =>

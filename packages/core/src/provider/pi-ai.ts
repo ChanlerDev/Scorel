@@ -246,6 +246,14 @@ const toolParameters = (name: string): Tool["parameters"] => {
           }),
         ),
       });
+    case "AppendDaily":
+      return Type.Object({
+        summary: Type.String(),
+        completed: Type.Optional(Type.Array(Type.String())),
+        decisions: Type.Optional(Type.Array(Type.String())),
+        followUps: Type.Optional(Type.Array(Type.String())),
+        memoryCandidates: Type.Optional(Type.Array(Type.String())),
+      });
     case "Skill":
       return Type.Object({
         name: Type.String(),

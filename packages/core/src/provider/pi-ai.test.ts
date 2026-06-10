@@ -213,6 +213,7 @@ const builtinProfile: ScorelConfig = {
     daily: true,
     autoDream: true,
     promoteRoot: true,
+    dreamIdleMinutes: 60,
   },
 };
 
@@ -252,6 +253,7 @@ const customProfile: ScorelConfig = {
     daily: true,
     autoDream: true,
     promoteRoot: true,
+    dreamIdleMinutes: 60,
   },
 };
 

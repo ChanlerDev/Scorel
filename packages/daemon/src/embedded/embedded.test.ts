@@ -74,6 +74,7 @@ const modelProfile: ScorelConfig = {
     daily: true,
     autoDream: true,
     promoteRoot: true,
+    dreamIdleMinutes: 60,
   },
 };
 
@@ -232,8 +233,46 @@ describe("ScorelHost + embedded transport", () => {
     expect(JSON.stringify(resolved.data)).not.toContain("secret");
   });
 
-  it("injects memory context and appends automatic daily notes", async () => {
-    const { root, host } = await fixtureWithModelProfile();
+  it("injects memory context and lets the agent append daily notes through AppendDaily", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-memory-tool-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    const journalProvider: RuntimeProvider = {
+      streamTurn: async function* ({ context, tools }) {
+        const hasDailyToolResult = context.some((message) =>
+          message.role === "tool_result" &&
+          message.content.some((block) => block.type === "tool_result" && block.toolName === "AppendDaily"),
+        );
+        if (tools.some((tool) => tool.name === "AppendDaily") && !hasDailyToolResult) {
+          return {
+            role: "assistant",
+            content: [{
+              type: "tool_call",
+              toolCallId: "call_daily",
+              toolName: "AppendDaily",
+              args: {
+                summary: "记住这个项目的 memory 设计方向",
+                completed: ["验证 memory harness 注入"],
+                decisions: ["daily 由 AppendDaily 工具写入"],
+              },
+            }],
+            stopReason: "tool_call",
+          };
+        }
+        return assistantMessage("ok");
+      },
+    };
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      modelProfile,
+      memoryHomeDir: root,
+      createRuntime: async () => new ScorelRuntime({ provider: journalProvider }),
+      now: () => 1_000,
+    });
+    await host.start();
     const repo = join(root, "repo-memory");
     await mkdir(repo);
     const project = await host.registerProject(repo);
@@ -264,6 +303,146 @@ describe("ScorelHost + embedded transport", () => {
     const sessionFile = await readFile(join(root, "sessions", "ses_memory.jsonl"), "utf8");
     expect(sessionFile).toContain('"type":"harness_item"');
     expect(sessionFile).toContain('"kind":"memory"');
+    expect(sessionFile).toContain('"toolName":"AppendDaily"');
+  });
+
+  it("injects memory context only once for a session even across days", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-memory-once-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    let now = Date.UTC(2026, 5, 11, 8);
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      modelProfile,
+      memoryHomeDir: root,
+      createRuntime: async () => new ScorelRuntime({ provider }),
+      now: () => now,
+    });
+    await host.start();
+    const repo = join(root, "repo-memory-once");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_memory_once") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_memory_once_create"),
+      sessionId: asSessionId("ses_memory_once"),
+      meta: { projectId: project.projectId },
+    });
+
+    const firstResponse = waitForResponse(transport, "req_memory_once_first");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_memory_once_first"),
+      sessionId: asSessionId("ses_memory_once"),
+      content: "第一天",
+    });
+    await expect(firstResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    now = Date.UTC(2026, 5, 12, 8);
+    const secondResponse = waitForResponse(transport, "req_memory_once_second");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_memory_once_second"),
+      sessionId: asSessionId("ses_memory_once"),
+      content: "第二天继续同一个 session",
+    });
+    await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const sessionFile = await readFile(join(root, "sessions", "ses_memory_once.jsonl"), "utf8");
+    const memoryHarnesses = sessionFile
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { type?: string; item?: { kind?: string } })
+      .filter((event) => event.type === "harness_item" && event.item?.kind === "memory");
+    expect(memoryHarnesses).toHaveLength(1);
+  });
+
+  it("runs idle dream after AppendDaily and updates project/root memory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-idle-dream-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    const dreamProfile: ScorelConfig = {
+      ...modelProfile,
+      memory: {
+        ...modelProfile.memory,
+        dreamIdleMinutes: 0,
+      },
+    };
+    const journalProvider: RuntimeProvider = {
+      streamTurn: async function* ({ context, tools }) {
+        const hasDailyToolResult = context.some((message) =>
+          message.role === "tool_result" &&
+          message.content.some((block) => block.type === "tool_result" && block.toolName === "AppendDaily"),
+        );
+        if (tools.some((tool) => tool.name === "AppendDaily") && !hasDailyToolResult) {
+          return {
+            role: "assistant",
+            content: [{
+              type: "tool_call",
+              toolCallId: "call_daily",
+              toolName: "AppendDaily",
+              args: {
+                summary: "S0082 改成 AppendDaily 加 idle dream",
+                decisions: ["dreamer 只负责 project 和 root memory"],
+              },
+            }],
+            stopReason: "tool_call",
+          };
+        }
+        return assistantMessage("ok");
+      },
+    };
+    const dreamProvider: RuntimeProvider = {
+      streamTurn: async function* () {
+        return assistantMessage(JSON.stringify({
+          projectMemory: "# Project Memory\n\n- Daily is written by AppendDaily.\n",
+          rootMemory: "# Memory\n\n- User prefers memory design explained through messages assembly.\n",
+        }));
+      },
+    };
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      modelProfile: dreamProfile,
+      memoryHomeDir: root,
+      createRuntime: async ({ purpose }) => new ScorelRuntime({ provider: purpose === "memory" ? dreamProvider : journalProvider }),
+      now: () => 1_000,
+    });
+    await host.start();
+    const repo = join(root, "repo-dream");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_dream") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_dream_create"),
+      sessionId: asSessionId("ses_dream"),
+      meta: { projectId: project.projectId },
+    });
+    const response = waitForResponse(transport, "req_dream_send");
+
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_dream_send"),
+      sessionId: asSessionId("ses_dream"),
+      content: "记录日记并稍后 dream",
+    });
+
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    await waitUntil(async () => {
+      const memory = await readFile(join(root, ".scorel", "memory", "projects", project.projectId, "MEMORY.md"), "utf8");
+      return memory.includes("Daily is written by AppendDaily");
+    });
+    const rootMemory = await readFile(join(root, ".scorel", "memory", "MEMORY.md"), "utf8");
+    expect(rootMemory).toContain("messages assembly");
   });
 
   it("returns an empty model profile when project config is missing", async () => {
@@ -765,7 +944,7 @@ apiKey = "secret"
       source: "model",
       model: expect.objectContaining({ modelId: "aux" }),
     }));
-    expect(runtimeSelections).toEqual(["main", "aux", "aux"]);
+    expect(runtimeSelections).toEqual(["main", "aux"]);
 
     const listResponse = waitForResponse(transport, "req_list_title");
     await transport.send({
@@ -811,7 +990,7 @@ apiKey = "secret"
 
     const file = await readFile(join(sessionsDir, "ses_explicit_title.jsonl"), "utf8");
     expect(file).not.toContain("session_title_updated");
-    expect(runtimeSelections).toEqual(["main", "aux"]);
+    expect(runtimeSelections).toEqual(["main"]);
   });
 
   it("persists project ownership in session headers and restores lanes through the registry", async () => {
@@ -1225,4 +1404,14 @@ const eventually = async (assertion: () => void): Promise<void> => {
     }
   }
   throw lastError;
+};
+
+const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
+  for (let i = 0; i < 50; i += 1) {
+    if (await predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("condition was not met");
 };

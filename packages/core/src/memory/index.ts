@@ -2,6 +2,8 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { defineTool, type AgentTool } from "../tools/index.js";
+
 export type MemoryPaths = {
   rootDir: string;
   rootMemoryPath: string;
@@ -31,6 +33,18 @@ export type BuildMemoryContextOptions = {
 
 export type AppendDailyOptions = BuildMemoryContextOptions & {
   text: string;
+};
+
+export type AppendDailyInput = {
+  summary: string;
+  completed?: string[];
+  decisions?: string[];
+  followUps?: string[];
+  memoryCandidates?: string[];
+};
+
+export type CreateAppendDailyToolOptions = BuildMemoryContextOptions & {
+  onAppend?: (result: { path: string; entry: string; date: string }) => void | Promise<void>;
 };
 
 export const memoryDate = (timestamp: number): string => new Date(timestamp).toISOString().slice(0, 10);
@@ -102,19 +116,45 @@ export const appendDailyEntry = async (options: AppendDailyOptions): Promise<{ p
   return { path: paths.todayDailyPath, entry: entry.trimEnd(), date: paths.today };
 };
 
-export const renderAutomaticDailyEntry = (input: { userText: string; assistantText: string }): string => {
-  const user = compactLine(input.userText, 180);
-  const assistant = compactLine(input.assistantText, 220);
-  if (!user && !assistant) {
-    return "";
-  }
-  if (!assistant) {
-    return `对话：${user}`;
-  }
-  if (!user) {
-    return `进展：${assistant}`;
-  }
-  return `进展：${user} -> ${assistant}`;
+export const createAppendDailyTool = (options: CreateAppendDailyToolOptions): AgentTool =>
+  defineTool({
+    name: "AppendDaily",
+    description: [
+      "Append a compact hidden project daily journal entry after meaningful work.",
+      "Use this once near the end of a completed user turn when there is progress, a decision, or a follow-up worth preserving.",
+      "Do not include secrets, raw logs, speculation, or facts that should be re-read from the repository.",
+    ].join(" "),
+    execute: async (_toolCallId, args) => {
+      const input = parseAppendDailyInput(args);
+      const result = await appendDailyEntry({
+        projectId: options.projectId,
+        homeDir: options.homeDir,
+        now: options.now,
+        text: renderDailyEntry(input),
+      });
+      await options.onAppend?.(result);
+      return {
+        content: [{
+          type: "text",
+          text: result.entry ? `Daily appended: ${result.date}` : "Daily append skipped: empty entry",
+        }],
+        details: {
+          path: result.path,
+          date: result.date,
+        },
+      };
+    },
+  });
+
+export const renderDailyEntry = (input: AppendDailyInput): string => {
+  const sections = [
+    `Summary: ${compactLine(input.summary, 500)}`,
+    renderList("Completed", input.completed),
+    renderList("Decisions", input.decisions),
+    renderList("Follow-ups", input.followUps),
+    renderList("Memory candidates", input.memoryCandidates),
+  ].filter(Boolean);
+  return sections.join(" ");
 };
 
 export const mergeMemoryMarkdown = (current: string, addition: string): string => {
@@ -168,6 +208,45 @@ const trimForContext = (text: string, maxChars: number, mode: "head" | "tail" = 
 
 const compactLine = (value: string, maxChars: number): string =>
   value.replace(/\s+/g, " ").trim().slice(0, maxChars);
+
+const renderList = (label: string, values: string[] | undefined): string => {
+  const items = (values ?? []).map((value) => compactLine(value, 240)).filter(Boolean);
+  return items.length > 0 ? `${label}: ${items.join("; ")}` : "";
+};
+
+const parseAppendDailyInput = (value: unknown): AppendDailyInput => {
+  if (!isRecord(value)) {
+    throw new Error("AppendDaily args must be an object");
+  }
+  const summary = requireString(value.summary, "summary");
+  return {
+    summary,
+    completed: optionalStringArray(value.completed, "completed"),
+    decisions: optionalStringArray(value.decisions, "decisions"),
+    followUps: optionalStringArray(value.followUps, "followUps"),
+    memoryCandidates: optionalStringArray(value.memoryCandidates, "memoryCandidates"),
+  };
+};
+
+const requireString = (value: unknown, name: string): string => {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`AppendDaily.${name} must be a non-empty string`);
+  }
+  return value.trim();
+};
+
+const optionalStringArray = (value: unknown, name: string): string[] | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new Error(`AppendDaily.${name} must be an array of strings`);
+  }
+  return value.map((item) => item.trim()).filter(Boolean);
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const safeProjectId = (projectId: string): string => {
   if (!/^[A-Za-z0-9_-]+$/.test(projectId)) {

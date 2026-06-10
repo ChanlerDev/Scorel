@@ -2,6 +2,7 @@ import type { GuiMemorySettingsView, GuiProjectRef } from "../../../shared/ipc.j
 import { SettingsCard } from "../SettingsCard.js";
 import { SettingsHeader } from "../SettingsHeader.js";
 import { SettingsRow } from "../SettingsRow.js";
+import { Select } from "../controls/Select.js";
 import { Toggle } from "../controls/Toggle.js";
 
 export type MemorySectionProps = {
@@ -42,13 +43,31 @@ export function MemorySection(props: MemorySectionProps) {
           />
           <SettingsRow
             label="自动 daily"
-            description="每轮完成后自动写入项目短日记。"
+            description="让 agent 在完成有意义工作时调用 AppendDaily，写入项目日记。"
             control={<Toggle checked={props.memory.daily} disabled={disabled || !props.memory.enabled} onChange={(daily) => void update({ daily })} ariaLabel="自动 daily" />}
           />
           <SettingsRow
             label="自动 dream"
-            description="使用辅助模型把会话证据提炼到 Project MEMORY。"
+            description="项目空闲后使用辅助模型把 daily 证据提炼到 Project MEMORY。"
             control={<Toggle checked={props.memory.autoDream} disabled={disabled || !props.memory.enabled} onChange={(autoDream) => void update({ autoDream })} ariaLabel="自动 dream" />}
+          />
+          <SettingsRow
+            label="Dream 延迟"
+            description="最后一次 daily 写入后等待多久再整合长期记忆。"
+            control={(
+              <Select
+                value={String(props.memory.dreamIdleMinutes)}
+                disabled={disabled || !props.memory.enabled || !props.memory.autoDream}
+                ariaLabel="Dream 延迟"
+                options={[
+                  { value: "0", label: "立即" },
+                  { value: "15", label: "15 分钟" },
+                  { value: "60", label: "1 小时" },
+                  { value: "360", label: "6 小时" },
+                ]}
+                onChange={(value) => void update({ dreamIdleMinutes: Number(value) })}
+              />
+            )}
           />
           <SettingsRow
             label="提升到全局"

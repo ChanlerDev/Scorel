@@ -97,6 +97,7 @@ auxiliary = "aux"
         daily: true,
         autoDream: true,
         promoteRoot: true,
+        dreamIdleMinutes: 60,
       },
     });
   });
@@ -126,6 +127,7 @@ enabled = true
 daily = false
 autoDream = true
 promoteRoot = false
+dreamIdleMinutes = 15
 `);
 
     await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "secret" } })).resolves.toMatchObject({
@@ -134,6 +136,7 @@ promoteRoot = false
         daily: false,
         autoDream: true,
         promoteRoot: false,
+        dreamIdleMinutes: 15,
       },
     });
 
@@ -141,11 +144,13 @@ promoteRoot = false
       existingConfigText: await readProjectConfig(cwd),
       daily: true,
       promoteRoot: true,
+      dreamIdleMinutes: 60,
     });
 
     expect(rendered).toContain("[memory]");
     expect(rendered).toContain("daily = true");
     expect(rendered).toContain("promoteRoot = true");
+    expect(rendered).toContain("dreamIdleMinutes = 60");
   });
 
   it("loads custom pi-ai provider models with model metadata", async () => {

@@ -25,7 +25,7 @@ export const SCOREL_CONFIG_SCHEMA = {
       keys: ["primary", "standard", "auxiliary"],
     },
     memory: {
-      keys: ["enabled", "daily", "autoDream", "promoteRoot"],
+      keys: ["enabled", "daily", "autoDream", "promoteRoot", "dreamIdleMinutes"],
     },
   },
 } as const;
@@ -101,6 +101,7 @@ export type MemoryConfig = {
   daily: boolean;
   autoDream: boolean;
   promoteRoot: boolean;
+  dreamIdleMinutes: number;
 };
 
 export type ProviderConnectionSummary = {
@@ -515,6 +516,7 @@ export const renderMemoryConfig = (input: UpsertMemoryConfigInput): string => {
     ...(input.daily !== undefined ? { daily: requireBoolean(input.daily, "memory.daily") } : {}),
     ...(input.autoDream !== undefined ? { autoDream: requireBoolean(input.autoDream, "memory.autoDream") } : {}),
     ...(input.promoteRoot !== undefined ? { promoteRoot: requireBoolean(input.promoteRoot, "memory.promoteRoot") } : {}),
+    ...(input.dreamIdleMinutes !== undefined ? { dreamIdleMinutes: requireNonNegativeNumber(input.dreamIdleMinutes, "memory.dreamIdleMinutes") } : {}),
   };
   return renderRawConfig(raw);
 };
@@ -524,6 +526,7 @@ const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   daily: true,
   autoDream: true,
   promoteRoot: true,
+  dreamIdleMinutes: 60,
 };
 
 const loadMemory = (raw: RawConfig): MemoryConfig => ({
@@ -531,6 +534,7 @@ const loadMemory = (raw: RawConfig): MemoryConfig => ({
   daily: raw.memory?.daily ?? DEFAULT_MEMORY_CONFIG.daily,
   autoDream: raw.memory?.autoDream ?? DEFAULT_MEMORY_CONFIG.autoDream,
   promoteRoot: raw.memory?.promoteRoot ?? DEFAULT_MEMORY_CONFIG.promoteRoot,
+  dreamIdleMinutes: requireNonNegativeNumber(raw.memory?.dreamIdleMinutes ?? DEFAULT_MEMORY_CONFIG.dreamIdleMinutes, "memory.dreamIdleMinutes"),
 });
 
 const loadProviders = (raw: RawConfig, env: Record<string, string | undefined>): Record<string, ScorelProviderConfig> => {
@@ -830,6 +834,7 @@ const renderRawConfig = (raw: RawConfig): string => {
     lines.push(`daily = ${memory.daily}`);
     lines.push(`autoDream = ${memory.autoDream}`);
     lines.push(`promoteRoot = ${memory.promoteRoot}`);
+    lines.push(`dreamIdleMinutes = ${memory.dreamIdleMinutes}`);
     lines.push("");
   }
   return lines.join("\n");
@@ -909,6 +914,14 @@ const requireNumber = (value: number | undefined, name: string): number => {
     throw new Error(`${name} is required`);
   }
   return value;
+};
+
+const requireNonNegativeNumber = (value: number | undefined, name: string): number => {
+  const number = requireNumber(value, name);
+  if (number < 0) {
+    throw new Error(`${name} must be non-negative`);
+  }
+  return number;
 };
 
 const requireBoolean = (value: boolean | undefined, name: string): boolean => {

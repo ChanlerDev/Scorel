@@ -98,6 +98,7 @@ export type MemorySettings = {
   daily: boolean;
   autoDream: boolean;
   promoteRoot: boolean;
+  dreamIdleMinutes: number;
 };
 
 export type UpsertMemorySettingsInput = Partial<MemorySettings> & {

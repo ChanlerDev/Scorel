@@ -8,11 +8,11 @@ import { listSessionSummaries } from "./projects/sessions.js";
 
 import {
   ScorelRuntime,
-  appendDailyEntry,
   buildContext,
   buildInstructionSnapshot,
   buildMemoryContext,
   corePackageName,
+  createAppendDailyTool,
   createCodingTools,
   createSkillTool,
   diffSkillIndex,
@@ -25,8 +25,6 @@ import {
   loadScorelConfig,
   loadScorelConfigProfile,
   loadSession,
-  mergeMemoryMarkdown,
-  renderAutomaticDailyEntry,
   renderMemoryConfig,
   renderMemoryHarness,
   renderSkillDelta,
@@ -458,6 +456,14 @@ type SessionLane = {
   followUpWaiters: Map<string, { connection: Connection; request: ClientRequest<"send_message"> }>;
 };
 
+type MemoryDreamSchedule = {
+  timer?: ReturnType<typeof setTimeout>;
+  running: boolean;
+  sessionId: SessionId;
+  clientId: ClientId;
+  lastActivityAt: number;
+};
+
 type AfterUserMessageHook = (input: {
   lane: SessionLane;
   clientId: ClientId;
@@ -511,6 +517,7 @@ export class ScorelHost {
   readonly #connections = new Set<Connection>();
   readonly #events = new Map<SessionId, ScorelEvent[]>();
   readonly #seqs = new Map<SessionId, number>();
+  readonly #memoryDreams = new Map<ProjectId, MemoryDreamSchedule>();
   readonly #registry: ProjectRegistry;
   #started = false;
 
@@ -538,6 +545,12 @@ export class ScorelHost {
   }
 
   async shutdown(): Promise<void> {
+    for (const schedule of this.#memoryDreams.values()) {
+      if (schedule.timer) {
+        clearTimeout(schedule.timer);
+      }
+    }
+    this.#memoryDreams.clear();
     this.#connections.clear();
     this.#started = false;
   }
@@ -845,6 +858,7 @@ export class ScorelHost {
     const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, clientId);
     await this.#syncSkillIndex(lane, clientId);
     await this.#ensureMemoryHarness(lane, clientId);
+    await this.#syncMemoryTools(lane, clientId);
     const userEventId = asEventId(this.#createId());
     const userEvent = await this.#appendPersistent(lane, {
       type: "user_message",
@@ -889,15 +903,6 @@ export class ScorelHost {
     )) {
       await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
     }
-
-    await this.#runAutomaticMemory(lane, clientId, userEvent, state.finalAssistantEventId).catch((cause) => {
-      const error = cause instanceof Error ? cause : new Error(String(cause));
-      void this.#appendDiagnostic(sessionId, "automatic_memory_failed", {
-        clientId,
-        message: error.message,
-        stack: shortStack(error),
-      });
-    });
 
     const result = { userEventId, assistantEventId: state.finalAssistantEventId };
     await this.#appendDiagnostic(sessionId, "send_message_finished", {
@@ -1415,17 +1420,10 @@ export class ScorelHost {
     if (!memory.enabled) {
       return;
     }
-    const today = scorelMemoryPaths({
-      projectId: lane.project.projectId,
-      homeDir: this.#memoryHomeDir,
-      now: this.#now,
-    }).today;
     for (const event of lane.session.tree) {
       if (
         event.type === "harness_item" &&
-        event.item.kind === "memory" &&
-        event.item.data?.date === today &&
-        event.item.data?.projectId === lane.project.projectId
+        event.item.kind === "memory"
       ) {
         return;
       }
@@ -1455,87 +1453,108 @@ export class ScorelHost {
     });
   }
 
-  async #runAutomaticMemory(
-    lane: SessionLane,
-    clientId: ClientId,
-    userEvent: Extract<PersistentEvent, { type: "user_message" }>,
-    assistantEventId: EventId,
-  ): Promise<void> {
+  async #syncMemoryTools(lane: SessionLane, clientId: ClientId): Promise<void> {
     const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
-    if (!memory.enabled) {
+    if (!memory.enabled || !memory.daily) {
+      lane.runtime.unregisterTool("AppendDaily");
       return;
     }
-    const assistantEvent = lane.session.tree.get(assistantEventId)?.event;
-    if (!assistantEvent || assistantEvent.type !== "assistant_message") {
-      return;
-    }
-    const userText = inputText(userEvent.message);
-    const assistantBody = assistantText(assistantEvent.message);
-    let dailyText = renderAutomaticDailyEntry({ userText, assistantText: assistantBody });
-    let projectMemory: string | undefined;
-    let rootMemory: string | undefined;
-
-    if (memory.autoDream) {
-      const generated = await this.#generateMemoryUpdate(lane, userText, assistantBody, memory).catch((cause) => {
-        const error = cause instanceof Error ? cause : new Error(String(cause));
-        void this.#appendDiagnostic(lane.session.header.sessionId, "automatic_memory_model_failed", {
-          clientId,
-          message: error.message,
-          stack: shortStack(error),
-        });
-        return undefined;
-      });
-      if (generated?.daily) {
-        dailyText = generated.daily;
-      }
-      projectMemory = generated?.projectMemory;
-      rootMemory = generated?.rootMemory;
-    }
-
-    if (memory.daily && dailyText.trim()) {
-      const result = await appendDailyEntry({
+    lane.runtime.registerTool(
+      createAppendDailyTool({
         projectId: lane.project.projectId,
         homeDir: this.#memoryHomeDir,
         now: this.#now,
-        text: dailyText,
-      });
-      await this.#appendDiagnostic(lane.session.header.sessionId, "memory_daily_appended", {
-        clientId,
-        path: result.path,
-        date: result.date,
-      });
-    }
+        onAppend: async (result) => {
+          await this.#appendDiagnostic(lane.session.header.sessionId, "memory_daily_appended", {
+            clientId,
+            path: result.path,
+            date: result.date,
+          });
+          await this.#scheduleMemoryDream(lane, clientId);
+        },
+      }),
+    );
+  }
 
-    const paths = scorelMemoryPaths({
-      projectId: lane.project.projectId,
-      homeDir: this.#memoryHomeDir,
-      now: this.#now,
-    });
-    if (projectMemory?.trim()) {
-      await writeFile(paths.projectMemoryPath, normalizeMarkdownFile(projectMemory), "utf8");
-      await this.#appendDiagnostic(lane.session.header.sessionId, "project_memory_updated", {
-        clientId,
-        path: paths.projectMemoryPath,
-      });
-    } else if (memory.autoDream && dailyText.trim()) {
-      const current = await readFile(paths.projectMemoryPath, "utf8").catch(() => "# Project Memory\n");
-      await writeFile(paths.projectMemoryPath, mergeMemoryMarkdown(current, dailyText), "utf8");
+  async #scheduleMemoryDream(lane: SessionLane, clientId: ClientId): Promise<void> {
+    const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
+    if (!memory.enabled || !memory.autoDream) {
+      return;
     }
-    if (memory.promoteRoot && rootMemory?.trim()) {
-      await writeFile(paths.rootMemoryPath, normalizeMarkdownFile(rootMemory), "utf8");
-      await this.#appendDiagnostic(lane.session.header.sessionId, "root_memory_updated", {
-        clientId,
-        path: paths.rootMemoryPath,
+    const projectId = lane.project.projectId;
+    const existing = this.#memoryDreams.get(projectId);
+    if (existing?.timer) {
+      clearTimeout(existing.timer);
+    }
+    const schedule: MemoryDreamSchedule = {
+      running: existing?.running ?? false,
+      sessionId: lane.session.header.sessionId,
+      clientId,
+      lastActivityAt: this.#now(),
+    };
+    const delayMs = Math.max(0, memory.dreamIdleMinutes) * 60 * 1000;
+    schedule.timer = setTimeout(() => {
+      void this.#runIdleMemoryDream(projectId).catch((cause) => {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        void this.#appendDiagnostic(schedule.sessionId, "idle_memory_dream_failed", {
+          clientId: schedule.clientId,
+          message: error.message,
+          stack: shortStack(error),
+        });
       });
+    }, delayMs);
+    schedule.timer.unref?.();
+    this.#memoryDreams.set(projectId, schedule);
+    await this.#appendDiagnostic(lane.session.header.sessionId, "idle_memory_dream_scheduled", {
+      clientId,
+      projectId,
+      idleMinutes: memory.dreamIdleMinutes,
+    });
+  }
+
+  async #runIdleMemoryDream(projectId: ProjectId): Promise<void> {
+    const schedule = this.#memoryDreams.get(projectId);
+    if (!schedule || schedule.running) {
+      return;
+    }
+    schedule.running = true;
+    schedule.timer = undefined;
+    this.#memoryDreams.set(projectId, schedule);
+    try {
+      const lane = await this.#getLane(schedule.sessionId);
+      const memory = await this.#safeMemorySettingsForRuntime(lane, schedule.clientId);
+      if (!memory.enabled || !memory.autoDream) {
+        return;
+      }
+      const generated = await this.#generateMemoryUpdate(lane, memory);
+      const paths = scorelMemoryPaths({
+        projectId: lane.project.projectId,
+        homeDir: this.#memoryHomeDir,
+        now: this.#now,
+      });
+      if (generated?.projectMemory?.trim()) {
+        await writeFile(paths.projectMemoryPath, normalizeMarkdownFile(generated.projectMemory), "utf8");
+        await this.#appendDiagnostic(lane.session.header.sessionId, "project_memory_updated", {
+          clientId: schedule.clientId,
+          path: paths.projectMemoryPath,
+        });
+      }
+      if (memory.promoteRoot && generated?.rootMemory?.trim()) {
+        await writeFile(paths.rootMemoryPath, normalizeMarkdownFile(generated.rootMemory), "utf8");
+        await this.#appendDiagnostic(lane.session.header.sessionId, "root_memory_updated", {
+          clientId: schedule.clientId,
+          path: paths.rootMemoryPath,
+        });
+      }
+    } finally {
+      this.#memoryDreams.delete(projectId);
     }
   }
 
   async #generateMemoryUpdate(
     lane: SessionLane,
-    userText: string,
-    assistantBody: string,
     memory: MemorySettings,
-  ): Promise<{ daily?: string; projectMemory?: string; rootMemory?: string } | undefined> {
+  ): Promise<{ projectMemory?: string; rootMemory?: string } | undefined> {
     const selectedModel = await this.#selectedModelFromMeta(
       { projectId: lane.project.projectId, modelSelection: { role: "auxiliary" } },
       lane.project,
@@ -1561,14 +1580,14 @@ export class ScorelHost {
         content: [{
           type: "text",
           text: [
-            "Update Scorel filesystem memory from this completed turn.",
-            "Return only strict JSON with optional keys: daily, projectMemory, rootMemory.",
-            "daily: one short Chinese or English bullet sentence about durable progress.",
+            "Consolidate Scorel filesystem memory from recent project daily notes.",
+            "Return only strict JSON with optional keys: projectMemory, rootMemory.",
             "projectMemory: full replacement markdown for Project MEMORY.md, only durable project preferences/decisions/workflows/open questions.",
             memory.promoteRoot
               ? "rootMemory: full replacement markdown for root MEMORY.md, only cross-project stable user preferences. Omit if no global preference."
               : "Do not return rootMemory.",
             "Do not store secrets, transient tool noise, or code facts that can be read from the repo.",
+            "Use daily notes as recent evidence, but only promote stable facts and decisions into memory.",
             "",
             "<root_memory>",
             context.rootMemory,
@@ -1576,12 +1595,11 @@ export class ScorelHost {
             "<project_memory>",
             context.projectMemory,
             "</project_memory>",
-            "<user_turn>",
-            userText,
-            "</user_turn>",
-            "<assistant_turn>",
-            assistantBody,
-            "</assistant_turn>",
+            "<recent_daily>",
+            context.yesterdayDaily,
+            "",
+            context.todayDaily,
+            "</recent_daily>",
           ].join("\n"),
         }],
       }],
@@ -1954,6 +1972,7 @@ export class ScorelHost {
         daily: request.daily,
         autoDream: request.autoDream,
         promoteRoot: request.promoteRoot,
+        dreamIdleMinutes: request.dreamIdleMinutes,
         existingConfigText,
       }),
       "utf8",
@@ -2220,9 +2239,10 @@ const disabledMemorySettings = (): MemorySettings => ({
   daily: false,
   autoDream: false,
   promoteRoot: false,
+  dreamIdleMinutes: 60,
 });
 
-const parseMemoryUpdate = (raw: string): { daily?: string; projectMemory?: string; rootMemory?: string } | undefined => {
+const parseMemoryUpdate = (raw: string): { projectMemory?: string; rootMemory?: string } | undefined => {
   const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
   if (!text) {
     return undefined;
@@ -2233,7 +2253,6 @@ const parseMemoryUpdate = (raw: string): { daily?: string; projectMemory?: strin
   }
   const record = parsed as Record<string, unknown>;
   return {
-    ...(typeof record.daily === "string" && record.daily.trim() ? { daily: record.daily.trim() } : {}),
     ...(typeof record.projectMemory === "string" && record.projectMemory.trim() ? { projectMemory: record.projectMemory.trim() } : {}),
     ...(typeof record.rootMemory === "string" && record.rootMemory.trim() ? { rootMemory: record.rootMemory.trim() } : {}),
   };

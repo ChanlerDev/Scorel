@@ -7,8 +7,9 @@ import { describe, expect, it } from "vitest";
 import {
   appendDailyEntry,
   buildMemoryContext,
+  createAppendDailyTool,
   mergeMemoryMarkdown,
-  renderAutomaticDailyEntry,
+  renderDailyEntry,
   renderMemoryHarness,
   scorelMemoryPaths,
 } from "./index.js";
@@ -51,15 +52,43 @@ describe("memory files", () => {
     expect(daily).toContain("- 15:42 设计：自动 memory 使用 session JSONL 作为证据链。");
   });
 
-  it("creates deterministic daily text and merges memory without duplicating entries", () => {
-    const entry = renderAutomaticDailyEntry({
-      userText: "我们要做自动 memory",
-      assistantText: "实现了 memory harness 和 daily",
+  it("formats structured daily entries and merges memory without duplicating entries", () => {
+    const entry = renderDailyEntry({
+      summary: "实现 agent-owned daily",
+      completed: ["新增 AppendDaily 工具"],
+      decisions: ["dream 延迟到 idle 后执行"],
     });
     const merged = mergeMemoryMarkdown("# Project Memory\n", "用户希望 memory 自动运行。");
 
-    expect(entry).toBe("进展：我们要做自动 memory -> 实现了 memory harness 和 daily");
+    expect(entry).toContain("Summary: 实现 agent-owned daily");
+    expect(entry).toContain("Completed: 新增 AppendDaily 工具");
+    expect(entry).toContain("Decisions: dream 延迟到 idle 后执行");
     expect(mergeMemoryMarkdown(merged, "用户希望 memory 自动运行。")).toBe(merged);
+  });
+
+  it("exposes AppendDaily as an append-only journal tool", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "scorel-memory-tool-"));
+    const tool = createAppendDailyTool({
+      homeDir,
+      projectId: "prj_test",
+      now: () => Date.UTC(2026, 5, 10, 16, 20),
+    });
+
+    const result = await tool.execute("call_daily", {
+      summary: "完成 memory journal 工具",
+      completed: ["AppendDaily 写入 daily"],
+      followUps: ["idle dreamer 整合 memory"],
+    }, new AbortController().signal, () => undefined);
+    const paths = scorelMemoryPaths({
+      homeDir,
+      projectId: "prj_test",
+      now: () => Date.UTC(2026, 5, 10, 16, 20),
+    });
+    const daily = await readFile(paths.todayDailyPath, "utf8");
+
+    expect(result.content[0]).toMatchObject({ type: "text", text: "Daily appended: 2026-06-10" });
+    expect(daily).toContain("Summary: 完成 memory journal 工具");
+    expect(daily).toContain("Follow-ups: idle dreamer 整合 memory");
   });
 
   it("rejects unsafe project ids", () => {

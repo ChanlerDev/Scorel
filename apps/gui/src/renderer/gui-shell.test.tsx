@@ -61,6 +61,7 @@ const memorySettings = {
   daily: true,
   autoDream: true,
   promoteRoot: true,
+  dreamIdleMinutes: 60,
 };
 
 const modelProps = {
@@ -387,6 +388,7 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("启用记忆");
     expect(html).toContain("自动 daily");
     expect(html).toContain("自动 dream");
+    expect(html).toContain("Dream 延迟");
     expect(html).toContain("提升到全局");
   });
 });
