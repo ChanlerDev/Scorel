@@ -8,6 +8,8 @@ Make every normal Scorel release produce transparent, user-readable changelog no
 
 - Add a release-notes generator that:
   - finds commits in a supplied release range
+  - collects commit file names and diff stats before collecting patches
+  - skips generated files such as `dist/`, source maps, lockfiles, `.next/`, and `node_modules/` before reading patch content
   - summarizes each commit as structured JSON evidence
   - aggregates commit summaries into release-level structured JSON
   - renders Markdown suitable for `docs/CHANGELOG.md`
@@ -82,7 +84,8 @@ must print Markdown notes only. It must not bump versions, write files, create c
 - Root `package.json` includes `release-notes`.
 - Commit summary and release aggregation prompts require strict JSON output and mention SHIP specs as important context.
 - DeepSeek requests use `https://api.deepseek.com/v1` and `deepseek-v4-flash` by default, with large output token limits appropriate for a high-context release task.
-- Generated or oversized diffs are filtered or truncated before being sent to the model.
+- Generated diffs are skipped before patch reads, so release-note collection does not depend on reading large bundled artifacts into a Node child-process buffer.
+- Oversized non-generated diffs are truncated before being sent to the model.
 - `scripts/release.mjs` generates notes by default and supports `--no-generate-notes`.
 - `.github/workflows/release.yml` exposes a `generate_notes` input that defaults to true and passes `DEEPSEEK_API_KEY` for release-note generation.
 - `docs/CHANGELOG.md` receives a full Markdown release section when notes generation is enabled.
@@ -103,6 +106,8 @@ git diff --check
 
 The standalone `pnpm release-notes` command may require `DEEPSEEK_API_KEY` for the AI path. Tests must cover the deterministic collector, prompt payload, Markdown renderer, changelog insertion, and dry-run fallback behavior without calling the real API.
 
+Collector tests must cover a commit that changes generated files plus a real release script file, and assert that the collector never calls `git show --patch` for generated files or for the whole commit patch.
+
 ## Affected Paths
 
 - `package.json`
@@ -119,6 +124,6 @@ The standalone `pnpm release-notes` command may require `DEEPSEEK_API_KEY` for t
 ## Risks
 
 - AI may overstate work. Mitigate with commit-level evidence, strict JSON validation, conservative prompts, and explicit handling of SHIP specs as context rather than proof of shipped behavior.
-- Large diffs can exceed practical request size. Exclude generated files and truncate oversized patches while preserving file names and diff stats.
+- Large diffs can exceed practical request size, and generated bundle diffs can exceed Node child-process output buffers before the model is called. Exclude generated files before patch reads, then truncate oversized non-generated patches while preserving file names and diff stats.
 - Release should not silently ship empty notes. Formal releases fail on AI generation errors unless `--no-generate-notes` is explicit; dry-run can fall back for preview.
 - DeepSeek API shape may drift. Keep base URL, model, and token limits configurable through environment variables.

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildCommitSummaryRequest,
+  collectCommitEvidence,
   filterPatch,
   insertReleaseNotes,
   renderReleaseNotesMarkdown,
@@ -28,6 +29,36 @@ test("filterPatch removes generated files and truncates oversized patches", () =
   assert.match(filtered.patch, /truncated/);
   assert.doesNotMatch(filtered.patch, /generated bundle/);
   assert.doesNotMatch(filtered.patch, /pnpm-lock/);
+});
+
+test("collectCommitEvidence skips generated files before reading patches", () => {
+  const calls = [];
+  const evidence = collectCommitEvidence({
+    from: "v0.0.1",
+    to: "HEAD",
+    patchLimit: 1000,
+    runGit: (args) => {
+      calls.push(args);
+      if (args[0] === "log") {
+        return "abc1234\x1ffix: publish release assets\x1f\x1e";
+      }
+      if (args.includes("--name-only")) {
+        return "dist/index.js\ndist/index.js.map\nscripts/release.mjs\n";
+      }
+      if (args.includes("--stat")) {
+        return " scripts/release.mjs | 2 ++\n dist/index.js | 2000 +++++++++++++++++";
+      }
+      assert.deepEqual(args, ["show", "--format=", "--patch", "--find-renames", "abc1234", "--", "scripts/release.mjs"]);
+      return "diff --git a/scripts/release.mjs b/scripts/release.mjs\n+release behavior";
+    },
+  });
+
+  assert.equal(evidence.length, 1);
+  assert.match(evidence[0].patch, /scripts\/release\.mjs/);
+  assert.match(evidence[0].patch, /omitted 2 generated/);
+  assert.equal(evidence[0].patchMeta.removedGeneratedBlocks, 2);
+  assert.equal(calls.some((args) => args.includes("--patch") && !args.includes("--")), false);
+  assert.equal(calls.some((args) => args.includes("--patch") && args.includes("dist/index.js")), false);
 });
 
 test("buildCommitSummaryRequest uses DeepSeek defaults and large max token budget", () => {

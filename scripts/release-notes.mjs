@@ -17,6 +17,8 @@ const generatedPathPatterns = [
   /(^|\/)node_modules\//,
 ];
 
+const errorOutputLimit = 4000;
+
 const commitSummarySystemPrompt = `You are Scorel's release-note analyst.
 
 Summarize one git commit into JSON evidence for a changelog.
@@ -78,9 +80,12 @@ export const defaultRunGit = (args, options = {}) => {
     cwd: options.cwd ?? root,
     encoding: "utf8",
     stdio: "pipe",
+    maxBuffer: options.maxBuffer,
   });
   if (result.status !== 0) {
-    throw new Error(`git ${args.join(" ")} failed\n${result.stdout}\n${result.stderr}`);
+    const stdout = result.stdout.length > errorOutputLimit ? `${result.stdout.slice(0, errorOutputLimit)}\n[release-notes: stdout truncated]` : result.stdout;
+    const stderr = result.stderr.length > errorOutputLimit ? `${result.stderr.slice(0, errorOutputLimit)}\n[release-notes: stderr truncated]` : result.stderr;
+    throw new Error(`git ${args.join(" ")} failed\n${stdout}\n${stderr}`);
   }
   return result.stdout.trim();
 };
@@ -122,6 +127,37 @@ export const filterPatch = (patch, options = {}) => {
     filtered = `${filtered}\n\n[release-notes: omitted ${removedBlocks} generated or oversized file diff block${removedBlocks === 1 ? "" : "s"}]`.trim();
   }
   return { patch: filtered, truncated, removedBlocks };
+};
+
+const collectPatchForFiles = ({ commit, changedFiles, runGit, patchLimit }) => {
+  const patchableFiles = changedFiles.filter((path) => !isGeneratedPath(path));
+  const chunks = [];
+  let truncated = false;
+  const removedBlocks = changedFiles.length - patchableFiles.length;
+
+  for (const path of patchableFiles) {
+    const rawPatch = runGit(["show", "--format=", "--patch", "--find-renames", commit.sha, "--", path], {
+      maxBuffer: Math.max(defaultPatchLimit, patchLimit) + 64_000,
+    });
+    const filtered = filterPatch(rawPatch, { maxChars: Math.max(0, patchLimit - chunks.join("\n").length) });
+    if (filtered.patch) {
+      chunks.push(filtered.patch);
+    }
+    truncated = truncated || filtered.truncated;
+    if (chunks.join("\n").length >= patchLimit) {
+      truncated = true;
+      break;
+    }
+  }
+
+  let patch = chunks.join("\n").trim();
+  if (removedBlocks > 0) {
+    patch = `${patch}\n\n[release-notes: omitted ${removedBlocks} generated or oversized file diff block${removedBlocks === 1 ? "" : "s"}]`.trim();
+  }
+  if (truncated && !patch.includes("[release-notes: patch truncated")) {
+    patch = `${patch}\n\n[release-notes: patch truncated at ${patchLimit} characters]`.trim();
+  }
+  return { patch, truncated, removedBlocks };
 };
 
 const jsonArray = (value) => (Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim()).map((item) => item.trim()) : []);
@@ -288,8 +324,7 @@ export const collectCommitEvidence = ({ from, to = "HEAD", runGit = defaultRunGi
       .map((line) => line.trim())
       .filter(Boolean);
     const diffStat = runGit(["show", "--format=", "--stat", commit.sha]);
-    const rawPatch = runGit(["show", "--format=", "--patch", "--find-renames", commit.sha]);
-    const filtered = filterPatch(rawPatch, { maxChars: patchLimit });
+    const filtered = collectPatchForFiles({ commit, changedFiles, runGit, patchLimit });
     return {
       repository: "Scorel",
       commit,
