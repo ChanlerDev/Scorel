@@ -115,6 +115,7 @@ publish: true | false
 The workflow must:
 
 - install pnpm from `packageManager`
+- install system tools required by the release check path, including `ripgrep` for the `Glob` and `Grep` coding-tool tests
 - run `pnpm install --frozen-lockfile`
 - run `pnpm release <bump> --dry-run` by default
 - require `NPM_TOKEN` only for a real publish
@@ -127,6 +128,7 @@ The workflow must:
 - `pnpm pack:smoke` packs and installs the tarball into a temporary project, then runs `scorel --help`.
 - `pnpm release patch --dry-run` runs the full dry-run path and exits 0.
 - `.github/workflows/release.yml` exists and manually triggers the same release command.
+- `.github/workflows/release.yml` installs `ripgrep` before running the release command, so the repo-level test suite matches the product's rg-backed coding tools.
 - `docs/ROADMAP.md` includes S0062 as Done only after verification.
 - `docs/CHANGELOG.md` records release infrastructure under Unreleased until the first release moves it to a version section.
 
@@ -163,4 +165,5 @@ git diff --check
 - Bundling can accidentally include development-only code. Keep `files` restricted to `dist`, README, and selected docs.
 - Publishing internal packages too early would create API stability pressure. Keep only root `@chanlerdev/scorel` public in S0062.
 - Real npm publish requires `chanlerdev` authentication locally or `NPM_TOKEN` in GitHub Actions.
+- GitHub hosted runners do not guarantee `rg` is available. Install `ripgrep` explicitly in release workflow setup instead of skipping the rg-backed tool tests.
 - A release script that mutates versions before verification can leave the repo dirty after failures. Run verification before mutation for normal release, and keep dry-run non-mutating.
