@@ -438,7 +438,7 @@ export type ScorelHostOptions = {
   builtinExtensionsDir?: string;
   modelProfile?: ScorelConfig;
   loadConfig?: (options: { project: HostProject }) => Promise<ScorelConfig>;
-  loadConfigProfile?: (options: { project: HostProject }) => Promise<ScorelConfigProfile>;
+  loadConfigProfile?: (options: { project: HostProject }) => Promise<ScorelConfigProfile | ScorelConfig>;
   createRuntime: (options: { sessionId: SessionId; project: HostProject; selectedModel?: SelectedModelSummary; purpose: "chat" | "title" | "memory" }) => Promise<ScorelRuntime>;
   memoryHomeDir?: string;
   now?: () => number;
@@ -583,7 +583,7 @@ export class ScorelHost {
   readonly #builtinExtensionsDir: string;
   readonly #modelProfile: ScorelConfig | undefined;
   readonly #loadConfig: ((options: { project: HostProject }) => Promise<ScorelConfig>) | undefined;
-  readonly #loadConfigProfile: ((options: { project: HostProject }) => Promise<ScorelConfigProfile>) | undefined;
+  readonly #loadConfigProfile: ((options: { project: HostProject }) => Promise<ScorelConfigProfile | ScorelConfig>) | undefined;
   readonly #createRuntime: ScorelHostOptions["createRuntime"];
   readonly #memoryHomeDir: string | undefined;
   readonly #now: () => number;

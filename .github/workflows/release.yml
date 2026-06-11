@@ -71,11 +71,13 @@ jobs:
         if: ${{ inputs.dry_run == false && inputs.publish == false }}
         run: pnpm release ${{ inputs.bump }} --no-publish ${{ inputs.generate_notes == false && '--no-generate-notes' || '' }}
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
 
       - name: Release and publish
         if: ${{ inputs.dry_run == false && inputs.publish == true }}
         run: pnpm release ${{ inputs.bump }} ${{ inputs.generate_notes == false && '--no-generate-notes' || '' }}
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}

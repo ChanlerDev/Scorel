@@ -799,7 +799,7 @@ var init_sessions = __esm({
 // packages/core/src/config/index.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join4 } from "node:path";
-var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, scorelProjectConfigPath, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, renderMemoryConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, loadMemory, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, requireModelRole, modelRoles;
+var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, scorelProjectConfigPath, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, renderMemoryConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, loadMemory, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireCompactThreshold, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, requireModelRole, modelRoles;
 var init_config = __esm({
   "packages/core/src/config/index.ts"() {
     "use strict";
@@ -827,7 +827,7 @@ var init_config = __esm({
           keys: ["primary", "standard", "auxiliary"]
         },
         memory: {
-          keys: ["enabled", "daily", "autoDream", "promoteRoot", "dreamIdleMinutes"]
+          keys: ["enabled", "daily", "sessionMemory", "autoDream", "promoteRoot", "dreamIdleMinutes", "autoCompactThreshold"]
         },
         extension: {
           keys: ["enabled", "kind"]
@@ -1087,9 +1087,11 @@ var init_config = __esm({
         ...loadMemory(raw),
         ...input.enabled !== void 0 ? { enabled: requireBoolean(input.enabled, "memory.enabled") } : {},
         ...input.daily !== void 0 ? { daily: requireBoolean(input.daily, "memory.daily") } : {},
+        ...input.sessionMemory !== void 0 ? { sessionMemory: requireBoolean(input.sessionMemory, "memory.sessionMemory") } : {},
         ...input.autoDream !== void 0 ? { autoDream: requireBoolean(input.autoDream, "memory.autoDream") } : {},
         ...input.promoteRoot !== void 0 ? { promoteRoot: requireBoolean(input.promoteRoot, "memory.promoteRoot") } : {},
-        ...input.dreamIdleMinutes !== void 0 ? { dreamIdleMinutes: requireNonNegativeNumber(input.dreamIdleMinutes, "memory.dreamIdleMinutes") } : {}
+        ...input.dreamIdleMinutes !== void 0 ? { dreamIdleMinutes: requireNonNegativeNumber(input.dreamIdleMinutes, "memory.dreamIdleMinutes") } : {},
+        ...input.autoCompactThreshold !== void 0 ? { autoCompactThreshold: requireCompactThreshold(input.autoCompactThreshold) } : {}
       };
       return renderRawConfig(raw);
     };
@@ -1118,16 +1120,20 @@ var init_config = __esm({
     DEFAULT_MEMORY_CONFIG = {
       enabled: true,
       daily: true,
+      sessionMemory: true,
       autoDream: true,
       promoteRoot: true,
-      dreamIdleMinutes: 60
+      dreamIdleMinutes: 60,
+      autoCompactThreshold: 0.8
     };
     loadMemory = (raw) => ({
       enabled: raw.memory?.enabled ?? DEFAULT_MEMORY_CONFIG.enabled,
       daily: raw.memory?.daily ?? DEFAULT_MEMORY_CONFIG.daily,
+      sessionMemory: raw.memory?.sessionMemory ?? DEFAULT_MEMORY_CONFIG.sessionMemory,
       autoDream: raw.memory?.autoDream ?? DEFAULT_MEMORY_CONFIG.autoDream,
       promoteRoot: raw.memory?.promoteRoot ?? DEFAULT_MEMORY_CONFIG.promoteRoot,
-      dreamIdleMinutes: requireNonNegativeNumber(raw.memory?.dreamIdleMinutes ?? DEFAULT_MEMORY_CONFIG.dreamIdleMinutes, "memory.dreamIdleMinutes")
+      dreamIdleMinutes: requireNonNegativeNumber(raw.memory?.dreamIdleMinutes ?? DEFAULT_MEMORY_CONFIG.dreamIdleMinutes, "memory.dreamIdleMinutes"),
+      autoCompactThreshold: requireCompactThreshold(raw.memory?.autoCompactThreshold ?? DEFAULT_MEMORY_CONFIG.autoCompactThreshold)
     });
     loadExtensions = (raw) => {
       const extensions = {};
@@ -1401,9 +1407,11 @@ var init_config = __esm({
         lines.push("[memory]");
         lines.push(`enabled = ${memory.enabled}`);
         lines.push(`daily = ${memory.daily}`);
+        lines.push(`sessionMemory = ${memory.sessionMemory}`);
         lines.push(`autoDream = ${memory.autoDream}`);
         lines.push(`promoteRoot = ${memory.promoteRoot}`);
         lines.push(`dreamIdleMinutes = ${memory.dreamIdleMinutes}`);
+        lines.push(`autoCompactThreshold = ${memory.autoCompactThreshold}`);
         lines.push("");
       }
       for (const [extensionId, extension] of Object.entries(raw.extensions).sort(([left], [right]) => left.localeCompare(right))) {
@@ -1487,6 +1495,13 @@ var init_config = __esm({
       const number = requireNumber(value, name);
       if (number < 0) {
         throw new Error(`${name} must be non-negative`);
+      }
+      return number;
+    };
+    requireCompactThreshold = (value) => {
+      const number = requireNumber(value, "memory.autoCompactThreshold");
+      if (number <= 0 || number >= 1) {
+        throw new Error("memory.autoCompactThreshold must be greater than 0 and less than 1");
       }
       return number;
     };
@@ -2654,7 +2669,7 @@ var init_instructions = __esm({
 import { appendFile, mkdir as mkdir3, readFile as readFile7, writeFile as writeFile3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { join as join6 } from "node:path";
-var memoryDate, scorelMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, parseAppendDailyInput, requireString3, optionalStringArray, isRecord5, safeProjectId, isNodeErrorCode2;
+var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, requireString3, optionalStringArray, isRecord5, safeProjectId, isNodeErrorCode2;
 var init_memory = __esm({
   "packages/core/src/memory/index.ts"() {
     "use strict";
@@ -2679,6 +2694,14 @@ var init_memory = __esm({
         dreamStatePath: join6(projectDir, "dream-state.json"),
         today,
         yesterday
+      };
+    };
+    scorelSessionMemoryPaths = (options) => {
+      const home = options.homeDir ?? homedir3();
+      const sessionsDir = join6(home, ".scorel", "context", "session-memory", safeProjectId(options.projectId));
+      return {
+        sessionsDir,
+        sessionMemoryPath: join6(sessionsDir, `${safeProjectId(options.sessionId)}.md`)
       };
     };
     buildMemoryContext = async (options) => {
@@ -2762,6 +2785,37 @@ var init_memory = __esm({
       ].filter(Boolean);
       return sections.join(" ");
     };
+    readSessionMemory = async (options) => {
+      const paths = scorelSessionMemoryPaths(options);
+      return trimForContext(await readOptional(paths.sessionMemoryPath), 12e3, "tail");
+    };
+    writeSessionMemory = async (input) => {
+      const paths = scorelSessionMemoryPaths(input);
+      await mkdir3(paths.sessionsDir, { recursive: true, mode: 448 });
+      const content = renderSessionMemory(input);
+      await writeFile3(paths.sessionMemoryPath, content, { encoding: "utf8", mode: 384 });
+      return { path: paths.sessionMemoryPath, content };
+    };
+    renderSessionMemory = (input) => {
+      const timestamp = new Date((input.now ?? Date.now)()).toISOString();
+      return normalizeMarkdownFile([
+        `# Session Memory: ${input.sessionId}`,
+        "",
+        `Updated: ${timestamp}`,
+        "",
+        "## Current State",
+        compactLine(input.summary, 1200) || "- No durable session state captured yet.",
+        "",
+        "## Recent Work",
+        renderBullets(input.recentMessages, 360) || "- No recent work captured.",
+        "",
+        "## Decisions",
+        renderBullets(input.decisions, 360) || "- No session decisions captured.",
+        "",
+        "## Follow-ups",
+        renderBullets(input.followUps, 360) || "- No follow-ups captured."
+      ].join("\n"));
+    };
     ensureMemoryFiles = async (paths) => {
       await mkdir3(paths.rootDir, { recursive: true, mode: 448 });
       await mkdir3(paths.projectDir, { recursive: true, mode: 448 });
@@ -2802,6 +2856,9 @@ var init_memory = __esm({
       const items = (values ?? []).map((value) => compactLine(value, 240)).filter(Boolean);
       return items.length > 0 ? `${label}: ${items.join("; ")}` : "";
     };
+    renderBullets = (values, maxChars) => (values ?? []).map((value) => compactLine(value, maxChars)).filter(Boolean).map((value) => `- ${value}`).join("\n");
+    normalizeMarkdownFile = (value) => `${value.trimEnd()}
+`;
     parseAppendDailyInput = (value) => {
       if (!isRecord5(value)) {
         throw new Error("AppendDaily args must be an object");
@@ -3311,7 +3368,7 @@ function assertTreeEvent(value) {
   if (value.type === "session_header") {
     throw new SessionStoreError("invalid_event", "Session header must be stored as the JSONL header line");
   }
-  if (value.type !== "user_message" && value.type !== "assistant_message" && value.type !== "tool_result" && value.type !== "session_title_updated" && value.type !== "instruction_snapshot" && value.type !== "harness_item" && value.type !== "queue_update" && value.type !== "skill_index_snapshot" && value.type !== "skill_index_delta") {
+  if (value.type !== "user_message" && value.type !== "assistant_message" && value.type !== "tool_result" && value.type !== "session_title_updated" && value.type !== "instruction_snapshot" && value.type !== "harness_item" && value.type !== "compact" && value.type !== "queue_update" && value.type !== "skill_index_snapshot" && value.type !== "skill_index_delta") {
     throw new SessionStoreError("invalid_event", "Unsupported session event type");
   }
   if (typeof value.id !== "string" || value.parentId !== null && typeof value.parentId !== "string" || typeof value.seq !== "number" || typeof value.clientId !== "string" || typeof value.ts !== "number") {
@@ -3329,6 +3386,9 @@ function assertTreeEvent(value) {
   if (value.type === "harness_item" && !isHarnessItem(value.item)) {
     throw new SessionStoreError("invalid_event", "harness_item is missing item payload");
   }
+  if (value.type === "compact" && !isCompactEvent(value)) {
+    throw new SessionStoreError("invalid_event", "compact is missing summary payload");
+  }
   if (value.type === "queue_update" && !isQueueUpdate(value)) {
     throw new SessionStoreError("invalid_event", "queue_update is missing queue payload");
   }
@@ -3339,7 +3399,7 @@ function assertTreeEvent(value) {
     throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
   }
 }
-var SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, createSession, loadSession, buildContext, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, cloneMessage, isRecord6;
+var SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, createSession, loadSession, buildContext, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, compactSummaryMessage, cloneMessage, isRecord6;
 var init_session = __esm({
   "packages/core/src/session/index.ts"() {
     "use strict";
@@ -3545,20 +3605,60 @@ var init_session = __esm({
       await mkdir4(dirname6(filePath), { recursive: true });
       return new JsonlSession(filePath, header, tree);
     };
-    buildContext = (tree, leafId) => tree.getPath(leafId).reduce((messages, id) => {
-      const event = tree.get(id)?.event;
-      if (!event) {
+    buildContext = (tree, leafId) => {
+      const path = tree.getPath(leafId);
+      return path.reduce((messages, id, index) => {
+        const event = tree.get(id)?.event;
+        if (!event) {
+          return messages;
+        }
+        if ("message" in event) {
+          messages.push(cloneMessage(event.message));
+          return messages;
+        }
+        if (event.type === "harness_item") {
+          appendHarnessItemToContext(messages, event);
+        }
+        if (event.type === "compact") {
+          const retained = retainedMessagesBeforeCompact(tree, path.slice(0, index), event.retainedEventCount);
+          messages.length = 0;
+          messages.push(compactSummaryMessage(event));
+          messages.push(...retained);
+        }
         return messages;
+      }, []);
+    };
+    retainedMessagesBeforeCompact = (tree, pathBeforeCompact, retainedEventCount) => {
+      if (retainedEventCount <= 0) {
+        return [];
       }
-      if ("message" in event) {
-        messages.push(cloneMessage(event.message));
-        return messages;
+      const candidateStart = Math.max(0, pathBeforeCompact.length - retainedEventCount);
+      let start = pathBeforeCompact.length;
+      for (let index = candidateStart; index < pathBeforeCompact.length; index += 1) {
+        const event = tree.get(pathBeforeCompact[index])?.event;
+        if (isRetainedContextStart(event)) {
+          start = index;
+          break;
+        }
       }
-      if (event.type === "harness_item") {
-        appendHarnessItemToContext(messages, event);
+      const retained = [];
+      for (const id of pathBeforeCompact.slice(start)) {
+        const event = tree.get(id)?.event;
+        if (!event) {
+          continue;
+        }
+        if ("message" in event) {
+          retained.push(cloneMessage(event.message));
+        } else if (event.type === "harness_item") {
+          appendHarnessItemToContext(retained, event);
+        } else if (event.type === "compact") {
+          retained.length = 0;
+          retained.push(compactSummaryMessage(event));
+        }
       }
-      return messages;
-    }, []);
+      return retained;
+    };
+    isRetainedContextStart = (event) => event?.type === "user_message" || event?.type === "compact" || event?.type === "assistant_message" && event.message.content.some((block) => block.type === "tool_call");
     parseJsonLine = (line, lineNumber) => {
       try {
         return JSON.parse(line);
@@ -3594,7 +3694,7 @@ var init_session = __esm({
         throw new SessionStoreError("session_mismatch", `Event belongs to ${value.sessionId}, expected ${header.sessionId}`);
       }
     };
-    isConversationEvent = (event) => event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result" || event.type === "harness_item";
+    isConversationEvent = (event) => event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result" || event.type === "harness_item" || event.type === "compact";
     isInstructionSnapshot = (value) => {
       if (!isRecord6(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
         return false;
@@ -3604,6 +3704,7 @@ var init_session = __esm({
       );
     };
     isHarnessItem = (value) => isRecord6(value) && typeof value.kind === "string" && typeof value.origin === "string" && typeof value.content === "string" && (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
+    isCompactEvent = (value) => typeof value.summary === "string" && typeof value.compactedThrough === "string" && typeof value.tokensBefore === "number" && typeof value.tokensAfter === "number" && typeof value.retainedEventCount === "number";
     isQueueUpdate = (value) => (value.queue === "follow_up" || value.queue === "steer") && value.operation === "rewrite" && Array.isArray(value.items) && (value.anchorEventId === null || typeof value.anchorEventId === "string") && value.items.every(
       (item) => isRecord6(item) && typeof item.id === "string" && Array.isArray(item.content) && typeof item.createdAt === "number" && typeof item.updatedAt === "number" && typeof item.clientId === "string"
     );
@@ -3653,6 +3754,23 @@ ${reminder}` }]
     renderSystemReminder = (content) => `<system-reminder>
 ${content}
 </system-reminder>`;
+    compactSummaryMessage = (event) => ({
+      role: "user",
+      content: [{
+        type: "text",
+        text: renderSystemReminder([
+          "Earlier session context has been compacted.",
+          "",
+          event.summary.trim(),
+          "",
+          "Use this summary as continuity context. Verify current repository facts before acting."
+        ].join("\n"))
+      }],
+      meta: {
+        source: "compact",
+        compactedThrough: event.compactedThrough
+      }
+    });
     cloneMessage = (message) => ({
       ...message,
       content: message.content.map((block) => {
@@ -4247,7 +4365,7 @@ import { appendFile as appendFile3, mkdir as mkdir6, readFile as readFile11, rea
 import { dirname as dirname8, join as join10, resolve as resolve5 } from "node:path";
 import { pathToFileURL } from "node:url";
 import { WebSocketServer } from "ws";
-var daemonPackageName, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode4, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, inputText, assistantText, disabledMemorySettings, runtimeChannelContextFromWire, parseQueuedChannelContext, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord7, parseMemoryUpdate, normalizeMarkdownFile, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
+var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode4, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, runtimeChannelContextFromWire, parseQueuedChannelContext, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord7, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
 var init_src4 = __esm({
   "packages/daemon/src/index.ts"() {
     "use strict";
@@ -4260,6 +4378,8 @@ var init_src4 = __esm({
     init_pair();
     init_host_client();
     daemonPackageName = "@scorel/daemon";
+    SESSION_MEMORY_COMPACT_WAIT_MS = 5e3;
+    AUTO_COMPACT_RETAINED_EVENTS = 8;
     localDaemonStateFile = (stateDir) => join10(stateDir, "daemon.json");
     createLocalDaemonState = async (options) => {
       const state = {
@@ -4506,6 +4626,7 @@ var init_src4 = __esm({
       #events = /* @__PURE__ */ new Map();
       #seqs = /* @__PURE__ */ new Map();
       #memoryDreams = /* @__PURE__ */ new Map();
+      #sessionMemoryUpdates = /* @__PURE__ */ new Map();
       #imExtensions = /* @__PURE__ */ new Map();
       #imBindings = /* @__PURE__ */ new Map();
       #registry;
@@ -4852,6 +4973,7 @@ var init_src4 = __esm({
         await this.#syncSkillIndex(lane, clientId);
         await this.#ensureMemoryHarness(lane, clientId);
         await this.#syncMemoryTools(lane, clientId);
+        await this.#autoCompactIfNeeded(lane, clientId);
         this.#syncChannelTool(lane, input.channelContext);
         let parentId = input.parentId === void 0 ? lane.session.activeLeafId : input.parentId;
         if (input.channelContext) {
@@ -4912,6 +5034,7 @@ var init_src4 = __esm({
           assistantEventId: state.finalAssistantEventId,
           source: input.source
         });
+        this.#scheduleSessionMemoryUpdate(lane, clientId);
         input.onComplete?.(result);
         return { ...result, status: "completed" };
       }
@@ -5418,6 +5541,223 @@ var init_src4 = __esm({
           })
         );
       }
+      async #autoCompactIfNeeded(lane, clientId) {
+        const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
+        if (memory.autoCompactThreshold <= 0) {
+          return;
+        }
+        const leafId = lane.session.activeLeafId;
+        if (!leafId) {
+          return;
+        }
+        const leaf = lane.session.tree.get(leafId)?.event;
+        if (leaf?.type === "compact") {
+          return;
+        }
+        const context = buildContext(lane.session.tree, leafId);
+        const tokensBefore = estimateScorelMessagesTokens(context);
+        const contextWindow = lane.session.header.meta.selectedModel?.contextWindow ?? 2e5;
+        const threshold = Math.floor(contextWindow * memory.autoCompactThreshold);
+        if (tokensBefore < threshold) {
+          return;
+        }
+        await this.#waitForSessionMemoryUpdate(lane.session.header.sessionId, SESSION_MEMORY_COMPACT_WAIT_MS);
+        const sessionMemory = memory.sessionMemory ? await this.#readSessionMemory(lane) : "";
+        const compactSource = sessionMemory ? "session_memory" : "foreground_compact";
+        const compactSummary = sessionMemory || await this.#generateForegroundCompactSummary(lane).catch((cause) => {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          void this.#appendDiagnostic(lane.session.header.sessionId, "foreground_compact_failed", {
+            clientId,
+            message: error.message,
+            stack: shortStack(error)
+          });
+          return "";
+        });
+        const summary = [
+          compactSummary || this.#fallbackSessionMemorySummary(lane).summary
+        ].join("\n").trim();
+        const compacted = await this.#appendPersistent(lane, {
+          type: "compact",
+          id: asEventId(this.#createId()),
+          parentId: leafId,
+          sessionId: lane.session.header.sessionId,
+          clientId,
+          ts: this.#now(),
+          summary,
+          compactedThrough: leafId,
+          tokensBefore,
+          tokensAfter: estimateTextTokens(summary),
+          retainedEventCount: AUTO_COMPACT_RETAINED_EVENTS
+        });
+        await this.#appendDiagnostic(lane.session.header.sessionId, "auto_compacted", {
+          clientId,
+          compactEventId: compacted.id,
+          source: compactSource,
+          tokensBefore,
+          tokensAfter: "tokensAfter" in compacted ? compacted.tokensAfter : void 0,
+          threshold
+        });
+      }
+      #scheduleSessionMemoryUpdate(lane, clientId) {
+        const sessionId = lane.session.header.sessionId;
+        const previous = this.#sessionMemoryUpdates.get(sessionId) ?? Promise.resolve();
+        const task = previous.catch(() => void 0).then(() => this.#maintainSessionMemory(lane, clientId));
+        this.#sessionMemoryUpdates.set(sessionId, task);
+        void task.catch((cause) => {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          void this.#appendDiagnostic(sessionId, "session_memory_update_failed", {
+            clientId,
+            message: error.message,
+            stack: shortStack(error)
+          });
+        }).finally(() => {
+          if (this.#sessionMemoryUpdates.get(sessionId) === task) {
+            this.#sessionMemoryUpdates.delete(sessionId);
+          }
+        });
+      }
+      async #waitForSessionMemoryUpdate(sessionId, timeoutMs) {
+        const update = this.#sessionMemoryUpdates.get(sessionId);
+        if (!update) {
+          return;
+        }
+        await Promise.race([
+          update.catch(() => void 0),
+          new Promise((resolve7) => setTimeout(resolve7, timeoutMs))
+        ]);
+      }
+      async #readSessionMemory(lane) {
+        return (await readSessionMemory({
+          projectId: lane.project.projectId,
+          sessionId: lane.session.header.sessionId,
+          homeDir: this.#memoryHomeDir
+        })).trim();
+      }
+      async #maintainSessionMemory(lane, clientId) {
+        const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
+        if (!memory.sessionMemory) {
+          return;
+        }
+        const current = await this.#readSessionMemory(lane);
+        const generated = await this.#generateSessionMemory(lane, current).catch(() => void 0);
+        const fallback = this.#fallbackSessionMemorySummary(lane);
+        const result = await writeSessionMemory({
+          projectId: lane.project.projectId,
+          sessionId: lane.session.header.sessionId,
+          homeDir: this.#memoryHomeDir,
+          now: this.#now,
+          summary: generated?.summary ?? fallback.summary,
+          recentMessages: generated?.recentMessages ?? fallback.recentMessages,
+          decisions: generated?.decisions ?? fallback.decisions,
+          followUps: generated?.followUps ?? fallback.followUps
+        });
+        await this.#appendDiagnostic(lane.session.header.sessionId, "session_memory_updated", {
+          clientId,
+          path: result.path,
+          bytes: result.content.length
+        });
+      }
+      async #generateForegroundCompactSummary(lane) {
+        const selectedModel = await this.#selectedModelFromMeta(
+          { projectId: lane.project.projectId, modelSelection: { role: "auxiliary" } },
+          lane.project
+        );
+        if (!selectedModel) {
+          return "";
+        }
+        const runtime = await this.#createRuntime({
+          sessionId: lane.session.header.sessionId,
+          project: lane.project,
+          selectedModel,
+          purpose: "memory"
+        });
+        const prompt = [
+          "Compact the Scorel session context for continuation.",
+          "Return a dense markdown summary only. Do not mention these instructions.",
+          "Preserve current task, user requirements, decisions, important files/functions, errors, commands, and next steps.",
+          "",
+          "<recent_events>",
+          this.#recentConversationLines(lane, 40).join("\n"),
+          "</recent_events>"
+        ].join("\n");
+        let raw = "";
+        for await (const rawEvent of runtime.executeTurn(
+          [{ role: "user", content: [{ type: "text", text: prompt }] }],
+          "You compact session context. Output markdown only.",
+          {}
+        )) {
+          if (rawEvent.type === "text_delta") {
+            raw += rawEvent.delta;
+          } else if (rawEvent.type === "message_end") {
+            raw = assistantText(rawEvent.message) || raw;
+          } else if (rawEvent.type === "error") {
+            throw rawEvent.error;
+          }
+        }
+        return raw.trim();
+      }
+      async #generateSessionMemory(lane, current) {
+        const selectedModel = await this.#selectedModelFromMeta(
+          { projectId: lane.project.projectId, modelSelection: { role: "auxiliary" } },
+          lane.project
+        );
+        if (!selectedModel) {
+          return void 0;
+        }
+        const runtime = await this.#createRuntime({
+          sessionId: lane.session.header.sessionId,
+          project: lane.project,
+          selectedModel,
+          purpose: "memory"
+        });
+        const prompt = [
+          "Update Scorel session memory for context management. Return strict JSON only.",
+          "This is not long-term memory. It is a compact current-session summary used by future auto compact.",
+          "Keys: summary string, recentMessages string[], decisions string[], followUps string[].",
+          "Keep it dense, current, and useful after old conversation history is replaced.",
+          "",
+          "<current_session_memory>",
+          current.trim() || "(empty)",
+          "</current_session_memory>",
+          "",
+          "<recent_events>",
+          this.#recentConversationLines(lane, 24).join("\n"),
+          "</recent_events>"
+        ].join("\n");
+        let raw = "";
+        for await (const rawEvent of runtime.executeTurn(
+          [{ role: "user", content: [{ type: "text", text: prompt }] }],
+          "You maintain session memory for context compaction. Output strict JSON only.",
+          {}
+        )) {
+          if (rawEvent.type === "text_delta") {
+            raw += rawEvent.delta;
+          } else if (rawEvent.type === "message_end") {
+            raw = assistantText(rawEvent.message) || raw;
+          } else if (rawEvent.type === "error") {
+            throw rawEvent.error;
+          }
+        }
+        return parseSessionMemoryJson(raw);
+      }
+      #fallbackSessionMemorySummary(lane) {
+        const recentMessages = this.#recentConversationLines(lane, 12);
+        return {
+          summary: recentMessages.at(-1) ?? "Session is active. Continue from the latest visible user request.",
+          recentMessages,
+          decisions: [],
+          followUps: []
+        };
+      }
+      #recentConversationLines(lane, limit) {
+        const events = [...lane.session.tree].filter((event) => "message" in event || event.type === "compact").slice(-limit);
+        return events.map((event) => {
+          if (event.type === "compact") {
+            return `[compact] ${compactLine2(event.summary, 500)}`;
+          }
+          return `[${event.message.role}] ${compactLine2(messageText(event.message), 500)}`;
+        });
+      }
       async #appendChannelHarness(lane, clientId, context, parentId) {
         const lines = [
           "This message came from an IM channel.",
@@ -5507,14 +5847,14 @@ var init_src4 = __esm({
             now: this.#now
           });
           if (generated?.projectMemory?.trim()) {
-            await writeFile6(paths.projectMemoryPath, normalizeMarkdownFile(generated.projectMemory), "utf8");
+            await writeFile6(paths.projectMemoryPath, normalizeMarkdownFile2(generated.projectMemory), "utf8");
             await this.#appendDiagnostic(lane.session.header.sessionId, "project_memory_updated", {
               clientId: schedule.clientId,
               path: paths.projectMemoryPath
             });
           }
           if (memory.promoteRoot && generated?.rootMemory?.trim()) {
-            await writeFile6(paths.rootMemoryPath, normalizeMarkdownFile(generated.rootMemory), "utf8");
+            await writeFile6(paths.rootMemoryPath, normalizeMarkdownFile2(generated.rootMemory), "utf8");
             await this.#appendDiagnostic(lane.session.header.sessionId, "root_memory_updated", {
               clientId: schedule.clientId,
               path: paths.rootMemoryPath
@@ -6126,9 +6466,11 @@ var init_src4 = __esm({
           renderMemoryConfig({
             enabled: request.enabled,
             daily: request.daily,
+            sessionMemory: request.sessionMemory,
             autoDream: request.autoDream,
             promoteRoot: request.promoteRoot,
             dreamIdleMinutes: request.dreamIdleMinutes,
+            autoCompactThreshold: request.autoCompactThreshold,
             existingConfigText
           }),
           "utf8"
@@ -6391,12 +6733,52 @@ var init_src4 = __esm({
     normalizeContent = (content) => typeof content === "string" ? [{ type: "text", text: content }] : content;
     inputText = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
     assistantText = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
+    messageText = (message) => {
+      const text = message.content.map((block) => {
+        if (block.type === "text") {
+          return block.text;
+        }
+        if (block.type === "thinking") {
+          return `[thinking] ${block.text}`;
+        }
+        if (block.type === "tool_call") {
+          return `[tool_call:${block.toolName}] ${JSON.stringify(block.args)}`;
+        }
+        if (block.type === "tool_result") {
+          return `[tool_result:${block.toolName}] ${JSON.stringify(block.result)}`;
+        }
+        return "";
+      }).filter(Boolean).join("\n").trim();
+      return text || "(empty)";
+    };
+    estimateScorelMessagesTokens = (messages) => estimateTextTokens(messages.map(messageText).join("\n"));
+    estimateTextTokens = (value) => Math.ceil(value.length / 3);
+    compactLine2 = (value, maxChars) => value.replace(/\s+/g, " ").trim().slice(0, maxChars);
+    parseSessionMemoryJson = (raw) => {
+      const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+      if (!text) {
+        return void 0;
+      }
+      const parsed = JSON.parse(text);
+      if (!isRecord7(parsed)) {
+        return void 0;
+      }
+      return {
+        summary: typeof parsed.summary === "string" ? parsed.summary : void 0,
+        recentMessages: stringArray(parsed.recentMessages),
+        decisions: stringArray(parsed.decisions),
+        followUps: stringArray(parsed.followUps)
+      };
+    };
+    stringArray = (value) => Array.isArray(value) ? value.filter((item) => typeof item === "string") : void 0;
     disabledMemorySettings = () => ({
       enabled: false,
       daily: false,
+      sessionMemory: false,
       autoDream: false,
       promoteRoot: false,
-      dreamIdleMinutes: 60
+      dreamIdleMinutes: 60,
+      autoCompactThreshold: 0.8
     });
     runtimeChannelContextFromWire = (context) => ({
       extensionId: context.channel,
@@ -6473,7 +6855,7 @@ var init_src4 = __esm({
         ...typeof record.rootMemory === "string" && record.rootMemory.trim() ? { rootMemory: record.rootMemory.trim() } : {}
       };
     };
-    normalizeMarkdownFile = (value) => `${value.trimEnd()}
+    normalizeMarkdownFile2 = (value) => `${value.trimEnd()}
 `;
     sanitizeSessionTitle = (value) => {
       const title = value.split(/\r?\n/).map((line) => line.trim()).find(Boolean)?.replace(/^["'`“”‘’]+|["'`“”‘’]+$/g, "").replace(/[.!?。！？]+$/g, "").trim();
@@ -8472,12 +8854,13 @@ var init_index = __esm({
     };
     runChat = async (options, io) => {
       const loadProjectConfig = async (project2) => options.config ?? await loadScorelConfig({ cwd: project2.workDir });
+      const loadProjectConfigProfile = async (project2) => options.config ?? await loadScorelConfigProfile({ cwd: project2.workDir });
       const daemon = new ScorelHost({
         sessionsDir: options.sessionsDir,
         projectsPath: join16(options.stateDir, "projects.json"),
         deviceId: asDeviceId("device_local"),
         loadConfig: async ({ project: project2 }) => loadProjectConfig(project2),
-        loadConfigProfile: async ({ project: project2 }) => loadScorelConfigProfile({ cwd: project2.workDir }),
+        loadConfigProfile: async ({ project: project2 }) => loadProjectConfigProfile(project2),
         createRuntime: async ({ project: project2, selectedModel, purpose }) => createRealRuntime({
           cwd: project2.workDir,
           config: await loadProjectConfig(project2),
