@@ -36,12 +36,14 @@ import {
   renderSkillListing,
   renderSystemPrompt,
   renderModelProfileConfig,
+  readSessionMemory,
   resolveModelSelection,
   resolvePiAiModel,
   scanSkillIndex,
   sessionLogFilePath,
   scorelSessionsDir,
   scorelMemoryPaths,
+  writeSessionMemory,
   type ExtensionManifest,
   type ScorelConfig,
   type ScorelConfigProfile,
@@ -94,6 +96,8 @@ export const daemonPackageName = "@scorel/daemon" as const;
 export const daemonCoreDependency = corePackageName;
 export const daemonProtocolDependency = protocolPackageName;
 export const daemonProtocolVersion = protocolVersion;
+const SESSION_MEMORY_COMPACT_WAIT_MS = 5_000;
+const AUTO_COMPACT_RETAINED_EVENTS = 8;
 export type ScorelHostTransport = DaemonTransport;
 export { loadScorelConfig, loadScorelConfigProfile, scorelSessionsDir, type ScorelConfig };
 export {
@@ -544,6 +548,7 @@ type PersistentEventInput =
   | Omit<Extract<PersistentEvent, { type: "session_title_updated" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "instruction_snapshot" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "harness_item" }>, "seq">
+  | Omit<Extract<PersistentEvent, { type: "compact" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "queue_update" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "skill_index_snapshot" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "skill_index_delta" }>, "seq">;
@@ -588,6 +593,7 @@ export class ScorelHost {
   readonly #events = new Map<SessionId, ScorelEvent[]>();
   readonly #seqs = new Map<SessionId, number>();
   readonly #memoryDreams = new Map<ProjectId, MemoryDreamSchedule>();
+  readonly #sessionMemoryUpdates = new Map<SessionId, Promise<void>>();
   readonly #imExtensions = new Map<string, LoadedImExtension>();
   readonly #imBindings = new Map<string, ImSessionBinding>();
   readonly #registry: ProjectRegistry;
@@ -967,6 +973,7 @@ export class ScorelHost {
     await this.#syncSkillIndex(lane, clientId);
     await this.#ensureMemoryHarness(lane, clientId);
     await this.#syncMemoryTools(lane, clientId);
+    await this.#autoCompactIfNeeded(lane, clientId);
     this.#syncChannelTool(lane, input.channelContext);
     let parentId = input.parentId === undefined ? lane.session.activeLeafId : input.parentId;
     if (input.channelContext) {
@@ -1031,6 +1038,7 @@ export class ScorelHost {
       assistantEventId: state.finalAssistantEventId,
       source: input.source,
     });
+    this.#scheduleSessionMemoryUpdate(lane, clientId);
     input.onComplete?.(result);
     return { ...result, status: "completed" };
   }
@@ -1597,6 +1605,242 @@ export class ScorelHost {
         },
       }),
     );
+  }
+
+  async #autoCompactIfNeeded(lane: SessionLane, clientId: ClientId): Promise<void> {
+    const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
+    if (memory.autoCompactThreshold <= 0) {
+      return;
+    }
+    const leafId = lane.session.activeLeafId;
+    if (!leafId) {
+      return;
+    }
+    const leaf = lane.session.tree.get(leafId)?.event;
+    if (leaf?.type === "compact") {
+      return;
+    }
+    const context = buildContext(lane.session.tree, leafId);
+    const tokensBefore = estimateScorelMessagesTokens(context);
+    const contextWindow = lane.session.header.meta.selectedModel?.contextWindow ?? 200_000;
+    const threshold = Math.floor(contextWindow * memory.autoCompactThreshold);
+    if (tokensBefore < threshold) {
+      return;
+    }
+    await this.#waitForSessionMemoryUpdate(lane.session.header.sessionId, SESSION_MEMORY_COMPACT_WAIT_MS);
+    const sessionMemory = memory.sessionMemory ? await this.#readSessionMemory(lane) : "";
+    const compactSource = sessionMemory ? "session_memory" : "foreground_compact";
+    const compactSummary = sessionMemory || await this.#generateForegroundCompactSummary(lane).catch((cause) => {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      void this.#appendDiagnostic(lane.session.header.sessionId, "foreground_compact_failed", {
+        clientId,
+        message: error.message,
+        stack: shortStack(error),
+      });
+      return "";
+    });
+    const summary = [
+      compactSummary || this.#fallbackSessionMemorySummary(lane).summary,
+    ].join("\n").trim();
+    const compacted = await this.#appendPersistent(lane, {
+      type: "compact",
+      id: asEventId(this.#createId()),
+      parentId: leafId,
+      sessionId: lane.session.header.sessionId,
+      clientId,
+      ts: this.#now(),
+      summary,
+      compactedThrough: leafId,
+      tokensBefore,
+      tokensAfter: estimateTextTokens(summary),
+      retainedEventCount: AUTO_COMPACT_RETAINED_EVENTS,
+    });
+    await this.#appendDiagnostic(lane.session.header.sessionId, "auto_compacted", {
+      clientId,
+      compactEventId: compacted.id,
+      source: compactSource,
+      tokensBefore,
+      tokensAfter: "tokensAfter" in compacted ? compacted.tokensAfter : undefined,
+      threshold,
+    });
+  }
+
+  #scheduleSessionMemoryUpdate(lane: SessionLane, clientId: ClientId): void {
+    const sessionId = lane.session.header.sessionId;
+    const previous = this.#sessionMemoryUpdates.get(sessionId) ?? Promise.resolve();
+    const task = previous.catch(() => undefined).then(() => this.#maintainSessionMemory(lane, clientId));
+    this.#sessionMemoryUpdates.set(sessionId, task);
+    void task.catch((cause) => {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      void this.#appendDiagnostic(sessionId, "session_memory_update_failed", {
+        clientId,
+        message: error.message,
+        stack: shortStack(error),
+      });
+    }).finally(() => {
+      if (this.#sessionMemoryUpdates.get(sessionId) === task) {
+        this.#sessionMemoryUpdates.delete(sessionId);
+      }
+    });
+  }
+
+  async #waitForSessionMemoryUpdate(sessionId: SessionId, timeoutMs: number): Promise<void> {
+    const update = this.#sessionMemoryUpdates.get(sessionId);
+    if (!update) {
+      return;
+    }
+    await Promise.race([
+      update.catch(() => undefined),
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+  }
+
+  async #readSessionMemory(lane: SessionLane): Promise<string> {
+    return (await readSessionMemory({
+      projectId: lane.project.projectId,
+      sessionId: lane.session.header.sessionId,
+      homeDir: this.#memoryHomeDir,
+    })).trim();
+  }
+
+  async #maintainSessionMemory(lane: SessionLane, clientId: ClientId): Promise<void> {
+    const memory = await this.#safeMemorySettingsForRuntime(lane, clientId);
+    if (!memory.sessionMemory) {
+      return;
+    }
+    const current = await this.#readSessionMemory(lane);
+    const generated = await this.#generateSessionMemory(lane, current).catch(() => undefined);
+    const fallback = this.#fallbackSessionMemorySummary(lane);
+    const result = await writeSessionMemory({
+      projectId: lane.project.projectId,
+      sessionId: lane.session.header.sessionId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+      summary: generated?.summary ?? fallback.summary,
+      recentMessages: generated?.recentMessages ?? fallback.recentMessages,
+      decisions: generated?.decisions ?? fallback.decisions,
+      followUps: generated?.followUps ?? fallback.followUps,
+    });
+    await this.#appendDiagnostic(lane.session.header.sessionId, "session_memory_updated", {
+      clientId,
+      path: result.path,
+      bytes: result.content.length,
+    });
+  }
+
+  async #generateForegroundCompactSummary(lane: SessionLane): Promise<string> {
+    const selectedModel = await this.#selectedModelFromMeta(
+      { projectId: lane.project.projectId, modelSelection: { role: "auxiliary" } },
+      lane.project,
+    );
+    if (!selectedModel) {
+      return "";
+    }
+    const runtime = await this.#createRuntime({
+      sessionId: lane.session.header.sessionId,
+      project: lane.project,
+      selectedModel,
+      purpose: "memory",
+    });
+    const prompt = [
+      "Compact the Scorel session context for continuation.",
+      "Return a dense markdown summary only. Do not mention these instructions.",
+      "Preserve current task, user requirements, decisions, important files/functions, errors, commands, and next steps.",
+      "",
+      "<recent_events>",
+      this.#recentConversationLines(lane, 40).join("\n"),
+      "</recent_events>",
+    ].join("\n");
+    let raw = "";
+    for await (const rawEvent of runtime.executeTurn(
+      [{ role: "user", content: [{ type: "text", text: prompt }] }],
+      "You compact session context. Output markdown only.",
+      {},
+    )) {
+      if (rawEvent.type === "text_delta") {
+        raw += rawEvent.delta;
+      } else if (rawEvent.type === "message_end") {
+        raw = assistantText(rawEvent.message) || raw;
+      } else if (rawEvent.type === "error") {
+        throw rawEvent.error;
+      }
+    }
+    return raw.trim();
+  }
+
+  async #generateSessionMemory(
+    lane: SessionLane,
+    current: string,
+  ): Promise<{ summary?: string; recentMessages?: string[]; decisions?: string[]; followUps?: string[] } | undefined> {
+    const selectedModel = await this.#selectedModelFromMeta(
+      { projectId: lane.project.projectId, modelSelection: { role: "auxiliary" } },
+      lane.project,
+    );
+    if (!selectedModel) {
+      return undefined;
+    }
+    const runtime = await this.#createRuntime({
+      sessionId: lane.session.header.sessionId,
+      project: lane.project,
+      selectedModel,
+      purpose: "memory",
+    });
+    const prompt = [
+      "Update Scorel session memory for context management. Return strict JSON only.",
+      "This is not long-term memory. It is a compact current-session summary used by future auto compact.",
+      "Keys: summary string, recentMessages string[], decisions string[], followUps string[].",
+      "Keep it dense, current, and useful after old conversation history is replaced.",
+      "",
+      "<current_session_memory>",
+      current.trim() || "(empty)",
+      "</current_session_memory>",
+      "",
+      "<recent_events>",
+      this.#recentConversationLines(lane, 24).join("\n"),
+      "</recent_events>",
+    ].join("\n");
+    let raw = "";
+    for await (const rawEvent of runtime.executeTurn(
+      [{ role: "user", content: [{ type: "text", text: prompt }] }],
+      "You maintain session memory for context compaction. Output strict JSON only.",
+      {},
+    )) {
+      if (rawEvent.type === "text_delta") {
+        raw += rawEvent.delta;
+      } else if (rawEvent.type === "message_end") {
+        raw = assistantText(rawEvent.message) || raw;
+      } else if (rawEvent.type === "error") {
+        throw rawEvent.error;
+      }
+    }
+    return parseSessionMemoryJson(raw);
+  }
+
+  #fallbackSessionMemorySummary(lane: SessionLane): {
+    summary: string;
+    recentMessages: string[];
+    decisions: string[];
+    followUps: string[];
+  } {
+    const recentMessages = this.#recentConversationLines(lane, 12);
+    return {
+      summary: recentMessages.at(-1) ?? "Session is active. Continue from the latest visible user request.",
+      recentMessages,
+      decisions: [],
+      followUps: [],
+    };
+  }
+
+  #recentConversationLines(lane: SessionLane, limit: number): string[] {
+    const events = [...lane.session.tree]
+      .filter((event) => "message" in event || event.type === "compact")
+      .slice(-limit);
+    return events.map((event) => {
+      if (event.type === "compact") {
+        return `[compact] ${compactLine(event.summary, 500)}`;
+      }
+      return `[${event.message.role}] ${compactLine(messageText(event.message), 500)}`;
+    });
   }
 
   async #appendChannelHarness(
@@ -2387,9 +2631,11 @@ export class ScorelHost {
       renderMemoryConfig({
         enabled: request.enabled,
         daily: request.daily,
+        sessionMemory: request.sessionMemory,
         autoDream: request.autoDream,
         promoteRoot: request.promoteRoot,
         dreamIdleMinutes: request.dreamIdleMinutes,
+        autoCompactThreshold: request.autoCompactThreshold,
         existingConfigText,
       }),
       "utf8",
@@ -2698,12 +2944,67 @@ const assistantText = (message: ScorelMessage): string =>
     .join("\n")
     .trim();
 
+const messageText = (message: ScorelMessage): string => {
+  const text = message.content
+    .map((block) => {
+      if (block.type === "text") {
+        return block.text;
+      }
+      if (block.type === "thinking") {
+        return `[thinking] ${block.text}`;
+      }
+      if (block.type === "tool_call") {
+        return `[tool_call:${block.toolName}] ${JSON.stringify(block.args)}`;
+      }
+      if (block.type === "tool_result") {
+        return `[tool_result:${block.toolName}] ${JSON.stringify(block.result)}`;
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  return text || "(empty)";
+};
+
+const estimateScorelMessagesTokens = (messages: ScorelMessage[]): number =>
+  estimateTextTokens(messages.map(messageText).join("\n"));
+
+const estimateTextTokens = (value: string): number => Math.ceil(value.length / 3);
+
+const compactLine = (value: string, maxChars: number): string =>
+  value.replace(/\s+/g, " ").trim().slice(0, maxChars);
+
+const parseSessionMemoryJson = (
+  raw: string,
+): { summary?: string; recentMessages?: string[]; decisions?: string[]; followUps?: string[] } | undefined => {
+  const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  if (!text) {
+    return undefined;
+  }
+  const parsed = JSON.parse(text) as unknown;
+  if (!isRecord(parsed)) {
+    return undefined;
+  }
+  return {
+    summary: typeof parsed.summary === "string" ? parsed.summary : undefined,
+    recentMessages: stringArray(parsed.recentMessages),
+    decisions: stringArray(parsed.decisions),
+    followUps: stringArray(parsed.followUps),
+  };
+};
+
+const stringArray = (value: unknown): string[] | undefined =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : undefined;
+
 const disabledMemorySettings = (): MemorySettings => ({
   enabled: false,
   daily: false,
+  sessionMemory: false,
   autoDream: false,
   promoteRoot: false,
   dreamIdleMinutes: 60,
+  autoCompactThreshold: 0.8,
 });
 
 const runtimeChannelContextFromWire = (context: ChannelContext): RuntimeChannelContext => ({

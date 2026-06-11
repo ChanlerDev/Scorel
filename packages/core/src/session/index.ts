@@ -19,7 +19,8 @@ import {
 } from "@scorel/protocol";
 
 type MessagePersistentEvent = Extract<PersistentEvent, { message: ScorelMessage }>;
-type ConversationPersistentEvent = MessagePersistentEvent | HarnessItemEvent;
+type CompactPersistentEvent = Extract<PersistentEvent, { type: "compact" }>;
+type ConversationPersistentEvent = MessagePersistentEvent | HarnessItemEvent | CompactPersistentEvent;
 
 export type SessionControlState = {
   instructionSnapshot?: InstructionSnapshot;
@@ -322,8 +323,9 @@ export const loadSession = async (options: LoadSessionOptions): Promise<JsonlSes
   return new JsonlSession(filePath, header, tree);
 };
 
-export const buildContext = (tree: SessionTree, leafId: EventId): ScorelMessage[] =>
-  tree.getPath(leafId).reduce<ScorelMessage[]>((messages, id) => {
+export const buildContext = (tree: SessionTree, leafId: EventId): ScorelMessage[] => {
+  const path = tree.getPath(leafId);
+  return path.reduce<ScorelMessage[]>((messages, id, index) => {
     const event = tree.get(id)?.event;
     if (!event) {
       return messages;
@@ -335,8 +337,58 @@ export const buildContext = (tree: SessionTree, leafId: EventId): ScorelMessage[
     if (event.type === "harness_item") {
       appendHarnessItemToContext(messages, event);
     }
+    if (event.type === "compact") {
+      const retained = retainedMessagesBeforeCompact(tree, path.slice(0, index), event.retainedEventCount);
+      messages.length = 0;
+      messages.push(compactSummaryMessage(event));
+      messages.push(...retained);
+    }
     return messages;
   }, []);
+};
+
+const retainedMessagesBeforeCompact = (
+  tree: SessionTree,
+  pathBeforeCompact: EventId[],
+  retainedEventCount: number,
+): ScorelMessage[] => {
+  if (retainedEventCount <= 0) {
+    return [];
+  }
+  const candidateStart = Math.max(0, pathBeforeCompact.length - retainedEventCount);
+  let start = pathBeforeCompact.length;
+  for (let index = candidateStart; index < pathBeforeCompact.length; index += 1) {
+    const event = tree.get(pathBeforeCompact[index])?.event;
+    if (isRetainedContextStart(event)) {
+      start = index;
+      break;
+    }
+  }
+  const retained: ScorelMessage[] = [];
+  for (const id of pathBeforeCompact.slice(start)) {
+    const event = tree.get(id)?.event;
+    if (!event) {
+      continue;
+    }
+    if ("message" in event) {
+      retained.push(cloneMessage(event.message));
+    } else if (event.type === "harness_item") {
+      appendHarnessItemToContext(retained, event);
+    } else if (event.type === "compact") {
+      retained.length = 0;
+      retained.push(compactSummaryMessage(event));
+    }
+  }
+  return retained;
+};
+
+const isRetainedContextStart = (event: PersistentEvent | undefined): boolean =>
+  event?.type === "user_message" ||
+  event?.type === "compact" ||
+  (
+    event?.type === "assistant_message" &&
+    event.message.content.some((block) => block.type === "tool_call")
+  );
 
 const parseJsonLine = (line: string, lineNumber: number): unknown => {
   try {
@@ -391,6 +443,7 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
     value.type !== "session_title_updated" &&
     value.type !== "instruction_snapshot" &&
     value.type !== "harness_item" &&
+    value.type !== "compact" &&
     value.type !== "queue_update" &&
     value.type !== "skill_index_snapshot" &&
     value.type !== "skill_index_delta"
@@ -421,6 +474,9 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
   if (value.type === "harness_item" && !isHarnessItem(value.item)) {
     throw new SessionStoreError("invalid_event", "harness_item is missing item payload");
   }
+  if (value.type === "compact" && !isCompactEvent(value)) {
+    throw new SessionStoreError("invalid_event", "compact is missing summary payload");
+  }
   if (value.type === "queue_update" && !isQueueUpdate(value)) {
     throw new SessionStoreError("invalid_event", "queue_update is missing queue payload");
   }
@@ -436,7 +492,8 @@ const isConversationEvent = (event: PersistentEvent): event is ConversationPersi
   event.type === "user_message" ||
   event.type === "assistant_message" ||
   event.type === "tool_result" ||
-  event.type === "harness_item";
+  event.type === "harness_item" ||
+  event.type === "compact";
 
 const isInstructionSnapshot = (value: unknown): value is InstructionSnapshot => {
   if (!isRecord(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
@@ -457,6 +514,13 @@ const isHarnessItem = (value: unknown): boolean =>
   typeof value.origin === "string" &&
   typeof value.content === "string" &&
   (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
+
+const isCompactEvent = (value: Record<string, unknown>): boolean =>
+  typeof value.summary === "string" &&
+  typeof value.compactedThrough === "string" &&
+  typeof value.tokensBefore === "number" &&
+  typeof value.tokensAfter === "number" &&
+  typeof value.retainedEventCount === "number";
 
 const isQueueUpdate = (value: Record<string, unknown>): boolean =>
   (value.queue === "follow_up" || value.queue === "steer") &&
@@ -550,6 +614,24 @@ const isToolResultWithContent = (value: unknown): value is { content: unknown[] 
 
 const renderSystemReminder = (content: string): string =>
   `<system-reminder>\n${content}\n</system-reminder>`;
+
+const compactSummaryMessage = (event: CompactPersistentEvent): ScorelMessage => ({
+  role: "user",
+  content: [{
+    type: "text",
+    text: renderSystemReminder([
+      "Earlier session context has been compacted.",
+      "",
+      event.summary.trim(),
+      "",
+      "Use this summary as continuity context. Verify current repository facts before acting.",
+    ].join("\n")),
+  }],
+  meta: {
+    source: "compact",
+    compactedThrough: event.compactedThrough,
+  },
+});
 
 const cloneMessage = (message: ScorelMessage): ScorelMessage => ({
   ...message,

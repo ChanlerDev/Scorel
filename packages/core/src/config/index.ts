@@ -25,7 +25,7 @@ export const SCOREL_CONFIG_SCHEMA = {
       keys: ["primary", "standard", "auxiliary"],
     },
     memory: {
-      keys: ["enabled", "daily", "autoDream", "promoteRoot", "dreamIdleMinutes"],
+      keys: ["enabled", "daily", "sessionMemory", "autoDream", "promoteRoot", "dreamIdleMinutes", "autoCompactThreshold"],
     },
     extension: {
       keys: ["enabled", "kind"],
@@ -106,9 +106,11 @@ export type ScorelConfig = {
 export type MemoryConfig = {
   enabled: boolean;
   daily: boolean;
+  sessionMemory: boolean;
   autoDream: boolean;
   promoteRoot: boolean;
   dreamIdleMinutes: number;
+  autoCompactThreshold: number;
 };
 
 export type ExtensionConfig = {
@@ -545,9 +547,11 @@ export const renderMemoryConfig = (input: UpsertMemoryConfigInput): string => {
     ...loadMemory(raw),
     ...(input.enabled !== undefined ? { enabled: requireBoolean(input.enabled, "memory.enabled") } : {}),
     ...(input.daily !== undefined ? { daily: requireBoolean(input.daily, "memory.daily") } : {}),
+    ...(input.sessionMemory !== undefined ? { sessionMemory: requireBoolean(input.sessionMemory, "memory.sessionMemory") } : {}),
     ...(input.autoDream !== undefined ? { autoDream: requireBoolean(input.autoDream, "memory.autoDream") } : {}),
     ...(input.promoteRoot !== undefined ? { promoteRoot: requireBoolean(input.promoteRoot, "memory.promoteRoot") } : {}),
     ...(input.dreamIdleMinutes !== undefined ? { dreamIdleMinutes: requireNonNegativeNumber(input.dreamIdleMinutes, "memory.dreamIdleMinutes") } : {}),
+    ...(input.autoCompactThreshold !== undefined ? { autoCompactThreshold: requireCompactThreshold(input.autoCompactThreshold) } : {}),
   };
   return renderRawConfig(raw);
 };
@@ -578,17 +582,21 @@ export const renderExtensionConfig = (input: UpsertExtensionConfigInput): string
 const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   enabled: true,
   daily: true,
+  sessionMemory: true,
   autoDream: true,
   promoteRoot: true,
   dreamIdleMinutes: 60,
+  autoCompactThreshold: 0.8,
 };
 
 const loadMemory = (raw: RawConfig): MemoryConfig => ({
   enabled: raw.memory?.enabled ?? DEFAULT_MEMORY_CONFIG.enabled,
   daily: raw.memory?.daily ?? DEFAULT_MEMORY_CONFIG.daily,
+  sessionMemory: raw.memory?.sessionMemory ?? DEFAULT_MEMORY_CONFIG.sessionMemory,
   autoDream: raw.memory?.autoDream ?? DEFAULT_MEMORY_CONFIG.autoDream,
   promoteRoot: raw.memory?.promoteRoot ?? DEFAULT_MEMORY_CONFIG.promoteRoot,
   dreamIdleMinutes: requireNonNegativeNumber(raw.memory?.dreamIdleMinutes ?? DEFAULT_MEMORY_CONFIG.dreamIdleMinutes, "memory.dreamIdleMinutes"),
+  autoCompactThreshold: requireCompactThreshold(raw.memory?.autoCompactThreshold ?? DEFAULT_MEMORY_CONFIG.autoCompactThreshold),
 });
 
 const loadExtensions = (raw: RawConfig): Record<string, ExtensionConfig> => {
@@ -901,9 +909,11 @@ const renderRawConfig = (raw: RawConfig): string => {
     lines.push("[memory]");
     lines.push(`enabled = ${memory.enabled}`);
     lines.push(`daily = ${memory.daily}`);
+    lines.push(`sessionMemory = ${memory.sessionMemory}`);
     lines.push(`autoDream = ${memory.autoDream}`);
     lines.push(`promoteRoot = ${memory.promoteRoot}`);
     lines.push(`dreamIdleMinutes = ${memory.dreamIdleMinutes}`);
+    lines.push(`autoCompactThreshold = ${memory.autoCompactThreshold}`);
     lines.push("");
   }
   for (const [extensionId, extension] of Object.entries(raw.extensions).sort(([left], [right]) => left.localeCompare(right))) {
@@ -1003,6 +1013,14 @@ const requireNonNegativeNumber = (value: number | undefined, name: string): numb
   const number = requireNumber(value, name);
   if (number < 0) {
     throw new Error(`${name} must be non-negative`);
+  }
+  return number;
+};
+
+const requireCompactThreshold = (value: number | undefined): number => {
+  const number = requireNumber(value, "memory.autoCompactThreshold");
+  if (number <= 0 || number >= 1) {
+    throw new Error("memory.autoCompactThreshold must be greater than 0 and less than 1");
   }
   return number;
 };

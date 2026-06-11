@@ -60,9 +60,11 @@ const modelProfile: GuiModelProfileView = {
 const memorySettings = {
   enabled: true,
   daily: true,
+  sessionMemory: true,
   autoDream: true,
   promoteRoot: true,
   dreamIdleMinutes: 60,
+  autoCompactThreshold: 0.8,
 };
 
 const telegramSettings = {
@@ -400,6 +402,8 @@ describe("GUI shell rendering contract", () => {
 
     expect(html).toContain("启用记忆");
     expect(html).toContain("自动 daily");
+    expect(html).toContain("Session Memory");
+    expect(html).toContain("Auto Compact");
     expect(html).toContain("自动 dream");
     expect(html).toContain("Dream 延迟");
     expect(html).toContain("提升到全局");

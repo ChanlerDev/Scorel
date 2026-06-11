@@ -588,6 +588,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.12 | [`S0080`](spec/ship/S0080-session-title-hook-and-gui-markdown-dark-code.md) | Session title 生成改为 after-user-message hook，并修复 GUI Markdown 深色代码块 | Done |
 | M9.F1.13 | [`S0081`](spec/ship/S0081-automatic-memory.md) | 自动 memory context、daily、dream consolidation、GUI Settings 与 Command+, 设置入口 | Done |
 | M9.F1.14 | [`S0082`](spec/ship/S0082-memory-journal-tool-and-idle-dream.md) | Daily 改为 agent 主循环 AppendDaily 工具，dream 改为项目 idle 后延迟整合 project/root memory | Done |
+| M9.F1.15 | [`S0086`](spec/ship/S0086-auto-compact-and-session-memory.md) | 80% auto compact、compact replay barrier 和每轮 session memory 维护 | Done |
 
 **Not in M9 Follow-up**:
 

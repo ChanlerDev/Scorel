@@ -96,9 +96,11 @@ auxiliary = "aux"
       memory: {
         enabled: true,
         daily: true,
+        sessionMemory: true,
         autoDream: true,
         promoteRoot: true,
         dreamIdleMinutes: 60,
+        autoCompactThreshold: 0.8,
       },
     });
   });
@@ -126,32 +128,40 @@ auxiliary = "main"
 [memory]
 enabled = true
 daily = false
+sessionMemory = true
 autoDream = true
 promoteRoot = false
 dreamIdleMinutes = 15
+autoCompactThreshold = 0.75
 `);
 
     await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "secret" } })).resolves.toMatchObject({
       memory: {
         enabled: true,
         daily: false,
+        sessionMemory: true,
         autoDream: true,
         promoteRoot: false,
         dreamIdleMinutes: 15,
+        autoCompactThreshold: 0.75,
       },
     });
 
     const rendered = renderMemoryConfig({
       existingConfigText: await readProjectConfig(cwd),
       daily: true,
+      sessionMemory: false,
       promoteRoot: true,
       dreamIdleMinutes: 60,
+      autoCompactThreshold: 0.8,
     });
 
     expect(rendered).toContain("[memory]");
     expect(rendered).toContain("daily = true");
+    expect(rendered).toContain("sessionMemory = false");
     expect(rendered).toContain("promoteRoot = true");
     expect(rendered).toContain("dreamIdleMinutes = 60");
+    expect(rendered).toContain("autoCompactThreshold = 0.8");
   });
 
   it("loads extension enablement and config without resolving secrets", async () => {

@@ -72,9 +72,11 @@ const modelProfile: ScorelConfig = {
   memory: {
     enabled: true,
     daily: true,
+    sessionMemory: true,
     autoDream: true,
     promoteRoot: true,
     dreamIdleMinutes: 60,
+    autoCompactThreshold: 0.8,
   },
   extensions: {},
 };
@@ -362,6 +364,276 @@ describe("ScorelHost + embedded transport", () => {
       .filter((event) => event.type === "harness_item" && event.item?.kind === "memory");
     expect(memoryHarnesses).toHaveLength(1);
   });
+
+  it("maintains session memory asynchronously after completed turns", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-session-memory-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    const sessionMemoryProvider: RuntimeProvider = {
+      streamTurn: async function* () {
+        return assistantMessage(JSON.stringify({
+          summary: "正在实现 S0086 auto compact",
+          recentMessages: ["用户要求 session memory 作为异步 auto compact"],
+          decisions: ["session memory 不写入长期 MEMORY"],
+          followUps: ["达到阈值时直接用 session memory 写 compact"],
+        }));
+      },
+    };
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      modelProfile,
+      memoryHomeDir: root,
+      createRuntime: async ({ purpose }) => new ScorelRuntime({ provider: purpose === "memory" ? sessionMemoryProvider : provider }),
+      now: () => Date.UTC(2026, 5, 11, 9, 0),
+    });
+    await host.start();
+    const repo = join(root, "repo-session-memory");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_session_memory") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_session_memory_create"),
+      sessionId: asSessionId("ses_session_memory"),
+      meta: { projectId: project.projectId },
+    });
+    const response = waitForResponse(transport, "req_session_memory_send");
+
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_session_memory_send"),
+      sessionId: asSessionId("ses_session_memory"),
+      content: "实现 S0086",
+    });
+
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    const sessionMemoryPath = join(root, ".scorel", "context", "session-memory", project.projectId, "ses_session_memory.md");
+    await waitUntil(async () => {
+      const content = await readFile(sessionMemoryPath, "utf8").catch(() => "");
+      return content.includes("正在实现 S0086 auto compact");
+    });
+    const content = await readFile(sessionMemoryPath, "utf8");
+    expect(content).toContain("session memory 不写入长期 MEMORY");
+  });
+
+  it("auto compacts from existing session memory at the threshold", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-auto-compact-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    const compactProfile: ScorelConfig = {
+      ...modelProfile,
+      providerModels: {
+        ...modelProfile.providerModels,
+        main: {
+          ...modelProfile.providerModels.main,
+          contextWindow: 1000,
+        },
+      },
+      memory: {
+        ...modelProfile.memory,
+        autoCompactThreshold: 0.1,
+      },
+    };
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      modelProfile: compactProfile,
+      memoryHomeDir: root,
+      createRuntime: async () => new ScorelRuntime({ provider }),
+      now: () => Date.UTC(2026, 5, 11, 9, 0),
+    });
+    await host.start();
+    const repo = join(root, "repo-auto-compact");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    await mkdir(join(root, ".scorel", "context", "session-memory", project.projectId), { recursive: true });
+    await writeFile(
+      join(root, ".scorel", "context", "session-memory", project.projectId, "ses_compact.md"),
+      "# Session Memory: ses_compact\n\n## Current State\nReady compact summary from background session memory.\n",
+      "utf8",
+    );
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_compact") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_compact_create"),
+      sessionId: asSessionId("ses_compact"),
+      meta: { projectId: project.projectId },
+    });
+
+    const firstResponse = waitForResponse(transport, "req_compact_first");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_compact_first"),
+      sessionId: asSessionId("ses_compact"),
+      content: "x".repeat(900),
+    });
+    await expect(firstResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const secondResponse = waitForResponse(transport, "req_compact_second");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_compact_second"),
+      sessionId: asSessionId("ses_compact"),
+      content: "continue",
+    });
+    await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const sessionFile = await readFile(join(root, "sessions", "ses_compact.jsonl"), "utf8");
+    expect(sessionFile).toContain('"type":"compact"');
+    expect(sessionFile).toContain("Ready compact summary from background session memory");
+    expect(sessionFile.indexOf('"type":"compact"')).toBeLessThan(sessionFile.lastIndexOf('"type":"user_message"'));
+  });
+
+  it("falls back to foreground compact when session memory is disabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-foreground-compact-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    const compactProfile: ScorelConfig = {
+      ...modelProfile,
+      providerModels: {
+        ...modelProfile.providerModels,
+        main: {
+          ...modelProfile.providerModels.main,
+          contextWindow: 1000,
+        },
+      },
+      memory: {
+        ...modelProfile.memory,
+        sessionMemory: false,
+        autoCompactThreshold: 0.1,
+      },
+    };
+    const compactProvider: RuntimeProvider = {
+      streamTurn: async function* () {
+        return assistantMessage("Foreground compact summary from auxiliary.");
+      },
+    };
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      modelProfile: compactProfile,
+      memoryHomeDir: root,
+      createRuntime: async ({ purpose }) => new ScorelRuntime({ provider: purpose === "memory" ? compactProvider : provider }),
+      now: () => Date.UTC(2026, 5, 11, 9, 0),
+    });
+    await host.start();
+    const repo = join(root, "repo-foreground-compact");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_foreground_compact") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_foreground_compact_create"),
+      sessionId: asSessionId("ses_foreground_compact"),
+      meta: { projectId: project.projectId },
+    });
+
+    const firstResponse = waitForResponse(transport, "req_foreground_compact_first");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_foreground_compact_first"),
+      sessionId: asSessionId("ses_foreground_compact"),
+      content: "x".repeat(900),
+    });
+    await expect(firstResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const secondResponse = waitForResponse(transport, "req_foreground_compact_second");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_foreground_compact_second"),
+      sessionId: asSessionId("ses_foreground_compact"),
+      content: "continue",
+    });
+    await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const sessionFile = await readFile(join(root, "sessions", "ses_foreground_compact.jsonl"), "utf8");
+    expect(sessionFile).toContain('"type":"compact"');
+    expect(sessionFile).toContain("Foreground compact summary from auxiliary.");
+  });
+
+  it("does not block indefinitely when session memory update is in flight during compact", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-inflight-compact-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    const compactProfile: ScorelConfig = {
+      ...modelProfile,
+      providerModels: {
+        ...modelProfile.providerModels,
+        main: {
+          ...modelProfile.providerModels.main,
+          contextWindow: 1000,
+        },
+      },
+      memory: {
+        ...modelProfile.memory,
+        autoCompactThreshold: 0.1,
+      },
+    };
+    const never = new Promise<ScorelMessage>(() => undefined);
+    const compactProvider: RuntimeProvider = {
+      streamTurn: async function* ({ context }) {
+        const prompt = context.map((message) => message.content.map((block) => block.type === "text" ? block.text : "").join("\n")).join("\n");
+        if (prompt.includes("Update Scorel session memory")) {
+          return await never;
+        }
+        return assistantMessage("Foreground compact while session memory update is still running.");
+      },
+    };
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      modelProfile: compactProfile,
+      memoryHomeDir: root,
+      createRuntime: async ({ purpose }) => new ScorelRuntime({ provider: purpose === "memory" ? compactProvider : provider }),
+      now: () => Date.UTC(2026, 5, 11, 9, 0),
+    });
+    await host.start();
+    const repo = join(root, "repo-inflight-compact");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_inflight_compact") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_inflight_compact_create"),
+      sessionId: asSessionId("ses_inflight_compact"),
+      meta: { projectId: project.projectId },
+    });
+
+    const firstResponse = waitForResponse(transport, "req_inflight_compact_first");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_inflight_compact_first"),
+      sessionId: asSessionId("ses_inflight_compact"),
+      content: "x".repeat(900),
+    });
+    await expect(firstResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const secondResponse = waitForResponse(transport, "req_inflight_compact_second");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_inflight_compact_second"),
+      sessionId: asSessionId("ses_inflight_compact"),
+      content: "continue",
+    });
+    await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const sessionFile = await readFile(join(root, "sessions", "ses_inflight_compact.jsonl"), "utf8");
+    expect(sessionFile).toContain('"type":"compact"');
+    expect(sessionFile).toContain("Foreground compact while session memory update is still running.");
+  }, 10_000);
 
   it("runs idle dream after AppendDaily and updates project/root memory", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-idle-dream-"));
@@ -1023,7 +1295,7 @@ apiKey = "secret"
       source: "model",
       model: expect.objectContaining({ modelId: "aux" }),
     }));
-    expect(runtimeSelections).toEqual(["main", "aux"]);
+    expect(runtimeSelections.slice(0, 2)).toEqual(["main", "aux"]);
 
     const listResponse = waitForResponse(transport, "req_list_title");
     await transport.send({
@@ -1069,7 +1341,7 @@ apiKey = "secret"
 
     const file = await readFile(join(sessionsDir, "ses_explicit_title.jsonl"), "utf8");
     expect(file).not.toContain("session_title_updated");
-    expect(runtimeSelections).toEqual(["main"]);
+    expect(runtimeSelections[0]).toBe("main");
   });
 
   it("persists project ownership in session headers and restores lanes through the registry", async () => {

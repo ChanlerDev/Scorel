@@ -211,9 +211,11 @@ const builtinProfile: ScorelConfig = {
   memory: {
     enabled: true,
     daily: true,
+    sessionMemory: true,
     autoDream: true,
     promoteRoot: true,
     dreamIdleMinutes: 60,
+    autoCompactThreshold: 0.8,
   },
   extensions: {},
 };
@@ -252,9 +254,11 @@ const customProfile: ScorelConfig = {
   memory: {
     enabled: true,
     daily: true,
+    sessionMemory: true,
     autoDream: true,
     promoteRoot: true,
     dreamIdleMinutes: 60,
+    autoCompactThreshold: 0.8,
   },
   extensions: {},
 };

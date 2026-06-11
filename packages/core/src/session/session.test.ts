@@ -55,7 +55,38 @@ const assistantEvent = (id: string, parentId: string, seq: number, content: stri
   },
 });
 
-const toolResultEvent = (id: string, parentId: string, seq: number, content: string): PersistentEvent => ({
+const assistantToolCallEvent = (
+  id: string,
+  parentId: string,
+  seq: number,
+  toolCallId: string,
+): PersistentEvent => ({
+  type: "assistant_message",
+  id: asEventId(id),
+  parentId: asEventId(parentId),
+  seq: asSeq(seq),
+  sessionId,
+  clientId,
+  ts: 1_000 + seq,
+  message: {
+    role: "assistant",
+    stopReason: "tool_call",
+    content: [{
+      type: "tool_call",
+      toolCallId,
+      toolName: "Read",
+      args: { filePath: "README.md" },
+    }],
+  },
+});
+
+const toolResultEvent = (
+  id: string,
+  parentId: string,
+  seq: number,
+  content: string,
+  toolCallId = "call_1",
+): PersistentEvent => ({
   type: "tool_result",
   id: asEventId(id),
   parentId: asEventId(parentId),
@@ -68,12 +99,34 @@ const toolResultEvent = (id: string, parentId: string, seq: number, content: str
     content: [
       {
         type: "tool_result",
-        toolCallId: "call_1",
+        toolCallId,
         toolName: "Read",
         result: { content: [{ type: "text", text: content }] },
       },
     ],
   },
+});
+
+const compactEvent = (
+  id: string,
+  parentId: string,
+  seq: number,
+  compactedThrough: string,
+  summary: string,
+  retainedEventCount = 8,
+): PersistentEvent => ({
+  type: "compact",
+  id: asEventId(id),
+  parentId: asEventId(parentId),
+  seq: asSeq(seq),
+  sessionId,
+  clientId,
+  ts: 1_000 + seq,
+  compactedThrough: asEventId(compactedThrough),
+  summary,
+  tokensBefore: 1000,
+  tokensAfter: 250,
+  retainedEventCount,
 });
 
 const harnessItemEvent = (
@@ -278,6 +331,132 @@ describe("session core", () => {
     expect(original && "message" in original ? original.message : undefined).toEqual(
       "message" in expectedOriginal ? expectedOriginal.message : undefined,
     );
+  });
+
+  it("uses compact events as context barriers while keeping later messages", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    await session.append(userEvent("evt_1", null, 1, "old user"));
+    await session.append(assistantEvent("evt_2", "evt_1", 2, "old assistant"));
+    await session.append(compactEvent("evt_3", "evt_2", 3, "evt_2", "Summary of old context."));
+    await session.append(userEvent("evt_4", "evt_3", 4, "recent user"));
+    await session.append(assistantEvent("evt_5", "evt_4", 5, "recent assistant"));
+
+    const context = buildContext(session.tree, asEventId("evt_5"));
+
+    expect(context).toEqual([
+      {
+        role: "user",
+        content: [{
+          type: "text",
+          text: "<system-reminder>\nEarlier session context has been compacted.\n\nSummary of old context.\n\nUse this summary as continuity context. Verify current repository facts before acting.\n</system-reminder>",
+        }],
+        meta: {
+          source: "compact",
+          compactedThrough: "evt_2",
+        },
+      },
+      { role: "user", content: [{ type: "text", text: "old user" }] },
+      { role: "assistant", content: [{ type: "text", text: "old assistant" }] },
+      { role: "user", content: [{ type: "text", text: "recent user" }] },
+      { role: "assistant", content: [{ type: "text", text: "recent assistant" }] },
+    ]);
+
+    const loaded = await loadSession({ sessionsDir, sessionId });
+    expect(loaded.tree.getPath(asEventId("evt_5"))).toEqual(["evt_1", "evt_2", "evt_3", "evt_4", "evt_5"]);
+    expect(buildContext(loaded.tree, asEventId("evt_5"))).toHaveLength(5);
+  });
+
+  it("retains recent events from a safe boundary before the compact barrier", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    await session.append(userEvent("evt_1", null, 1, "old user"));
+    await session.append(assistantEvent("evt_2", "evt_1", 2, "old assistant"));
+    await session.append(userEvent("evt_3", "evt_2", 3, "latest user before compact"));
+    await session.append(assistantEvent("evt_4", "evt_3", 4, "latest assistant before compact"));
+    await session.append(toolResultEvent("evt_5", "evt_4", 5, "latest tool result before compact"));
+    await session.append(assistantEvent("evt_6", "evt_5", 6, "latest final assistant before compact"));
+    await session.append(compactEvent("evt_7", "evt_6", 7, "evt_6", "Summary of older context.", 4));
+    await session.append(userEvent("evt_8", "evt_7", 8, "new user after compact"));
+
+    const context = buildContext(session.tree, asEventId("evt_8"));
+
+    expect(context.map((message) => message.role)).toEqual([
+      "user",
+      "user",
+      "assistant",
+      "tool_result",
+      "assistant",
+      "user",
+    ]);
+    expect(context.map((message) => message.content[0])).toEqual([
+      expect.objectContaining({ type: "text", text: expect.stringContaining("Summary of older context.") }),
+      { type: "text", text: "latest user before compact" },
+      { type: "text", text: "latest assistant before compact" },
+      expect.objectContaining({ type: "tool_result" }),
+      { type: "text", text: "latest final assistant before compact" },
+      { type: "text", text: "new user after compact" },
+    ]);
+  });
+
+  it("retains the latest replayable tool loop from a long-running turn", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    await session.append(userEvent("evt_1", null, 1, "long task"));
+    await session.append(assistantToolCallEvent("evt_2", "evt_1", 2, "call_1"));
+    await session.append(toolResultEvent("evt_3", "evt_2", 3, "result 1"));
+    await session.append(assistantToolCallEvent("evt_4", "evt_3", 4, "call_2"));
+    await session.append(toolResultEvent("evt_5", "evt_4", 5, "result 2", "call_2"));
+    await session.append(assistantEvent("evt_6", "evt_5", 6, "final answer after tool loop"));
+    await session.append(compactEvent("evt_7", "evt_6", 7, "evt_6", "Summary of long task.", 4));
+    await session.append(userEvent("evt_8", "evt_7", 8, "continue after compact"));
+
+    const context = buildContext(session.tree, asEventId("evt_8"));
+
+    expect(context.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "tool_result",
+      "assistant",
+      "user",
+    ]);
+    expect(context.map((message) => message.content[0])).toEqual([
+      expect.objectContaining({ type: "text", text: expect.stringContaining("Summary of long task.") }),
+      expect.objectContaining({ type: "tool_call", toolCallId: "call_2" }),
+      expect.objectContaining({ type: "tool_result" }),
+      { type: "text", text: "final answer after tool loop" },
+      { type: "text", text: "continue after compact" },
+    ]);
   });
 
   it("replays queue updates as control state outside the conversation tree", async () => {

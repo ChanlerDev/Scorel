@@ -96,9 +96,11 @@ export type UpsertModelProfileInput = {
 export type MemorySettings = {
   enabled: boolean;
   daily: boolean;
+  sessionMemory: boolean;
   autoDream: boolean;
   promoteRoot: boolean;
   dreamIdleMinutes: number;
+  autoCompactThreshold: number;
 };
 
 export type UpsertMemorySettingsInput = Partial<MemorySettings> & {
@@ -228,6 +230,15 @@ export type HarnessItemEvent = PersistentEventBase & {
   item: HarnessItem;
 };
 
+export type CompactEvent = PersistentEventBase & {
+  type: "compact";
+  summary: string;
+  compactedThrough: EventId;
+  tokensBefore: number;
+  tokensAfter: number;
+  retainedEventCount: number;
+};
+
 export type QueueName = "follow_up" | "steer";
 
 export type QueueItem = {
@@ -283,6 +294,7 @@ export type PersistentEvent =
   | SessionTitleUpdatedEvent
   | InstructionSnapshotEvent
   | HarnessItemEvent
+  | CompactEvent
   | QueueUpdateEvent
   | SkillIndexSnapshotEvent
   | SkillIndexDeltaEvent;

@@ -93,6 +93,8 @@ describe("@scorel/protocol", () => {
           return input.snapshot.cwd;
         case "harness_item":
           return input.item.kind;
+        case "compact":
+          return input.summary;
         case "queue_update":
           return input.queue;
         case "skill_index_snapshot":

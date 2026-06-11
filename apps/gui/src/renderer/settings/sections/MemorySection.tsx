@@ -33,7 +33,7 @@ export function MemorySection(props: MemorySectionProps) {
 
   return (
     <>
-      <SettingsHeader title="记忆" subtitle="自动恢复项目上下文，并在后台沉淀长期记忆。" />
+      <SettingsHeader title="记忆" subtitle="管理长期记忆、会话连续性和自动上下文压缩。" />
       <section className="settings-section settings-section--wide">
         <SettingsCard>
           <SettingsRow
@@ -45,6 +45,28 @@ export function MemorySection(props: MemorySectionProps) {
             label="自动 daily"
             description="让 agent 在完成有意义工作时调用 AppendDaily，写入项目日记。"
             control={<Toggle checked={props.memory.daily} disabled={disabled || !props.memory.enabled} onChange={(daily) => void update({ daily })} ariaLabel="自动 daily" />}
+          />
+          <SettingsRow
+            label="Session Memory"
+            description="每轮结束后异步维护当前会话摘要，供 auto compact 直接替换旧上下文。"
+            control={<Toggle checked={props.memory.sessionMemory} disabled={disabled} onChange={(sessionMemory) => void update({ sessionMemory })} ariaLabel="Session Memory" />}
+          />
+          <SettingsRow
+            label="Auto Compact"
+            description="达到模型上下文窗口比例后，使用 session memory 写入 compact barrier。"
+            control={(
+              <Select
+                value={String(props.memory.autoCompactThreshold)}
+                disabled={disabled}
+                ariaLabel="Auto Compact"
+                options={[
+                  { value: "0.7", label: "70%" },
+                  { value: "0.8", label: "80%" },
+                  { value: "0.9", label: "90%" },
+                ]}
+                onChange={(value) => void update({ autoCompactThreshold: Number(value) })}
+              />
+            )}
           />
           <SettingsRow
             label="自动 dream"

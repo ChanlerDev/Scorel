@@ -34,9 +34,11 @@ const SIDEBAR_DEFAULT_WIDTH = 278;
 const defaultMemorySettings = (): GuiMemorySettingsView => ({
   enabled: true,
   daily: true,
+  sessionMemory: true,
   autoDream: true,
   promoteRoot: true,
   dreamIdleMinutes: 60,
+  autoCompactThreshold: 0.8,
 });
 
 const defaultTelegramSettings = (): GuiExtensionSettingsView => ({

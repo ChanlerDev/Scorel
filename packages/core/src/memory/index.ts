@@ -25,6 +25,11 @@ export type MemoryContext = {
   yesterdayDaily: string;
 };
 
+export type SessionMemoryPaths = {
+  sessionsDir: string;
+  sessionMemoryPath: string;
+};
+
 export type BuildMemoryContextOptions = {
   projectId: string;
   homeDir?: string;
@@ -45,6 +50,17 @@ export type AppendDailyInput = {
 
 export type CreateAppendDailyToolOptions = BuildMemoryContextOptions & {
   onAppend?: (result: { path: string; entry: string; date: string }) => void | Promise<void>;
+};
+
+export type SessionMemoryInput = {
+  sessionId: string;
+  projectId: string;
+  summary: string;
+  recentMessages?: string[];
+  decisions?: string[];
+  followUps?: string[];
+  now?: () => number;
+  homeDir?: string;
 };
 
 export const memoryDate = (timestamp: number): string => new Date(timestamp).toISOString().slice(0, 10);
@@ -68,6 +84,19 @@ export const scorelMemoryPaths = (options: BuildMemoryContextOptions): MemoryPat
     dreamStatePath: join(projectDir, "dream-state.json"),
     today,
     yesterday,
+  };
+};
+
+export const scorelSessionMemoryPaths = (options: {
+  projectId: string;
+  sessionId: string;
+  homeDir?: string;
+}): SessionMemoryPaths => {
+  const home = options.homeDir ?? homedir();
+  const sessionsDir = join(home, ".scorel", "context", "session-memory", safeProjectId(options.projectId));
+  return {
+    sessionsDir,
+    sessionMemoryPath: join(sessionsDir, `${safeProjectId(options.sessionId)}.md`),
   };
 };
 
@@ -169,6 +198,44 @@ export const mergeMemoryMarkdown = (current: string, addition: string): string =
   return `${normalized.trimEnd()}\n\n- ${text.replace(/^-+\s*/, "")}\n`;
 };
 
+export const readSessionMemory = async (options: {
+  projectId: string;
+  sessionId: string;
+  homeDir?: string;
+}): Promise<string> => {
+  const paths = scorelSessionMemoryPaths(options);
+  return trimForContext(await readOptional(paths.sessionMemoryPath), 12_000, "tail");
+};
+
+export const writeSessionMemory = async (input: SessionMemoryInput): Promise<{ path: string; content: string }> => {
+  const paths = scorelSessionMemoryPaths(input);
+  await mkdir(paths.sessionsDir, { recursive: true, mode: 0o700 });
+  const content = renderSessionMemory(input);
+  await writeFile(paths.sessionMemoryPath, content, { encoding: "utf8", mode: 0o600 });
+  return { path: paths.sessionMemoryPath, content };
+};
+
+export const renderSessionMemory = (input: SessionMemoryInput): string => {
+  const timestamp = new Date((input.now ?? Date.now)()).toISOString();
+  return normalizeMarkdownFile([
+    `# Session Memory: ${input.sessionId}`,
+    "",
+    `Updated: ${timestamp}`,
+    "",
+    "## Current State",
+    compactLine(input.summary, 1_200) || "- No durable session state captured yet.",
+    "",
+    "## Recent Work",
+    renderBullets(input.recentMessages, 360) || "- No recent work captured.",
+    "",
+    "## Decisions",
+    renderBullets(input.decisions, 360) || "- No session decisions captured.",
+    "",
+    "## Follow-ups",
+    renderBullets(input.followUps, 360) || "- No follow-ups captured.",
+  ].join("\n"));
+};
+
 const ensureMemoryFiles = async (paths: MemoryPaths): Promise<void> => {
   await mkdir(paths.rootDir, { recursive: true, mode: 0o700 });
   await mkdir(paths.projectDir, { recursive: true, mode: 0o700 });
@@ -213,6 +280,15 @@ const renderList = (label: string, values: string[] | undefined): string => {
   const items = (values ?? []).map((value) => compactLine(value, 240)).filter(Boolean);
   return items.length > 0 ? `${label}: ${items.join("; ")}` : "";
 };
+
+const renderBullets = (values: string[] | undefined, maxChars: number): string =>
+  (values ?? [])
+    .map((value) => compactLine(value, maxChars))
+    .filter(Boolean)
+    .map((value) => `- ${value}`)
+    .join("\n");
+
+export const normalizeMarkdownFile = (value: string): string => `${value.trimEnd()}\n`;
 
 const parseAppendDailyInput = (value: unknown): AppendDailyInput => {
   if (!isRecord(value)) {

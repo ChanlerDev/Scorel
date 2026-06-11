@@ -140,10 +140,11 @@ Session 是 append-only JSONL。Host 是唯一 writer，Entry 不直接写会话
 - `user_message`：用户输入。
 - `assistant_message`：模型输出。
 - `tool_result`：工具执行结果。
+- `compact`：旧上下文的压缩摘要，作为后续 `buildContext()` 的 replay barrier。
 - `queue_update`：follow-up / steer 队列状态。
 - `skill_index_snapshot` / `skill_index_delta`：Skill 路由表。
 
-JSONL 是恢复会话的事实来源。`buildContext()` 从事件树构造下一轮 LLM messages；UI 则从同一条事件流投影 transcript、工具块、运行状态和队列状态。
+JSONL 是恢复会话的事实来源。`buildContext()` 从事件树构造下一轮 LLM messages；遇到 `compact` 时，会用 compact summary 替换更早上下文，并最多保留最近 8 条从 `user_message`、`compact` 或带 `tool_call` 的 `assistant_message` 边界开始的原始 conversation events。UI 则从同一条事件流投影 transcript、工具块、运行状态和队列状态。
 
 这个设计的重点不是“保存聊天记录”，而是让 Agent 的输入、输出、工具调用、控制事件和恢复状态都落在同一条可检查的链路里。
 
@@ -183,6 +184,16 @@ Memory 的链路分三段：
 3. 项目空闲后，auxiliary model 读取 daily 和当前 memory，把稳定内容整理进 project/root `MEMORY.md`。
 
 当前规则是：一个 session 只注入一次 memory harness。Daily 和 dream 更新是给未来 session 用的，不刷新当前 session 的上下文。
+
+Auto compact 是当前 session 的上下文管理，不是长期 memory。Host 在每轮新用户消息写入前估算 context，默认达到模型窗口 80% 时追加 `compact` 事件。`compact` 优先使用后台维护的 session memory；如果 session memory 不存在或关闭，会降级到 foreground compact。后台 session memory 正在更新时，Host 最多等待 5 秒，然后继续执行，不让用户 turn 无限等待。
+
+Session memory 写在：
+
+```text
+~/.scorel/context/session-memory/<projectId>/<sessionId>.md
+```
+
+它只服务当前 session 的 auto compact，不写入 root/project `MEMORY.md`。GUI Settings 的 Memory 区域可以开关 session memory，并配置 auto compact 阈值。
 
 `AppendDaily` 返回的是普通 tool result，例如：
 
