@@ -55,6 +55,7 @@ export type GuiLocalHostService = {
   listLocalSessions(projectId: string): Promise<SessionSummary[]>;
   listLocalModels(projectId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
   upsertLocalModelProfile(input: UpsertModelProfileInput): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
+  removeLocalModelProvider(projectId: string, providerId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[]; removed: boolean }>;
   fetchLocalProviderModels(projectId: string, providerId: string): Promise<ProviderCatalogModelSummary[]>;
   getLocalMemorySettings(projectId: string): Promise<MemorySettings>;
   getLocalMemoryStatus(projectId: string): Promise<MemoryStatus>;
@@ -134,6 +135,9 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     },
     upsertLocalModelProfile(input) {
       return client.upsertModelProfile(input);
+    },
+    removeLocalModelProvider(projectId, providerId) {
+      return client.removeModelProvider({ projectId: asProjectId(projectId) as ProjectId, providerId });
     },
     fetchLocalProviderModels(projectId, providerId) {
       return client.fetchProviderModels({ projectId: asProjectId(projectId) as ProjectId, providerId });

@@ -805,6 +805,10 @@ export class ScorelHost {
         this.#respond(connection, message, await this.#handleUpsertModelProfile(message));
         break;
       }
+      case "remove_model_provider": {
+        this.#respond(connection, message, await this.#handleRemoveModelProvider(message));
+        break;
+      }
       case "fetch_provider_models": {
         this.#respond(connection, message, { models: await this.#fetchProviderModels(message.projectId, message.providerId) });
         break;
@@ -2750,6 +2754,39 @@ export class ScorelHost {
       modelId: request.modelId,
     });
     return this.#listModels(project.projectId);
+  }
+
+  async #handleRemoveModelProvider(
+    request: ClientRequest<"remove_model_provider">,
+  ): Promise<{
+    providers: ProviderConnectionSummary[];
+    providerModels: ProviderModelSummary[];
+    models: AvailableModelSummary[];
+    roles: Record<"primary" | "standard" | "auxiliary", string>;
+    warnings?: string[];
+    removed: boolean;
+  }> {
+    const project = await this.#registry.require(request.projectId);
+    const configPath = join(project.workDir, ".scorel", "config.toml");
+    let existingConfigText: string | undefined;
+    try {
+      existingConfigText = await readFile(configPath, "utf8");
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+    await mkdir(join(project.workDir, ".scorel"), { recursive: true });
+    await writeFile(
+      configPath,
+      renderModelProfileConfig({
+        removeProviderId: request.providerId,
+        existingConfigText,
+      }),
+      "utf8",
+    );
+    const profile = await this.#listModels(project.projectId);
+    return { ...profile, removed: true };
   }
 
   async #memorySettingsForProject(projectId: ProjectId): Promise<MemorySettings> {

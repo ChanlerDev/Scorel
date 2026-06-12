@@ -115,6 +115,7 @@ export type GuiApi = {
   listSessions(project: GuiProjectRef): Promise<SessionSummary[]>;
   listModels(project: GuiProjectRef): Promise<GuiModelProfileView>;
   upsertModelProfile(project: GuiProjectRef, input: GuiUpsertModelProfileInput): Promise<GuiModelProfileView>;
+  removeModelProvider(project: GuiProjectRef, providerId: string): Promise<GuiModelProfileView & { removed: boolean }>;
   fetchProviderModels(project: GuiProjectRef, providerId: string): Promise<GuiProviderCatalogModelView[]>;
   getMemorySettings(project: GuiProjectRef): Promise<GuiMemorySettingsView>;
   getMemoryStatus(project: GuiProjectRef): Promise<GuiMemoryStatusView>;
@@ -143,6 +144,7 @@ export const guiIpcChannels = {
   listSessions: "scorel:listSessions",
   listModels: "scorel:listModels",
   upsertModelProfile: "scorel:upsertModelProfile",
+  removeModelProvider: "scorel:removeModelProvider",
   fetchProviderModels: "scorel:fetchProviderModels",
   getMemorySettings: "scorel:getMemorySettings",
   getMemoryStatus: "scorel:getMemoryStatus",

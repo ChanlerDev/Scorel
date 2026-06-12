@@ -437,6 +437,7 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("选用");
     expect(html).toContain("配置");
     expect(html).toContain("测试模型");
+    expect(html).toContain("删除提供商");
     expect(html).not.toContain("保存提供商");
     expect(html).not.toContain("Context");
     expect(html).not.toContain("Max Tokens");

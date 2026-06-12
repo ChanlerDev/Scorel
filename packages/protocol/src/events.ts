@@ -93,6 +93,11 @@ export type UpsertModelProfileInput = {
   roles?: Partial<Record<ModelRole, string>>;
 };
 
+export type RemoveModelProviderInput = {
+  projectId: ProjectId;
+  providerId: string;
+};
+
 export type MemorySettings = {
   enabled: boolean;
   daily: boolean;

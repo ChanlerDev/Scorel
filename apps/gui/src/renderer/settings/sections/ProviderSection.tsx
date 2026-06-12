@@ -172,6 +172,27 @@ export function ProviderSection({
   const saveProvider = (form: ProviderForm): Promise<void> =>
     save(providerInput(form));
 
+  const removeSelectedProvider = async (): Promise<void> => {
+    if (!project || !selectedProvider || busy) return;
+    setBusy(true);
+    try {
+      const profile = await window.scorel.removeModelProvider(project, selectedProvider.providerId);
+      onModelProfileChange(profile);
+      const nextProvider = profile.providers[0];
+      setSelectedProviderId(nextProvider?.providerId ?? "");
+      setProviderForm(providerToForm(nextProvider) ?? DEFAULT_PROVIDER_FORM);
+      setProviderModelForm(providerModelToForm(profile.providerModels[0], nextProvider?.providerId) ?? DEFAULT_PROVIDER_MODEL_FORM);
+      setCatalogModels([]);
+      setConfigModel(null);
+      setModelTestMessage(null);
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const saveNewProvider = async (): Promise<void> => {
     if (!project) return;
     const input = providerInput(newProviderForm);
@@ -351,6 +372,13 @@ export function ProviderSection({
 
             <div className="provider-detail">
               <div className="provider-detail__scroll">
+                {selectedProvider ? (
+                  <div className="provider-detail__actions">
+                    <button type="button" className="button button--danger" disabled={busy || !project} onClick={() => void removeSelectedProvider()}>
+                      删除提供商
+                    </button>
+                  </div>
+                ) : null}
                 <div className="settings-form settings-form--compact">
                   <label>
                     <span>提供商名称</span>

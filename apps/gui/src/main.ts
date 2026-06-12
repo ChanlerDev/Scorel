@@ -128,6 +128,12 @@ const registerIpc = (): void => {
       ? requireConnectedLocalHost().upsertLocalModelProfile(payload)
       : relayService.upsertRemoteModelProfile(requireRelayDeviceId(ref), payload);
   });
+  ipcMain.handle(guiIpcChannels.removeModelProvider, async (_event, project: GuiProjectRef, providerId: string) => {
+    const ref = normalizeProjectRef(project);
+    return ref.source === "local"
+      ? requireConnectedLocalHost().removeLocalModelProvider(ref.projectId, providerId)
+      : relayService.removeRemoteModelProvider(requireRelayDeviceId(ref), ref.projectId, providerId);
+  });
   ipcMain.handle(guiIpcChannels.fetchProviderModels, async (_event, project: GuiProjectRef, providerId: string) => {
     const ref = normalizeProjectRef(project);
     return ref.source === "local"

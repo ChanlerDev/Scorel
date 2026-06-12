@@ -185,6 +185,7 @@ export type ResolvedModelSelection = {
 
 export type UpsertModelProfileConfigInput = {
   providerId?: string;
+  removeProviderId?: string;
   providerType?: "builtin" | "custom";
   provider?: string;
   apiKeyEnv?: string;
@@ -428,6 +429,10 @@ export const resolveModelSelection = (
 export const renderModelProfileConfig = (input: UpsertModelProfileConfigInput): string => {
   const raw = parseEditableConfig(input.existingConfigText);
 
+  if (input.removeProviderId) {
+    removeProvider(raw, requireIdentifier(input.removeProviderId, "removeProviderId"));
+  }
+
   if (input.providerType || input.provider || input.apiKeyEnv || input.apiKey || input.api || input.baseUrl) {
     const providerId = requireIdentifier(input.providerId, "providerId");
     const providerType = requireProviderType(input.providerType, "providerType");
@@ -539,6 +544,35 @@ export const renderModelProfileConfig = (input: UpsertModelProfileConfigInput): 
   }
 
   return renderRawConfig(raw);
+};
+
+const removeProvider = (raw: RawConfig, providerId: string): void => {
+  delete raw.providers[providerId];
+  const removedProviderModels = new Set<string>();
+  for (const [providerModelId, providerModel] of Object.entries(raw.providerModels)) {
+    if (providerModel.provider === providerId) {
+      delete raw.providerModels[providerModelId];
+      removedProviderModels.add(providerModelId);
+    }
+  }
+  const removedAvailableModels = new Set<string>();
+  for (const [availableModelId, availableModel] of Object.entries(raw.availableModels)) {
+    if (availableModel.model && removedProviderModels.has(availableModel.model)) {
+      delete raw.availableModels[availableModelId];
+      removedAvailableModels.add(availableModelId);
+    }
+  }
+  if (!raw.modelProfile?.roles) return;
+  const fallbackModelId = Object.keys(raw.availableModels).sort()[0];
+  if (!fallbackModelId) {
+    delete raw.modelProfile;
+    return;
+  }
+  for (const role of ["primary", "standard", "auxiliary"] as const) {
+    if (!raw.modelProfile.roles[role] || removedAvailableModels.has(raw.modelProfile.roles[role])) {
+      raw.modelProfile.roles[role] = fallbackModelId;
+    }
+  }
 };
 
 export const renderMemoryConfig = (input: UpsertMemoryConfigInput): string => {

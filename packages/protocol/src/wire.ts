@@ -11,6 +11,7 @@ import type {
   ProviderConnectionSummary,
   ProviderCatalogModelSummary,
   ProviderModelSummary,
+  RemoveModelProviderInput,
   UpsertModelProfileInput,
   MemoryStatus,
   MemorySettings,
@@ -82,6 +83,10 @@ export type ClientRequestMap = {
   fetch_provider_models: {
     request: { projectId: ProjectId; providerId: string };
     response: { models: ProviderCatalogModelSummary[] };
+  };
+  remove_model_provider: {
+    request: RemoveModelProviderInput;
+    response: { providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[]; removed: boolean };
   };
   get_memory_settings: {
     request: { projectId: ProjectId };

@@ -657,6 +657,10 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | M12.1 | [`S0083`](spec/ship/S0083-extension-manifest-and-im-channel-runtime.md) | Extension manifest、IM channel bridge、fixed session、default workspace、source reminder、SendChannelMessage、loopback IM | Done |
 | M12.2 | [`S0084`](spec/ship/S0084-built-in-telegram-im-extension.md) | Built-in Telegram IM extension、Bot API long polling、DM/group mention、local HTTP stub coverage | Done |
 | M12.3 | [`S0085`](spec/ship/S0085-gui-im-extension-settings.md) | GUI IM settings、Telegram toggle、extension config IPC、built-in package discovery | Done |
+| M12.4 | [`S0090`](spec/ship/S0090-gui-provider-delete-and-dark-code-theme.md) | 修复 GUI Provider 删除能力和 dark code block Shiki theme 漂移 | Done |
+| M12.5 | [`S0091`](spec/ship/S0091-built-in-qq-and-wechat-im-extensions.md) | Built-in QQ Bot / WeChat IM extensions and shared adapter boundary | Planned |
+| M12.6 | [`S0092`](spec/ship/S0092-im-message-media-and-human-cadence.md) | SendChannelMessage media payload and IM human-cadence guidance | Planned |
+| M12.7 | [`S0093`](spec/ship/S0093-gui-im-settings-platform-layout.md) | GUI IM Settings compact platform rows and expandable details | Planned |
 
 ---
 
@@ -749,6 +753,10 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0087`](spec/ship/S0087-gui-ui-polish-sweep.md) | Codex-inspired GUI visual pass and GUI tool trace polish | Done |
 | [`S0088`](spec/ship/S0088-gui-streaming-thinking-contract.md) | GUI streaming thinking contract | Done |
 | [`S0089`](spec/ship/S0089-memory-reliability-and-dream-trigger.md) | Memory reliability and dream trigger fix | Done |
+| [`S0090`](spec/ship/S0090-gui-provider-delete-and-dark-code-theme.md) | GUI Provider delete and dark code theme fixes | Done |
+| [`S0091`](spec/ship/S0091-built-in-qq-and-wechat-im-extensions.md) | Built-in QQ Bot and WeChat IM extensions | Planned |
+| [`S0092`](spec/ship/S0092-im-message-media-and-human-cadence.md) | IM media message payload and human response cadence | Planned |
+| [`S0093`](spec/ship/S0093-gui-im-settings-platform-layout.md) | GUI IM Settings platform layout | Planned |
 
 ---
 

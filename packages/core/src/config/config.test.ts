@@ -669,6 +669,56 @@ auxiliary = "main"
     expect(merged).not.toContain("apiKeyEnv");
   });
 
+  it("removes a provider and all dependent model profile entries", () => {
+    const first = renderModelProfileConfig({
+      providerId: "amp",
+      providerType: "custom",
+      provider: "AMP",
+      api: "openai-completions",
+      baseUrl: "https://amp.example.test/v1",
+      apiKeyEnv: "AMP_KEY",
+      availableModelId: "main",
+      providerModelKey: "amp_main",
+      providerModelId: "amp-main",
+      displayName: "AMP Main",
+      addToAvailable: true,
+      roles: {
+        primary: "main",
+        standard: "main",
+        auxiliary: "main",
+      },
+    });
+    const second = renderModelProfileConfig({
+      existingConfigText: first,
+      providerId: "backup",
+      providerType: "custom",
+      provider: "Backup",
+      api: "openai-completions",
+      baseUrl: "https://backup.example.test/v1",
+      apiKeyEnv: "BACKUP_KEY",
+      availableModelId: "backup",
+      providerModelKey: "backup_main",
+      providerModelId: "backup-main",
+      displayName: "Backup Main",
+      addToAvailable: true,
+    });
+
+    const removed = renderModelProfileConfig({
+      existingConfigText: second,
+      removeProviderId: "amp",
+    });
+
+    expect(removed).not.toContain("[providers.amp]");
+    expect(removed).not.toContain("[provider_models.amp_main]");
+    expect(removed).not.toContain("[available_models.main]");
+    expect(removed).toContain("[providers.backup]");
+    expect(removed).toContain("[provider_models.backup_main]");
+    expect(removed).toContain("[available_models.backup]");
+    expect(removed).toContain('primary = "backup"');
+    expect(removed).toContain('standard = "backup"');
+    expect(removed).toContain('auxiliary = "backup"');
+  });
+
 });
 
 const mkProject = async (config: string): Promise<string> => {

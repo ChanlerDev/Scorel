@@ -15,6 +15,7 @@ const api: GuiApi = {
   listSessions: (project) => ipcRenderer.invoke(guiIpcChannels.listSessions, project),
   listModels: (project) => ipcRenderer.invoke(guiIpcChannels.listModels, project),
   upsertModelProfile: (project, input) => ipcRenderer.invoke(guiIpcChannels.upsertModelProfile, project, input),
+  removeModelProvider: (project, providerId) => ipcRenderer.invoke(guiIpcChannels.removeModelProvider, project, providerId),
   fetchProviderModels: (project, providerId) => ipcRenderer.invoke(guiIpcChannels.fetchProviderModels, project, providerId),
   getMemorySettings: (project) => ipcRenderer.invoke(guiIpcChannels.getMemorySettings, project),
   getMemoryStatus: (project) => ipcRenderer.invoke(guiIpcChannels.getMemoryStatus, project),

@@ -1147,6 +1147,36 @@ auxiliary = "main"
     expect(removedConfig).toContain("[provider_models.chanleramp_aux]");
     expect(removedConfig).not.toContain("[available_models.aux]");
     expect(removedConfig).toContain('auxiliary = "main"');
+
+    const providerRemoveResponse = waitForResponse(transport, "req_remove_provider");
+    await transport.send({
+      type: "remove_model_provider",
+      requestId: asRequestId("req_remove_provider"),
+      projectId: project.projectId,
+      providerId: "chanleramp",
+    });
+
+    await expect(providerRemoveResponse).resolves.toMatchObject({
+      type: "response",
+      requestType: "remove_model_provider",
+      data: {
+        removed: true,
+        providers: [],
+        providerModels: [],
+        models: [],
+        roles: {
+          primary: "",
+          standard: "",
+          auxiliary: "",
+        },
+      },
+    });
+    const providerRemovedConfig = await readFile(join(repo, ".scorel", "config.toml"), "utf8");
+    expect(providerRemovedConfig).not.toContain("[providers.chanleramp]");
+    expect(providerRemovedConfig).not.toContain("[provider_models.chanleramp_main]");
+    expect(providerRemovedConfig).not.toContain("[provider_models.chanleramp_aux]");
+    expect(providerRemovedConfig).not.toContain("[available_models.main]");
+    expect(providerRemovedConfig).not.toContain("[model_profile.roles]");
   });
 
   it("fetches provider catalog models through a real /models endpoint", async () => {

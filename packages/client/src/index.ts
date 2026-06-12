@@ -310,6 +310,11 @@ export class DaemonClient {
     return (await this.#request("fetch_provider_models", input)).models;
   }
 
+  async removeModelProvider(input: { projectId: ProjectId; providerId: string }): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[]; removed: boolean }> {
+    this.#assertDaemonConnected();
+    return this.#request("remove_model_provider", input);
+  }
+
   async getMemorySettings(input: { projectId: ProjectId }): Promise<MemorySettings> {
     this.#assertDaemonConnected();
     return (await this.#request("get_memory_settings", input)).memory;

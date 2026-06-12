@@ -341,6 +341,30 @@ describe("@scorel/protocol", () => {
     expect(response.data.models[0].id).toBe("deepseek-v4-flash");
   });
 
+  it("round-trips remove_model_provider as project-scoped provider deletion", () => {
+    const request = {
+      type: "remove_model_provider",
+      requestId: asRequestId("req_remove_model_provider"),
+      projectId: asProjectId("prj_repo"),
+      providerId: "chanleramp",
+    } satisfies ClientRequest<"remove_model_provider">;
+
+    const response = okResponse(request, {
+      providers: [],
+      providerModels: [],
+      models: [],
+      roles: {
+        primary: "",
+        standard: "",
+        auxiliary: "",
+      },
+      removed: true,
+    }) satisfies ResponseFor<typeof request>;
+
+    expect(response.requestType).toBe("remove_model_provider");
+    expect(response.data.removed).toBe(true);
+  });
+
   it("requires project identity in session metadata", () => {
     const meta: CreateSessionMeta = { projectId: asProjectId("prj_repo"), title: "Repo session" };
     const request = {

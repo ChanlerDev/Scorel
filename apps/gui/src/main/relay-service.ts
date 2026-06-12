@@ -52,6 +52,7 @@ export type GuiRelayService = {
   listRemoteSessions(deviceId: string, projectId: string): Promise<SessionSummary[]>;
   listRemoteModels(deviceId: string, projectId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
   upsertRemoteModelProfile(deviceId: string, input: UpsertModelProfileInput): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
+  removeRemoteModelProvider(deviceId: string, projectId: string, providerId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[]; removed: boolean }>;
   fetchRemoteProviderModels(deviceId: string, projectId: string, providerId: string): Promise<ProviderCatalogModelSummary[]>;
   getRemoteMemorySettings(deviceId: string, projectId: string): Promise<MemorySettings>;
   getRemoteMemoryStatus(deviceId: string, projectId: string): Promise<MemoryStatus>;
@@ -142,6 +143,9 @@ export const createGuiRelayService = (store: GuiStore): GuiRelayService => {
     },
     async upsertRemoteModelProfile(deviceId, input) {
       return (await connectedClient(deviceId)).upsertModelProfile(input);
+    },
+    async removeRemoteModelProvider(deviceId, projectId, providerId) {
+      return (await connectedClient(deviceId)).removeModelProvider({ projectId: asProjectId(projectId) as ProjectId, providerId });
     },
     async fetchRemoteProviderModels(deviceId, projectId, providerId) {
       return (await connectedClient(deviceId)).fetchProviderModels({ projectId: asProjectId(projectId) as ProjectId, providerId });
