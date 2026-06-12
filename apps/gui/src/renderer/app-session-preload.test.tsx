@@ -47,6 +47,7 @@ afterEach(() => {
   container?.remove();
   container = undefined;
   window.localStorage.clear();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -88,9 +89,54 @@ describe("GUI App session preload", () => {
     expect(listSessions).toHaveBeenCalledWith({ source: "local", projectId: "project_scorel" });
     expect(listSessions).not.toHaveBeenCalledWith({ source: "local", projectId: "project_tickel" });
   });
+
+  it("refreshes loaded Project sessions so background IM sessions become visible", async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+    let calls = 0;
+    let sessionsChanged: ((payload: { source: "local"; projectId: string; sessionId: string }) => void) | undefined;
+    const listSessions = vi.fn(async ({ projectId }: { projectId: ProjectId }) => {
+      calls += 1;
+      return calls < 2
+        ? []
+        : [{
+            sessionId: "session_im_qq" as never,
+            projectId,
+            title: "qq: qq:private:user_1",
+            updatedAt: 2,
+            currentSeq: 1 as never,
+          }];
+    });
+
+    installScorelApi({
+      listSessions,
+      onSessionsChanged: vi.fn((handler) => {
+        sessionsChanged = handler;
+        return () => undefined;
+      }),
+    });
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root!.render(<App />);
+    });
+    await waitFor(() => expect(listSessions).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      sessionsChanged?.({ source: "local", projectId: "project_workspace", sessionId: "session_im_qq" });
+      await Promise.resolve();
+    });
+    expect(container!.textContent).toContain("qq: qq:private:user_1");
+  });
 });
 
-function installScorelApi(overrides: { listSessions: ReturnType<typeof vi.fn> }): void {
+function installScorelApi(overrides: {
+  listSessions: ReturnType<typeof vi.fn>;
+  onSessionsChanged?: ReturnType<typeof vi.fn>;
+}): void {
   Object.defineProperty(window, "scorel", {
     configurable: true,
     value: {
@@ -120,6 +166,7 @@ function installScorelApi(overrides: { listSessions: ReturnType<typeof vi.fn> })
         running: false,
       })),
       onSessionEvent: vi.fn(() => () => undefined),
+      onSessionsChanged: overrides.onSessionsChanged ?? vi.fn(() => () => undefined),
       onOpenSettings: vi.fn(() => () => undefined),
       detachSession: vi.fn(async () => undefined),
     },

@@ -662,6 +662,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | M12.6 | [`S0092`](spec/ship/S0092-im-message-media-and-human-cadence.md) | SendChannelMessage media payload and IM human-cadence guidance | Done |
 | M12.7 | [`S0093`](spec/ship/S0093-gui-im-settings-platform-layout.md) | GUI IM Settings compact platform rows and expandable details | Done |
 | M12.8 | [`S0094`](spec/ship/S0094-im-inbound-runtime.md) | QQ and WeChat built-in IM inbound runtime receive paths | Done |
+| M12.9 | [`S0095`](spec/ship/S0095-gui-im-session-list-refresh.md) | Refresh GUI session lists for background IM-created sessions | Done |
 
 ---
 
@@ -759,6 +760,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0092`](spec/ship/S0092-im-message-media-and-human-cadence.md) | IM media message payload and human response cadence | Done |
 | [`S0093`](spec/ship/S0093-gui-im-settings-platform-layout.md) | GUI IM Settings platform layout | Done |
 | [`S0094`](spec/ship/S0094-im-inbound-runtime.md) | IM inbound runtime receive paths | Done |
+| [`S0095`](spec/ship/S0095-gui-im-session-list-refresh.md) | GUI IM session list refresh | Done |
 
 ---
 

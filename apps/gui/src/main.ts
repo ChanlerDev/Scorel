@@ -41,6 +41,11 @@ const startLocalHost = async (): Promise<void> => {
     deviceDisplayName: "Local",
   });
   await localHost.start();
+  localHost.onLocalSessionsChanged((change) => {
+    const window = mainWindow;
+    if (!window || window.isDestroyed()) return;
+    window.webContents.send(guiIpcChannels.sessionsChanged, { source: "local", ...change });
+  });
   hostStatus = { state: "connected" };
 };
 

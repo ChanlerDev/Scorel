@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 
-import { guiIpcChannels, type GuiApi, type GuiSessionEventPayload } from "./shared/ipc.js";
+import { guiIpcChannels, type GuiApi, type GuiSessionEventPayload, type GuiSessionsChangedPayload } from "./shared/ipc.js";
 
 const api: GuiApi = {
   getHostStatus: () => ipcRenderer.invoke(guiIpcChannels.getHostStatus),
@@ -34,6 +34,15 @@ const api: GuiApi = {
     ipcRenderer.on(guiIpcChannels.sessionEvent, listener);
     return () => {
       ipcRenderer.off(guiIpcChannels.sessionEvent, listener);
+    };
+  },
+  onSessionsChanged: (handler) => {
+    const listener = (_event: IpcRendererEvent, payload: GuiSessionsChangedPayload): void => {
+      handler(payload);
+    };
+    ipcRenderer.on(guiIpcChannels.sessionsChanged, listener);
+    return () => {
+      ipcRenderer.off(guiIpcChannels.sessionsChanged, listener);
     };
   },
   onOpenSettings: (handler) => {

@@ -46,6 +46,7 @@ export type GuiLocalHostServiceOptions = {
 };
 
 export type GuiLocalSubscriber = (event: ScorelEvent) => void;
+export type GuiLocalSessionsChangedHandler = (change: { projectId: string; sessionId: string }) => void;
 
 export type GuiLocalHostService = {
   start(): Promise<void>;
@@ -68,6 +69,7 @@ export type GuiLocalHostService = {
     events: PersistentEvent[];
     unsubscribe: () => void;
   }>;
+  onLocalSessionsChanged(handler: GuiLocalSessionsChangedHandler): () => void;
   sendLocalMessage(sessionId: string, content: string): Promise<{ accepted: true }>;
 };
 
@@ -75,12 +77,18 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
   const sessionsDir = join(options.stateDir, "sessions");
   const projectsPath = join(options.stateDir, "projects.json");
   let started = false;
+  const sessionChangeHandlers = new Set<GuiLocalSessionsChangedHandler>();
   const host = new ScorelHost({
     sessionsDir,
     projectsPath,
     ...(options.scorelHomeDir ? { scorelHomeDir: options.scorelHomeDir } : {}),
     deviceId: asDeviceId(options.deviceId ?? "device_gui_local"),
     deviceDisplayName: options.deviceDisplayName ?? "Local",
+    onSessionListChanged: (change) => {
+      for (const handler of sessionChangeHandlers) {
+        handler({ projectId: change.projectId, sessionId: change.sessionId });
+      }
+    },
     ...(options.createRuntime
       ? {}
       : {
@@ -172,6 +180,12 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
       const unsubscribe = client.subscribe(filteredHandler);
       const events = client.getEvents().filter((event) => event.sessionId === sessionId);
       return { events, unsubscribe };
+    },
+    onLocalSessionsChanged(handler) {
+      sessionChangeHandlers.add(handler);
+      return () => {
+        sessionChangeHandlers.delete(handler);
+      };
     },
     async sendLocalMessage(sessionId, content) {
       await client.loadSession(asSessionId(sessionId));

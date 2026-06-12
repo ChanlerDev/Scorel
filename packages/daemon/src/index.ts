@@ -444,6 +444,7 @@ export type ScorelHostOptions = {
   loadConfigProfile?: (options: { project: HostProject }) => Promise<ScorelConfigProfile | ScorelConfig>;
   createRuntime: (options: { sessionId: SessionId; project: HostProject; selectedModel?: SelectedModelSummary; purpose: "chat" | "title" | "memory" }) => Promise<ScorelRuntime>;
   memoryHomeDir?: string;
+  onSessionListChanged?: (change: { projectId: ProjectId; sessionId: SessionId }) => void;
   now?: () => number;
   createId?: () => string;
 };
@@ -597,6 +598,7 @@ export class ScorelHost {
   readonly #loadConfigProfile: ((options: { project: HostProject }) => Promise<ScorelConfigProfile | ScorelConfig>) | undefined;
   readonly #createRuntime: ScorelHostOptions["createRuntime"];
   readonly #memoryHomeDir: string | undefined;
+  readonly #onSessionListChanged: ((change: { projectId: ProjectId; sessionId: SessionId }) => void) | undefined;
   readonly #now: () => number;
   readonly #createId: () => string;
   readonly #sessions = new Map<SessionId, SessionLane>();
@@ -622,6 +624,7 @@ export class ScorelHost {
     this.#loadConfigProfile = options.loadConfigProfile;
     this.#createRuntime = options.createRuntime;
     this.#memoryHomeDir = options.memoryHomeDir;
+    this.#onSessionListChanged = options.onSessionListChanged;
     this.#now = options.now ?? Date.now;
     this.#createId = options.createId ?? (() => crypto.randomUUID());
     this.#registry = new ProjectRegistry({
@@ -894,6 +897,9 @@ export class ScorelHost {
       workDir: lane.project.workDir,
       model: request.meta.model,
     });
+    if (created) {
+      this.#onSessionListChanged?.({ projectId: lane.project.projectId, sessionId });
+    }
     this.#respond(connection, request, { sessionId });
   }
 
@@ -2626,6 +2632,7 @@ export class ScorelHost {
       externalConversationId,
       projectId: project.projectId,
     });
+    this.#onSessionListChanged?.({ projectId: project.projectId, sessionId });
     return binding;
   }
 

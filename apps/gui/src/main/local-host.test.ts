@@ -68,6 +68,32 @@ describe("GUI local Host service", () => {
     }
   });
 
+  it("notifies when local session lists change", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-session-change-"));
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const service = createGuiLocalHostService({
+      stateDir: root,
+      deviceId: "device_gui_test",
+      createRuntime: async () => new ScorelRuntime({ provider }),
+    });
+
+    await service.start();
+    try {
+      const project = await service.registerLocalProject(repo);
+      const changes: Array<{ projectId: string; sessionId: string }> = [];
+      const unsubscribe = service.onLocalSessionsChanged((change) => {
+        changes.push(change);
+      });
+      const sessionId = await service.createLocalSession(project.projectId);
+
+      expect(changes).toEqual([{ projectId: project.projectId, sessionId }]);
+      unsubscribe();
+    } finally {
+      await service.stop();
+    }
+  });
+
   it("keeps local transcript events scoped to the opened Session", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-gui-workspace-"));
     const repo = join(root, "repo");

@@ -256,6 +256,15 @@ export function App() {
     setView("settings");
   }), []);
 
+  useEffect(() => window.scorel.onSessionsChanged((payload) => {
+    const key = payload.source === "local"
+      ? `local:${payload.projectId}`
+      : `relay:${payload.deviceId}:${payload.projectId}`;
+    const project = projects.find((candidate) => projectKey(candidate) === key);
+    if (!project) return;
+    void refreshSessionsForProject(project);
+  }), [projects, refreshSessionsForProject]);
+
   useEffect(() => {
     void (async () => {
       setBusy(true);

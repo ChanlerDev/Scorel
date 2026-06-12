@@ -102,6 +102,13 @@ export type GuiSessionEventPayload = {
   event: ScorelEvent;
 };
 
+export type GuiSessionsChangedPayload = {
+  source: "local" | "relay";
+  projectId: string;
+  sessionId: string;
+  deviceId?: string;
+};
+
 export type GuiApi = {
   getHostStatus(): Promise<GuiHostStatus>;
   getSnapshot(): Promise<GuiSnapshot>;
@@ -128,6 +135,7 @@ export type GuiApi = {
   detachSession(sessionId: string): Promise<void>;
   sendMessage(project: GuiProjectRef, sessionId: string, content: string): Promise<GuiSendMessageAck>;
   onSessionEvent(handler: (payload: GuiSessionEventPayload) => void): () => void;
+  onSessionsChanged(handler: (payload: GuiSessionsChangedPayload) => void): () => void;
   onOpenSettings(handler: () => void): () => void;
 };
 
@@ -157,5 +165,6 @@ export const guiIpcChannels = {
   detachSession: "scorel:detachSession",
   sendMessage: "scorel:sendMessage",
   sessionEvent: "scorel:sessionEvent",
+  sessionsChanged: "scorel:sessionsChanged",
   openSettings: "scorel:openSettings",
 } as const;
