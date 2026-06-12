@@ -14,7 +14,7 @@ export type QQTarget = {
 export type QQAdapter = {
   start(ctx: unknown): Promise<void>;
   stop(): Promise<void>;
-  sendMessage(target: QQTarget, message: { text: string }): Promise<void>;
+  sendMessage(target: QQTarget, message: { text?: string; attachments?: Array<Record<string, unknown>> }): Promise<void>;
 };
 
 export function createAdapter(options?: { config?: Record<string, string | number | boolean> }): QQAdapter;

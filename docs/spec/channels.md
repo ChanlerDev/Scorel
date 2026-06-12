@@ -13,7 +13,7 @@ Channel 是外部消息入口。S0083 后，IM Channel 通过 Extension manifest
 IM Adapter -> Channel Bridge -> ScorelHost -> ScorelRuntime -> SendChannelMessage -> IM Adapter
 ```
 
-Channel 不拥有 Runtime、Session、queue、memory 或 replay。它只把外部 IM 消息转成现有 Host turn，并把模型通过 `SendChannelMessage` 发出的文本送回当前 IM 会话。
+Channel 不拥有 Runtime、Session、queue、memory 或 replay。它只把外部 IM 消息转成现有 Host turn，并把模型通过 `SendChannelMessage` 发出的文本或附件元数据送回当前 IM 会话。
 
 CLI / GUI / WebUI 仍然直接通过 DaemonClient / Host application service 操作 Host，不经过 Channel。
 
@@ -118,12 +118,23 @@ Use SendChannelMessage to reply to the current conversation when needed.
 当前已落地的回复工具：
 
 ```typescript
-SendChannelMessage({ text: string })
+SendChannelMessage({
+  text?: string,
+  attachments?: Array<{
+    type: "image" | "file",
+    path?: string,
+    url?: string,
+    mimeType?: string,
+    caption?: string
+  }>
+})
 ```
 
 规则：
 
 - 默认目标是当前 IM conversation；
+- `text` 和 `attachments` 至少提供一个；
+- adapter 可以对暂不支持的附件返回明确 tool error，不能静默忽略；
 - 模型不填写 Telegram chat id、飞书 open id、Slack channel id 等 raw id；
 - 无 channel context 时返回 `no_channel_context`；
 - adapter send 失败时返回 tool error 并写 diagnostics。
@@ -137,9 +148,8 @@ SendChannelMessage({ text: string })
 后续真实 provider：
 
 - S0084: Telegram Bot API long polling；
-- Feishu；
-- Slack 或 Discord；
-- WeCom，而不是微信个人号优先。
+- S0091: QQ Bot / WeChat official bot-style adapter；
+- S0092: structured `SendChannelMessage` payload and IM response cadence。
 
 ---
 

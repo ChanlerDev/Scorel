@@ -87,6 +87,7 @@ export const createTelegramAdapter = (options) => {
       }
     },
     async sendMessage(target, message) {
+      rejectUnsupportedAttachments("Telegram", message);
       const chatId = target?.data?.chatId;
       if (chatId === undefined || chatId === null) {
         throw new Error("telegram target is missing chatId");
@@ -248,5 +249,11 @@ const numberConfig = (value, fallback) => {
 const safeErrorMessage = (cause) => cause instanceof Error ? redactToken(cause.message) : redactToken(String(cause));
 
 export const redactToken = (value) => value.replace(/bot[0-9]+:[A-Za-z0-9_-]+/g, "bot[REDACTED]");
+
+const rejectUnsupportedAttachments = (platform, message) => {
+  if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+    throw new Error(`${platform} attachment sending is not supported yet`);
+  }
+};
 
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

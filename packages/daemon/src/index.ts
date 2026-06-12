@@ -464,7 +464,14 @@ export type ImTarget = {
 };
 
 export type ImOutgoingMessage = {
-  text: string;
+  text?: string;
+  attachments?: Array<{
+    type: "image" | "file";
+    path?: string;
+    url?: string;
+    mimeType?: string;
+    caption?: string;
+  }>;
 };
 
 export type ImAdapterContext = {
@@ -1891,6 +1898,9 @@ export class ScorelHost {
       ...(context.mentionedBot !== undefined ? [`mentioned_bot: ${context.mentionedBot}`] : []),
       "",
       "Use SendChannelMessage to reply to the current conversation when needed.",
+      "In IM, send a short acknowledgement before long work so the user does not think the bot is stuck.",
+      "For longer tasks, send concise progress updates instead of waiting until every tool call has finished.",
+      "Keep replies conversational and avoid exposing internal tool names unless they help the user.",
     ];
     return this.#appendPersistent(lane, {
       type: "harness_item",
@@ -2426,13 +2436,17 @@ export class ScorelHost {
           if (!extension) {
             throw new Error(`channel_adapter_unavailable: ${current.extensionId}`);
           }
-          await extension.adapter.sendMessage(current.target, { text: input.text });
+          await extension.adapter.sendMessage(current.target, {
+            ...(input.text ? { text: input.text } : {}),
+            ...(input.attachments ? { attachments: input.attachments } : {}),
+          });
           await this.#appendDiagnostic(lane.session.header.sessionId, "channel_message_sent", {
             extensionId: current.extensionId,
             channel: current.channel,
             externalConversationId: current.externalConversationId,
+            attachments: input.attachments?.length ?? 0,
           });
-          return { channel: current.channel, target: "current" };
+          return { channel: current.channel, target: "current", attachments: input.attachments?.length ?? 0 };
         },
       }),
     );

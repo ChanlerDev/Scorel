@@ -30,7 +30,7 @@ export type TelegramAdapter = {
     };
   }): Promise<void>;
   stop(): Promise<void>;
-  sendMessage(target: TelegramTarget, message: { text: string }): Promise<void>;
+  sendMessage(target: TelegramTarget, message: { text?: string; attachments?: Array<Record<string, unknown>> }): Promise<void>;
   setTyping?(target: TelegramTarget, typing: boolean): Promise<void>;
 };
 

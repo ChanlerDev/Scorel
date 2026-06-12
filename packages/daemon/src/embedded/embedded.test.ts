@@ -766,7 +766,10 @@ describe("ScorelHost + embedded transport", () => {
               type: "tool_call",
               toolCallId: `call_channel_reply_${requestedChannelReplies}`,
               toolName: "SendChannelMessage",
-              args: { text: "loopback reply" },
+              args: {
+                text: "loopback reply",
+                attachments: [{ type: "image", path: "/tmp/screen.png", mimeType: "image/png" }],
+              },
             }],
             stopReason: "tool_call",
           };
@@ -801,7 +804,10 @@ describe("ScorelHost + embedded transport", () => {
     });
 
     expect(sessionIdAgain).toBe(sessionId);
-    expect(host.loopbackOutbox()).toEqual([{ text: "loopback reply" }, { text: "loopback reply" }]);
+    expect(host.loopbackOutbox()).toEqual([
+      { text: "loopback reply", attachments: [{ type: "image", path: "/tmp/screen.png", mimeType: "image/png" }] },
+      { text: "loopback reply", attachments: [{ type: "image", path: "/tmp/screen.png", mimeType: "image/png" }] },
+    ]);
     const workspace = await realpath(join(scorelHomeDir, "workspace"));
     expect((await host.listProjects()).some((project) => project.workDir === workspace)).toBe(true);
 
@@ -813,6 +819,9 @@ describe("ScorelHost + embedded transport", () => {
     expect(providerTurns[0]?.context.some((message) =>
       message.meta?.source === "harness_item" &&
       message.meta.harnessKind === "channel_context"
+    )).toBe(true);
+    expect(providerTurns[0]?.context.some((message) =>
+      JSON.stringify(message.content).includes("send a short acknowledgement before long work")
     )).toBe(true);
   });
 

@@ -13,6 +13,7 @@ export const createWeChatAdapter = (options) => ({
     // No persistent resource in the webhook sender.
   },
   async sendMessage(_target, message) {
+    rejectUnsupportedAttachments("WeChat", message);
     const response = await fetch(options.webhookUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -64,4 +65,10 @@ const requiredStringConfig = (value, name) => {
     throw new Error(`${name} is required`);
   }
   return value.trim();
+};
+
+const rejectUnsupportedAttachments = (platform, message) => {
+  if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+    throw new Error(`${platform} attachment sending is not supported yet`);
+  }
 };

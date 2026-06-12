@@ -209,4 +209,10 @@ const optionalStringConfig = (value, name) => {
   return value;
 };
 
+const rejectUnsupportedAttachments = (platform, message) => {
+  if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+    throw new Error(`${platform} attachment sending is not supported yet`);
+  }
+};
+
 const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

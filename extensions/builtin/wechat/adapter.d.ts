@@ -10,7 +10,7 @@ export type WeChatTarget = {
 export type WeChatAdapter = {
   start(ctx: unknown): Promise<void>;
   stop(): Promise<void>;
-  sendMessage(target: WeChatTarget, message: { text: string }): Promise<void>;
+  sendMessage(target: WeChatTarget, message: { text?: string; attachments?: Array<Record<string, unknown>> }): Promise<void>;
 };
 
 export function createAdapter(options?: { config?: Record<string, string | number | boolean> }): WeChatAdapter;
