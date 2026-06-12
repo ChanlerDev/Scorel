@@ -2266,8 +2266,8 @@ a {
   min-width: 0;
   overflow: hidden;
   border-radius: 10px;
-  background: #0d1117;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
 }
 
 .shiki-block__header {
@@ -2278,8 +2278,8 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--color-border-hairline);
+  background: var(--color-surface-raised);
 }
 
 .shiki-block__lang {
@@ -2288,7 +2288,7 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(241, 241, 243, 0.68);
+  color: var(--color-text-muted);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1;
@@ -2298,7 +2298,7 @@ a {
   appearance: none;
   border: 0;
   background: transparent;
-  color: rgba(241, 241, 243, 0.68);
+  color: var(--color-text-muted);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
@@ -2312,8 +2312,8 @@ a {
 }
 
 .shiki-block__copy:hover {
-  color: var(--color-code);
-  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text);
+  background: var(--color-border-hairline);
 }
 
 .shiki-block__html {

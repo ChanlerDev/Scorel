@@ -53,6 +53,7 @@ Do not copy Codex literally. Scorel remains Project-first and should only show r
   - keep a stable topbar title fallback (`未命名对话`) until auxiliary title generation updates it.
   - keep expanded thinking content within the message column, with long prose wrapping and code blocks scrolling internally.
   - render code-block language and copy controls inside the code-block header.
+  - keep markdown code blocks aligned with the GUI light surface and token system; do not use a fixed dark code-block theme in the light workspace.
   - render tool calls as compact execution evidence rows: clear tool name, target object, status, counters, and expandable details.
   - keep successful tool output collapsed by default, while making errors, diffs, and pending/running state visible.
 
@@ -87,6 +88,7 @@ Do not copy Codex literally. Scorel remains Project-first and should only show r
 - Expanded thinking content cannot horizontally stretch the workspace.
 - Long prose wraps inside thinking/markdown content, while code blocks keep formatting and scroll internally.
 - Code blocks show the fenced language as non-interactive metadata on the top-left and a copy control on the top-right.
+- Code block theme and chrome match the GUI light mode instead of rendering as a visually detached dark block.
 - GUI tool blocks read as a low-noise execution trace, not generic JSON dumps.
 - Bash, Read, Glob/Grep, Edit/Write, TodoWrite, and fallback JSON tools share consistent header/body/error/pending styling.
 - File edits surface filename and diff counters in the header; expanded details keep diff/output internally scrollable.

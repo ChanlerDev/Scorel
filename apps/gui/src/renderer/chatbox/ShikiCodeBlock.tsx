@@ -10,7 +10,7 @@ import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 
 import { Check, Clipboard } from "../icons/index.js";
 
-const THEME_NAME = "github-dark-default";
+const THEME_NAME = "github-light-default";
 
 type Status = "loading" | "ready" | "error";
 
@@ -51,7 +51,7 @@ const langPromises = new Map<string, Promise<void>>();
 function ensureHighlighter(): Promise<HighlighterCore> {
   if (!highlighterPromise) {
     highlighterPromise = (async () => {
-      const themeMod = await import("shiki/themes/github-dark-default.mjs");
+      const themeMod = await import("shiki/themes/github-light-default.mjs");
       const wasm = await import("shiki/wasm");
       return createHighlighterCore({
         themes: [themeMod.default ?? themeMod],
