@@ -48,8 +48,8 @@ const defaultMemoryStatus = (projectId = ""): GuiMemoryStatusView => ({
   running: false,
 });
 
-const defaultTelegramSettings = (): GuiExtensionSettingsView => ({
-  extensionId: "telegram",
+const defaultExtensionSettings = (extensionId: string): GuiExtensionSettingsView => ({
+  extensionId,
   enabled: false,
   kind: "im",
   config: {},
@@ -81,7 +81,11 @@ export function App() {
   const [modelProfile, setModelProfile] = useState<GuiModelProfileView>({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
   const [memorySettings, setMemorySettings] = useState<GuiMemorySettingsView>(defaultMemorySettings());
   const [memoryStatus, setMemoryStatus] = useState<GuiMemoryStatusView>(defaultMemoryStatus());
-  const [telegramSettings, setTelegramSettings] = useState<GuiExtensionSettingsView>(defaultTelegramSettings());
+  const [imSettings, setImSettings] = useState<Record<string, GuiExtensionSettingsView>>({
+    telegram: defaultExtensionSettings("telegram"),
+    qq: defaultExtensionSettings("qq"),
+    wechat: defaultExtensionSettings("wechat"),
+  });
   const [selectedModelId, setSelectedModelId] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
   const [pickerAnchor, setPickerAnchor] = useState<{ left: number; top: number } | undefined>(undefined);
@@ -257,7 +261,12 @@ export function App() {
       setBusy(true);
       try {
         await refreshSnapshot();
-        setTelegramSettings(await window.scorel.getExtensionSettings("telegram"));
+        const [telegram, qq, wechat] = await Promise.all([
+          window.scorel.getExtensionSettings("telegram"),
+          window.scorel.getExtensionSettings("qq"),
+          window.scorel.getExtensionSettings("wechat"),
+        ]);
+        setImSettings({ telegram, qq, wechat });
         setError(null);
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : String(cause));
@@ -467,7 +476,7 @@ export function App() {
         modelProfile={modelProfile}
         memory={memorySettings}
         memoryStatus={memoryStatus}
-        telegram={telegramSettings}
+        imExtensions={imSettings}
         onModelProfileChange={(profile) => {
           setModelProfile(profile);
           setSelectedModelId((current) => {
@@ -476,7 +485,7 @@ export function App() {
           });
         }}
         onMemoryChange={setMemorySettings}
-        onTelegramChange={setTelegramSettings}
+        onExtensionChange={(extension) => setImSettings((current) => ({ ...current, [extension.extensionId]: extension }))}
         onBack={() => setView("workspace")}
       />
     );

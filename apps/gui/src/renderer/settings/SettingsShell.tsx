@@ -20,10 +20,10 @@ export type SettingsShellProps = {
   modelProfile: GuiModelProfileView;
   memory: GuiMemorySettingsView;
   memoryStatus: GuiMemoryStatusView;
-  telegram: GuiExtensionSettingsView;
+  imExtensions: Record<string, GuiExtensionSettingsView>;
   onModelProfileChange(profile: GuiModelProfileView): void;
   onMemoryChange(memory: GuiMemorySettingsView): void;
-  onTelegramChange(extension: GuiExtensionSettingsView): void;
+  onExtensionChange(extension: GuiExtensionSettingsView): void;
   busy: boolean;
   setBusy(value: boolean): void;
   setError(message: string | null): void;
@@ -89,11 +89,11 @@ export function SettingsShell(props: SettingsShellProps) {
     case "im":
       content = (
         <ImSection
-          telegram={props.telegram}
+          extensions={props.imExtensions}
           busy={props.busy}
           setBusy={props.setBusy}
           setError={props.setError}
-          onTelegramChange={props.onTelegramChange}
+          onExtensionChange={props.onExtensionChange}
         />
       );
       break;

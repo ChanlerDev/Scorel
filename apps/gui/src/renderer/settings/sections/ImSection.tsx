@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 
 import type { GuiExtensionSettingsView } from "../../../shared/ipc.js";
 import { SettingsCard } from "../SettingsCard.js";
@@ -7,59 +7,62 @@ import { SettingsRow } from "../SettingsRow.js";
 import { Select } from "../controls/Select.js";
 import { Toggle } from "../controls/Toggle.js";
 
+type PlatformId = "telegram" | "qq" | "wechat";
+
+type PlatformDefinition = {
+  id: PlatformId;
+  label: string;
+  summary: string;
+  detailTitle: string;
+  defaultConfig: Record<string, string | number | boolean>;
+};
+
+const PLATFORMS: PlatformDefinition[] = [
+  {
+    id: "telegram",
+    label: "Telegram",
+    summary: "Bot API long polling",
+    detailTitle: "Telegram Bot 配置",
+    defaultConfig: {
+      credentialMode: "env",
+      botTokenEnv: "SCOREL_TELEGRAM_BOT_TOKEN",
+      pollIntervalMs: 1000,
+    },
+  },
+  {
+    id: "qq",
+    label: "QQ Bot",
+    summary: "App ID + App Secret 自动换取 Access Token",
+    detailTitle: "QQ Bot 配置",
+    defaultConfig: {},
+  },
+  {
+    id: "wechat",
+    label: "WeChat",
+    summary: "粘贴企业微信群机器人 Webhook URL",
+    detailTitle: "WeChat 配置",
+    defaultConfig: {},
+  },
+];
+const OPEN_PLATFORM_STORAGE_KEY = "scorel.settings.im.openPlatform";
+const PLATFORM_IDS = new Set<PlatformId>(PLATFORMS.map((platform) => platform.id));
+
 export type ImSectionProps = {
-  telegram: GuiExtensionSettingsView;
+  extensions: Record<string, GuiExtensionSettingsView>;
   busy: boolean;
   setBusy(value: boolean): void;
   setError(message: string | null): void;
-  onTelegramChange(extension: GuiExtensionSettingsView): void;
+  onExtensionChange(extension: GuiExtensionSettingsView): void;
 };
 
 export function ImSection(props: ImSectionProps) {
-  const [credentialMode, setCredentialMode] = useState<"env" | "direct">(configCredentialMode(props.telegram));
-  const [apiKey, setApiKey] = useState(configString(props.telegram, "apiKey", ""));
-  const [botTokenEnv, setBotTokenEnv] = useState(configString(props.telegram, "botTokenEnv", "SCOREL_TELEGRAM_BOT_TOKEN"));
-  const [pollIntervalMs, setPollIntervalMs] = useState(configString(props.telegram, "pollIntervalMs", "1000"));
-  const [allowedChatIds, setAllowedChatIds] = useState(configString(props.telegram, "allowedChatIds", ""));
-  const [botUsername, setBotUsername] = useState(configString(props.telegram, "botUsername", ""));
+  const [openPlatform, setOpenPlatform] = useState<PlatformId | null>(() => readStoredOpenPlatform());
 
-  useEffect(() => {
-    setCredentialMode(configCredentialMode(props.telegram));
-    setApiKey(configString(props.telegram, "apiKey", ""));
-    setBotTokenEnv(configString(props.telegram, "botTokenEnv", "SCOREL_TELEGRAM_BOT_TOKEN"));
-    setPollIntervalMs(configString(props.telegram, "pollIntervalMs", "1000"));
-    setAllowedChatIds(configString(props.telegram, "allowedChatIds", ""));
-    setBotUsername(configString(props.telegram, "botUsername", ""));
-  }, [props.telegram]);
-
-  const update = async (input: { enabled?: boolean; config?: Record<string, string | number | boolean | undefined> }): Promise<void> => {
-    props.setBusy(true);
-    try {
-      const next = await window.scorel.upsertExtensionSettings({
-        extensionId: "telegram",
-        kind: "im",
-        ...input,
-      });
-      props.onTelegramChange(next);
-      props.setError(null);
-    } catch (cause) {
-      props.setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      props.setBusy(false);
-    }
-  };
-
-  const savePollInterval = (): void => {
-    const value = Number(pollIntervalMs);
-    void update({ config: { pollIntervalMs: Number.isFinite(value) && value >= 0 ? value : 1000 } });
-  };
-
-  const changeCredentialMode = (mode: "env" | "direct"): void => {
-    setCredentialMode(mode);
-    void update({
-      config: mode === "env"
-        ? { credentialMode: "env", apiKey: undefined, botToken: undefined, botTokenEnv: botTokenEnv.trim() || "SCOREL_TELEGRAM_BOT_TOKEN" }
-        : { credentialMode: "direct", botTokenEnv: undefined },
+  const toggleOpenPlatform = (platformId: PlatformId): void => {
+    setOpenPlatform((current) => {
+      const next = current === platformId ? null : platformId;
+      writeStoredOpenPlatform(next);
+      return next;
     });
   };
 
@@ -68,118 +71,277 @@ export function ImSection(props: ImSectionProps) {
       <SettingsHeader title="IM" subtitle="管理本机 Host 可接入的即时消息入口。" />
       <section className="settings-section settings-section--wide">
         <SettingsCard>
-          <SettingsRow
-            label="Telegram"
-            description={props.telegram.active ? "已启用并已连接本机 Host。" : "保存后会写入用户级 config，并尝试启动 Telegram adapter。"}
-            control={<Toggle checked={props.telegram.enabled} disabled={props.busy} onChange={(enabled) => void update({ enabled })} ariaLabel="启用 Telegram" />}
-          />
-          <SettingsRow
-            label="凭证方式"
-            description="环境变量更适合长期使用；直接填写会写入用户级 config。"
-            control={(
-              <Select
-                value={credentialMode}
-                disabled={props.busy}
-                ariaLabel="Telegram 凭证方式"
-                options={[
-                  { value: "env", label: "环境变量" },
-                  { value: "direct", label: "直接填写" },
-                ]}
-                onChange={(value) => changeCredentialMode(value === "direct" ? "direct" : "env")}
+          <div className="im-platform-list">
+            {PLATFORMS.map((platform) => (
+              <ImPlatform
+                key={platform.id}
+                platform={platform}
+                extension={props.extensions[platform.id] ?? defaultExtension(platform.id)}
+                open={openPlatform === platform.id}
+                busy={props.busy}
+                setBusy={props.setBusy}
+                setError={props.setError}
+                onToggleOpen={() => toggleOpenPlatform(platform.id)}
+                onExtensionChange={props.onExtensionChange}
               />
-            )}
-          />
-          {credentialMode === "env" ? (
-            <SettingsRow
-              label="Bot Token Env"
-              description="环境变量名；真实 token 从环境变量读取。"
-              control={(
-                <input
-                  className="input-text"
-                  value={botTokenEnv}
-                  disabled={props.busy}
-                  onChange={(event) => setBotTokenEnv(event.currentTarget.value)}
-                  onBlur={() => void update({ config: { credentialMode: "env", apiKey: undefined, botToken: undefined, botTokenEnv: botTokenEnv.trim() || "SCOREL_TELEGRAM_BOT_TOKEN" } })}
-                />
-              )}
-            />
-          ) : (
-            <SettingsRow
-              label="Bot API Key"
-              description="直接写入用户级 config；界面隐藏显示，但文件内是明文。"
-              control={(
-                <input
-                  className="input-text"
-                  type="password"
-                  placeholder="123456:telegram-bot-token"
-                  value={apiKey}
-                  disabled={props.busy}
-                  onChange={(event) => setApiKey(event.currentTarget.value)}
-                  onBlur={() => void update({ config: { credentialMode: "direct", apiKey: apiKey.trim() || undefined, botToken: undefined, botTokenEnv: undefined } })}
-                />
-              )}
-            />
-          )}
-          <SettingsRow
-            label="Poll Interval"
-            description="Bot API long polling 的本地轮询间隔。"
-            control={(
-              <input
-                className="input-text"
-                inputMode="numeric"
-                value={pollIntervalMs}
-                disabled={props.busy}
-                onChange={(event) => setPollIntervalMs(event.currentTarget.value)}
-                onBlur={savePollInterval}
-              />
-            )}
-          />
-          <SettingsRow
-            label="Allowed Chats"
-            description="可选，逗号分隔；留空表示不限制。"
-            control={(
-              <input
-                className="input-text"
-                placeholder="-1001234567890,123456789"
-                value={allowedChatIds}
-                disabled={props.busy}
-                onChange={(event) => setAllowedChatIds(event.currentTarget.value)}
-                onBlur={() => void update({ config: { allowedChatIds: allowedChatIds.trim() || undefined } })}
-              />
-            )}
-          />
-          <SettingsRow
-            label="Bot Username"
-            description="可选；留空时 adapter 会通过 getMe 获取。"
-            control={(
-              <input
-                className="input-text"
-                placeholder="scorel_bot"
-                value={botUsername}
-                disabled={props.busy}
-                onChange={(event) => setBotUsername(event.currentTarget.value)}
-                onBlur={() => void update({ config: { botUsername: botUsername.trim() || undefined } })}
-              />
-            )}
-          />
+            ))}
+          </div>
         </SettingsCard>
       </section>
     </>
   );
 }
 
-const configString = (extension: GuiExtensionSettingsView, key: string, fallback: string): string => {
-  const value = extension.config[key];
+function ImPlatform(props: {
+  platform: PlatformDefinition;
+  extension: GuiExtensionSettingsView;
+  open: boolean;
+  busy: boolean;
+  setBusy(value: boolean): void;
+  setError(message: string | null): void;
+  onToggleOpen(): void;
+  onExtensionChange(extension: GuiExtensionSettingsView): void;
+}) {
+  const { platform, extension } = props;
+  const [config, setConfig] = useState<Record<string, string | number | boolean>>({ ...platform.defaultConfig, ...extension.config });
+  const credentialMode = configCredentialMode(extension, config);
+
+  useEffect(() => {
+    setConfig({ ...platform.defaultConfig, ...extension.config });
+  }, [extension, platform.defaultConfig]);
+
+  const update = async (input: { enabled?: boolean; config?: Record<string, string | number | boolean | undefined> }): Promise<void> => {
+    props.setBusy(true);
+    try {
+      const next = await window.scorel.upsertExtensionSettings({
+        extensionId: platform.id,
+        kind: "im",
+        ...input,
+      });
+      props.onExtensionChange(next);
+      props.setError(null);
+    } catch (cause) {
+      props.setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      props.setBusy(false);
+    }
+  };
+
+  const saveConfig = (patch: Record<string, string | number | boolean | undefined>): void => {
+    setConfig((current) => ({ ...current, ...definedPatch(patch) }));
+    void update({ config: patch });
+  };
+
+  return (
+    <div className={props.open ? `im-platform im-platform--${platform.id} im-platform--open` : `im-platform im-platform--${platform.id}`}>
+      <div className="im-platform__summary">
+        <button type="button" className="im-platform__main" onClick={props.onToggleOpen} aria-expanded={props.open}>
+          <span className="im-platform__name">{platform.label}</span>
+          <span className="im-platform__meta">{extension.active ? "Active" : extension.enabled ? "Configured" : platform.summary}</span>
+        </button>
+        <Toggle
+          checked={extension.enabled}
+          disabled={props.busy}
+          onChange={(enabled) => void update({ enabled })}
+          ariaLabel={`启用 ${platform.label}`}
+        />
+      </div>
+      {props.open ? (
+        <div className="im-platform__details">
+          <div className="im-platform__detail-head">
+            <div>
+              <div className="im-platform__detail-title">{platform.detailTitle}</div>
+              <div className="im-platform__detail-desc">{platform.summary}</div>
+            </div>
+            <span className="settings-status-pill">{extension.active ? "Active" : extension.enabled ? "Enabled" : "Disabled"}</span>
+          </div>
+          <div className="im-platform__fields">
+            {platform.id === "telegram" ? (
+              <TelegramFields
+                config={config}
+                credentialMode={credentialMode}
+                busy={props.busy}
+                setConfig={setConfig}
+                saveConfig={saveConfig}
+              />
+            ) : platform.id === "qq" ? (
+              <QQFields config={config} busy={props.busy} setConfig={setConfig} saveConfig={saveConfig} />
+            ) : (
+              <WeChatFields config={config} busy={props.busy} setConfig={setConfig} saveConfig={saveConfig} />
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TelegramFields(props: FieldProps & { credentialMode: "env" | "direct" }) {
+  return (
+    <>
+      <SettingsRow
+        label="凭证方式"
+        description="环境变量更适合长期使用；直接填写会写入用户级 config。"
+        control={(
+          <Select
+            value={props.credentialMode}
+            disabled={props.busy}
+            ariaLabel="Telegram 凭证方式"
+            options={[
+              { value: "env", label: "环境变量" },
+              { value: "direct", label: "直接填写" },
+            ]}
+            onChange={(value) => props.saveConfig(value === "direct"
+              ? { credentialMode: "direct", botTokenEnv: undefined }
+              : { credentialMode: "env", apiKey: undefined, botToken: undefined, botTokenEnv: configString(props.config, "botTokenEnv", "SCOREL_TELEGRAM_BOT_TOKEN") })}
+          />
+        )}
+      />
+      {props.credentialMode === "env" ? (
+        <TextField field="botTokenEnv" label="Bot Token Env" description="环境变量名；真实 token 从环境变量读取。" fallback="SCOREL_TELEGRAM_BOT_TOKEN" {...props} />
+      ) : (
+        <TextField field="apiKey" label="Bot API Key" description="直接写入用户级 config；界面隐藏显示，但文件内是明文。" password placeholder="123456:telegram-bot-token" {...props} />
+      )}
+      <NumberField field="pollIntervalMs" label="Poll Interval" description="Bot API long polling 的本地轮询间隔。" fallback="1000" {...props} />
+      <TextField field="allowedChatIds" label="Allowed Chats" description="可选，逗号分隔；留空表示不限制。" placeholder="-1001234567890,123456789" {...props} />
+      <TextField field="botUsername" label="Bot Username" description="可选；留空时 adapter 会通过 getMe 获取。" placeholder="scorel_bot" {...props} />
+    </>
+  );
+}
+
+function QQFields(props: FieldProps) {
+  return (
+    <>
+      <TextField field="appId" label="App ID" description="QQ Bot 应用 ID。" {...props} />
+      <TextField field="appSecret" label="App Secret" description="直接写入用户级 config；Scorel 会自动换取 Access Token。" password {...props} />
+      <TextField field="botId" label="Bot ID" description="可选，用于移除群消息里的 bot mention。" {...props} />
+      <TextField field="allowedConversationIds" label="Allowed Conversations" description="可选，逗号分隔；保留给 adapter allow-list。" {...props} />
+    </>
+  );
+}
+
+function WeChatFields(props: FieldProps) {
+  return (
+    <>
+      <TextField field="webhookUrl" label="Webhook URL" description="从企业微信群机器人配置页复制完整地址并粘贴到这里。" password placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." {...props} />
+    </>
+  );
+}
+
+type FieldProps = {
+  config: Record<string, string | number | boolean>;
+  busy: boolean;
+  setConfig: Dispatch<SetStateAction<Record<string, string | number | boolean>>>;
+  saveConfig(patch: Record<string, string | number | boolean | undefined>): void;
+};
+
+function TextField(props: FieldProps & {
+  field: string;
+  label: string;
+  description: string;
+  fallback?: string;
+  placeholder?: string;
+  password?: boolean;
+}) {
+  const value = configString(props.config, props.field, props.fallback ?? "");
+  return (
+    <SettingsRow
+      label={props.label}
+      description={props.description}
+      control={(
+        <input
+          className="input-text"
+          type={props.password ? "password" : "text"}
+          placeholder={props.placeholder}
+          value={value}
+          disabled={props.busy}
+          onChange={(event) => props.setConfig({ ...props.config, [props.field]: event.currentTarget.value })}
+          onBlur={() => props.saveConfig({ [props.field]: value.trim() || undefined })}
+        />
+      )}
+    />
+  );
+}
+
+function NumberField(props: FieldProps & { field: string; label: string; description: string; fallback: string }) {
+  const value = configString(props.config, props.field, props.fallback);
+  return (
+    <SettingsRow
+      label={props.label}
+      description={props.description}
+      control={(
+        <input
+          className="input-text"
+          inputMode="numeric"
+          value={value}
+          disabled={props.busy}
+          onChange={(event) => props.setConfig({ ...props.config, [props.field]: event.currentTarget.value })}
+          onBlur={() => {
+            const numeric = Number(value);
+            props.saveConfig({ [props.field]: Number.isFinite(numeric) && numeric >= 0 ? numeric : Number(props.fallback) });
+          }}
+        />
+      )}
+    />
+  );
+}
+
+const defaultExtension = (extensionId: PlatformId): GuiExtensionSettingsView => ({
+  extensionId,
+  enabled: false,
+  kind: "im",
+  config: {},
+  active: false,
+});
+
+const definedPatch = (patch: Record<string, string | number | boolean | undefined>): Record<string, string | number | boolean> => {
+  const next: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) {
+      next[key] = value;
+    }
+  }
+  return next;
+};
+
+const configString = (extension: { config?: Record<string, unknown> } | Record<string, unknown>, key: string, fallback: string): string => {
+  const source = ("config" in extension && extension.config ? extension.config : extension) as Record<string, unknown>;
+  const value = source[key];
   if (value === undefined || value === "") {
     return fallback;
   }
   return String(value);
 };
 
-const configCredentialMode = (extension: GuiExtensionSettingsView): "env" | "direct" => {
-  const mode = configString(extension, "credentialMode", "");
+const configCredentialMode = (extension: GuiExtensionSettingsView, config: Record<string, string | number | boolean>): "env" | "direct" => {
+  const mode = configString(config, "credentialMode", "");
   if (mode === "direct" || mode === "env") {
     return mode;
   }
   return configString(extension, "apiKey", "") ? "direct" : "env";
 };
+
+const readStoredOpenPlatform = (): PlatformId | null => {
+  try {
+    const value = window.localStorage.getItem(OPEN_PLATFORM_STORAGE_KEY);
+    return isPlatformId(value) ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredOpenPlatform = (platformId: PlatformId | null): void => {
+  try {
+    if (platformId) {
+      window.localStorage.setItem(OPEN_PLATFORM_STORAGE_KEY, platformId);
+    } else {
+      window.localStorage.removeItem(OPEN_PLATFORM_STORAGE_KEY);
+    }
+  } catch {
+    // localStorage can be unavailable in restricted browser contexts.
+  }
+};
+
+const isPlatformId = (value: string | null): value is PlatformId => (
+  value === "telegram" || value === "qq" || value === "wechat" || (value !== null && PLATFORM_IDS.has(value as PlatformId))
+);

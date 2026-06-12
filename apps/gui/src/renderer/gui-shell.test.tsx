@@ -85,6 +85,24 @@ const telegramSettings = {
   active: false,
 };
 
+const imExtensions = {
+  telegram: telegramSettings,
+  qq: {
+    extensionId: "qq",
+    enabled: false,
+    kind: "im" as const,
+    config: {},
+    active: false,
+  },
+  wechat: {
+    extensionId: "wechat",
+    enabled: false,
+    kind: "im" as const,
+    config: {},
+    active: false,
+  },
+};
+
 const modelProps = {
   models: modelProfile.models,
   selectedModelId: "main",
@@ -340,10 +358,10 @@ describe("GUI shell rendering contract", () => {
         modelProfile={modelProfile}
         memory={memorySettings}
         memoryStatus={memoryStatus}
-        telegram={telegramSettings}
+        imExtensions={imExtensions}
         onModelProfileChange={noop}
         onMemoryChange={noop}
-        onTelegramChange={noop}
+        onExtensionChange={noop}
         busy={false}
         setBusy={noop}
         setError={noop}
@@ -387,10 +405,10 @@ describe("GUI shell rendering contract", () => {
         modelProfile={modelProfile}
         memory={memorySettings}
         memoryStatus={memoryStatus}
-        telegram={telegramSettings}
+        imExtensions={imExtensions}
         onModelProfileChange={noop}
         onMemoryChange={noop}
-        onTelegramChange={noop}
+        onExtensionChange={noop}
         busy={false}
         setBusy={noop}
         setError={noop}
@@ -475,21 +493,28 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("提升到全局");
   });
 
-  it("renders Telegram IM credential controls", () => {
+  it("renders compact IM platform rows collapsed by default", () => {
     const html = renderToStaticMarkup(
       <ImSection
-        telegram={{ ...telegramSettings, config: { credentialMode: "direct" } }}
+        extensions={{
+          ...imExtensions,
+          telegram: { ...telegramSettings, config: { credentialMode: "direct" } },
+        }}
         busy={false}
         setBusy={noop}
         setError={noop}
-        onTelegramChange={noop}
+        onExtensionChange={noop}
       />,
     );
 
     expect(html).toContain("Telegram");
-    expect(html).toContain("凭证方式");
-    expect(html).toContain("直接填写");
-    expect(html).toContain("Bot API Key");
-    expect(html).toContain("Allowed Chats");
+    expect(html).toContain("QQ Bot");
+    expect(html).toContain("WeChat");
+    expect(html).toContain("im-platform__summary");
+    expect(html).not.toContain("im-platform__details");
+    expect(html).not.toContain("Telegram Bot 配置");
+    expect(html).not.toContain("凭证方式");
+    expect(html).not.toContain("Bot API Key");
+    expect(html).not.toContain("Allowed Conversations");
   });
 });

@@ -32,13 +32,17 @@ export function Composer({
 }: ComposerProps) {
   void onCancel;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const composingRef = useRef(false);
+  const empty = value.trim().length === 0;
+  const canSubmit = !disabled && !empty && !inFlight;
 
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>): void => {
       event.preventDefault();
-      onSubmit();
+      if (composingRef.current) return;
+      if (canSubmit) onSubmit();
     },
-    [onSubmit],
+    [canSubmit, onSubmit],
   );
 
   useEffect(() => {
@@ -48,8 +52,6 @@ export function Composer({
     const next = Math.min(node.scrollHeight, MAX_HEIGHT);
     node.style.height = `${next}px`;
   }, [value]);
-
-  const empty = value.trim().length === 0;
 
   return (
     <form className="composer" onSubmit={handleSubmit} data-testid="composer">
@@ -61,10 +63,19 @@ export function Composer({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.value)}
+        onCompositionStart={() => {
+          composingRef.current = true;
+        }}
+        onCompositionEnd={() => {
+          composingRef.current = false;
+        }}
         onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
+            if (composingRef.current || event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+              return;
+            }
             event.preventDefault();
-            if (!disabled && !empty) onSubmit();
+            if (canSubmit) onSubmit();
           }
         }}
       />
