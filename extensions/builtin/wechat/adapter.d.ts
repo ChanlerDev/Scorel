@@ -1,5 +1,9 @@
 export type WeChatAdapterOptions = {
-  webhookUrl: string;
+  webhookUrl?: string;
+  callbackHost?: string;
+  callbackPort?: number;
+  callbackPath?: string;
+  callbackToken?: string;
 };
 
 export type WeChatTarget = {
@@ -10,6 +14,7 @@ export type WeChatTarget = {
 export type WeChatAdapter = {
   start(ctx: unknown): Promise<void>;
   stop(): Promise<void>;
+  callbackUrl?(): string | undefined;
   sendMessage(target: WeChatTarget, message: { text?: string; attachments?: Array<Record<string, unknown>> }): Promise<void>;
 };
 

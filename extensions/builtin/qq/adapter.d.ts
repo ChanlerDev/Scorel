@@ -3,7 +3,11 @@ export type QQAdapterOptions = {
   appSecret: string;
   apiBaseUrl: string;
   accessTokenUrl?: string;
+  gatewayUrl?: string;
   botId?: string;
+  intents?: number;
+  heartbeatIntervalMs?: number;
+  dedupeTtlMs?: number;
 };
 
 export type QQTarget = {

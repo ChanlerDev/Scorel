@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
 import { describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 
 import {
   createAdapter,
@@ -95,6 +96,80 @@ describe("QQ Bot IM adapter", () => {
       await server.close();
     }
   });
+
+  it("connects to the official gateway shape and routes dispatch messages", async () => {
+    const gateway = await startQQGatewayStub();
+    const requests: Array<{ url: string; body: unknown; authorization: string | undefined }> = [];
+    const api = await startJsonStub(async (request, body) => {
+      requests.push({ url: request.url ?? "", body, authorization: request.headers.authorization });
+      if (request.url === "/app/getAppAccessToken") {
+        return { access_token: "access_token_1", expires_in: 7200 };
+      }
+      if (request.url === "/gateway") {
+        return { url: gateway.url };
+      }
+      return { id: "sent" };
+    });
+
+    try {
+      const received: unknown[] = [];
+      const adapter = createQQAdapter({
+        appId: "app_1",
+        appSecret: "secret_1",
+        apiBaseUrl: api.url,
+        accessTokenUrl: `${api.url}/app/getAppAccessToken`,
+        gatewayUrl: `${api.url}/gateway`,
+        botId: "bot_1",
+        heartbeatIntervalMs: 10_000,
+      });
+
+      await adapter.start({
+        onMessage: async (message: unknown) => {
+          received.push(message);
+        },
+        logger: {
+          info: () => undefined,
+          error: () => undefined,
+        },
+      });
+      await waitFor(() => gateway.sent.some((message) => message.op === 2));
+      expect(gateway.sent.find((message) => message.op === 2)).toMatchObject({
+        op: 2,
+        d: {
+          token: "QQBot access_token_1",
+          intents: expect.any(Number),
+          shard: [0, 1],
+        },
+      });
+
+      gateway.dispatch({
+        op: 0,
+        s: 1,
+        t: "GROUP_AT_MESSAGE_CREATE",
+        d: {
+          id: "msg_group_1",
+          content: "<@!bot_1> hello from qq",
+          group_openid: "group_123",
+          author: { username: "Chanler" },
+        },
+      });
+      await waitFor(() => received.length === 1);
+      expect(received[0]).toMatchObject({
+        externalConversationId: "qq:group:group_123",
+        text: "hello from qq",
+        target: {
+          data: { kind: "group", id: "group_123", messageId: "msg_group_1" },
+        },
+      });
+
+      await adapter.stop();
+      await waitFor(() => gateway.closed);
+      expect(gateway.closed).toBe(true);
+    } finally {
+      await api.close();
+      await gateway.close();
+    }
+  });
 });
 
 const startJsonStub = async (
@@ -123,4 +198,58 @@ const readJson = async (request: IncomingMessage): Promise<unknown> => {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+};
+
+type QQGatewayPayload = { op: number; d?: unknown; s?: number; t?: string };
+
+const startQQGatewayStub = async (): Promise<{
+  url: string;
+  sent: QQGatewayPayload[];
+  closed: boolean;
+  dispatch: (payload: QQGatewayPayload) => void;
+  close: () => Promise<void>;
+}> => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  const sent: QQGatewayPayload[] = [];
+  let client: import("ws").WebSocket | undefined;
+  let closed = false;
+  server.on("connection", (socket) => {
+    client = socket;
+    socket.on("message", (data) => {
+      sent.push(JSON.parse(String(data)) as QQGatewayPayload);
+    });
+    socket.on("close", () => {
+      closed = true;
+    });
+    socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 10_000 } }));
+  });
+  await new Promise<void>((resolve) => server.once("listening", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("QQ gateway stub did not bind to a TCP port");
+  }
+  return {
+    url: `ws://127.0.0.1:${address.port}`,
+    sent,
+    get closed() {
+      return closed;
+    },
+    dispatch: (payload) => {
+      client?.send(JSON.stringify(payload));
+    },
+    close: async () => {
+      client?.close();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    },
+  };
+};
+
+const waitFor = async (predicate: () => boolean, timeoutMs = 1000): Promise<void> => {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("Timed out waiting for condition");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 };

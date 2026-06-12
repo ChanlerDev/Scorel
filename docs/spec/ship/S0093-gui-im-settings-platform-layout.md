@@ -21,8 +21,8 @@ The business value is scale. Telegram was one provider; Telegram + QQ + WeChat n
 - The last expanded platform is remembered locally; collapsing clears that remembered state.
 - Support Telegram, QQ, and WeChat using one reusable component shape.
 - Preserve existing Telegram config fields and persistence behavior.
-- Add QQ and WeChat config fields that match S0091.
-- For QQ and WeChat, expose the current quick setup fields only: QQ `App ID` / `App Secret`, WeChat full `Webhook URL`.
+- Add QQ and WeChat config fields that match S0091/S0094.
+- For QQ and WeChat, expose the current quick setup fields only: QQ `App ID` / `App Secret`, WeChat `Outbound Webhook` plus inbound callback `Callback Token` / `Callback Host` / `Callback Port`.
 - Keep settings stored through the existing `getExtensionSettings` / `upsertExtensionSettings` IPC path.
 - Absorb immediate GUI review fixes found before push:
   - expanded platform details must have a visible ownership boundary;

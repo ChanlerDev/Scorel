@@ -81,13 +81,16 @@ describe("ImSection", () => {
     expect(element.textContent).not.toContain("Telegram Bot 配置");
   });
 
-  it("uses a full webhook URL as the only WeChat quick setup field", async () => {
+  it("separates WeChat outbound webhook and inbound callback setup fields", async () => {
     window.localStorage.setItem(STORAGE_KEY, "wechat");
 
     const element = await renderImSection();
 
     expect(element.textContent).toContain("WeChat 配置");
-    expect(element.textContent).toContain("Webhook URL");
+    expect(element.textContent).toContain("Outbound Webhook");
+    expect(element.textContent).toContain("Callback Token");
+    expect(element.textContent).toContain("Callback Host");
+    expect(element.textContent).toContain("Callback Port");
     expect(element.textContent).not.toContain("Webhook Key Env");
     expect(element.textContent).not.toContain("Webhook Base URL");
   });

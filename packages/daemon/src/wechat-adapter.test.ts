@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { request } from "node:http";
+import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
 
@@ -29,7 +31,7 @@ describe("WeChat IM adapter", () => {
   });
 
   it("requires a webhook URL and redacts webhook keys", () => {
-    expect(() => createAdapter()).toThrow("WeChat webhook URL is required");
+    expect(() => createAdapter()).toThrow("WeChat webhook URL or callback token is required");
     expect(redactWeChatSecret("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=abc-secret"))
       .toBe("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=[REDACTED]");
   });
@@ -61,6 +63,64 @@ describe("WeChat IM adapter", () => {
       await server.close();
     }
   });
+
+  it("starts an HTTP callback server for verification and inbound text messages", async () => {
+    const received: unknown[] = [];
+    const adapter = createWeChatAdapter({
+      callbackHost: "127.0.0.1",
+      callbackPort: 0,
+      callbackToken: "callback_token",
+    });
+
+    try {
+      await adapter.start({
+        onMessage: async (message: unknown) => {
+          received.push(message);
+        },
+        logger: {
+          info: () => undefined,
+          error: () => undefined,
+        },
+      });
+      const callbackUrl = adapter.callbackUrl?.();
+      expect(callbackUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/wechat\/callback$/);
+
+      const timestamp = "1710000000";
+      const nonce = "nonce_1";
+      const echostr = "verify_echo";
+      const signature = wechatSignature("callback_token", timestamp, nonce);
+      const verify = await httpRequest(`${callbackUrl}?signature=${signature}&timestamp=${timestamp}&nonce=${nonce}&echostr=${echostr}`);
+      expect(verify).toMatchObject({ status: 200, body: echostr });
+
+      const xml = [
+        "<xml>",
+        "<ToUserName><![CDATA[to_user]]></ToUserName>",
+        "<FromUserName><![CDATA[openid_123]]></FromUserName>",
+        "<CreateTime>1710000001</CreateTime>",
+        "<MsgType><![CDATA[text]]></MsgType>",
+        "<Content><![CDATA[hello wechat]]></Content>",
+        "<MsgId>msg_1</MsgId>",
+        "</xml>",
+      ].join("");
+      const postSignature = wechatSignature("callback_token", "1710000001", "nonce_2");
+      const post = await httpRequest(`${callbackUrl}?signature=${postSignature}&timestamp=1710000001&nonce=nonce_2`, {
+        method: "POST",
+        body: xml,
+        headers: { "content-type": "text/xml" },
+      });
+      expect(post).toMatchObject({ status: 200, body: "success" });
+      expect(received).toHaveLength(1);
+      expect(received[0]).toMatchObject({
+        externalConversationId: "wechat:official:openid_123",
+        text: "hello wechat",
+        target: {
+          data: { kind: "official", id: "openid_123", messageId: "msg_1" },
+        },
+      });
+    } finally {
+      await adapter.stop();
+    }
+  });
 });
 
 const startJsonStub = async (
@@ -90,3 +150,31 @@ const readJson = async (request: IncomingMessage): Promise<unknown> => {
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 };
+
+const wechatSignature = (token: string, timestamp: string, nonce: string): string => {
+  return createHash("sha1").update([token, timestamp, nonce].sort().join("")).digest("hex");
+};
+
+const httpRequest = async (
+  url: string,
+  options: { method?: string; body?: string; headers?: Record<string, string> } = {},
+): Promise<{ status: number; body: string }> =>
+  new Promise((resolve, reject) => {
+    const req = request(url, {
+      method: options.method ?? "GET",
+      headers: options.headers,
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      response.on("end", () => {
+        resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") });
+      });
+    });
+    req.on("error", reject);
+    if (options.body) {
+      req.write(options.body);
+    }
+    req.end();
+  });

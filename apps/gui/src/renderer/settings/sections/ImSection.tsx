@@ -223,7 +223,10 @@ function QQFields(props: FieldProps) {
 function WeChatFields(props: FieldProps) {
   return (
     <>
-      <TextField field="webhookUrl" label="Webhook URL" description="从企业微信群机器人配置页复制完整地址并粘贴到这里。" password placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." {...props} />
+      <TextField field="webhookUrl" label="Outbound Webhook" description="企业微信群机器人只用于出站发送；它不会接收群里用户消息。" password placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..." {...props} />
+      <TextField field="callbackToken" label="Callback Token" description="公众号 plaintext 回调用于接收用户消息；需和微信后台 Token 一致。" password {...props} />
+      <TextField field="callbackHost" label="Callback Host" description="本机监听地址；公网接入需通过域名或隧道转发到此地址。" fallback="127.0.0.1" {...props} />
+      <NumberField field="callbackPort" label="Callback Port" description="0 表示自动选择本地端口；固定公网转发时可填写端口。" fallback="0" {...props} />
     </>
   );
 }
