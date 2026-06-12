@@ -589,6 +589,8 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.13 | [`S0081`](spec/ship/S0081-automatic-memory.md) | 自动 memory context、daily、dream consolidation、GUI Settings 与 Command+, 设置入口 | Done |
 | M9.F1.14 | [`S0082`](spec/ship/S0082-memory-journal-tool-and-idle-dream.md) | Daily 改为 agent 主循环 AppendDaily 工具，dream 改为项目 idle 后延迟整合 project/root memory | Done |
 | M9.F1.15 | [`S0086`](spec/ship/S0086-auto-compact-and-session-memory.md) | 80% auto compact、compact replay barrier 和每轮 session memory 维护 | Done |
+| M9.F1.16 | [`S0087`](spec/ship/S0087-gui-ui-polish-sweep.md) | Codex-inspired GUI visual pass：学习 Codex 的比例、层级和克制风格，并把 GUI tool blocks 收敛为低噪声执行证据流 | Done |
+| M9.F1.17 | [`S0088`](spec/ship/S0088-gui-streaming-thinking-contract.md) | Streaming thinking contract：补 thinking/content delta，使 thinking 在 turn 运行中按序显示，而不是最终 assistant_message 后才插入 | Planned |
 
 **Not in M9 Follow-up**:
 
@@ -742,6 +744,9 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0083`](spec/ship/S0083-extension-manifest-and-im-channel-runtime.md) | Extension manifest、IM channel bridge、fixed session、source reminder 与 SendChannelMessage | Done |
 | [`S0084`](spec/ship/S0084-built-in-telegram-im-extension.md) | Built-in Telegram IM extension with Bot API long polling | Done |
 | [`S0085`](spec/ship/S0085-gui-im-extension-settings.md) | GUI IM extension settings and Telegram toggle | Done |
+| [`S0086`](spec/ship/S0086-auto-compact-and-session-memory.md) | Auto compact and session memory | Done |
+| [`S0087`](spec/ship/S0087-gui-ui-polish-sweep.md) | Codex-inspired GUI visual pass and GUI tool trace polish | Done |
+| [`S0088`](spec/ship/S0088-gui-streaming-thinking-contract.md) | GUI streaming thinking contract | Planned |
 
 ---
 

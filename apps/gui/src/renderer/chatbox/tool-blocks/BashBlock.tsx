@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import { Terminal } from "../../icons/index.js";
+import { extractToolDetails, extractToolText } from "./result-text.js";
 import type { ToolBlockProps } from "./registry.js";
 import { ToolChip } from "./ToolChip.js";
 
@@ -21,6 +22,14 @@ function truncate(value: string, limit: number): string {
 }
 
 function parseBashResult(value: unknown): { text: string; exitCode?: number } {
+  const toolText = extractToolText(value);
+  const details = extractToolDetails(value) as { exitCode?: unknown } | undefined;
+  if (toolText) {
+    return {
+      text: toolText,
+      exitCode: typeof details?.exitCode === "number" ? details.exitCode : undefined,
+    };
+  }
   if (typeof value === "string") return { text: value };
   if (value && typeof value === "object") {
     const r = value as BashResult;
@@ -40,42 +49,28 @@ export function BashBlock({ call, result, pending }: ToolBlockProps) {
   const [showAll, setShowAll] = useState<boolean>(false);
   const lines = out.text ? out.text.split(/\r?\n/) : [];
   const visible = !showAll && lines.length > COLLAPSE_AT ? lines.slice(0, COLLAPSE_AT) : lines;
-  const exitColor = out.exitCode === 0 || out.exitCode === undefined
-    ? "var(--color-status-ok)"
-    : "var(--color-status-err)";
-
   return (
     <ToolChip
       icon={<Terminal />}
       title={
-        <span style={{ fontFamily: "var(--font-mono)", color: "var(--color-text)" }}>
+        <span className="tool-chip__mono-target">
           $ {truncate(command, 64)}
         </span>
       }
+      counters={out.exitCode !== undefined ? <span className={out.exitCode === 0 ? "tool-chip__counter--ok" : "tool-chip__counter--err"}>exit {out.exitCode}</span> : undefined}
       pending={pending}
       isError={Boolean(result?.isError)}
       body={
         <>
-          <pre>{visible.join("\n")}</pre>
+          <pre className="tool-output">{visible.join("\n")}</pre>
           {!showAll && lines.length > COLLAPSE_AT ? (
             <button
               type="button"
               onClick={() => setShowAll(true)}
-              style={{
-                marginTop: 4,
-                fontSize: 12,
-                color: "var(--color-text-muted)",
-                textDecoration: "underline",
-                background: "transparent",
-              }}
+              className="tool-link-button"
             >
               展开 {lines.length - COLLAPSE_AT} 行
             </button>
-          ) : null}
-          {out.exitCode !== undefined ? (
-            <p style={{ margin: "4px 0 0", fontSize: 12, color: exitColor }}>
-              → exit {out.exitCode}
-            </p>
           ) : null}
         </>
       }

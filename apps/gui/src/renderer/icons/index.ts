@@ -45,4 +45,5 @@ export {
   Terminal,
   ListTodo,
   Download,
+  Clipboard,
 } from "lucide-react";

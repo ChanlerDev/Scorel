@@ -21,6 +21,7 @@ export type SidebarProps = {
   onNewSessionClick(): void;
   onProjectPickerOpen(anchor: DOMRect): void;
   onProjectClick(key: string): void;
+  onProjectExpanded(key: string): void;
   onSessionClick(key: string, sessionId: string): void;
   onSettingsClick(): void;
   onSidebarToggle?: () => void;
@@ -43,6 +44,7 @@ export function Sidebar({
   onNewSessionClick,
   onProjectPickerOpen,
   onProjectClick,
+  onProjectExpanded,
   onSessionClick,
   onSettingsClick,
   onSidebarToggle,
@@ -103,6 +105,7 @@ export function Sidebar({
                     sessions={sessionsByProject[key] ?? []}
                     selectedSessionId={key === selectedProjectKey ? selectedSessionId : null}
                     onProjectClick={() => onProjectClick(key)}
+                    onProjectExpanded={onProjectExpanded}
                     onSessionClick={(sessionId) => onSessionClick(key, sessionId)}
                   />
                 </li>

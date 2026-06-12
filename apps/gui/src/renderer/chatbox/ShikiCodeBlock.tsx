@@ -8,6 +8,8 @@ import {
 import { createHighlighterCore, type HighlighterCore } from "shiki/core";
 import { createOnigurumaEngine } from "shiki/engine/oniguruma";
 
+import { Check, Clipboard } from "../icons/index.js";
+
 const THEME_NAME = "github-dark-default";
 
 type Status = "loading" | "ready" | "error";
@@ -147,9 +149,24 @@ export default function ShikiCodeBlock({
 
   return (
     <div className="shiki-block">
-      <button type="button" className="shiki-block__copy" onClick={onCopy}>
-        {copied ? "Copied" : "Copy"}
-      </button>
+      <div className="shiki-block__header">
+        <span
+          className="shiki-block__lang"
+          title={lang || "text"}
+        >
+          {lang || "text"}
+        </span>
+        <button
+          type="button"
+          className="shiki-block__copy"
+          onClick={onCopy}
+          aria-label={copied ? "已复制代码" : "复制代码"}
+          title={copied ? "已复制" : "复制代码"}
+        >
+          {copied ? <Check size={13} /> : <Clipboard size={13} />}
+          <span>{copied ? "Copied" : "Copy"}</span>
+        </button>
+      </div>
       {status === "ready" && html ? (
         <div
           className="shiki-block__html"

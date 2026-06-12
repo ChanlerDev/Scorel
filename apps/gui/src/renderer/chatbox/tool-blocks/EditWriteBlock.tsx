@@ -31,8 +31,8 @@ export function EditWriteBlock({ call, result, pending }: ToolBlockProps) {
       icon={isWrite ? <FilePlus /> : <Pencil />}
       title={
         <>
-          {isWrite ? "已创建" : "已编辑"}{" "}
-          <span style={{ color: "var(--color-text)", fontFamily: "var(--font-mono)" }}>
+          {isWrite ? "Write" : "Edit"}{" "}
+          <span className="tool-chip__mono-target">
             {basename(filePath) || "file"}
           </span>
         </>
@@ -45,11 +45,12 @@ export function EditWriteBlock({ call, result, pending }: ToolBlockProps) {
       }
       pending={pending}
       isError={isError}
+      defaultOpen
       body={
         <>
           <UnifiedDiff lines={truncated} />
           {diff.length > MAX_DIFF_LINES ? (
-            <p style={{ marginTop: 4, color: "var(--color-text-faint)" }}>
+            <p className="tool-muted-line">
               …({diff.length - MAX_DIFF_LINES} more lines truncated)
             </p>
           ) : null}
@@ -61,18 +62,12 @@ export function EditWriteBlock({ call, result, pending }: ToolBlockProps) {
 
 function UnifiedDiff({ lines }: { lines: DiffLine[] }) {
   return (
-    <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+    <pre className="tool-diff">
       {lines.map((line, idx) => {
-        const tint =
-          line.kind === "add"
-            ? "rgba(22, 163, 74, 0.10)"
-            : line.kind === "del"
-              ? "rgba(220, 38, 38, 0.10)"
-              : "transparent";
         const prefix = line.kind === "add" ? "+" : line.kind === "del" ? "-" : " ";
         return (
-          <div key={idx} style={{ background: tint, padding: "0 4px" }}>
-            <span style={{ color: "var(--color-text-faint)", display: "inline-block", width: 14 }}>{prefix}</span>
+          <div key={idx} className={`tool-diff__line tool-diff__line--${line.kind}`}>
+            <span className="tool-diff__prefix">{prefix}</span>
             {line.text}
           </div>
         );

@@ -10,6 +10,7 @@ import { SettingsShell } from "./settings/SettingsShell.js";
 import { Sidebar } from "./shell/Sidebar.js";
 import { EmptyState } from "./workspace/EmptyState.js";
 import { Topbar } from "./workspace/Topbar.js";
+import { Workspace } from "./workspace/Workspace.js";
 
 const noop = (): void => {};
 
@@ -103,6 +104,7 @@ describe("GUI shell rendering contract", () => {
         onNewSessionClick={noop}
         onProjectPickerOpen={noop}
         onProjectClick={noop}
+        onProjectExpanded={noop}
         onSessionClick={noop}
         onSettingsClick={noop}
       />,
@@ -128,6 +130,7 @@ describe("GUI shell rendering contract", () => {
         onNewSessionClick={noop}
         onProjectPickerOpen={noop}
         onProjectClick={noop}
+        onProjectExpanded={noop}
         onSessionClick={noop}
         onSettingsClick={noop}
       />,
@@ -159,6 +162,7 @@ describe("GUI shell rendering contract", () => {
         onNewSessionClick={noop}
         onProjectPickerOpen={noop}
         onProjectClick={noop}
+        onProjectExpanded={noop}
         onSessionClick={noop}
         onSettingsClick={noop}
         onSidebarToggle={noop}
@@ -181,6 +185,52 @@ describe("GUI shell rendering contract", () => {
 
     expect(html).toContain('data-testid="topbar-sidebar-toggle"');
     expect(html).toContain('aria-label="展开侧边栏"');
+  });
+
+  it("does not reserve an empty topbar in the empty workspace", () => {
+    const html = renderToStaticMarkup(
+      <Workspace
+        selectedProject={localProject}
+        selectedSessionTitle={undefined}
+        hasActiveSession={false}
+        turns={[]}
+        message=""
+        onMessageChange={noop}
+        onSubmit={noop}
+        busy={false}
+        inFlight={false}
+        {...modelProps}
+        error={null}
+        hostMessage={undefined}
+        onPickerOpen={noop}
+      />,
+    );
+
+    expect(html).toContain("workspace--no-topbar");
+    expect(html).not.toContain('class="topbar"');
+  });
+
+  it("shows a stable fallback title for active sessions before title generation", () => {
+    const html = renderToStaticMarkup(
+      <Workspace
+        selectedProject={localProject}
+        selectedSessionTitle={undefined}
+        hasActiveSession={true}
+        turns={[]}
+        message=""
+        onMessageChange={noop}
+        onSubmit={noop}
+        busy={false}
+        inFlight={false}
+        {...modelProps}
+        error={null}
+        hostMessage={undefined}
+        onPickerOpen={noop}
+      />,
+    );
+
+    expect(html).toContain('class="topbar"');
+    expect(html).toContain("未命名对话");
   });
 
   it("uses distinct empty workspace headings for no project and selected project", () => {

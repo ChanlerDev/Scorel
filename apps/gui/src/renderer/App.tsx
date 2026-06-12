@@ -85,6 +85,8 @@ export function App() {
   const projectorStateRef = useRef<ProjectorState>(emptyProjectorState());
   const pendingEventsRef = useRef<ScorelEvent[]>([]);
   const batcherRef = useRef<ReturnType<typeof createRafBatcher> | null>(null);
+  const sessionsByProjectRef = useRef<Record<string, SessionSummary[]>>({});
+  const loadingSessionsRef = useRef<Set<string>>(new Set());
 
   const flushPending = useCallback(() => {
     const queued = pendingEventsRef.current;
@@ -161,6 +163,30 @@ export function App() {
     [],
   );
 
+  const ensureSessionsForProject = useCallback(
+    (key: string): void => {
+      if (sessionsByProjectRef.current[key] !== undefined || loadingSessionsRef.current.has(key)) return;
+      const project = projects.find((candidate) => projectKey(candidate) === key);
+      if (!project) return;
+      loadingSessionsRef.current.add(key);
+      void refreshSessionsForProject(project)
+        .catch((cause) => {
+          setSessionsByProject((current) => ({ ...current, [key]: [] }));
+          if (selectedProjectKey === key) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+          }
+        })
+        .finally(() => {
+          loadingSessionsRef.current.delete(key);
+        });
+    },
+    [projects, refreshSessionsForProject, selectedProjectKey],
+  );
+
+  useEffect(() => {
+    sessionsByProjectRef.current = sessionsByProject;
+  }, [sessionsByProject]);
+
   const loadInitialEvents = useCallback((events: PersistentEvent[]): void => {
     let next = emptyProjectorState();
     for (const event of events) {
@@ -222,10 +248,7 @@ export function App() {
     void (async () => {
       setBusy(true);
       try {
-        const snapshot = await refreshSnapshot();
-        if (snapshot.projects[0]) {
-          await refreshSessionsForProject(snapshot.projects[0]);
-        }
+        await refreshSnapshot();
         setTelegramSettings(await window.scorel.getExtensionSettings("telegram"));
         setError(null);
       } catch (cause) {
@@ -234,17 +257,11 @@ export function App() {
         setBusy(false);
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refreshSnapshot]);
 
   useEffect(() => {
-    if (!selectedProject) return;
-    const key = projectKey(selectedProject);
-    if (sessionsByProject[key]) return;
-    void refreshSessionsForProject(selectedProject).catch((cause) => {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    });
-  }, [selectedProject, sessionsByProject, refreshSessionsForProject]);
+    if (selectedProjectKey) ensureSessionsForProject(selectedProjectKey);
+  }, [ensureSessionsForProject, selectedProjectKey]);
 
   useEffect(() => {
     if (!selectedProject) {
@@ -470,6 +487,7 @@ export function App() {
           onNewSessionClick={() => void handleNewSession()}
           onProjectPickerOpen={openProjectPicker}
           onProjectClick={handleProjectClick}
+          onProjectExpanded={ensureSessionsForProject}
           onSessionClick={handleSessionClick}
           onSettingsClick={() => setView("settings")}
           onSidebarToggle={() => setSidebarCollapsed(true)}

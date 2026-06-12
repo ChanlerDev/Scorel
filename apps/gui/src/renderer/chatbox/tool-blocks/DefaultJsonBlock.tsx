@@ -20,8 +20,8 @@ export function DefaultJsonBlock({ call, result, pending }: ToolBlockProps) {
       isError={Boolean(result?.isError)}
       body={
         <>
-          <pre>{safeStringify(call.args)}</pre>
-          {result ? <pre>{safeStringify(result.result)}</pre> : null}
+          <pre className="tool-output">{safeStringify(call.args)}</pre>
+          {result ? <pre className="tool-output tool-output--result">{safeStringify(result.result)}</pre> : null}
         </>
       }
     />

@@ -1,4 +1,5 @@
 import type { SessionSummary } from "@scorel/protocol";
+import { useEffect } from "react";
 
 import { ChevronDown, ChevronRight, Folder } from "../icons/index.js";
 import type { GuiProjectView, GuiRelayDeviceView } from "../../shared/ipc.js";
@@ -12,6 +13,7 @@ export type ProjectTreeProps = {
   sessions: SessionSummary[];
   selectedSessionId: string | null;
   onProjectClick(): void;
+  onProjectExpanded(projectKey: string): void;
   onSessionClick(sessionId: string): void;
 };
 
@@ -23,9 +25,14 @@ export function ProjectTree({
   sessions,
   selectedSessionId,
   onProjectClick,
+  onProjectExpanded,
   onSessionClick,
 }: ProjectTreeProps) {
   const { collapsed, toggle } = useCollapsed(`project:${projectKey}`, !isActive);
+
+  useEffect(() => {
+    if (!collapsed) onProjectExpanded(projectKey);
+  }, [collapsed, onProjectExpanded, projectKey]);
 
   const handleProjectClick = (): void => {
     toggle();

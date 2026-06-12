@@ -24,7 +24,7 @@ export function ToolChip({
   const [open, setOpen] = useState<boolean>(defaultOpen ?? Boolean(isError));
   const toggleable = Boolean(body);
   return (
-    <div className={`tool-chip${isError ? " tool-chip--error" : ""}`}>
+    <div className={`tool-chip${isError ? " tool-chip--error" : ""}${pending ? " tool-chip--pending" : ""}`}>
       <button
         type="button"
         className="tool-chip__header"
@@ -33,10 +33,10 @@ export function ToolChip({
         disabled={!toggleable}
         style={!toggleable ? { cursor: "default" } : undefined}
       >
-        <span style={{ display: "inline-grid", placeItems: "center" }}>{icon}</span>
+        <span className="tool-chip__icon">{icon}</span>
         <span className="tool-chip__title">
           {title}
-          {pending ? <span style={{ color: "var(--color-text-faint)" }}> · pending</span> : null}
+          {pending ? <span className="tool-chip__status"> · pending</span> : null}
         </span>
         <span className="tool-chip__counters">{counters}</span>
         {toggleable ? (

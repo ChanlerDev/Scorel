@@ -29,15 +29,23 @@ export type WorkspaceProps = {
 };
 
 export function Workspace(props: WorkspaceProps) {
+  const showTopbar =
+    props.hasActiveSession ||
+    Boolean(props.error) ||
+    Boolean(props.hostMessage) ||
+    Boolean(props.sidebarCollapsed);
+
   return (
-    <main className="workspace">
-      <Topbar
-        title={props.hasActiveSession ? props.selectedSessionTitle : undefined}
-        error={props.error ?? undefined}
-        hostMessage={props.hostMessage}
-        sidebarCollapsed={props.sidebarCollapsed}
-        onSidebarToggle={props.onSidebarToggle}
-      />
+    <main className={`workspace${showTopbar ? "" : " workspace--no-topbar"}`}>
+      {showTopbar ? (
+        <Topbar
+          title={props.hasActiveSession ? props.selectedSessionTitle ?? "未命名对话" : undefined}
+          error={props.error ?? undefined}
+          hostMessage={props.hostMessage}
+          sidebarCollapsed={props.sidebarCollapsed}
+          onSidebarToggle={props.onSidebarToggle}
+        />
+      ) : null}
       {props.hasActiveSession ? (
         <SessionView
           selectedProject={props.selectedProject}
