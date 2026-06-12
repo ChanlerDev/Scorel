@@ -591,6 +591,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.15 | [`S0086`](spec/ship/S0086-auto-compact-and-session-memory.md) | 80% auto compact、compact replay barrier 和每轮 session memory 维护 | Done |
 | M9.F1.16 | [`S0087`](spec/ship/S0087-gui-ui-polish-sweep.md) | Codex-inspired GUI visual pass：学习 Codex 的比例、层级和克制风格，并把 GUI tool blocks 收敛为低噪声执行证据流 | Done |
 | M9.F1.17 | [`S0088`](spec/ship/S0088-gui-streaming-thinking-contract.md) | Streaming thinking contract：补 thinking/content delta，使 thinking 在 turn 运行中按序显示，而不是最终 assistant_message 后才插入 | Planned |
+| M9.F1.18 | [`S0089`](spec/ship/S0089-memory-reliability-and-dream-trigger.md) | Memory reliability：修复 AppendDaily 调用质量、dreaming 触发与可观测性，让 M9 后半段聚焦真实使用中的质量优化 | Planned |
 
 **Not in M9 Follow-up**:
 
@@ -747,6 +748,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0086`](spec/ship/S0086-auto-compact-and-session-memory.md) | Auto compact and session memory | Done |
 | [`S0087`](spec/ship/S0087-gui-ui-polish-sweep.md) | Codex-inspired GUI visual pass and GUI tool trace polish | Done |
 | [`S0088`](spec/ship/S0088-gui-streaming-thinking-contract.md) | GUI streaming thinking contract | Planned |
+| [`S0089`](spec/ship/S0089-memory-reliability-and-dream-trigger.md) | Memory reliability and dream trigger fix | Planned |
 
 ---
 
