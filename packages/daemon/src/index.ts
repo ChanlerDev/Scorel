@@ -36,6 +36,7 @@ import {
   renderSkillListing,
   renderSystemPrompt,
   renderModelProfileConfig,
+  readMemoryDreamState,
   readSessionMemory,
   resolveModelSelection,
   resolvePiAiModel,
@@ -43,6 +44,7 @@ import {
   sessionLogFilePath,
   scorelSessionsDir,
   scorelMemoryPaths,
+  writeMemoryDreamState,
   writeSessionMemory,
   type ExtensionManifest,
   type ScorelConfig,
@@ -88,6 +90,7 @@ import {
   type Unsubscribe,
   type ClientRequestMap,
   type ChannelContext,
+  type MemoryStatus,
   type ExtensionSettings,
   type MemorySettings,
 } from "@scorel/protocol";
@@ -558,6 +561,7 @@ type TransientEventInput =
   | Omit<Extract<TransientEvent, { type: "turn_end" }>, "seq">
   | Omit<Extract<TransientEvent, { type: "message_start" }>, "seq">
   | Omit<Extract<TransientEvent, { type: "text_delta" }>, "seq">
+  | Omit<Extract<TransientEvent, { type: "thinking_delta" }>, "seq">
   | Omit<Extract<TransientEvent, { type: "error" }>, "seq">;
 
 type Connection = {
@@ -807,6 +811,10 @@ export class ScorelHost {
       }
       case "get_memory_settings": {
         this.#respond(connection, message, { memory: await this.#memorySettingsForProject(message.projectId) });
+        break;
+      }
+      case "get_memory_status": {
+        this.#respond(connection, message, { status: await this.#memoryStatusForProject(message.projectId) });
         break;
       }
       case "upsert_memory_settings": {
@@ -1383,10 +1391,21 @@ export class ScorelHost {
           delta: rawEvent.delta,
         });
         break;
+      case "thinking_delta":
+        this.#broadcastTransient(lane.session.header.sessionId, {
+          type: "thinking_delta",
+          sessionId: lane.session.header.sessionId,
+          clientId,
+          ts: this.#now(),
+          eventId: state.assistantEventId,
+          delta: rawEvent.delta,
+        });
+        break;
       case "message_end": {
         await this.#appendDiagnostic(lane.session.header.sessionId, "assistant_result", {
           clientId,
           stopReason: rawEvent.message.stopReason,
+          thinkingBlocks: countContentBlocks(rawEvent.message, "thinking"),
           textBlocks: countContentBlocks(rawEvent.message, "text"),
           toolCalls: countContentBlocks(rawEvent.message, "tool_call"),
           inputTokens: rawEvent.message.usage?.inputTokens,
@@ -1596,12 +1615,22 @@ export class ScorelHost {
         homeDir: this.#memoryHomeDir,
         now: this.#now,
         onAppend: async (result) => {
-          await this.#appendDiagnostic(lane.session.header.sessionId, "memory_daily_appended", {
-            clientId,
-            path: result.path,
-            date: result.date,
-          });
-          await this.#scheduleMemoryDream(lane, clientId);
+          if (result.entry) {
+            await this.#markMemoryDreamDirty(lane, clientId, result.path);
+          }
+          try {
+            await this.#appendDiagnostic(lane.session.header.sessionId, "memory_daily_appended", {
+              clientId,
+              path: result.path,
+              date: result.date,
+              skippedReason: result.skippedReason,
+            });
+          } catch {
+            // Diagnostics are observability only; daily append and dream scheduling must survive log failures.
+          }
+          if (result.entry) {
+            await this.#scheduleMemoryDream(lane, clientId);
+          }
         },
       }),
     );
@@ -1899,6 +1928,22 @@ export class ScorelHost {
       lastActivityAt: this.#now(),
     };
     const delayMs = Math.max(0, memory.dreamIdleMinutes) * 60 * 1000;
+    const scheduledFor = this.#now() + delayMs;
+    const currentState = await readMemoryDreamState({
+      projectId: lane.project.projectId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+    });
+    await this.#writeMemoryDreamState(lane.project.projectId, {
+      ...(currentState ?? {}),
+      projectId: String(lane.project.projectId),
+      dirty: true,
+      running: schedule.running,
+      sessionId: String(lane.session.header.sessionId),
+      clientId: String(clientId),
+      lastDailyAppendAt: currentState?.lastDailyAppendAt ?? schedule.lastActivityAt,
+      scheduledFor,
+    });
     schedule.timer = setTimeout(() => {
       void this.#runIdleMemoryDream(projectId).catch((cause) => {
         const error = cause instanceof Error ? cause : new Error(String(cause));
@@ -1918,6 +1963,27 @@ export class ScorelHost {
     });
   }
 
+  async #markMemoryDreamDirty(lane: SessionLane, clientId: ClientId, dailyPath: string): Promise<void> {
+    const current = await readMemoryDreamState({
+      projectId: lane.project.projectId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+    });
+    await this.#writeMemoryDreamState(lane.project.projectId, {
+      projectId: String(lane.project.projectId),
+      dirty: true,
+      running: current?.running ?? false,
+      sessionId: String(lane.session.header.sessionId),
+      clientId: String(clientId),
+      lastDailyAppendAt: this.#now(),
+      lastDailyPath: dailyPath,
+      lastFailure: current?.lastFailure,
+      lastSuccessAt: current?.lastSuccessAt,
+      lastProjectMemoryUpdateAt: current?.lastProjectMemoryUpdateAt,
+      lastRootMemoryUpdateAt: current?.lastRootMemoryUpdateAt,
+    });
+  }
+
   async #runIdleMemoryDream(projectId: ProjectId): Promise<void> {
     const schedule = this.#memoryDreams.get(projectId);
     if (!schedule || schedule.running) {
@@ -1926,10 +1992,28 @@ export class ScorelHost {
     schedule.running = true;
     schedule.timer = undefined;
     this.#memoryDreams.set(projectId, schedule);
+    const beforeRun = await readMemoryDreamState({
+      projectId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+    });
+    await this.#writeMemoryDreamState(projectId, {
+      ...(beforeRun ?? { projectId: String(projectId), dirty: true }),
+      projectId: String(projectId),
+      running: true,
+      lastAttemptAt: this.#now(),
+    });
     try {
       const lane = await this.#getLane(schedule.sessionId);
       const memory = await this.#safeMemorySettingsForRuntime(lane, schedule.clientId);
       if (!memory.enabled || !memory.autoDream) {
+        await this.#writeMemoryDreamState(projectId, {
+          ...(beforeRun ?? { projectId: String(projectId) }),
+          projectId: String(projectId),
+          dirty: false,
+          running: false,
+          lastFailure: { at: this.#now(), message: "Memory dream disabled" },
+        });
         return;
       }
       const generated = await this.#generateMemoryUpdate(lane, memory);
@@ -1952,9 +2036,87 @@ export class ScorelHost {
           path: paths.rootMemoryPath,
         });
       }
+      const now = this.#now();
+      const latestState = await readMemoryDreamState({ projectId, homeDir: this.#memoryHomeDir, now: this.#now });
+      const hasNewDailyDuringRun =
+        latestState?.lastDailyAppendAt !== undefined &&
+        beforeRun?.lastDailyAppendAt !== undefined &&
+        latestState.lastDailyAppendAt > beforeRun.lastDailyAppendAt;
+      await this.#writeMemoryDreamState(projectId, {
+        ...(latestState ?? { projectId: String(projectId) }),
+        projectId: String(projectId),
+        dirty: hasNewDailyDuringRun,
+        running: false,
+        ...(hasNewDailyDuringRun ? {} : { scheduledFor: undefined }),
+        lastSuccessAt: now,
+        lastFailure: undefined,
+        ...(generated?.projectMemory?.trim() ? { lastProjectMemoryUpdateAt: now } : {}),
+        ...(memory.promoteRoot && generated?.rootMemory?.trim() ? { lastRootMemoryUpdateAt: now } : {}),
+      });
+      if (hasNewDailyDuringRun) {
+        await this.#scheduleMemoryDream(lane, schedule.clientId);
+      }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      await this.#writeMemoryDreamState(projectId, {
+        ...(await readMemoryDreamState({ projectId, homeDir: this.#memoryHomeDir, now: this.#now }) ?? { projectId: String(projectId) }),
+        projectId: String(projectId),
+        dirty: true,
+        running: false,
+        lastFailure: { at: this.#now(), message },
+      });
+      throw cause;
     } finally {
       this.#memoryDreams.delete(projectId);
     }
+  }
+
+  async #memoryStatusForProject(projectId: ProjectId): Promise<MemoryStatus> {
+    const state = await readMemoryDreamState({
+      projectId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+    });
+    await this.#recoverMemoryDream(projectId, state);
+    const recovered = await readMemoryDreamState({
+      projectId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+    });
+    return {
+      projectId,
+      dirty: recovered?.dirty ?? false,
+      running: recovered?.running ?? false,
+      ...(recovered?.lastDailyAppendAt !== undefined ? { lastDailyAppendAt: recovered.lastDailyAppendAt } : {}),
+      ...(recovered?.lastDailyPath ? { lastDailyPath: recovered.lastDailyPath } : {}),
+      ...(recovered?.scheduledFor !== undefined ? { scheduledFor: recovered.scheduledFor } : {}),
+      ...(recovered?.lastAttemptAt !== undefined ? { lastAttemptAt: recovered.lastAttemptAt } : {}),
+      ...(recovered?.lastSuccessAt !== undefined ? { lastSuccessAt: recovered.lastSuccessAt } : {}),
+      ...(recovered?.lastFailure ? { lastFailure: recovered.lastFailure } : {}),
+      ...(recovered?.lastProjectMemoryUpdateAt !== undefined ? { lastProjectMemoryUpdateAt: recovered.lastProjectMemoryUpdateAt } : {}),
+      ...(recovered?.lastRootMemoryUpdateAt !== undefined ? { lastRootMemoryUpdateAt: recovered.lastRootMemoryUpdateAt } : {}),
+    };
+  }
+
+  async #recoverMemoryDream(projectId: ProjectId, state: Awaited<ReturnType<typeof readMemoryDreamState>>): Promise<void> {
+    if (!state?.dirty || this.#memoryDreams.has(projectId)) {
+      return;
+    }
+    const lane = [...this.#sessions.values()].find((candidate) => candidate.project.projectId === projectId);
+    if (!lane) {
+      return;
+    }
+    const clientId = state.clientId ? asClientId(state.clientId) : asClientId("client_memory_recovery");
+    await this.#scheduleMemoryDream(lane, clientId);
+  }
+
+  async #writeMemoryDreamState(projectId: ProjectId, state: Parameters<typeof writeMemoryDreamState>[0]["state"]): Promise<void> {
+    await writeMemoryDreamState({
+      projectId,
+      homeDir: this.#memoryHomeDir,
+      now: this.#now,
+      state,
+    });
   }
 
   async #generateMemoryUpdate(

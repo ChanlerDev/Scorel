@@ -3,6 +3,7 @@ import type {
   AvailableModelSummary,
   HostProject,
   ModelRole,
+  MemoryStatus,
   MemorySettings,
   ExtensionSettings,
   ProviderCatalogModelSummary,
@@ -75,6 +76,8 @@ export type GuiUpsertModelProfileInput = Omit<UpsertModelProfileInput, "projectI
 
 export type GuiMemorySettingsView = MemorySettings;
 
+export type GuiMemoryStatusView = MemoryStatus;
+
 export type GuiUpsertMemorySettingsInput = Omit<UpsertMemorySettingsInput, "projectId">;
 
 export type GuiExtensionSettingsView = ExtensionSettings;
@@ -114,6 +117,7 @@ export type GuiApi = {
   upsertModelProfile(project: GuiProjectRef, input: GuiUpsertModelProfileInput): Promise<GuiModelProfileView>;
   fetchProviderModels(project: GuiProjectRef, providerId: string): Promise<GuiProviderCatalogModelView[]>;
   getMemorySettings(project: GuiProjectRef): Promise<GuiMemorySettingsView>;
+  getMemoryStatus(project: GuiProjectRef): Promise<GuiMemoryStatusView>;
   upsertMemorySettings(project: GuiProjectRef, input: GuiUpsertMemorySettingsInput): Promise<GuiMemorySettingsView>;
   getExtensionSettings(extensionId: string): Promise<GuiExtensionSettingsView>;
   upsertExtensionSettings(input: GuiUpsertExtensionSettingsInput): Promise<GuiExtensionSettingsView>;
@@ -141,6 +145,7 @@ export const guiIpcChannels = {
   upsertModelProfile: "scorel:upsertModelProfile",
   fetchProviderModels: "scorel:fetchProviderModels",
   getMemorySettings: "scorel:getMemorySettings",
+  getMemoryStatus: "scorel:getMemoryStatus",
   upsertMemorySettings: "scorel:upsertMemorySettings",
   getExtensionSettings: "scorel:getExtensionSettings",
   upsertExtensionSettings: "scorel:upsertExtensionSettings",

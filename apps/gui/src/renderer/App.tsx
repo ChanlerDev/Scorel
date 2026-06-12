@@ -19,6 +19,7 @@ import type {
   GuiProjectView,
   GuiExtensionSettingsView,
   GuiMemorySettingsView,
+  GuiMemoryStatusView,
   GuiModelProfileView,
   GuiRelayDeviceView,
   GuiRemoteProjectView,
@@ -39,6 +40,12 @@ const defaultMemorySettings = (): GuiMemorySettingsView => ({
   promoteRoot: true,
   dreamIdleMinutes: 60,
   autoCompactThreshold: 0.8,
+});
+
+const defaultMemoryStatus = (projectId = ""): GuiMemoryStatusView => ({
+  projectId: projectId as never,
+  dirty: false,
+  running: false,
 });
 
 const defaultTelegramSettings = (): GuiExtensionSettingsView => ({
@@ -73,6 +80,7 @@ export function App() {
   const [message, setMessage] = useState<string>("");
   const [modelProfile, setModelProfile] = useState<GuiModelProfileView>({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
   const [memorySettings, setMemorySettings] = useState<GuiMemorySettingsView>(defaultMemorySettings());
+  const [memoryStatus, setMemoryStatus] = useState<GuiMemoryStatusView>(defaultMemoryStatus());
   const [telegramSettings, setTelegramSettings] = useState<GuiExtensionSettingsView>(defaultTelegramSettings());
   const [selectedModelId, setSelectedModelId] = useState<string>("");
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
@@ -291,6 +299,13 @@ export function App() {
         setMemorySettings(defaultMemorySettings());
         setError(cause instanceof Error ? cause.message : String(cause));
       });
+    void window.scorel.getMemoryStatus(projectRef(selectedProject))
+      .then((status) => {
+        setMemoryStatus(status);
+      })
+      .catch(() => {
+        setMemoryStatus(defaultMemoryStatus(selectedProject.projectId));
+      });
   }, [selectedProject]);
 
   const handleProjectClick = useCallback((key: string): void => {
@@ -451,6 +466,7 @@ export function App() {
         }}
         modelProfile={modelProfile}
         memory={memorySettings}
+        memoryStatus={memoryStatus}
         telegram={telegramSettings}
         onModelProfileChange={(profile) => {
           setModelProfile(profile);

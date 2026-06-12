@@ -718,6 +718,26 @@ describe("ScorelHost + embedded transport", () => {
       const rootMemory = await readFile(join(root, ".scorel", "memory", "MEMORY.md"), "utf8");
       return rootMemory.includes("messages assembly");
     });
+    const completedStatus = waitForResponse(transport, "req_dream_status_completed");
+    await transport.send({
+      type: "get_memory_status",
+      requestId: asRequestId("req_dream_status_completed"),
+      projectId: project.projectId,
+    });
+    await expect(completedStatus).resolves.toMatchObject({
+      type: "response",
+      requestType: "get_memory_status",
+      data: {
+        status: {
+          projectId: project.projectId,
+          dirty: false,
+          running: false,
+          lastSuccessAt: 1_000,
+          lastProjectMemoryUpdateAt: 1_000,
+          lastRootMemoryUpdateAt: 1_000,
+        },
+      },
+    });
   });
 
   it("routes loopback IM messages through fixed session, channel reminder, skill index, and SendChannelMessage", async () => {
@@ -1287,8 +1307,12 @@ apiKey = "secret"
     });
     await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
 
-    const lines = (await readFile(join(sessionsDir, "ses_title.jsonl"), "utf8")).trim().split("\n");
-    const events = lines.slice(1).map((line) => JSON.parse(line) as { type: string; title?: string; source?: string; model?: { modelId?: string } });
+    let events: { type: string; title?: string; source?: string; model?: { modelId?: string } }[] = [];
+    await waitUntil(async () => {
+      const lines = (await readFile(join(sessionsDir, "ses_title.jsonl"), "utf8")).trim().split("\n");
+      events = lines.slice(1).map((line) => JSON.parse(line) as { type: string; title?: string; source?: string; model?: { modelId?: string } });
+      return events.some((event) => event.type === "session_title_updated");
+    });
     expect(events).toContainEqual(expect.objectContaining({
       type: "session_title_updated",
       title: "ok",

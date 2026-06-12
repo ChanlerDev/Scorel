@@ -10,7 +10,7 @@ The business value is process trust. Users should see the agent's work unfold in
 
 Today Scorel streams only `text_delta`. Thinking content exists in the final persistent assistant message, so GUI can only render it after the turn is finalized. A GUI-only placeholder would be misleading because it would imply thinking is streaming when the runtime has not emitted it.
 
-## Candidate Scope
+## Scope
 
 - Add a protocol/runtime event for streaming thinking, likely `thinking_delta` or a more general ordered `content_delta`.
 - Preserve ordered assistant content blocks so thinking, text, and tool calls reconcile cleanly with the final persistent assistant message.
@@ -32,4 +32,4 @@ Today Scorel streams only `text_delta`. Thinking content exists in the final per
 
 ## Status
 
-Planned.
+Done.

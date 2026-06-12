@@ -11,7 +11,9 @@ import {
   mergeMemoryMarkdown,
   renderDailyEntry,
   renderMemoryHarness,
+  readMemoryDreamState,
   scorelMemoryPaths,
+  writeMemoryDreamState,
 } from "./index.js";
 
 describe("memory files", () => {
@@ -89,6 +91,65 @@ describe("memory files", () => {
     expect(result.content[0]).toMatchObject({ type: "text", text: "Daily appended: 2026-06-10" });
     expect(daily).toContain("Summary: 完成 memory journal 工具");
     expect(daily).toContain("Follow-ups: idle dreamer 整合 memory");
+  });
+
+  it("rejects low-signal AppendDaily entries", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "scorel-memory-low-signal-"));
+    const tool = createAppendDailyTool({
+      homeDir,
+      projectId: "prj_test",
+      now: () => Date.UTC(2026, 5, 10, 16, 20),
+    });
+
+    await expect(tool.execute("call_daily", {
+      summary: "完成任务",
+    }, new AbortController().signal, () => undefined)).rejects.toThrow(/too generic|requires/);
+  });
+
+  it("skips duplicate daily entries", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "scorel-memory-duplicate-"));
+    const first = await appendDailyEntry({
+      homeDir,
+      projectId: "prj_test",
+      now: () => Date.UTC(2026, 5, 10, 16, 20),
+      text: "Summary: 完成 memory journal 工具 Completed: AppendDaily 写入 daily",
+    });
+    const second = await appendDailyEntry({
+      homeDir,
+      projectId: "prj_test",
+      now: () => Date.UTC(2026, 5, 10, 16, 21),
+      text: "Summary: 完成 memory journal 工具 Completed: AppendDaily 写入 daily",
+    });
+    const daily = await readFile(first.path, "utf8");
+
+    expect(first.entry).toContain("16:20");
+    expect(second).toMatchObject({ entry: "", skippedReason: "duplicate" });
+    expect(daily.match(/AppendDaily 写入 daily/g)).toHaveLength(1);
+  });
+
+  it("persists memory dream state", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "scorel-memory-dream-state-"));
+    await writeMemoryDreamState({
+      homeDir,
+      projectId: "prj_test",
+      state: {
+        projectId: "prj_test",
+        dirty: true,
+        running: false,
+        lastDailyAppendAt: 1_000,
+        scheduledFor: 2_000,
+        lastDailyPath: "/tmp/daily.md",
+      },
+    });
+
+    await expect(readMemoryDreamState({ homeDir, projectId: "prj_test" })).resolves.toMatchObject({
+      projectId: "prj_test",
+      dirty: true,
+      running: false,
+      lastDailyAppendAt: 1_000,
+      scheduledFor: 2_000,
+      lastDailyPath: "/tmp/daily.md",
+    });
   });
 
   it("rejects unsafe project ids", () => {

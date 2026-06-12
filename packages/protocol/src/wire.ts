@@ -12,6 +12,7 @@ import type {
   ProviderCatalogModelSummary,
   ProviderModelSummary,
   UpsertModelProfileInput,
+  MemoryStatus,
   MemorySettings,
   UpsertExtensionSettingsInput,
   UpsertMemorySettingsInput,
@@ -85,6 +86,10 @@ export type ClientRequestMap = {
   get_memory_settings: {
     request: { projectId: ProjectId };
     response: { memory: MemorySettings };
+  };
+  get_memory_status: {
+    request: { projectId: ProjectId };
+    response: { status: MemoryStatus };
   };
   upsert_memory_settings: {
     request: UpsertMemorySettingsInput;

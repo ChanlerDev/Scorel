@@ -6,7 +6,7 @@ import {
   Server,
   Smartphone,
 } from "../icons/index.js";
-import type { GuiExtensionSettingsView, GuiMemorySettingsView, GuiModelProfileView, GuiProjectRef, GuiRelayDeviceView } from "../../shared/ipc.js";
+import type { GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiProjectRef, GuiRelayDeviceView } from "../../shared/ipc.js";
 import { ConfigSection } from "./sections/ConfigSection.js";
 import { ImSection } from "./sections/ImSection.js";
 import { MemorySection } from "./sections/MemorySection.js";
@@ -19,6 +19,7 @@ export type SettingsShellProps = {
   project: GuiProjectRef | null;
   modelProfile: GuiModelProfileView;
   memory: GuiMemorySettingsView;
+  memoryStatus: GuiMemoryStatusView;
   telegram: GuiExtensionSettingsView;
   onModelProfileChange(profile: GuiModelProfileView): void;
   onMemoryChange(memory: GuiMemorySettingsView): void;
@@ -77,6 +78,7 @@ export function SettingsShell(props: SettingsShellProps) {
         <MemorySection
           project={props.project}
           memory={props.memory}
+          status={props.memoryStatus}
           busy={props.busy}
           setBusy={props.setBusy}
           setError={props.setError}

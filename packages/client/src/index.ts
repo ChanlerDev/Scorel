@@ -21,6 +21,7 @@ import {
   type HostProject,
   type AvailableModelSummary,
   type ModelRole,
+  type MemoryStatus,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
   type ProviderModelSummary,
@@ -312,6 +313,11 @@ export class DaemonClient {
   async getMemorySettings(input: { projectId: ProjectId }): Promise<MemorySettings> {
     this.#assertDaemonConnected();
     return (await this.#request("get_memory_settings", input)).memory;
+  }
+
+  async getMemoryStatus(input: { projectId: ProjectId }): Promise<MemoryStatus> {
+    this.#assertDaemonConnected();
+    return (await this.#request("get_memory_status", input)).status;
   }
 
   async upsertMemorySettings(input: UpsertMemorySettingsInput): Promise<MemorySettings> {

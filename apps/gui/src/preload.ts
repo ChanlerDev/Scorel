@@ -17,6 +17,7 @@ const api: GuiApi = {
   upsertModelProfile: (project, input) => ipcRenderer.invoke(guiIpcChannels.upsertModelProfile, project, input),
   fetchProviderModels: (project, providerId) => ipcRenderer.invoke(guiIpcChannels.fetchProviderModels, project, providerId),
   getMemorySettings: (project) => ipcRenderer.invoke(guiIpcChannels.getMemorySettings, project),
+  getMemoryStatus: (project) => ipcRenderer.invoke(guiIpcChannels.getMemoryStatus, project),
   upsertMemorySettings: (project, input) => ipcRenderer.invoke(guiIpcChannels.upsertMemorySettings, project, input),
   getExtensionSettings: (extensionId) => ipcRenderer.invoke(guiIpcChannels.getExtensionSettings, extensionId),
   upsertExtensionSettings: (input) => ipcRenderer.invoke(guiIpcChannels.upsertExtensionSettings, input),

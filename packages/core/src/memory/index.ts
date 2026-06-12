@@ -40,16 +40,40 @@ export type AppendDailyOptions = BuildMemoryContextOptions & {
   text: string;
 };
 
+export type AppendDailyResult = {
+  path: string;
+  entry: string;
+  date: string;
+  skippedReason?: "empty" | "duplicate";
+};
+
 export type AppendDailyInput = {
   summary: string;
   completed?: string[];
   decisions?: string[];
   followUps?: string[];
   memoryCandidates?: string[];
+  evidence?: string[];
 };
 
 export type CreateAppendDailyToolOptions = BuildMemoryContextOptions & {
-  onAppend?: (result: { path: string; entry: string; date: string }) => void | Promise<void>;
+  onAppend?: (result: AppendDailyResult) => void | Promise<void>;
+};
+
+export type MemoryDreamState = {
+  projectId: string;
+  dirty: boolean;
+  running: boolean;
+  sessionId?: string;
+  clientId?: string;
+  lastDailyAppendAt?: number;
+  lastDailyPath?: string;
+  scheduledFor?: number;
+  lastAttemptAt?: number;
+  lastSuccessAt?: number;
+  lastFailure?: { at: number; message: string };
+  lastProjectMemoryUpdateAt?: number;
+  lastRootMemoryUpdateAt?: number;
 };
 
 export type SessionMemoryInput = {
@@ -132,12 +156,16 @@ export const renderMemoryHarness = (context: MemoryContext): string => [
   "- Daily notes are recent progress context, not long-term truth.",
 ].join("\n");
 
-export const appendDailyEntry = async (options: AppendDailyOptions): Promise<{ path: string; entry: string; date: string }> => {
+export const appendDailyEntry = async (options: AppendDailyOptions): Promise<AppendDailyResult> => {
   const paths = scorelMemoryPaths(options);
   await ensureMemoryFiles(paths);
   const text = options.text.trim();
   if (!text) {
-    return { path: paths.todayDailyPath, entry: "", date: paths.today };
+    return { path: paths.todayDailyPath, entry: "", date: paths.today, skippedReason: "empty" };
+  }
+  const existing = await readOptional(paths.todayDailyPath);
+  if (containsNormalizedDailyEntry(existing, text)) {
+    return { path: paths.todayDailyPath, entry: "", date: paths.today, skippedReason: "duplicate" };
   }
   const time = new Date((options.now ?? Date.now)()).toISOString().slice(11, 16);
   const entry = `- ${time} ${text.replace(/\s+/g, " ")}\n`;
@@ -155,6 +183,7 @@ export const createAppendDailyTool = (options: CreateAppendDailyToolOptions): Ag
     ].join(" "),
     execute: async (_toolCallId, args) => {
       const input = parseAppendDailyInput(args);
+      validateAppendDailyInput(input);
       const result = await appendDailyEntry({
         projectId: options.projectId,
         homeDir: options.homeDir,
@@ -165,11 +194,14 @@ export const createAppendDailyTool = (options: CreateAppendDailyToolOptions): Ag
       return {
         content: [{
           type: "text",
-          text: result.entry ? `Daily appended: ${result.date}` : "Daily append skipped: empty entry",
+          text: result.entry
+            ? `Daily appended: ${result.date}`
+            : `Daily append skipped: ${result.skippedReason ?? "empty"}`,
         }],
         details: {
           path: result.path,
           date: result.date,
+          skippedReason: result.skippedReason,
         },
       };
     },
@@ -182,8 +214,46 @@ export const renderDailyEntry = (input: AppendDailyInput): string => {
     renderList("Decisions", input.decisions),
     renderList("Follow-ups", input.followUps),
     renderList("Memory candidates", input.memoryCandidates),
+    renderList("Evidence", input.evidence),
   ].filter(Boolean);
   return sections.join(" ");
+};
+
+export const readMemoryDreamState = async (options: BuildMemoryContextOptions): Promise<MemoryDreamState | undefined> => {
+  const paths = scorelMemoryPaths(options);
+  const text = await readOptional(paths.dreamStatePath);
+  if (!text.trim()) return undefined;
+  try {
+    const parsed = JSON.parse(text) as Partial<MemoryDreamState>;
+    if (parsed.projectId !== options.projectId) return undefined;
+    return {
+      projectId: options.projectId,
+      dirty: Boolean(parsed.dirty),
+      running: Boolean(parsed.running),
+      sessionId: optionalString(parsed.sessionId),
+      clientId: optionalString(parsed.clientId),
+      lastDailyAppendAt: optionalNumber(parsed.lastDailyAppendAt),
+      lastDailyPath: optionalString(parsed.lastDailyPath),
+      scheduledFor: optionalNumber(parsed.scheduledFor),
+      lastAttemptAt: optionalNumber(parsed.lastAttemptAt),
+      lastSuccessAt: optionalNumber(parsed.lastSuccessAt),
+      lastFailure: parseLastFailure(parsed.lastFailure),
+      lastProjectMemoryUpdateAt: optionalNumber(parsed.lastProjectMemoryUpdateAt),
+      lastRootMemoryUpdateAt: optionalNumber(parsed.lastRootMemoryUpdateAt),
+    };
+  } catch {
+    return undefined;
+  }
+};
+
+export const writeMemoryDreamState = async (
+  options: BuildMemoryContextOptions & { state: MemoryDreamState },
+): Promise<MemoryDreamState> => {
+  const paths = scorelMemoryPaths(options);
+  await mkdir(paths.projectDir, { recursive: true, mode: 0o700 });
+  const state = { ...options.state, projectId: options.projectId };
+  await writeFile(paths.dreamStatePath, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  return state;
 };
 
 export const mergeMemoryMarkdown = (current: string, addition: string): string => {
@@ -301,8 +371,52 @@ const parseAppendDailyInput = (value: unknown): AppendDailyInput => {
     decisions: optionalStringArray(value.decisions, "decisions"),
     followUps: optionalStringArray(value.followUps, "followUps"),
     memoryCandidates: optionalStringArray(value.memoryCandidates, "memoryCandidates"),
+    evidence: optionalStringArray(value.evidence, "evidence"),
   };
 };
+
+const validateAppendDailyInput = (input: AppendDailyInput): void => {
+  const summary = compactLine(input.summary, 500);
+  if (isLowSignalSummary(summary)) {
+    throw new Error("AppendDaily.summary is too generic; include concrete durable progress or a decision");
+  }
+  const details = [
+    ...(input.completed ?? []),
+    ...(input.decisions ?? []),
+    ...(input.followUps ?? []),
+    ...(input.memoryCandidates ?? []),
+    ...(input.evidence ?? []),
+  ].map((value) => compactLine(value, 240)).filter(Boolean);
+  if (details.length === 0) {
+    throw new Error("AppendDaily requires at least one completed item, decision, follow-up, memory candidate, or evidence item");
+  }
+};
+
+const isLowSignalSummary = (value: string): boolean => {
+  const normalized = value.toLowerCase().replace(/\s+/g, "");
+  return [
+    "done",
+    "completed",
+    "finished",
+    "updated",
+    "继续推进",
+    "完成任务",
+    "已处理",
+    "处理完成",
+    "做了一些修改",
+  ].includes(normalized);
+};
+
+const containsNormalizedDailyEntry = (daily: string, text: string): boolean => {
+  const needle = normalizeDailyText(text);
+  return daily
+    .split("\n")
+    .map((line) => line.replace(/^-\s+\d\d:\d\d\s+/, ""))
+    .some((line) => normalizeDailyText(line) === needle);
+};
+
+const normalizeDailyText = (value: string): string =>
+  value.replace(/\s+/g, " ").trim().toLowerCase();
 
 const requireString = (value: unknown, name: string): string => {
   if (typeof value !== "string" || !value.trim()) {
@@ -319,6 +433,19 @@ const optionalStringArray = (value: unknown, name: string): string[] | undefined
     throw new Error(`AppendDaily.${name} must be an array of strings`);
   }
   return value.map((item) => item.trim()).filter(Boolean);
+};
+
+const optionalNumber = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+const optionalString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value : undefined;
+
+const parseLastFailure = (value: unknown): MemoryDreamState["lastFailure"] => {
+  if (!isRecord(value)) return undefined;
+  const at = optionalNumber(value.at);
+  const message = optionalString(value.message);
+  return at !== undefined && message ? { at, message } : undefined;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

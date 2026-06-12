@@ -140,6 +140,12 @@ const registerIpc = (): void => {
       ? requireConnectedLocalHost().getLocalMemorySettings(ref.projectId)
       : relayService.getRemoteMemorySettings(requireRelayDeviceId(ref), ref.projectId);
   });
+  ipcMain.handle(guiIpcChannels.getMemoryStatus, async (_event, project: GuiProjectRef) => {
+    const ref = normalizeProjectRef(project);
+    return ref.source === "local"
+      ? requireConnectedLocalHost().getLocalMemoryStatus(ref.projectId)
+      : relayService.getRemoteMemoryStatus(requireRelayDeviceId(ref), ref.projectId);
+  });
   ipcMain.handle(guiIpcChannels.upsertMemorySettings, async (_event, project: GuiProjectRef, input: GuiUpsertMemorySettingsInput) => {
     const ref = normalizeProjectRef(project);
     const payload = { ...input, projectId: ref.projectId as never };

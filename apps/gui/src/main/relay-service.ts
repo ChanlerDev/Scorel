@@ -11,6 +11,7 @@ import {
   type ModelSelectionInput,
   type AvailableModelSummary,
   type ModelRole,
+  type MemoryStatus,
   type MemorySettings,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
@@ -53,6 +54,7 @@ export type GuiRelayService = {
   upsertRemoteModelProfile(deviceId: string, input: UpsertModelProfileInput): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
   fetchRemoteProviderModels(deviceId: string, projectId: string, providerId: string): Promise<ProviderCatalogModelSummary[]>;
   getRemoteMemorySettings(deviceId: string, projectId: string): Promise<MemorySettings>;
+  getRemoteMemoryStatus(deviceId: string, projectId: string): Promise<MemoryStatus>;
   upsertRemoteMemorySettings(deviceId: string, input: UpsertMemorySettingsInput): Promise<MemorySettings>;
   createRemoteSession(deviceId: string, projectId: string, modelSelection?: ModelSelectionInput): Promise<SessionId>;
   openRemoteSession(deviceId: string, sessionId: string): Promise<PersistentEvent[]>;
@@ -146,6 +148,9 @@ export const createGuiRelayService = (store: GuiStore): GuiRelayService => {
     },
     async getRemoteMemorySettings(deviceId, projectId) {
       return (await connectedClient(deviceId)).getMemorySettings({ projectId: asProjectId(projectId) as ProjectId });
+    },
+    async getRemoteMemoryStatus(deviceId, projectId) {
+      return (await connectedClient(deviceId)).getMemoryStatus({ projectId: asProjectId(projectId) as ProjectId });
     },
     async upsertRemoteMemorySettings(deviceId, input) {
       return (await connectedClient(deviceId)).upsertMemorySettings(input);

@@ -68,6 +68,15 @@ const memorySettings = {
   autoCompactThreshold: 0.8,
 };
 
+const memoryStatus = {
+  projectId: "project_scorel" as never,
+  dirty: true,
+  running: false,
+  lastDailyAppendAt: Date.UTC(2026, 5, 12, 8, 30),
+  scheduledFor: Date.UTC(2026, 5, 12, 9, 30),
+  lastProjectMemoryUpdateAt: Date.UTC(2026, 5, 12, 7, 30),
+};
+
 const telegramSettings = {
   extensionId: "telegram",
   enabled: false,
@@ -330,6 +339,7 @@ describe("GUI shell rendering contract", () => {
         project={{ source: "local", projectId: localProject.projectId }}
         modelProfile={modelProfile}
         memory={memorySettings}
+        memoryStatus={memoryStatus}
         telegram={telegramSettings}
         onModelProfileChange={noop}
         onMemoryChange={noop}
@@ -376,6 +386,7 @@ describe("GUI shell rendering contract", () => {
         project={{ source: "local", projectId: localProject.projectId }}
         modelProfile={modelProfile}
         memory={memorySettings}
+        memoryStatus={memoryStatus}
         telegram={telegramSettings}
         onModelProfileChange={noop}
         onMemoryChange={noop}
@@ -443,6 +454,7 @@ describe("GUI shell rendering contract", () => {
       <MemorySection
         project={{ source: "local", projectId: localProject.projectId }}
         memory={memorySettings}
+        status={memoryStatus}
         busy={false}
         setBusy={noop}
         setError={noop}
@@ -451,6 +463,9 @@ describe("GUI shell rendering contract", () => {
     );
 
     expect(html).toContain("启用记忆");
+    expect(html).toContain("Memory 状态");
+    expect(html).toContain("Scheduled");
+    expect(html).toContain("Last daily");
     expect(html).toContain("自动 daily");
     expect(html).toContain("Session Memory");
     expect(html).toContain("Auto Compact");

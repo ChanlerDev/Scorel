@@ -103,6 +103,23 @@ export type MemorySettings = {
   autoCompactThreshold: number;
 };
 
+export type MemoryStatus = {
+  projectId: ProjectId;
+  dirty: boolean;
+  running: boolean;
+  lastDailyAppendAt?: number;
+  lastDailyPath?: string;
+  scheduledFor?: number;
+  lastAttemptAt?: number;
+  lastSuccessAt?: number;
+  lastFailure?: {
+    at: number;
+    message: string;
+  };
+  lastProjectMemoryUpdateAt?: number;
+  lastRootMemoryUpdateAt?: number;
+};
+
 export type UpsertMemorySettingsInput = Partial<MemorySettings> & {
   projectId: ProjectId;
 };
@@ -339,6 +356,12 @@ export type TextDeltaEvent = TransientEventBase & {
   delta: string;
 };
 
+export type ThinkingDeltaEvent = TransientEventBase & {
+  type: "thinking_delta";
+  eventId: EventId;
+  delta: string;
+};
+
 export type ErrorEvent = TransientEventBase & {
   type: "error";
   code: ErrorCode;
@@ -352,6 +375,7 @@ export type TransientEvent =
   | MessageStartEvent
   | MessageEndEvent
   | TextDeltaEvent
+  | ThinkingDeltaEvent
   | ErrorEvent;
 
 export type ScorelEvent = PersistentEvent | TransientEvent;

@@ -49,6 +49,8 @@ export const createPiAiProvider = (options: PiAiProviderOptions): RuntimeProvide
     for await (const event of stream) {
       if (event.type === "text_delta") {
         yield { type: "text_delta", delta: event.delta };
+      } else if (event.type === "thinking_delta") {
+        yield { type: "thinking_delta", delta: event.delta };
       }
     }
 
@@ -253,6 +255,7 @@ const toolParameters = (name: string): Tool["parameters"] => {
         decisions: Type.Optional(Type.Array(Type.String())),
         followUps: Type.Optional(Type.Array(Type.String())),
         memoryCandidates: Type.Optional(Type.Array(Type.String())),
+        evidence: Type.Optional(Type.Array(Type.String())),
       });
     case "Skill":
       return Type.Object({

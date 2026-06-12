@@ -50,6 +50,38 @@ describe("ScorelRuntime", () => {
     expect(runtime.running).toBe(false);
   });
 
+  it("streams thinking deltas and synthesizes ordered thinking/text content", async () => {
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        yield { type: "thinking_delta", delta: "inspect" };
+        yield { type: "thinking_delta", delta: " files" };
+        yield { type: "text_delta", delta: "done" };
+      },
+    };
+    const runtime = new ScorelRuntime({ provider });
+
+    await expect(collect(runtime)).resolves.toEqual([
+      { type: "turn_start" },
+      { type: "message_start", role: "assistant" },
+      { type: "thinking_delta", delta: "inspect" },
+      { type: "thinking_delta", delta: " files" },
+      { type: "text_delta", delta: "done" },
+      {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", text: "inspect files" },
+            { type: "text", text: "done" },
+          ],
+          stopReason: "end_turn",
+          meta: undefined,
+        },
+      },
+      { type: "turn_end", stopReason: "end_turn" },
+    ]);
+  });
+
   it("emits partial message and error events when provider fails after text", async () => {
     const provider: RuntimeProvider = {
       streamTurn: async function* () {

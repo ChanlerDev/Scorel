@@ -93,6 +93,8 @@ export function projectEvent(state: ProjectorState, event: ScorelEvent): Project
       return startInFlightAssistant(next, String(event.eventId));
     case "text_delta":
       return appendTextDelta(next, String(event.eventId), event.delta);
+    case "thinking_delta":
+      return appendThinkingDelta(next, String(event.eventId), event.delta);
     case "message_end":
       return endInFlightAssistant(next, String(event.eventId), event.stopReason);
     case "turn_start":
@@ -325,13 +327,30 @@ function appendTextDelta(
   eventId: string,
   delta: string,
 ): ProjectorState {
+  return appendAssistantPartDelta(state, eventId, "text", delta);
+}
+
+function appendThinkingDelta(
+  state: ProjectorState,
+  eventId: string,
+  delta: string,
+): ProjectorState {
+  return appendAssistantPartDelta(state, eventId, "thinking", delta);
+}
+
+function appendAssistantPartDelta(
+  state: ProjectorState,
+  eventId: string,
+  kind: "text" | "thinking",
+  delta: string,
+): ProjectorState {
   let turns = state.turns;
   const idx = turns.findIndex((t) => t.id === eventId);
   if (idx < 0) {
     const turn: Turn = {
       id: eventId,
       kind: "assistant",
-      parts: [{ kind: "text", text: delta }],
+      parts: [{ kind, text: delta }],
       streaming: true,
     };
     return {
@@ -343,17 +362,25 @@ function appendTextDelta(
   const current = turns[idx]!;
   if (current.kind !== "assistant") return state;
   const parts = [...current.parts];
-  const textIdx = parts.findIndex((p) => p.kind === "text");
-  if (textIdx >= 0) {
-    const existing = parts[textIdx] as Extract<TurnPart, { kind: "text" }>;
-    parts[textIdx] = { kind: "text", text: existing.text + delta };
+  const partIdx = parts.findIndex((p) => p.kind === kind);
+  if (partIdx >= 0) {
+    const existing = parts[partIdx] as Extract<TurnPart, { kind: "text" | "thinking" }>;
+    parts[partIdx] = { kind, text: existing.text + delta };
   } else {
-    parts.unshift({ kind: "text", text: delta });
+    const insertAt = kind === "thinking" ? 0 : lastThinkingIndex(parts) + 1;
+    parts.splice(insertAt, 0, { kind, text: delta });
   }
   const merged: Turn = { ...current, parts, streaming: true };
   turns = [...turns];
   turns[idx] = merged;
   return { ...state, turns, inFlightAssistantId: eventId };
+}
+
+function lastThinkingIndex(parts: TurnPart[]): number {
+  for (let i = parts.length - 1; i >= 0; i -= 1) {
+    if (parts[i]?.kind === "thinking") return i;
+  }
+  return -1;
 }
 
 function endInFlightAssistant(

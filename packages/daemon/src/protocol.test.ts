@@ -325,6 +325,66 @@ describe("daemon protocol boundary", () => {
     });
   });
 
+  it("broadcasts streaming thinking deltas before the final assistant message", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-thinking-protocol-"));
+    const sessionsDir = join(root, "sessions");
+    await mkdir(sessionsDir);
+    const thinkingProvider: RuntimeProvider = {
+      streamTurn: async function* () {
+        yield { type: "thinking_delta", delta: "inspect" };
+        yield { type: "text_delta", delta: "done" };
+      },
+    };
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath: join(root, "projects.json"),
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () => new ScorelRuntime({ provider: thinkingProvider }),
+      now: () => 100,
+    });
+    await host.start();
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    const messages: DaemonMessage[] = [];
+    transport.onMessage((message) => messages.push(message));
+    await transport.connect({ clientId: asClientId("client_thinking"), sessionId: asSessionId("ses_thinking") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_thinking_create"),
+      sessionId: asSessionId("ses_thinking"),
+      meta: { projectId: project.projectId },
+    });
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_thinking_send"),
+      sessionId: asSessionId("ses_thinking"),
+      content: "show thinking",
+    });
+
+    await waitForMessage(messages, (message) => message.type === "event" && message.event.type === "thinking_delta");
+    expect(messages.find((message) => message.type === "event" && message.event.type === "thinking_delta")).toMatchObject({
+      type: "event",
+      event: {
+        type: "thinking_delta",
+        delta: "inspect",
+      },
+    });
+    expect(messages.find((message) => message.type === "event" && message.event.type === "text_delta")).toMatchObject({
+      type: "event",
+      event: {
+        type: "text_delta",
+        delta: "done",
+      },
+    });
+    await waitForMessage(messages, (message) => "requestId" in message && message.requestId === "req_thinking_send");
+    expect(response(messages, "req_thinking_send")).toMatchObject({
+      type: "response",
+      requestType: "send_message",
+    });
+  });
+
   it("serves Host protocol over WebSocket with a device-only handshake", async () => {
     const { root, host } = await fixture();
     const repo = join(root, "repo");
@@ -377,6 +437,19 @@ describe("daemon protocol boundary", () => {
 
 const response = (messages: DaemonMessage[], requestId: string): DaemonMessage | undefined =>
   messages.find((message) => "requestId" in message && message.requestId === requestId);
+
+const waitForMessage = async (
+  messages: DaemonMessage[],
+  predicate: (message: DaemonMessage) => boolean,
+): Promise<DaemonMessage> => {
+  const started = Date.now();
+  while (Date.now() - started < 1_000) {
+    const message = messages.find(predicate);
+    if (message) return message;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+  throw new Error("Timed out waiting for daemon message");
+};
 
 const connectTestWebSocket = async (url: string, token: string, clientId: string) => {
   const socket = new WebSocket(url);

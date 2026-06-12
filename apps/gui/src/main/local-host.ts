@@ -19,6 +19,7 @@ import {
   type ModelSelectionInput,
   type AvailableModelSummary,
   type ModelRole,
+  type MemoryStatus,
   type MemorySettings,
   type ExtensionSettings,
   type ProviderCatalogModelSummary,
@@ -56,6 +57,7 @@ export type GuiLocalHostService = {
   upsertLocalModelProfile(input: UpsertModelProfileInput): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
   fetchLocalProviderModels(projectId: string, providerId: string): Promise<ProviderCatalogModelSummary[]>;
   getLocalMemorySettings(projectId: string): Promise<MemorySettings>;
+  getLocalMemoryStatus(projectId: string): Promise<MemoryStatus>;
   upsertLocalMemorySettings(input: UpsertMemorySettingsInput): Promise<MemorySettings>;
   getLocalExtensionSettings(extensionId: string): Promise<ExtensionSettings>;
   upsertLocalExtensionSettings(input: UpsertExtensionSettingsInput): Promise<ExtensionSettings>;
@@ -138,6 +140,9 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     },
     getLocalMemorySettings(projectId) {
       return client.getMemorySettings({ projectId: asProjectId(projectId) as ProjectId });
+    },
+    getLocalMemoryStatus(projectId) {
+      return client.getMemoryStatus({ projectId: asProjectId(projectId) as ProjectId });
     },
     upsertLocalMemorySettings(input) {
       return client.upsertMemorySettings(input);

@@ -111,6 +111,8 @@ describe("@scorel/protocol", () => {
           return "message_end";
         case "text_delta":
           return input.delta;
+        case "thinking_delta":
+          return input.delta;
         case "error":
           return input.code;
         default: {

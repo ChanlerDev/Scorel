@@ -1,4 +1,4 @@
-import type { GuiMemorySettingsView, GuiProjectRef } from "../../../shared/ipc.js";
+import type { GuiMemorySettingsView, GuiMemoryStatusView, GuiProjectRef } from "../../../shared/ipc.js";
 import { SettingsCard } from "../SettingsCard.js";
 import { SettingsHeader } from "../SettingsHeader.js";
 import { SettingsRow } from "../SettingsRow.js";
@@ -8,6 +8,7 @@ import { Toggle } from "../controls/Toggle.js";
 export type MemorySectionProps = {
   project: GuiProjectRef | null;
   memory: GuiMemorySettingsView;
+  status: GuiMemoryStatusView;
   busy: boolean;
   setBusy(value: boolean): void;
   setError(message: string | null): void;
@@ -36,6 +37,11 @@ export function MemorySection(props: MemorySectionProps) {
       <SettingsHeader title="记忆" subtitle="管理长期记忆、会话连续性和自动上下文压缩。" />
       <section className="settings-section settings-section--wide">
         <SettingsCard>
+          <SettingsRow
+            label="Memory 状态"
+            description={memoryStatusDescription(props.status)}
+            control={<span className="settings-status-pill">{memoryStatusLabel(props.status)}</span>}
+          />
           <SettingsRow
             label="启用记忆"
             description="在新会话和恢复会话时注入 root/project memory 与最近 daily。"
@@ -101,3 +107,29 @@ export function MemorySection(props: MemorySectionProps) {
     </>
   );
 }
+
+const memoryStatusLabel = (status: GuiMemoryStatusView): string => {
+  if (status.running) return "Dreaming";
+  if (status.lastFailure) return "Failed";
+  if (status.dirty || status.scheduledFor) return "Scheduled";
+  if (status.lastSuccessAt) return "Ready";
+  return "Idle";
+};
+
+const memoryStatusDescription = (status: GuiMemoryStatusView): string => {
+  const parts = [
+    status.lastDailyAppendAt ? `Last daily ${formatTime(status.lastDailyAppendAt)}` : "No daily append yet",
+    status.scheduledFor ? `next dream ${formatTime(status.scheduledFor)}` : undefined,
+    status.lastProjectMemoryUpdateAt ? `Project MEMORY updated ${formatTime(status.lastProjectMemoryUpdateAt)}` : undefined,
+    status.lastFailure ? `last failure: ${status.lastFailure.message}` : undefined,
+  ].filter(Boolean);
+  return parts.join(" · ");
+};
+
+const formatTime = (timestamp: number): string =>
+  new Date(timestamp).toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });

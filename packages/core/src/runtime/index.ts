@@ -13,7 +13,7 @@ export type RuntimeTurnOptions = {
 };
 
 export type ProviderStreamChunk = {
-  type: "text_delta";
+  type: "text_delta" | "thinking_delta";
   delta: string;
 };
 
@@ -34,6 +34,7 @@ export type RawRuntimeEvent =
   | { type: "turn_end"; usage?: Usage; stopReason?: StopReason }
   | { type: "message_start"; role: "assistant" | "tool_result" }
   | { type: "text_delta"; delta: string }
+  | { type: "thinking_delta"; delta: string }
   | { type: "message_end"; message: ScorelMessage & { role: "assistant" } }
   | { type: "tool_execution_start"; toolCallId: string; toolName: string; args: unknown }
   | {
@@ -145,6 +146,7 @@ export class ScorelRuntime {
     signal: AbortSignal,
   ): AsyncGenerator<RawRuntimeEvent, ProviderTurnResult, undefined> {
     let text = "";
+    let thinking = "";
 
     yield { type: "message_start", role: "assistant" };
 
@@ -164,7 +166,7 @@ export class ScorelRuntime {
 
         const next = await stream.next();
         if (next.done) {
-          const message = normalizeAssistantMessage(next.value, text, signal.aborted ? "cancelled" : "end_turn");
+          const message = normalizeAssistantMessage(next.value, { thinking, text }, signal.aborted ? "cancelled" : "end_turn");
           if (message) {
             yield { type: "message_end", message };
           }
@@ -174,17 +176,20 @@ export class ScorelRuntime {
         if (next.value.type === "text_delta") {
           text += next.value.delta;
           yield next.value;
+        } else if (next.value.type === "thinking_delta") {
+          thinking += next.value.delta;
+          yield next.value;
         }
       }
 
-      const cancelledMessage = partialAssistantMessage(text, "cancelled");
+      const cancelledMessage = partialAssistantMessage({ thinking, text }, "cancelled");
       if (cancelledMessage) {
         yield { type: "message_end", message: cancelledMessage };
       }
       return { stopReason: "cancelled" };
     } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause));
-      const partial = partialAssistantMessage(text, "error");
+      const partial = partialAssistantMessage({ thinking, text }, "error");
       if (partial) {
         yield { type: "message_end", message: partial };
       }
@@ -246,7 +251,7 @@ export class ScorelRuntime {
 
 const normalizeAssistantMessage = (
   value: ScorelMessage | void,
-  text: string,
+  streamed: StreamedAssistantContent,
   fallbackStopReason: StopReason,
 ): (ScorelMessage & { role: "assistant" }) | undefined => {
   if (value) {
@@ -255,22 +260,30 @@ const normalizeAssistantMessage = (
     }
     return value;
   }
-  return partialAssistantMessage(text, fallbackStopReason);
+  return partialAssistantMessage(streamed, fallbackStopReason);
 };
 
 const isAssistantMessage = (message: ScorelMessage): message is ScorelMessage & { role: "assistant" } =>
   message.role === "assistant";
 
+type StreamedAssistantContent = {
+  thinking: string;
+  text: string;
+};
+
 const partialAssistantMessage = (
-  text: string,
+  streamed: StreamedAssistantContent,
   stopReason: StopReason,
 ): (ScorelMessage & { role: "assistant" }) | undefined => {
-  if (text.length === 0) {
+  if (streamed.thinking.length === 0 && streamed.text.length === 0) {
     return undefined;
   }
   return {
     role: "assistant",
-    content: [{ type: "text", text }],
+    content: [
+      ...(streamed.thinking ? [{ type: "thinking" as const, text: streamed.thinking }] : []),
+      ...(streamed.text ? [{ type: "text" as const, text: streamed.text }] : []),
+    ],
     stopReason,
     meta: stopReason === "end_turn" ? undefined : { partial: true },
   };

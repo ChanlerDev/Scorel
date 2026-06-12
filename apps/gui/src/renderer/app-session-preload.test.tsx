@@ -114,6 +114,11 @@ function installScorelApi(overrides: { listSessions: ReturnType<typeof vi.fn> })
         dreamIdleMinutes: 60,
         autoCompactThreshold: 0.8,
       })),
+      getMemoryStatus: vi.fn(async () => ({
+        projectId: "project_scorel",
+        dirty: false,
+        running: false,
+      })),
       onSessionEvent: vi.fn(() => () => undefined),
       onOpenSettings: vi.fn(() => () => undefined),
       detachSession: vi.fn(async () => undefined),

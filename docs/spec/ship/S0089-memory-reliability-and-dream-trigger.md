@@ -81,4 +81,4 @@ In practice this is not reliable enough yet:
 
 ## Status
 
-Planned.
+Done.
