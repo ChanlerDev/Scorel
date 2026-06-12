@@ -1,6 +1,8 @@
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { parseExtensionManifest } from "./index.js";
+import { loadExtensionManifest, parseExtensionManifest } from "./index.js";
 
 describe("extensions", () => {
   it("parses the minimal IM extension manifest", () => {
@@ -38,5 +40,24 @@ describe("extensions", () => {
       displayName: "Bad",
       adapter: "../adapter.js",
     }))).toThrow("must be a relative path inside the extension");
+  });
+
+  it("loads built-in QQ and WeChat IM manifests", async () => {
+    await expect(loadExtensionManifest(join(process.cwd(), "../../extensions/builtin/qq/scorel.extension.json")))
+      .resolves.toMatchObject({
+        id: "qq",
+        kind: "im",
+        displayName: "QQ Bot",
+        adapter: "./adapter.js",
+        skills: ["./skills"],
+      });
+    await expect(loadExtensionManifest(join(process.cwd(), "../../extensions/builtin/wechat/scorel.extension.json")))
+      .resolves.toMatchObject({
+        id: "wechat",
+        kind: "im",
+        displayName: "WeChat",
+        adapter: "./adapter.js",
+        skills: ["./skills"],
+      });
   });
 });

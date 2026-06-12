@@ -98,6 +98,31 @@ apiKey = "123456:telegram-bot-token"
 pollIntervalMs = 1000
 ```
 
+QQ Bot 和微信 / 企业微信入口在 GUI 的 Settings -> IM 里走更短的明文配置路径。QQ 填开放平台管理端的 `App ID` 和 `App Secret`，Scorel 会自动换取并刷新 Access Token：
+
+```toml
+[extensions.qq]
+enabled = true
+kind = "im"
+
+[extensions.qq.config]
+appId = "..."
+appSecret = "..."
+botId = "..."
+allowedConversationIds = "..."
+```
+
+微信 / 企业微信群机器人直接粘贴完整 Webhook URL：
+
+```toml
+[extensions.wechat]
+enabled = true
+kind = "im"
+
+[extensions.wechat.config]
+webhookUrl = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
+```
+
 然后启动本机 Host 或 GUI。Telegram 使用 Bot API long polling，不需要 Relay 或 webhook。
 
 本地开发常用检查：
@@ -290,6 +315,8 @@ Telegram 是第一个 built-in IM provider：
 - `credentialMode = "env"` 时从 `botTokenEnv` 读取 token。
 - `credentialMode = "direct"` 时直接读取 `apiKey`。
 - V1 只发纯文本，不做 webhook、媒体、inline keyboard 或主动跨 chat 发送。
+
+QQ Bot 和微信 / 企业微信沿用同一条 channel bridge：QQ 使用官方 `App ID` / `App Secret` 换取 Access Token 后发送消息；微信 / 企业微信使用群机器人 Webhook URL。两者默认都不要求用户配置 env var。
 
 ## Editing Mode
 

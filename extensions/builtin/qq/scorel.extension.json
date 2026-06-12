@@ -1,0 +1,7 @@
+{
+  "id": "qq",
+  "kind": "im",
+  "displayName": "QQ Bot",
+  "adapter": "./adapter.js",
+  "skills": ["./skills"]
+}

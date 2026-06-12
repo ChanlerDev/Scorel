@@ -39,13 +39,14 @@ kind = "im"
 
 [extensions.qq.config]
 appId = "..."
-secretEnv = "SCOREL_QQ_BOT_SECRET"
-tokenEnv = "SCOREL_QQ_BOT_TOKEN"
-pollIntervalMs = 1000
+appSecret = "..."
+botId = "..."
 allowedConversationIds = "..."
 ```
 
-V1 may implement a local HTTP-stubbed adapter contract if live QQ Bot API credentials are unavailable in this environment, but the shipped adapter API must mirror real QQ Bot message/send semantics.
+QQ Bot uses the current official server-side credential flow: Scorel stores the developer-console `App ID` and `App Secret`, calls `https://bots.qq.com/app/getAppAccessToken`, caches the returned access token until shortly before expiry, and sends API requests with `Authorization: QQBot ACCESS_TOKEN`.
+
+`apiBaseUrl` and `accessTokenUrl` may remain internal override hooks for tests and sandbox work, but GUI Settings must not expose them as the default setup path.
 
 ### WeChat Extension
 
@@ -67,14 +68,10 @@ enabled = true
 kind = "im"
 
 [extensions.wechat.config]
-appId = "..."
-secretEnv = "SCOREL_WECHAT_SECRET"
-tokenEnv = "SCOREL_WECHAT_TOKEN"
-pollIntervalMs = 1000
-allowedConversationIds = "..."
+webhookUrl = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
 ```
 
-Use WeChat Official Account / WeCom-style bot semantics where messages have stable conversation identity and official reply/send APIs. Do not implement consumer WeChat personal account automation.
+Use WeCom group robot webhook semantics for V1 send. The user copies the full webhook URL from the official group robot configuration and pastes it into Scorel. Do not make users split `key`, env var names, or base URLs in the default setup path. Do not implement consumer WeChat personal account automation.
 
 ### Skills
 
@@ -98,8 +95,10 @@ Each built-in extension must include a platform-specific skill that tells the mo
 
 - QQ and WeChat built-in extension manifests are discoverable by the existing loader.
 - Each extension starts only when explicitly enabled and required credentials are present.
+- QQ requires `appId` and `appSecret`; WeChat requires a full `webhookUrl`.
 - Each adapter normalizes incoming text messages into the existing `ImIncomingMessage` shape.
 - Each adapter sends plain text replies through the existing `SendChannelMessage` path.
+- QQ send obtains and reuses an official access token instead of accepting deprecated bot token config.
 - Adapter diagnostics redact secrets.
 - QQ, WeChat, Telegram, and loopback share the same channel bridge and session binding behavior.
 - No QQ/WeChat-specific branch is added to runtime/session/core channel orchestration.
@@ -112,6 +111,10 @@ Each built-in extension must include a platform-specific skill that tells the mo
 - Secret redaction tests.
 - Full `pnpm typecheck && pnpm test`.
 
+## Local State Boundary
+
+Pre-1.0 local config may contain older `tokenEnv`, `token`, `webhookKeyEnv`, `webhookKey`, or `webhookBaseUrl` keys from earlier S0091 drafts. Those keys are no longer the supported setup surface. Users should re-enter QQ `App ID` / `App Secret` or WeChat `Webhook URL` in GUI Settings.
+
 ## Status
 
-Planned.
+Done.

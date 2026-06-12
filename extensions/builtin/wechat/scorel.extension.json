@@ -1,0 +1,7 @@
+{
+  "id": "wechat",
+  "kind": "im",
+  "displayName": "WeChat",
+  "adapter": "./adapter.js",
+  "skills": ["./skills"]
+}
