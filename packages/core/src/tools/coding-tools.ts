@@ -316,7 +316,8 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
         const input = parseGlobArgs(args);
         const limit = input.head_limit ?? DEFAULT_SEARCH_LIMIT;
         const offset = input.offset ?? 0;
-        const all = await runRipgrep(["--files", "--hidden", "--glob", input.pattern, ...vcsExcludes()], workspaceTarget(input.path), root, signal);
+        const all = (await runRipgrep(["--files", "--hidden", "--glob", input.pattern, ...vcsExcludes()], workspaceTarget(input.path), root, signal))
+          .sort((left, right) => toWorkspaceRelative(root)(left).localeCompare(toWorkspaceRelative(root)(right)));
         const selected = paginate(all, limit, offset);
         const text = selected.items.map(toWorkspaceRelative(root)).join("\n");
         return textResult(text || "No files found", {

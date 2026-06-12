@@ -761,6 +761,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0093`](spec/ship/S0093-gui-im-settings-platform-layout.md) | GUI IM Settings platform layout | Done |
 | [`S0094`](spec/ship/S0094-im-inbound-runtime.md) | IM inbound runtime receive paths | Done |
 | [`S0095`](spec/ship/S0095-gui-im-session-list-refresh.md) | GUI IM session list refresh | Done |
+| [`S0096`](spec/ship/S0096-glob-stable-order.md) | Glob stable cross-platform ordering | Done |
 
 ---
 
