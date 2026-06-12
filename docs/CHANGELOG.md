@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+## 0.0.3 - 2026-06-12
+
+### Highlights
+
+- QQ Bot and WeChat inbound support: receive and route messages via official WebSocket or HTTP callback
+- GUI now auto-refreshes session lists when IM sessions are created in the background
+- Streaming thinking delta events in GUI for real-time thought display
+- Memory status display and reliability improvements (dream trigger, duplicate detection)
+
+### Changes
+
+- GUI automatically refreshes session lists when IM sessions are created in the background
+- Implement IM inbound runtime for QQ and WeChat (WebSocket gateway, HTTP callback server)
+- Compact IM settings layout with collapsible rows for Telegram, QQ, and WeChat
+- SendChannelMessage now supports optional attachments (image/file) with metadata
+- Human-cadence guidance injected into IM replies (acknowledgement, progress updates)
+- Add built-in QQ Bot and WeChat IM extension support (sending and receiving)
+- Add thinking_delta event for streaming real-time thought content in GUI
+- Add memory status query and GUI display for memory status
+- Improve daily append quality with validation for low-signal summaries and duplicate detection
+- Persist memory dream state (dirty/running/scheduled/failure) with restart recovery
+- Refine GUI visual style: Codex-inspired polish for sidebar, empty workspace, composer, code blocks, and tool execution traces
+- Add 'delete provider' button in GUI Settings with full deletion chain
+- Fix IME composition handling in composer (Enter does not submit during IME input)
+- Fix Shiki code block theme from dark to light to match GUI surface
+
+### Fixes
+
+- GUI provider deletion now removes provider, models, and dependent role assignments
+- Dark code block theme fixed to light mode for better readability in dark GUI
+- IME composition handling in composer fixed (Enter does not submit during IME input)
+
+### Breaking Changes
+
+- QQ and WeChat config keys changed: old `tokenEnv`, `token`, `webhookKeyEnv`, etc. are no longer supported; users must re-enter App ID/App Secret or Webhook URL.
+
+### Verification
+
+- Unit and integration tests for QQ gateway identify/heartbeat/dispatch/stop
+- Unit and integration tests for WeChat callback verification and text message routing
+- Tests for session change notification and renderer refresh behavior
+- Tests for attachment validation and human-cadence guidance in channel harness
+- Tests for QQ/WeChat adapter normalization and secret redaction
+- Tests for streaming thinking deltas and final message reconciliation
+- Tests for low-signal daily summary rejection and duplicate entry skipping
+- Tests for memory dream state persistence and status retrieval
+- GUI tests for IM settings layout, provider deletion, code block theme, and memory status display
+
+### Internal
+
+- Update README to clarify IM behavior details for QQ Bot and WeChat integrations
+- Add planned spec S0089 for memory reliability and dream trigger improvements
+
 ## 0.0.2 - 2026-06-11
 
 ### Highlights

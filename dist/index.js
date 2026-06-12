@@ -257,9 +257,17 @@ var init_src2 = __esm({
         this.#assertDaemonConnected();
         return (await this.#request("fetch_provider_models", input)).models;
       }
+      async removeModelProvider(input) {
+        this.#assertDaemonConnected();
+        return this.#request("remove_model_provider", input);
+      }
       async getMemorySettings(input) {
         this.#assertDaemonConnected();
         return (await this.#request("get_memory_settings", input)).memory;
+      }
+      async getMemoryStatus(input) {
+        this.#assertDaemonConnected();
+        return (await this.#request("get_memory_status", input)).status;
       }
       async upsertMemorySettings(input) {
         this.#assertDaemonConnected();
@@ -799,7 +807,7 @@ var init_sessions = __esm({
 // packages/core/src/config/index.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join4 } from "node:path";
-var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, scorelProjectConfigPath, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, renderMemoryConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, loadMemory, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireCompactThreshold, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, requireModelRole, modelRoles;
+var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, scorelProjectConfigPath, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, removeProvider, renderMemoryConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, loadMemory, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireCompactThreshold, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, requireModelRole, modelRoles;
 var init_config = __esm({
   "packages/core/src/config/index.ts"() {
     "use strict";
@@ -974,6 +982,9 @@ var init_config = __esm({
     };
     renderModelProfileConfig = (input) => {
       const raw = parseEditableConfig(input.existingConfigText);
+      if (input.removeProviderId) {
+        removeProvider(raw, requireIdentifier(input.removeProviderId, "removeProviderId"));
+      }
       if (input.providerType || input.provider || input.apiKeyEnv || input.apiKey || input.api || input.baseUrl) {
         const providerId = requireIdentifier(input.providerId, "providerId");
         const providerType = requireProviderType(input.providerType, "providerType");
@@ -1080,6 +1091,34 @@ var init_config = __esm({
         };
       }
       return renderRawConfig(raw);
+    };
+    removeProvider = (raw, providerId) => {
+      delete raw.providers[providerId];
+      const removedProviderModels = /* @__PURE__ */ new Set();
+      for (const [providerModelId, providerModel] of Object.entries(raw.providerModels)) {
+        if (providerModel.provider === providerId) {
+          delete raw.providerModels[providerModelId];
+          removedProviderModels.add(providerModelId);
+        }
+      }
+      const removedAvailableModels = /* @__PURE__ */ new Set();
+      for (const [availableModelId, availableModel] of Object.entries(raw.availableModels)) {
+        if (availableModel.model && removedProviderModels.has(availableModel.model)) {
+          delete raw.availableModels[availableModelId];
+          removedAvailableModels.add(availableModelId);
+        }
+      }
+      if (!raw.modelProfile?.roles) return;
+      const fallbackModelId = Object.keys(raw.availableModels).sort()[0];
+      if (!fallbackModelId) {
+        delete raw.modelProfile;
+        return;
+      }
+      for (const role of ["primary", "standard", "auxiliary"]) {
+        if (!raw.modelProfile.roles[role] || removedAvailableModels.has(raw.modelProfile.roles[role])) {
+          raw.modelProfile.roles[role] = fallbackModelId;
+        }
+      }
     };
     renderMemoryConfig = (input) => {
       const raw = parseEditableConfig(input.existingConfigText);
@@ -2413,7 +2452,7 @@ var init_tools = __esm({
 });
 
 // packages/core/src/channel/index.ts
-var createSendChannelMessageTool, parseSendChannelMessageInput, isRecord3;
+var createSendChannelMessageTool, parseSendChannelMessageInput, parseAttachments, optionalString2, isRecord3;
 var init_channel = __esm({
   "packages/core/src/channel/index.ts"() {
     "use strict";
@@ -2426,7 +2465,7 @@ var init_channel = __esm({
         const result = await options.sendCurrent(input);
         return {
           content: [{ type: "text", text: `Channel message sent to ${result.channel}:${result.target}` }],
-          details: result
+          details: { ...result, attachments: result.attachments ?? input.attachments?.length ?? 0 }
         };
       }
     });
@@ -2434,8 +2473,10 @@ var init_channel = __esm({
       if (!isRecord3(value)) {
         throw new Error("SendChannelMessage args must be an object");
       }
-      if (typeof value.text !== "string" || value.text.trim().length === 0) {
-        throw new Error("SendChannelMessage.text must be a non-empty string");
+      const text = typeof value.text === "string" && value.text.trim().length > 0 ? value.text : void 0;
+      const attachments = parseAttachments(value.attachments);
+      if (!text && attachments.length === 0) {
+        throw new Error("SendChannelMessage requires text or attachments");
       }
       if (value.channel !== void 0 && (typeof value.channel !== "string" || value.channel.trim().length === 0)) {
         throw new Error("SendChannelMessage.channel must be a non-empty string when provided");
@@ -2444,10 +2485,48 @@ var init_channel = __esm({
         throw new Error("SendChannelMessage.target must be current when provided");
       }
       return {
-        text: value.text,
+        ...text ? { text } : {},
+        ...attachments.length > 0 ? { attachments } : {},
         ...typeof value.channel === "string" ? { channel: value.channel } : {},
         ...value.target === "current" ? { target: "current" } : {}
       };
+    };
+    parseAttachments = (value) => {
+      if (value === void 0) {
+        return [];
+      }
+      if (!Array.isArray(value)) {
+        throw new Error("SendChannelMessage.attachments must be an array");
+      }
+      return value.map((item, index) => {
+        if (!isRecord3(item)) {
+          throw new Error(`SendChannelMessage.attachments.${index} must be an object`);
+        }
+        if (item.type !== "image" && item.type !== "file") {
+          throw new Error(`SendChannelMessage.attachments.${index}.type must be image or file`);
+        }
+        const path = optionalString2(item.path, `SendChannelMessage.attachments.${index}.path`);
+        const url = optionalString2(item.url, `SendChannelMessage.attachments.${index}.url`);
+        if (!path && !url) {
+          throw new Error(`SendChannelMessage.attachments.${index} requires path or url`);
+        }
+        return {
+          type: item.type,
+          ...path ? { path } : {},
+          ...url ? { url } : {},
+          ...optionalString2(item.mimeType, `SendChannelMessage.attachments.${index}.mimeType`) ? { mimeType: optionalString2(item.mimeType, `SendChannelMessage.attachments.${index}.mimeType`) } : {},
+          ...optionalString2(item.caption, `SendChannelMessage.attachments.${index}.caption`) ? { caption: optionalString2(item.caption, `SendChannelMessage.attachments.${index}.caption`) } : {}
+        };
+      });
+    };
+    optionalString2 = (value, name) => {
+      if (value === void 0 || value === "") {
+        return void 0;
+      }
+      if (typeof value !== "string") {
+        throw new Error(`${name} must be a string`);
+      }
+      return value;
     };
     isRecord3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
@@ -2669,7 +2748,7 @@ var init_instructions = __esm({
 import { appendFile, mkdir as mkdir3, readFile as readFile7, writeFile as writeFile3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { join as join6 } from "node:path";
-var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, requireString3, optionalStringArray, isRecord5, safeProjectId, isNodeErrorCode2;
+var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord5, safeProjectId, isNodeErrorCode2;
 var init_memory = __esm({
   "packages/core/src/memory/index.ts"() {
     "use strict";
@@ -2739,7 +2818,11 @@ var init_memory = __esm({
       await ensureMemoryFiles(paths);
       const text = options.text.trim();
       if (!text) {
-        return { path: paths.todayDailyPath, entry: "", date: paths.today };
+        return { path: paths.todayDailyPath, entry: "", date: paths.today, skippedReason: "empty" };
+      }
+      const existing = await readOptional(paths.todayDailyPath);
+      if (containsNormalizedDailyEntry(existing, text)) {
+        return { path: paths.todayDailyPath, entry: "", date: paths.today, skippedReason: "duplicate" };
       }
       const time = new Date((options.now ?? Date.now)()).toISOString().slice(11, 16);
       const entry = `- ${time} ${text.replace(/\s+/g, " ")}
@@ -2756,6 +2839,7 @@ var init_memory = __esm({
       ].join(" "),
       execute: async (_toolCallId, args) => {
         const input = parseAppendDailyInput(args);
+        validateAppendDailyInput(input);
         const result = await appendDailyEntry({
           projectId: options.projectId,
           homeDir: options.homeDir,
@@ -2766,11 +2850,12 @@ var init_memory = __esm({
         return {
           content: [{
             type: "text",
-            text: result.entry ? `Daily appended: ${result.date}` : "Daily append skipped: empty entry"
+            text: result.entry ? `Daily appended: ${result.date}` : `Daily append skipped: ${result.skippedReason ?? "empty"}`
           }],
           details: {
             path: result.path,
-            date: result.date
+            date: result.date,
+            skippedReason: result.skippedReason
           }
         };
       }
@@ -2781,9 +2866,44 @@ var init_memory = __esm({
         renderList("Completed", input.completed),
         renderList("Decisions", input.decisions),
         renderList("Follow-ups", input.followUps),
-        renderList("Memory candidates", input.memoryCandidates)
+        renderList("Memory candidates", input.memoryCandidates),
+        renderList("Evidence", input.evidence)
       ].filter(Boolean);
       return sections.join(" ");
+    };
+    readMemoryDreamState = async (options) => {
+      const paths = scorelMemoryPaths(options);
+      const text = await readOptional(paths.dreamStatePath);
+      if (!text.trim()) return void 0;
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed.projectId !== options.projectId) return void 0;
+        return {
+          projectId: options.projectId,
+          dirty: Boolean(parsed.dirty),
+          running: Boolean(parsed.running),
+          sessionId: optionalString3(parsed.sessionId),
+          clientId: optionalString3(parsed.clientId),
+          lastDailyAppendAt: optionalNumber2(parsed.lastDailyAppendAt),
+          lastDailyPath: optionalString3(parsed.lastDailyPath),
+          scheduledFor: optionalNumber2(parsed.scheduledFor),
+          lastAttemptAt: optionalNumber2(parsed.lastAttemptAt),
+          lastSuccessAt: optionalNumber2(parsed.lastSuccessAt),
+          lastFailure: parseLastFailure(parsed.lastFailure),
+          lastProjectMemoryUpdateAt: optionalNumber2(parsed.lastProjectMemoryUpdateAt),
+          lastRootMemoryUpdateAt: optionalNumber2(parsed.lastRootMemoryUpdateAt)
+        };
+      } catch {
+        return void 0;
+      }
+    };
+    writeMemoryDreamState = async (options) => {
+      const paths = scorelMemoryPaths(options);
+      await mkdir3(paths.projectDir, { recursive: true, mode: 448 });
+      const state = { ...options.state, projectId: options.projectId };
+      await writeFile3(paths.dreamStatePath, `${JSON.stringify(state, null, 2)}
+`, { encoding: "utf8", mode: 384 });
+      return state;
     };
     readSessionMemory = async (options) => {
       const paths = scorelSessionMemoryPaths(options);
@@ -2869,9 +2989,45 @@ var init_memory = __esm({
         completed: optionalStringArray(value.completed, "completed"),
         decisions: optionalStringArray(value.decisions, "decisions"),
         followUps: optionalStringArray(value.followUps, "followUps"),
-        memoryCandidates: optionalStringArray(value.memoryCandidates, "memoryCandidates")
+        memoryCandidates: optionalStringArray(value.memoryCandidates, "memoryCandidates"),
+        evidence: optionalStringArray(value.evidence, "evidence")
       };
     };
+    validateAppendDailyInput = (input) => {
+      const summary = compactLine(input.summary, 500);
+      if (isLowSignalSummary(summary)) {
+        throw new Error("AppendDaily.summary is too generic; include concrete durable progress or a decision");
+      }
+      const details = [
+        ...input.completed ?? [],
+        ...input.decisions ?? [],
+        ...input.followUps ?? [],
+        ...input.memoryCandidates ?? [],
+        ...input.evidence ?? []
+      ].map((value) => compactLine(value, 240)).filter(Boolean);
+      if (details.length === 0) {
+        throw new Error("AppendDaily requires at least one completed item, decision, follow-up, memory candidate, or evidence item");
+      }
+    };
+    isLowSignalSummary = (value) => {
+      const normalized = value.toLowerCase().replace(/\s+/g, "");
+      return [
+        "done",
+        "completed",
+        "finished",
+        "updated",
+        "\u7EE7\u7EED\u63A8\u8FDB",
+        "\u5B8C\u6210\u4EFB\u52A1",
+        "\u5DF2\u5904\u7406",
+        "\u5904\u7406\u5B8C\u6210",
+        "\u505A\u4E86\u4E00\u4E9B\u4FEE\u6539"
+      ].includes(normalized);
+    };
+    containsNormalizedDailyEntry = (daily, text) => {
+      const needle = normalizeDailyText(text);
+      return daily.split("\n").map((line) => line.replace(/^-\s+\d\d:\d\d\s+/, "")).some((line) => normalizeDailyText(line) === needle);
+    };
+    normalizeDailyText = (value) => value.replace(/\s+/g, " ").trim().toLowerCase();
     requireString3 = (value, name) => {
       if (typeof value !== "string" || !value.trim()) {
         throw new Error(`AppendDaily.${name} must be a non-empty string`);
@@ -2886,6 +3042,14 @@ var init_memory = __esm({
         throw new Error(`AppendDaily.${name} must be an array of strings`);
       }
       return value.map((item) => item.trim()).filter(Boolean);
+    };
+    optionalNumber2 = (value) => typeof value === "number" && Number.isFinite(value) ? value : void 0;
+    optionalString3 = (value) => typeof value === "string" && value.trim() ? value : void 0;
+    parseLastFailure = (value) => {
+      if (!isRecord5(value)) return void 0;
+      const at = optionalNumber2(value.at);
+      const message = optionalString3(value.message);
+      return at !== void 0 && message ? { at, message } : void 0;
     };
     isRecord5 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
     safeProjectId = (projectId) => {
@@ -2921,6 +3085,8 @@ var init_pi_ai = __esm({
         for await (const event of stream) {
           if (event.type === "text_delta") {
             yield { type: "text_delta", delta: event.delta };
+          } else if (event.type === "thinking_delta") {
+            yield { type: "thinking_delta", delta: event.delta };
           }
         }
         return fromPiAssistant(await stream.result());
@@ -3111,7 +3277,8 @@ var init_pi_ai = __esm({
             completed: Type.Optional(Type.Array(Type.String())),
             decisions: Type.Optional(Type.Array(Type.String())),
             followUps: Type.Optional(Type.Array(Type.String())),
-            memoryCandidates: Type.Optional(Type.Array(Type.String()))
+            memoryCandidates: Type.Optional(Type.Array(Type.String())),
+            evidence: Type.Optional(Type.Array(Type.String()))
           });
         case "Skill":
           return Type.Object({
@@ -3250,6 +3417,7 @@ var init_runtime = __esm({
       }
       async *#runProviderTurn(context, systemPrompt, options, signal) {
         let text = "";
+        let thinking = "";
         yield { type: "message_start", role: "assistant" };
         try {
           const stream = this.#provider.streamTurn({
@@ -3265,7 +3433,7 @@ var init_runtime = __esm({
             }
             const next = await stream.next();
             if (next.done) {
-              const message = normalizeAssistantMessage(next.value, text, signal.aborted ? "cancelled" : "end_turn");
+              const message = normalizeAssistantMessage(next.value, { thinking, text }, signal.aborted ? "cancelled" : "end_turn");
               if (message) {
                 yield { type: "message_end", message };
               }
@@ -3274,16 +3442,19 @@ var init_runtime = __esm({
             if (next.value.type === "text_delta") {
               text += next.value.delta;
               yield next.value;
+            } else if (next.value.type === "thinking_delta") {
+              thinking += next.value.delta;
+              yield next.value;
             }
           }
-          const cancelledMessage = partialAssistantMessage(text, "cancelled");
+          const cancelledMessage = partialAssistantMessage({ thinking, text }, "cancelled");
           if (cancelledMessage) {
             yield { type: "message_end", message: cancelledMessage };
           }
           return { stopReason: "cancelled" };
         } catch (cause) {
           const error = cause instanceof Error ? cause : new Error(String(cause));
-          const partial = partialAssistantMessage(text, "error");
+          const partial = partialAssistantMessage({ thinking, text }, "error");
           if (partial) {
             yield { type: "message_end", message: partial };
           }
@@ -3334,23 +3505,26 @@ var init_runtime = __esm({
         };
       }
     };
-    normalizeAssistantMessage = (value, text, fallbackStopReason) => {
+    normalizeAssistantMessage = (value, streamed, fallbackStopReason) => {
       if (value) {
         if (!isAssistantMessage(value)) {
           throw new Error(`Provider returned ${value.role} message instead of assistant`);
         }
         return value;
       }
-      return partialAssistantMessage(text, fallbackStopReason);
+      return partialAssistantMessage(streamed, fallbackStopReason);
     };
     isAssistantMessage = (message) => message.role === "assistant";
-    partialAssistantMessage = (text, stopReason) => {
-      if (text.length === 0) {
+    partialAssistantMessage = (streamed, stopReason) => {
+      if (streamed.thinking.length === 0 && streamed.text.length === 0) {
         return void 0;
       }
       return {
         role: "assistant",
-        content: [{ type: "text", text }],
+        content: [
+          ...streamed.thinking ? [{ type: "thinking", text: streamed.thinking }] : [],
+          ...streamed.text ? [{ type: "text", text: streamed.text }] : []
+        ],
         stopReason,
         meta: stopReason === "end_turn" ? void 0 : { partial: true }
       };
@@ -4619,6 +4793,7 @@ var init_src4 = __esm({
       #loadConfigProfile;
       #createRuntime;
       #memoryHomeDir;
+      #onSessionListChanged;
       #now;
       #createId;
       #sessions = /* @__PURE__ */ new Map();
@@ -4643,6 +4818,7 @@ var init_src4 = __esm({
         this.#loadConfigProfile = options.loadConfigProfile;
         this.#createRuntime = options.createRuntime;
         this.#memoryHomeDir = options.memoryHomeDir;
+        this.#onSessionListChanged = options.onSessionListChanged;
         this.#now = options.now ?? Date.now;
         this.#createId = options.createId ?? (() => crypto.randomUUID());
         this.#registry = new ProjectRegistry({
@@ -4819,12 +4995,20 @@ var init_src4 = __esm({
             this.#respond(connection, message, await this.#handleUpsertModelProfile(message));
             break;
           }
+          case "remove_model_provider": {
+            this.#respond(connection, message, await this.#handleRemoveModelProvider(message));
+            break;
+          }
           case "fetch_provider_models": {
             this.#respond(connection, message, { models: await this.#fetchProviderModels(message.projectId, message.providerId) });
             break;
           }
           case "get_memory_settings": {
             this.#respond(connection, message, { memory: await this.#memorySettingsForProject(message.projectId) });
+            break;
+          }
+          case "get_memory_status": {
+            this.#respond(connection, message, { status: await this.#memoryStatusForProject(message.projectId) });
             break;
           }
           case "upsert_memory_settings": {
@@ -4892,6 +5076,9 @@ var init_src4 = __esm({
           workDir: lane.project.workDir,
           model: request.meta.model
         });
+        if (created) {
+          this.#onSessionListChanged?.({ projectId: lane.project.projectId, sessionId });
+        }
         this.#respond(connection, request, { sessionId });
       }
       async #handleLoadSession(connection, request) {
@@ -5332,10 +5519,21 @@ var init_src4 = __esm({
               delta: rawEvent.delta
             });
             break;
+          case "thinking_delta":
+            this.#broadcastTransient(lane.session.header.sessionId, {
+              type: "thinking_delta",
+              sessionId: lane.session.header.sessionId,
+              clientId,
+              ts: this.#now(),
+              eventId: state.assistantEventId,
+              delta: rawEvent.delta
+            });
+            break;
           case "message_end": {
             await this.#appendDiagnostic(lane.session.header.sessionId, "assistant_result", {
               clientId,
               stopReason: rawEvent.message.stopReason,
+              thinkingBlocks: countContentBlocks(rawEvent.message, "thinking"),
               textBlocks: countContentBlocks(rawEvent.message, "text"),
               toolCalls: countContentBlocks(rawEvent.message, "tool_call"),
               inputTokens: rawEvent.message.usage?.inputTokens,
@@ -5531,12 +5729,21 @@ var init_src4 = __esm({
             homeDir: this.#memoryHomeDir,
             now: this.#now,
             onAppend: async (result) => {
-              await this.#appendDiagnostic(lane.session.header.sessionId, "memory_daily_appended", {
-                clientId,
-                path: result.path,
-                date: result.date
-              });
-              await this.#scheduleMemoryDream(lane, clientId);
+              if (result.entry) {
+                await this.#markMemoryDreamDirty(lane, clientId, result.path);
+              }
+              try {
+                await this.#appendDiagnostic(lane.session.header.sessionId, "memory_daily_appended", {
+                  clientId,
+                  path: result.path,
+                  date: result.date,
+                  skippedReason: result.skippedReason
+                });
+              } catch {
+              }
+              if (result.entry) {
+                await this.#scheduleMemoryDream(lane, clientId);
+              }
             }
           })
         );
@@ -5767,7 +5974,10 @@ var init_src4 = __esm({
           ...context.senderDisplayName ? [`sender_display_name: ${context.senderDisplayName}`] : [],
           ...context.mentionedBot !== void 0 ? [`mentioned_bot: ${context.mentionedBot}`] : [],
           "",
-          "Use SendChannelMessage to reply to the current conversation when needed."
+          "Use SendChannelMessage to reply to the current conversation when needed.",
+          "In IM, send a short acknowledgement before long work so the user does not think the bot is stuck.",
+          "For longer tasks, send concise progress updates instead of waiting until every tool call has finished.",
+          "Keep replies conversational and avoid exposing internal tool names unless they help the user."
         ];
         return this.#appendPersistent(lane, {
           type: "harness_item",
@@ -5808,6 +6018,22 @@ var init_src4 = __esm({
           lastActivityAt: this.#now()
         };
         const delayMs = Math.max(0, memory.dreamIdleMinutes) * 60 * 1e3;
+        const scheduledFor = this.#now() + delayMs;
+        const currentState = await readMemoryDreamState({
+          projectId: lane.project.projectId,
+          homeDir: this.#memoryHomeDir,
+          now: this.#now
+        });
+        await this.#writeMemoryDreamState(lane.project.projectId, {
+          ...currentState ?? {},
+          projectId: String(lane.project.projectId),
+          dirty: true,
+          running: schedule.running,
+          sessionId: String(lane.session.header.sessionId),
+          clientId: String(clientId),
+          lastDailyAppendAt: currentState?.lastDailyAppendAt ?? schedule.lastActivityAt,
+          scheduledFor
+        });
         schedule.timer = setTimeout(() => {
           void this.#runIdleMemoryDream(projectId).catch((cause) => {
             const error = cause instanceof Error ? cause : new Error(String(cause));
@@ -5826,6 +6052,26 @@ var init_src4 = __esm({
           idleMinutes: memory.dreamIdleMinutes
         });
       }
+      async #markMemoryDreamDirty(lane, clientId, dailyPath) {
+        const current = await readMemoryDreamState({
+          projectId: lane.project.projectId,
+          homeDir: this.#memoryHomeDir,
+          now: this.#now
+        });
+        await this.#writeMemoryDreamState(lane.project.projectId, {
+          projectId: String(lane.project.projectId),
+          dirty: true,
+          running: current?.running ?? false,
+          sessionId: String(lane.session.header.sessionId),
+          clientId: String(clientId),
+          lastDailyAppendAt: this.#now(),
+          lastDailyPath: dailyPath,
+          lastFailure: current?.lastFailure,
+          lastSuccessAt: current?.lastSuccessAt,
+          lastProjectMemoryUpdateAt: current?.lastProjectMemoryUpdateAt,
+          lastRootMemoryUpdateAt: current?.lastRootMemoryUpdateAt
+        });
+      }
       async #runIdleMemoryDream(projectId) {
         const schedule = this.#memoryDreams.get(projectId);
         if (!schedule || schedule.running) {
@@ -5834,10 +6080,28 @@ var init_src4 = __esm({
         schedule.running = true;
         schedule.timer = void 0;
         this.#memoryDreams.set(projectId, schedule);
+        const beforeRun = await readMemoryDreamState({
+          projectId,
+          homeDir: this.#memoryHomeDir,
+          now: this.#now
+        });
+        await this.#writeMemoryDreamState(projectId, {
+          ...beforeRun ?? { projectId: String(projectId), dirty: true },
+          projectId: String(projectId),
+          running: true,
+          lastAttemptAt: this.#now()
+        });
         try {
           const lane = await this.#getLane(schedule.sessionId);
           const memory = await this.#safeMemorySettingsForRuntime(lane, schedule.clientId);
           if (!memory.enabled || !memory.autoDream) {
+            await this.#writeMemoryDreamState(projectId, {
+              ...beforeRun ?? { projectId: String(projectId) },
+              projectId: String(projectId),
+              dirty: false,
+              running: false,
+              lastFailure: { at: this.#now(), message: "Memory dream disabled" }
+            });
             return;
           }
           const generated = await this.#generateMemoryUpdate(lane, memory);
@@ -5860,9 +6124,81 @@ var init_src4 = __esm({
               path: paths.rootMemoryPath
             });
           }
+          const now = this.#now();
+          const latestState = await readMemoryDreamState({ projectId, homeDir: this.#memoryHomeDir, now: this.#now });
+          const hasNewDailyDuringRun = latestState?.lastDailyAppendAt !== void 0 && beforeRun?.lastDailyAppendAt !== void 0 && latestState.lastDailyAppendAt > beforeRun.lastDailyAppendAt;
+          await this.#writeMemoryDreamState(projectId, {
+            ...latestState ?? { projectId: String(projectId) },
+            projectId: String(projectId),
+            dirty: hasNewDailyDuringRun,
+            running: false,
+            ...hasNewDailyDuringRun ? {} : { scheduledFor: void 0 },
+            lastSuccessAt: now,
+            lastFailure: void 0,
+            ...generated?.projectMemory?.trim() ? { lastProjectMemoryUpdateAt: now } : {},
+            ...memory.promoteRoot && generated?.rootMemory?.trim() ? { lastRootMemoryUpdateAt: now } : {}
+          });
+          if (hasNewDailyDuringRun) {
+            await this.#scheduleMemoryDream(lane, schedule.clientId);
+          }
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : String(cause);
+          await this.#writeMemoryDreamState(projectId, {
+            ...await readMemoryDreamState({ projectId, homeDir: this.#memoryHomeDir, now: this.#now }) ?? { projectId: String(projectId) },
+            projectId: String(projectId),
+            dirty: true,
+            running: false,
+            lastFailure: { at: this.#now(), message }
+          });
+          throw cause;
         } finally {
           this.#memoryDreams.delete(projectId);
         }
+      }
+      async #memoryStatusForProject(projectId) {
+        const state = await readMemoryDreamState({
+          projectId,
+          homeDir: this.#memoryHomeDir,
+          now: this.#now
+        });
+        await this.#recoverMemoryDream(projectId, state);
+        const recovered = await readMemoryDreamState({
+          projectId,
+          homeDir: this.#memoryHomeDir,
+          now: this.#now
+        });
+        return {
+          projectId,
+          dirty: recovered?.dirty ?? false,
+          running: recovered?.running ?? false,
+          ...recovered?.lastDailyAppendAt !== void 0 ? { lastDailyAppendAt: recovered.lastDailyAppendAt } : {},
+          ...recovered?.lastDailyPath ? { lastDailyPath: recovered.lastDailyPath } : {},
+          ...recovered?.scheduledFor !== void 0 ? { scheduledFor: recovered.scheduledFor } : {},
+          ...recovered?.lastAttemptAt !== void 0 ? { lastAttemptAt: recovered.lastAttemptAt } : {},
+          ...recovered?.lastSuccessAt !== void 0 ? { lastSuccessAt: recovered.lastSuccessAt } : {},
+          ...recovered?.lastFailure ? { lastFailure: recovered.lastFailure } : {},
+          ...recovered?.lastProjectMemoryUpdateAt !== void 0 ? { lastProjectMemoryUpdateAt: recovered.lastProjectMemoryUpdateAt } : {},
+          ...recovered?.lastRootMemoryUpdateAt !== void 0 ? { lastRootMemoryUpdateAt: recovered.lastRootMemoryUpdateAt } : {}
+        };
+      }
+      async #recoverMemoryDream(projectId, state) {
+        if (!state?.dirty || this.#memoryDreams.has(projectId)) {
+          return;
+        }
+        const lane = [...this.#sessions.values()].find((candidate) => candidate.project.projectId === projectId);
+        if (!lane) {
+          return;
+        }
+        const clientId = state.clientId ? asClientId(state.clientId) : asClientId("client_memory_recovery");
+        await this.#scheduleMemoryDream(lane, clientId);
+      }
+      async #writeMemoryDreamState(projectId, state) {
+        await writeMemoryDreamState({
+          projectId,
+          homeDir: this.#memoryHomeDir,
+          now: this.#now,
+          state
+        });
       }
       async #generateMemoryUpdate(lane, memory) {
         const selectedModel = await this.#selectedModelFromMeta(
@@ -6130,13 +6466,17 @@ var init_src4 = __esm({
               if (!extension) {
                 throw new Error(`channel_adapter_unavailable: ${current.extensionId}`);
               }
-              await extension.adapter.sendMessage(current.target, { text: input.text });
+              await extension.adapter.sendMessage(current.target, {
+                ...input.text ? { text: input.text } : {},
+                ...input.attachments ? { attachments: input.attachments } : {}
+              });
               await this.#appendDiagnostic(lane.session.header.sessionId, "channel_message_sent", {
                 extensionId: current.extensionId,
                 channel: current.channel,
-                externalConversationId: current.externalConversationId
+                externalConversationId: current.externalConversationId,
+                attachments: input.attachments?.length ?? 0
               });
-              return { channel: current.channel, target: "current" };
+              return { channel: current.channel, target: "current", attachments: input.attachments?.length ?? 0 };
             }
           })
         );
@@ -6305,6 +6645,7 @@ var init_src4 = __esm({
           externalConversationId,
           projectId: project.projectId
         });
+        this.#onSessionListChanged?.({ projectId: project.projectId, sessionId });
         return binding;
       }
       async #ensureDefaultWorkspaceProject() {
@@ -6426,6 +6767,29 @@ var init_src4 = __esm({
           modelId: request.modelId
         });
         return this.#listModels(project.projectId);
+      }
+      async #handleRemoveModelProvider(request) {
+        const project = await this.#registry.require(request.projectId);
+        const configPath = join10(project.workDir, ".scorel", "config.toml");
+        let existingConfigText;
+        try {
+          existingConfigText = await readFile11(configPath, "utf8");
+        } catch (cause) {
+          if (!isNodeErrorCode4(cause, "ENOENT")) {
+            throw cause;
+          }
+        }
+        await mkdir6(join10(project.workDir, ".scorel"), { recursive: true });
+        await writeFile6(
+          configPath,
+          renderModelProfileConfig({
+            removeProviderId: request.providerId,
+            existingConfigText
+          }),
+          "utf8"
+        );
+        const profile = await this.#listModels(project.projectId);
+        return { ...profile, removed: true };
       }
       async #memorySettingsForProject(projectId) {
         const config = await this.#configProfileForProject(projectId).catch((cause) => {
