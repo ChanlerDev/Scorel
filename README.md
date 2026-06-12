@@ -98,7 +98,7 @@ apiKey = "123456:telegram-bot-token"
 pollIntervalMs = 1000
 ```
 
-QQ Bot 和微信 / 企业微信入口在 GUI 的 Settings -> IM 里走更短的明文配置路径。QQ 填开放平台管理端的 `App ID` 和 `App Secret`，Scorel 会自动换取并刷新 Access Token：
+QQ Bot 和微信 / 企业微信入口在 GUI 的 Settings -> IM 里走更短的明文配置路径。QQ 填开放平台管理端的 `App ID` 和 `App Secret`，Scorel 会自动换取并刷新 Access Token，并通过官方 WebSocket Gateway 接收入站消息：
 
 ```toml
 [extensions.qq]
@@ -112,7 +112,12 @@ botId = "..."
 allowedConversationIds = "..."
 ```
 
-微信 / 企业微信群机器人直接粘贴完整 Webhook URL：
+微信 / 企业微信分成两条官方能力面：
+
+- 企业微信群机器人 Webhook：只用于出站发送，不能接收群里用户消息。
+- 公众号 plaintext callback：用于接收用户发来的微信消息，需要微信后台配置可访问的 callback URL 和同一个 Token。
+
+出站群机器人配置：
 
 ```toml
 [extensions.wechat]
@@ -123,7 +128,20 @@ kind = "im"
 webhookUrl = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."
 ```
 
-然后启动本机 Host 或 GUI。Telegram 使用 Bot API long polling，不需要 Relay 或 webhook。
+入站 callback 配置：
+
+```toml
+[extensions.wechat]
+enabled = true
+kind = "im"
+
+[extensions.wechat.config]
+callbackToken = "..."
+callbackHost = "127.0.0.1"
+callbackPort = 0
+```
+
+然后启动本机 Host 或 GUI。Telegram 使用 Bot API long polling，不需要 Relay 或 webhook。QQ 使用官方 WebSocket Gateway，不需要公网回调。微信 callback 如果要被微信服务器访问，需要用公网 URL 或隧道转发到本机 callback server。
 
 本地开发常用检查：
 
@@ -295,6 +313,7 @@ Host bridge 负责：
 
 - 把 `(extensionId, externalConversationId)` 绑定到固定 `sessionId`。
 - 使用默认 workspace：`~/.scorel/workspace`。
+- 在 GUI Host 中把后台 IM 新建 session 的 Project 变化主动通知 GUI，侧边栏不需要靠手动展开或定时轮询才看到新 IM session。
 - 把 IM 消息提交到现有 `send_message` 路径。
 - 在用户消息前注入 hidden `harness_item kind="channel_context"`，说明来源 channel、conversation type、sender display name、是否 mention bot。
 - 为当前 IM turn 暴露 `SendChannelMessage`。
@@ -316,7 +335,12 @@ Telegram 是第一个 built-in IM provider：
 - `credentialMode = "direct"` 时直接读取 `apiKey`。
 - V1 只发纯文本，不做 webhook、媒体、inline keyboard 或主动跨 chat 发送。
 
-QQ Bot 和微信 / 企业微信沿用同一条 channel bridge：QQ 使用官方 `App ID` / `App Secret` 换取 Access Token 后发送消息；微信 / 企业微信使用群机器人 Webhook URL。两者默认都不要求用户配置 env var。
+QQ Bot 和微信 / 企业微信沿用同一条 channel bridge：
+
+- QQ 使用官方 `App ID` / `App Secret` 换取 Access Token，发送消息走 REST API，接收消息走官方 WebSocket Gateway。
+- 微信 / 企业微信群机器人 Webhook 只负责出站发送。
+- 微信入站接收走公众号 plaintext callback；当前不实现个人微信自动化、企微加密回调解密、公网 tunnel 或 TLS 托管。
+- QQ 和微信默认都不要求用户配置 env var。
 
 ## Editing Mode
 
@@ -377,7 +401,7 @@ GUI 更偏本地桌面工作台，WebUI 更偏 hosted/remote control。二者都
 - follow-up / steer / cancel。
 - provider/model settings。
 - memory settings。
-- IM settings，包括 Telegram enable、env/direct token、allowed chats。
+- IM settings，包括 Telegram enable、env/direct token、allowed chats、QQ App ID / App Secret、WeChat outbound webhook 和 inbound callback。
 - Relay device pairing 和 remote project 选择。
 
 ## Status
@@ -398,6 +422,8 @@ GUI 更偏本地桌面工作台，WebUI 更偏 hosted/remote control。二者都
 - provider/model profile 和 auxiliary model。
 - extension manifest + IM channel bridge。
 - built-in Telegram IM extension。
+- built-in QQ Bot IM extension。
+- WeChat outbound webhook 和 official-account style plaintext callback。
 - GUI IM settings。
 
 计划中的方向：
