@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node --import tsx
 import { spawn, execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, type Server, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir, userInfo } from "node:os";
@@ -71,6 +71,7 @@ const main = async (): Promise<void> => {
     await cdp.send("Runtime.enable");
     await cdp.send("Page.enable");
     await waitFor(cdp, "app shell", "Boolean(document.querySelector('.app-shell'))");
+    const daemonState = await waitForDaemonState(home);
     await waitFor(cdp, "seeded local project", "document.body.innerText.includes('scorel-cdp-repo')");
 
     await clickButton(cdp, "设置");
@@ -111,6 +112,10 @@ const main = async (): Promise<void> => {
       assistantPersisted: session.assistantPersisted,
       detectedRtk,
       bashTool: session.bashTool,
+      sharedProjects: join(home, ".scorel", "projects.json"),
+      sharedSessionsDir: join(home, ".scorel", "sessions"),
+      daemonPid: daemonState.pid,
+      daemonUrl: daemonState.wsUrl,
     }, null, 2));
   } finally {
     cdp.close();
@@ -118,7 +123,7 @@ const main = async (): Promise<void> => {
 };
 
 const seedProject = async (home: string, repo: string, baseUrl: string): Promise<void> => {
-  await mkdir(join(home, ".scorel", "gui"), { recursive: true });
+  await mkdir(join(home, ".scorel"), { recursive: true });
   await mkdir(join(repo, ".scorel"), { recursive: true });
   await writeFile(join(repo, "README.md"), "# Scorel CDP GUI E2E\n", "utf8");
   await writeFile(join(repo, ".scorel", "config.toml"), `
@@ -149,7 +154,7 @@ auxiliary = "main"
 `, "utf8");
   const now = Date.now();
   const workDir = await realpath(repo);
-  await writeFile(join(home, ".scorel", "gui", "projects.json"), `${JSON.stringify({
+  await writeFile(join(home, ".scorel", "projects.json"), `${JSON.stringify({
     version: 1,
     projects: [
       {
@@ -290,7 +295,7 @@ const waitForSession = async (home: string, prompt: string): Promise<{
   assistantPersisted: boolean;
   bashTool?: { shell?: unknown; command?: unknown; rtk?: unknown; rtkApplied: boolean };
 }> => {
-  const sessionsDir = join(home, ".scorel", "gui", "sessions");
+  const sessionsDir = join(home, ".scorel", "sessions");
   let latest = "";
   await waitUntil("session JSONL with assistant response", async () => {
     const files = await readdir(sessionsDir).catch(() => []);
@@ -304,6 +309,8 @@ const waitForSession = async (home: string, prompt: string): Promise<{
     }
     return false;
   }, 180_000);
+  await assertMissing(join(home, ".scorel", "gui", "projects.json"));
+  await assertMissing(join(home, ".scorel", "gui", "sessions"));
   const raw = await readFile(latest, "utf8");
   const bashTool = raw
     .trim()
@@ -324,6 +331,42 @@ const waitForSession = async (home: string, prompt: string): Promise<{
       },
     } : {}),
   };
+};
+
+type DaemonState = {
+  wsUrl: string;
+  token: string;
+  pid: number;
+  stoppedAt: number | null;
+};
+
+const waitForDaemonState = async (home: string): Promise<DaemonState> => {
+  const file = join(home, ".scorel", "daemon.json");
+  let state: DaemonState | undefined;
+  await waitUntil("GUI-started daemon state", async () => {
+    const parsed = JSON.parse(await readFile(file, "utf8")) as Partial<DaemonState>;
+    if (typeof parsed.wsUrl !== "string" || typeof parsed.token !== "string" || typeof parsed.pid !== "number" || parsed.stoppedAt !== null) {
+      return false;
+    }
+    try {
+      process.kill(parsed.pid, 0);
+    } catch {
+      return false;
+    }
+    state = parsed as DaemonState;
+    return true;
+  });
+  return state!;
+};
+
+const assertMissing = async (path: string): Promise<void> => {
+  try {
+    await stat(path);
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw cause;
+  }
+  throw new Error(`Unexpected legacy GUI Host state path exists: ${path}`);
 };
 
 const toolResults = (event: unknown): Array<{ toolName: string; result: { details?: { shell?: unknown; rtk?: unknown } } }> => {
@@ -499,10 +542,43 @@ const cleanup = async (): Promise<void> => {
     ]);
   }
   if (managed.tempRoot) {
+    await stopTempDaemon(join(managed.tempRoot, "home"));
+  }
+  if (managed.tempRoot) {
     await rm(managed.tempRoot, { recursive: true, force: true });
   }
   if (managed.providerServer) {
     await new Promise<void>((resolveClose) => managed.providerServer?.close(() => resolveClose()));
+  }
+};
+
+const stopTempDaemon = async (home: string): Promise<void> => {
+  try {
+    const state = JSON.parse(await readFile(join(home, ".scorel", "daemon.json"), "utf8")) as Partial<DaemonState>;
+    if (typeof state.pid !== "number" || state.stoppedAt !== null) {
+      return;
+    }
+    try {
+      process.kill(state.pid, "SIGTERM");
+    } catch {
+      return;
+    }
+    await waitUntil("temporary GUI daemon exit", async () => {
+      try {
+        process.kill(state.pid!, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    }, 5_000).catch(() => {
+      try {
+        process.kill(state.pid!, "SIGKILL");
+      } catch {
+        // Already stopped.
+      }
+    });
+  } catch {
+    // No daemon state was written.
   }
 };
 

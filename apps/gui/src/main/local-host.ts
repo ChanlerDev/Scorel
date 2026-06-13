@@ -1,14 +1,19 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import { DaemonClient } from "@scorel/client";
+import WebSocket from "ws";
+
+import { DaemonClient, WsTransport } from "@scorel/client";
 import {
   createEmbeddedTransport,
   createRealRuntime,
+  daemonStateLiveness,
   loadScorelConfig,
   loadScorelConfigProfile,
+  readLocalDaemonState,
   ScorelHost,
   type ScorelHostOptions,
+  type LocalDaemonState,
 } from "@scorel/daemon";
 import {
   asClientId,
@@ -45,6 +50,9 @@ export type GuiLocalHostServiceOptions = {
   deviceId?: string;
   deviceDisplayName?: string;
   createRuntime?: RuntimeFactory;
+  readDaemonState?: (stateDir: string) => Promise<LocalDaemonState | null>;
+  ensureDaemon?: (stateDir: string) => Promise<void>;
+  createWebSocket?: (url: string) => WebSocket;
 };
 
 export type GuiLocalSubscriber = (event: ScorelEvent) => void;
@@ -78,9 +86,11 @@ export type GuiLocalHostService = {
 };
 
 export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): GuiLocalHostService => {
-  const sessionsDir = join(options.stateDir, "sessions");
-  const projectsPath = join(options.stateDir, "projects.json");
+  const hostStateDir = options.scorelHomeDir ?? options.stateDir;
+  const sessionsDir = join(hostStateDir, "sessions");
+  const projectsPath = join(hostStateDir, "projects.json");
   let started = false;
+  let ownsEmbeddedHost = false;
   const sessionChangeHandlers = new Set<GuiLocalSessionsChangedHandler>();
   const host = new ScorelHost({
     sessionsDir,
@@ -109,17 +119,41 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
           includeTools: purpose === "chat",
         })),
   });
-  const client = new DaemonClient(createEmbeddedTransport(host), {
+  let client = new DaemonClient(createEmbeddedTransport(host), {
     clientId: asClientId("client_gui"),
   });
 
   return {
     async start() {
       if (started) return;
+      const readDaemonState = options.readDaemonState ?? ((stateDir) => readLocalDaemonState({ stateDir }));
+      let daemonState = options.createRuntime ? null : await readDaemonState(hostStateDir);
+      if ((!daemonState || daemonStateLiveness(daemonState) !== "running") && !options.createRuntime) {
+        await options.ensureDaemon?.(hostStateDir);
+        daemonState = await readDaemonState(hostStateDir);
+      }
+      if (daemonState && daemonStateLiveness(daemonState) === "running") {
+        client = new DaemonClient(
+          new WsTransport({
+            url: daemonState.wsUrl,
+            token: daemonState.token,
+            createWebSocket: (url) => options.createWebSocket?.(url) ?? new WebSocket(url),
+          }),
+          { clientId: asClientId("client_gui") },
+        );
+        await client.connect();
+        ownsEmbeddedHost = false;
+        started = true;
+        return;
+      }
+      if (!options.createRuntime) {
+        throw new Error("local daemon is not running after start");
+      }
       await mkdir(sessionsDir, { recursive: true });
       try {
         await host.start();
         await client.connect();
+        ownsEmbeddedHost = true;
         started = true;
       } catch (cause) {
         client.disconnect();
@@ -130,7 +164,10 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     async stop() {
       if (!started) return;
       client.disconnect();
-      await host.shutdown();
+      if (ownsEmbeddedHost) {
+        await host.shutdown();
+      }
+      ownsEmbeddedHost = false;
       started = false;
     },
     listLocalProjects() {

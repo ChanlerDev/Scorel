@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -83,9 +83,7 @@ export const runCliUp = async (argv: string[], options: UpCommandOptions): Promi
   let daemonState: LocalDaemonState | null = existingState;
   if (!reuseDaemon) {
     const daemonArgs = [
-      "--import",
-      "tsx",
-      cliEntrypoint,
+      ...nodeEntrypointArgs(cliEntrypoint),
       "daemon",
       "serve",
       "--port",
@@ -95,8 +93,9 @@ export const runCliUp = async (argv: string[], options: UpCommandOptions): Promi
       "--no-relay",
     ];
     daemonChild = spawnFn(process.execPath, daemonArgs, {
-      cwd: flags.cwd,
+      cwd: dirname(cliEntrypoint),
       env: { ...process.env },
+      detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
     try {
@@ -106,7 +105,6 @@ export const runCliUp = async (argv: string[], options: UpCommandOptions): Promi
       daemonChild.kill("SIGTERM");
       return 1;
     }
-    pipeWithPrefix(daemonChild, "[daemon]", options.output, options.error);
     // Re-read state — serve has now written daemon.json with the bound port,
     // token, and pid we need for the unified header.
     daemonState = await readState(stateDir);
@@ -117,17 +115,18 @@ export const runCliUp = async (argv: string[], options: UpCommandOptions): Promi
     daemonChild?.kill("SIGTERM");
     return 1;
   }
+  if (daemonChild) {
+    detachBackgroundDaemon(daemonChild);
+  }
 
   const webuiArgs = [
-    "--import",
-    "tsx",
-    cliEntrypoint,
+    ...nodeEntrypointArgs(cliEntrypoint),
     "webui",
     "--port",
     String(flags.webuiPort),
   ];
   const webuiChild = spawnFn(process.execPath, webuiArgs, {
-    cwd: flags.cwd,
+    cwd: dirname(cliEntrypoint),
     env: { ...process.env },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -143,38 +142,23 @@ export const runCliUp = async (argv: string[], options: UpCommandOptions): Promi
       return;
     }
     shuttingDown = true;
-    daemonChild?.kill("SIGTERM");
     webuiChild.kill("SIGTERM");
   });
 
-  const daemonExit = daemonChild ? once(daemonChild) : Promise.resolve(0);
   const webuiExit = once(webuiChild);
 
-  // If either child dies before we asked them to, take the other down too so
-  // we don't leave orphaned processes wedging the next `scorel up`.
-  const daemonDeathWatcher = daemonChild
-    ? daemonExit.then((code) => {
-        if (!shuttingDown) {
-          shuttingDown = true;
-          options.error.write(`scorel up daemon exited code=${code}\n`);
-          webuiChild.kill("SIGTERM");
-        }
-        return code;
-      })
-    : Promise.resolve(0);
   const webuiDeathWatcher = webuiExit.then((code) => {
     if (!shuttingDown) {
       shuttingDown = true;
       options.error.write(`scorel up webui exited code=${code}\n`);
-      daemonChild?.kill("SIGTERM");
     }
     return code;
   });
 
-  const [daemonCode, webuiCode] = await Promise.all([daemonDeathWatcher, webuiDeathWatcher]);
+  const webuiCode = await webuiDeathWatcher;
   detachSigint();
   options.output.write("scorel up stopped\n");
-  return daemonCode === 0 && webuiCode === 0 ? 0 : 1;
+  return webuiCode === 0 ? 0 : 1;
 };
 
 const parseUpFlags = (argv: string[], defaultCwd: string): UpFlags => {
@@ -284,6 +268,15 @@ const pipeWithPrefix = (
     pipeStreamLines(child.stderr, prefix, error);
   }
 };
+
+const detachBackgroundDaemon = (child: ChildProcess): void => {
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  child.unref();
+};
+
+const nodeEntrypointArgs = (entrypoint: string): string[] =>
+  entrypoint.endsWith(".ts") ? ["--import", "tsx", entrypoint] : [entrypoint];
 
 const pipeStreamLines = (
   stream: NodeJS.ReadableStream,

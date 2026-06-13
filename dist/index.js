@@ -273,6 +273,14 @@ var init_src2 = __esm({
         this.#assertDaemonConnected();
         return (await this.#request("upsert_memory_settings", input)).memory;
       }
+      async getRuntimeSettings(input) {
+        this.#assertDaemonConnected();
+        return (await this.#request("get_runtime_settings", input)).runtime;
+      }
+      async upsertRuntimeSettings(input) {
+        this.#assertDaemonConnected();
+        return (await this.#request("upsert_runtime_settings", input)).runtime;
+      }
       async getExtensionSettings(input) {
         this.#assertDaemonConnected();
         return (await this.#request("get_extension_settings", input)).extension;
@@ -807,7 +815,7 @@ var init_sessions = __esm({
 // packages/core/src/config/index.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join4 } from "node:path";
-var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, scorelProjectConfigPath, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, removeProvider, renderMemoryConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, loadMemory, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireCompactThreshold, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, requireModelRole, modelRoles;
+var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, scorelProjectConfigPath, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, removeProvider, renderMemoryConfig, renderRuntimeConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, DEFAULT_RUNTIME_CONFIG, loadMemory, loadRuntime, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireCompactThreshold, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, requireModelRole, modelRoles;
 var init_config = __esm({
   "packages/core/src/config/index.ts"() {
     "use strict";
@@ -837,6 +845,9 @@ var init_config = __esm({
         memory: {
           keys: ["enabled", "daily", "sessionMemory", "autoDream", "promoteRoot", "dreamIdleMinutes", "autoCompactThreshold"]
         },
+        runtime: {
+          keys: ["tokenSavingRtk"]
+        },
         extension: {
           keys: ["enabled", "kind"]
         },
@@ -862,6 +873,7 @@ var init_config = __esm({
         models,
         modelProfile: { roles },
         memory: loadMemory(raw),
+        runtime: loadRuntime(raw),
         extensions: loadExtensions(raw)
       };
     };
@@ -878,6 +890,7 @@ var init_config = __esm({
         models,
         modelProfile: { roles },
         memory: loadMemory(raw),
+        runtime: loadRuntime(raw),
         extensions: loadExtensions(raw)
       };
     };
@@ -1134,6 +1147,14 @@ var init_config = __esm({
       };
       return renderRawConfig(raw);
     };
+    renderRuntimeConfig = (input) => {
+      const raw = parseEditableConfig(input.existingConfigText);
+      raw.runtime = {
+        ...loadRuntime(raw),
+        ...input.tokenSavingRtk !== void 0 ? { tokenSavingRtk: requireBoolean(input.tokenSavingRtk, "runtime.tokenSavingRtk") } : {}
+      };
+      return renderRawConfig(raw);
+    };
     renderExtensionConfig = (input) => {
       const raw = parseEditableConfig(input.existingConfigText);
       const extensionId = requireIdentifier(input.extensionId, "extensionId");
@@ -1165,6 +1186,9 @@ var init_config = __esm({
       dreamIdleMinutes: 60,
       autoCompactThreshold: 0.8
     };
+    DEFAULT_RUNTIME_CONFIG = {
+      tokenSavingRtk: false
+    };
     loadMemory = (raw) => ({
       enabled: raw.memory?.enabled ?? DEFAULT_MEMORY_CONFIG.enabled,
       daily: raw.memory?.daily ?? DEFAULT_MEMORY_CONFIG.daily,
@@ -1173,6 +1197,9 @@ var init_config = __esm({
       promoteRoot: raw.memory?.promoteRoot ?? DEFAULT_MEMORY_CONFIG.promoteRoot,
       dreamIdleMinutes: requireNonNegativeNumber(raw.memory?.dreamIdleMinutes ?? DEFAULT_MEMORY_CONFIG.dreamIdleMinutes, "memory.dreamIdleMinutes"),
       autoCompactThreshold: requireCompactThreshold(raw.memory?.autoCompactThreshold ?? DEFAULT_MEMORY_CONFIG.autoCompactThreshold)
+    });
+    loadRuntime = (raw) => ({
+      tokenSavingRtk: raw.runtime?.tokenSavingRtk ?? DEFAULT_RUNTIME_CONFIG.tokenSavingRtk
     });
     loadExtensions = (raw) => {
       const extensions = {};
@@ -1453,6 +1480,12 @@ var init_config = __esm({
         lines.push(`autoCompactThreshold = ${memory.autoCompactThreshold}`);
         lines.push("");
       }
+      if (raw.runtime) {
+        const runtime = loadRuntime(raw);
+        lines.push("[runtime]");
+        lines.push(`tokenSavingRtk = ${runtime.tokenSavingRtk}`);
+        lines.push("");
+      }
       for (const [extensionId, extension] of Object.entries(raw.extensions).sort(([left], [right]) => left.localeCompare(right))) {
         lines.push(`[extensions.${extensionId}]`);
         lines.push(`enabled = ${extension.enabled === true}`);
@@ -1584,6 +1617,9 @@ var init_config = __esm({
       if (section2 === "memory") {
         return { kind: "memory" };
       }
+      if (section2 === "runtime") {
+        return { kind: "runtime" };
+      }
       const extensionConfigMatch = /^extensions\.([A-Za-z0-9_-]+)\.config$/.exec(section2);
       if (extensionConfigMatch?.[1]) {
         return { kind: "extensionConfig", id: extensionConfigMatch[1] };
@@ -1606,6 +1642,8 @@ var init_config = __esm({
         config.modelProfile.roles ??= {};
       } else if (section2.kind === "memory") {
         config.memory ??= {};
+      } else if (section2.kind === "runtime") {
+        config.runtime ??= {};
       } else if (section2.kind === "extension") {
         config.extensions[section2.id] ??= {};
       } else if (section2.kind === "extensionConfig") {
@@ -1631,6 +1669,9 @@ var init_config = __esm({
       } else if (section2.kind === "memory") {
         config.memory ??= {};
         setValue(config.memory, key, value);
+      } else if (section2.kind === "runtime") {
+        config.runtime ??= {};
+        setValue(config.runtime, key, value);
       } else if (section2.kind === "extension") {
         config.extensions[section2.id] ??= {};
         setValue(config.extensions[section2.id], key, value);
@@ -1699,9 +1740,10 @@ var init_config = __esm({
 import { createHash, randomUUID as randomUUID2 } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdir as mkdir2, readFile as readFile4, rename as rename2, rm, stat as stat3, writeFile as writeFile2 } from "node:fs/promises";
-import { dirname as dirname3, extname, isAbsolute, relative, resolve } from "node:path";
+import { userInfo } from "node:os";
+import { basename as basename2, dirname as dirname3, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, bashResult, truncate, textResult, byteLength, isTimeoutError, isExecError, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
+var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, bashResult, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord3, shellQuote, shellCommandArgs, userShell, truncate, textResult, byteLength, isTimeoutError, isExecError, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
 var init_coding_tools = __esm({
   "packages/core/src/tools/coding-tools.ts"() {
     "use strict";
@@ -1721,6 +1763,7 @@ var init_coding_tools = __esm({
       const maxOutputBytes = options.maxOutputBytes ?? 16e3;
       const normalReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, READ_TOKEN_BUDGET_RATIO);
       const fullReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, FULL_READ_TOKEN_BUDGET_RATIO);
+      const defaultShell = resolveDefaultShell(options.defaultShell);
       const resolveWorkspacePath = (input) => {
         if (input.length === 0) {
           throw new Error("path must not be empty");
@@ -1873,25 +1916,52 @@ String: ${input.old_string}`
             const commandCwd = input.cwd ? resolveWorkspacePath(input.cwd) : root;
             const timeoutMs = Math.min(input.timeoutMs ?? defaultTimeoutMs, maxTimeoutMs);
             const outputLimit = input.maxOutputBytes ?? maxOutputBytes;
+            const rtk = options.tokenSaving?.rtk;
+            const rtkCommand = await resolveRtkCommand(rtk, input.command);
+            const command = rtkCommand.rewrittenCommand ?? input.command;
+            const executionCommand = rtkCommand.executionCommand ?? input.command;
+            const executable = defaultShell;
+            const argv = shellCommandArgs(defaultShell, executionCommand);
+            const rtkGainBefore = rtkCommand.applied && rtk?.executable ? await readRtkGain(rtk.executable, commandCwd) : void 0;
+            const rtkResult = {
+              enabled: rtk?.enabled === true,
+              applied: rtkCommand.applied,
+              ...rtk?.executable ? { executable: rtk.executable } : {},
+              ...rtkCommand.rewrittenCommand ? { rewrittenCommand: rtkCommand.rewrittenCommand } : {}
+            };
             try {
-              const result = await execFileAsync("/bin/bash", ["-lc", input.command], {
+              const result = await execFileAsync(executable, argv, {
                 cwd: commandCwd,
                 timeout: timeoutMs,
                 signal,
                 maxBuffer: Math.max(outputLimit * 4, 1024 * 1024)
               });
-              return bashResult({ exitCode: 0, stdout: result.stdout, stderr: result.stderr, cwd: commandCwd, outputLimit });
+              const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : void 0;
+              return bashResult({
+                exitCode: 0,
+                stdout: result.stdout,
+                stderr: result.stderr,
+                cwd: commandCwd,
+                outputLimit,
+                shell: defaultShell,
+                command,
+                rtk: withRtkSavings(rtkResult, rtkSavedTokens)
+              });
             } catch (cause) {
               if (isTimeoutError(cause)) {
                 throw new Error(`Bash command timed out after ${timeoutMs}ms`);
               }
               if (isExecError(cause)) {
+                const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : void 0;
                 return bashResult({
                   exitCode: typeof cause.code === "number" ? cause.code : 1,
                   stdout: String(cause.stdout ?? ""),
                   stderr: String(cause.stderr ?? cause.message),
                   cwd: commandCwd,
-                  outputLimit
+                  outputLimit,
+                  shell: defaultShell,
+                  command,
+                  rtk: withRtkSavings(rtkResult, rtkSavedTokens)
                 });
               }
               throw cause;
@@ -1905,7 +1975,7 @@ String: ${input.old_string}`
             const input = parseGlobArgs(args);
             const limit = input.head_limit ?? DEFAULT_SEARCH_LIMIT;
             const offset = input.offset ?? 0;
-            const all = await runRipgrep(["--files", "--hidden", "--glob", input.pattern, ...vcsExcludes()], workspaceTarget(input.path), root, signal);
+            const all = (await runRipgrep(["--files", "--hidden", "--glob", input.pattern, ...vcsExcludes()], workspaceTarget(input.path), root, signal)).sort((left, right) => toWorkspaceRelative(root)(left).localeCompare(toWorkspaceRelative(root)(right)));
             const selected = paginate(all, limit, offset);
             const text = selected.items.map(toWorkspaceRelative(root)).join("\n");
             return textResult(text || "No files found", {
@@ -2266,8 +2336,95 @@ ${stdout}
 stderr:
 ${stderr}`, {
         exitCode: input.exitCode,
-        cwd: input.cwd
+        cwd: input.cwd,
+        ...input.shell ? { shell: input.shell } : {},
+        ...input.command ? { command: input.command } : {},
+        ...input.rtk ? {
+          rtk: {
+            ...input.rtk,
+            estimatedOutputTokens: estimateTokens(`${stdout}
+${stderr}`)
+          }
+        } : {}
       });
+    };
+    resolveDefaultShell = (input) => {
+      const shell = input || process.env.SHELL || userShell() || "/bin/sh";
+      return shell.trim() || "/bin/sh";
+    };
+    resolveRtkCommand = async (rtk, command) => {
+      if (rtk?.enabled !== true || typeof rtk.executable !== "string" || rtk.executable.length === 0) {
+        return { applied: false };
+      }
+      try {
+        const result = await execFileAsync(rtk.executable, ["rewrite", command], {
+          timeout: 5e3,
+          maxBuffer: 1024 * 1024
+        });
+        return rtkRewriteResult(result.stdout, rtk.executable);
+      } catch (cause) {
+        if (isExecError(cause) && typeof cause.stdout === "string") {
+          return rtkRewriteResult(cause.stdout, rtk.executable);
+        }
+        return { applied: false };
+      }
+    };
+    rtkRewriteResult = (stdout, executable) => {
+      const rewrittenCommand = stdout.trim();
+      return rewrittenCommand ? { applied: true, rewrittenCommand, executionCommand: executableRewriteCommand(rewrittenCommand, executable) } : { applied: false };
+    };
+    executableRewriteCommand = (command, executable) => command.replace(/^rtk(?=\s|$)/, shellQuote(executable));
+    readRtkGain = async (rtkExecutable, cwd) => {
+      try {
+        const { stdout } = await execFileAsync(rtkExecutable, ["gain", "--project", "--format", "json"], {
+          cwd,
+          timeout: 5e3,
+          maxBuffer: 5e6
+        });
+        const parsed = JSON.parse(stdout);
+        if (!isRecord3(parsed) || !isRecord3(parsed.summary)) {
+          return void 0;
+        }
+        return { savedTokens: nonNegativeInteger(parsed.summary.total_saved) };
+      } catch {
+        return void 0;
+      }
+    };
+    rtkSavedTokenDelta = async (rtkExecutable, cwd, before) => {
+      if (!before) {
+        return void 0;
+      }
+      const after = await readRtkGain(rtkExecutable, cwd);
+      if (!after) {
+        return void 0;
+      }
+      return Math.max(0, after.savedTokens - before.savedTokens);
+    };
+    withRtkSavings = (rtk, savedTokens) => ({
+      ...rtk,
+      ...rtk.applied && savedTokens !== void 0 ? { estimatedSavedTokens: savedTokens } : {}
+    });
+    nonNegativeInteger = (value) => {
+      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+        return 0;
+      }
+      return Math.floor(value);
+    };
+    isRecord3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    shellQuote = (value) => `'${value.replace(/'/g, "'\\''")}'`;
+    shellCommandArgs = (shell, command) => {
+      const name = basename2(shell).toLowerCase();
+      if (name === "csh" || name === "tcsh" || name === "fish") {
+        return ["-c", command];
+      }
+      return ["-lc", command];
+    };
+    userShell = () => {
+      try {
+        return userInfo().shell ?? void 0;
+      } catch {
+        return void 0;
+      }
     };
     truncate = (value, maxBytes, label) => {
       const bytes = Buffer.byteLength(value);
@@ -2452,7 +2609,7 @@ var init_tools = __esm({
 });
 
 // packages/core/src/channel/index.ts
-var createSendChannelMessageTool, parseSendChannelMessageInput, parseAttachments, optionalString2, isRecord3;
+var createSendChannelMessageTool, parseSendChannelMessageInput, parseAttachments, optionalString2, isRecord4;
 var init_channel = __esm({
   "packages/core/src/channel/index.ts"() {
     "use strict";
@@ -2470,7 +2627,7 @@ var init_channel = __esm({
       }
     });
     parseSendChannelMessageInput = (value) => {
-      if (!isRecord3(value)) {
+      if (!isRecord4(value)) {
         throw new Error("SendChannelMessage args must be an object");
       }
       const text = typeof value.text === "string" && value.text.trim().length > 0 ? value.text : void 0;
@@ -2499,7 +2656,7 @@ var init_channel = __esm({
         throw new Error("SendChannelMessage.attachments must be an array");
       }
       return value.map((item, index) => {
-        if (!isRecord3(item)) {
+        if (!isRecord4(item)) {
           throw new Error(`SendChannelMessage.attachments.${index} must be an object`);
         }
         if (item.type !== "image" && item.type !== "file") {
@@ -2528,14 +2685,14 @@ var init_channel = __esm({
       }
       return value;
     };
-    isRecord3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
 // packages/core/src/extensions/index.ts
 import { readFile as readFile5 } from "node:fs/promises";
 import { dirname as dirname4, resolve as resolve2 } from "node:path";
-var loadExtensionManifest, parseExtensionManifest, requireString2, requireIdentifier2, requireKind, requireRelativePath, optionalRelativePaths, isRecord4;
+var loadExtensionManifest, parseExtensionManifest, requireString2, requireIdentifier2, requireKind, requireRelativePath, optionalRelativePaths, isRecord5;
 var init_extensions = __esm({
   "packages/core/src/extensions/index.ts"() {
     "use strict";
@@ -2548,7 +2705,7 @@ var init_extensions = __esm({
         const message = cause instanceof Error ? cause.message : String(cause);
         throw new Error(`Invalid extension manifest JSON at ${manifestPath}: ${message}`);
       }
-      if (!isRecord4(value)) {
+      if (!isRecord5(value)) {
         throw new Error(`Extension manifest at ${manifestPath} must be an object`);
       }
       const rootDir = dirname4(resolve2(manifestPath));
@@ -2604,7 +2761,7 @@ var init_extensions = __esm({
       }
       return value.map((item, index) => requireRelativePath(item, `${name}.${index}`, manifestPath));
     };
-    isRecord4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord5 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
@@ -2748,7 +2905,7 @@ var init_instructions = __esm({
 import { appendFile, mkdir as mkdir3, readFile as readFile7, writeFile as writeFile3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { join as join6 } from "node:path";
-var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord5, safeProjectId, isNodeErrorCode2;
+var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord6, safeProjectId, isNodeErrorCode2;
 var init_memory = __esm({
   "packages/core/src/memory/index.ts"() {
     "use strict";
@@ -2980,7 +3137,7 @@ var init_memory = __esm({
     normalizeMarkdownFile = (value) => `${value.trimEnd()}
 `;
     parseAppendDailyInput = (value) => {
-      if (!isRecord5(value)) {
+      if (!isRecord6(value)) {
         throw new Error("AppendDaily args must be an object");
       }
       const summary = requireString3(value.summary, "summary");
@@ -3046,12 +3203,12 @@ var init_memory = __esm({
     optionalNumber2 = (value) => typeof value === "number" && Number.isFinite(value) ? value : void 0;
     optionalString3 = (value) => typeof value === "string" && value.trim() ? value : void 0;
     parseLastFailure = (value) => {
-      if (!isRecord5(value)) return void 0;
+      if (!isRecord6(value)) return void 0;
       const at = optionalNumber2(value.at);
       const message = optionalString3(value.message);
       return at !== void 0 && message ? { at, message } : void 0;
     };
-    isRecord5 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord6 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
     safeProjectId = (projectId) => {
       if (!/^[A-Za-z0-9_-]+$/.test(projectId)) {
         throw new Error("projectId must contain only letters, numbers, underscores, or hyphens");
@@ -3347,7 +3504,7 @@ var init_pi_ai = __esm({
 });
 
 // packages/core/src/runtime/index.ts
-var ScorelRuntime, normalizeAssistantMessage, isAssistantMessage, partialAssistantMessage;
+var ScorelRuntime, toolResultForContext, normalizeAssistantMessage, isAssistantMessage, partialAssistantMessage;
 var init_runtime = __esm({
   "packages/core/src/runtime/index.ts"() {
     "use strict";
@@ -3496,7 +3653,7 @@ var init_runtime = __esm({
           type: "tool_result",
           toolCallId: toolCall.toolCallId,
           toolName: toolCall.toolName,
-          result,
+          result: toolResultForContext(result),
           isError
         };
         return {
@@ -3505,6 +3662,9 @@ var init_runtime = __esm({
         };
       }
     };
+    toolResultForContext = (result) => ({
+      content: result.content
+    });
     normalizeAssistantMessage = (value, streamed, fallbackStopReason) => {
       if (value) {
         if (!isAssistantMessage(value)) {
@@ -3536,7 +3696,7 @@ var init_runtime = __esm({
 import { appendFile as appendFile2, mkdir as mkdir4, readFile as readFile8, writeFile as writeFile4 } from "node:fs/promises";
 import { dirname as dirname6, join as join7 } from "node:path";
 function assertTreeEvent(value) {
-  if (!isRecord6(value)) {
+  if (!isRecord7(value)) {
     throw new SessionStoreError("invalid_event", "Event must be an object");
   }
   if (value.type === "session_header") {
@@ -3548,7 +3708,7 @@ function assertTreeEvent(value) {
   if (typeof value.id !== "string" || value.parentId !== null && typeof value.parentId !== "string" || typeof value.seq !== "number" || typeof value.clientId !== "string" || typeof value.ts !== "number") {
     throw new SessionStoreError("invalid_event", "Event is missing required base fields");
   }
-  if ((value.type === "user_message" || value.type === "assistant_message" || value.type === "tool_result") && !isRecord6(value.message)) {
+  if ((value.type === "user_message" || value.type === "assistant_message" || value.type === "tool_result") && !isRecord7(value.message)) {
     throw new SessionStoreError("invalid_event", "Message event is missing message payload");
   }
   if (value.type === "session_title_updated" && !isSessionTitleUpdated(value)) {
@@ -3573,7 +3733,7 @@ function assertTreeEvent(value) {
     throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
   }
 }
-var SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, createSession, loadSession, buildContext, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, compactSummaryMessage, cloneMessage, isRecord6;
+var SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, createSession, loadSession, buildContext, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, compactSummaryMessage, cloneMessage, isRecord7;
 var init_session = __esm({
   "packages/core/src/session/index.ts"() {
     "use strict";
@@ -3841,13 +4001,13 @@ var init_session = __esm({
       }
     };
     parseHeader = (value) => {
-      if (!isRecord6(value)) {
+      if (!isRecord7(value)) {
         throw new SessionStoreError("invalid_header", "Session header must be an object");
       }
       if (value.version !== 1 || typeof value.sessionId !== "string" || typeof value.deviceId !== "string") {
         throw new SessionStoreError("invalid_header", "Session header is missing required identity fields");
       }
-      if (typeof value.createdAt !== "number" || !isRecord6(value.meta)) {
+      if (typeof value.createdAt !== "number" || !isRecord7(value.meta)) {
         throw new SessionStoreError("invalid_header", "Session header is missing createdAt or meta");
       }
       if (typeof value.meta.projectId !== "string" || value.meta.projectId.length === 0) {
@@ -3861,7 +4021,7 @@ var init_session = __esm({
       return value;
     };
     validateSessionMatch = (header, value) => {
-      if (!isRecord6(value) || typeof value.sessionId !== "string") {
+      if (!isRecord7(value) || typeof value.sessionId !== "string") {
         throw new SessionStoreError("invalid_header", "Event must be an object with a sessionId");
       }
       if (value.sessionId !== header.sessionId) {
@@ -3870,24 +4030,24 @@ var init_session = __esm({
     };
     isConversationEvent = (event) => event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result" || event.type === "harness_item" || event.type === "compact";
     isInstructionSnapshot = (value) => {
-      if (!isRecord6(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
+      if (!isRecord7(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
         return false;
       }
       return value.sections.every(
-        (section2) => isRecord6(section2) && typeof section2.kind === "string" && typeof section2.frozenAt === "number" && typeof section2.renderedBlock === "string"
+        (section2) => isRecord7(section2) && typeof section2.kind === "string" && typeof section2.frozenAt === "number" && typeof section2.renderedBlock === "string"
       );
     };
-    isHarnessItem = (value) => isRecord6(value) && typeof value.kind === "string" && typeof value.origin === "string" && typeof value.content === "string" && (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
+    isHarnessItem = (value) => isRecord7(value) && typeof value.kind === "string" && typeof value.origin === "string" && typeof value.content === "string" && (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
     isCompactEvent = (value) => typeof value.summary === "string" && typeof value.compactedThrough === "string" && typeof value.tokensBefore === "number" && typeof value.tokensAfter === "number" && typeof value.retainedEventCount === "number";
     isQueueUpdate = (value) => (value.queue === "follow_up" || value.queue === "steer") && value.operation === "rewrite" && Array.isArray(value.items) && (value.anchorEventId === null || typeof value.anchorEventId === "string") && value.items.every(
-      (item) => isRecord6(item) && typeof item.id === "string" && Array.isArray(item.content) && typeof item.createdAt === "number" && typeof item.updatedAt === "number" && typeof item.clientId === "string"
+      (item) => isRecord7(item) && typeof item.id === "string" && Array.isArray(item.content) && typeof item.createdAt === "number" && typeof item.updatedAt === "number" && typeof item.clientId === "string"
     );
-    isSessionTitleUpdated = (value) => typeof value.title === "string" && value.title.length > 0 && (value.source === "model" || value.source === "user") && (value.derivedFrom === void 0 || isRecord6(value.derivedFrom) && typeof value.derivedFrom.eventId === "string" && typeof value.derivedFrom.seq === "number");
+    isSessionTitleUpdated = (value) => typeof value.title === "string" && value.title.length > 0 && (value.source === "model" || value.source === "user") && (value.derivedFrom === void 0 || isRecord7(value.derivedFrom) && typeof value.derivedFrom.eventId === "string" && typeof value.derivedFrom.seq === "number");
     isSkillIndexSnapshot = (value) => (value.anchorEventId === null || typeof value.anchorEventId === "string") && Array.isArray(value.entries) && value.entries.every(isSkillIndexEntry);
     isSkillIndexDelta = (value) => (value.anchorEventId === null || typeof value.anchorEventId === "string") && Array.isArray(value.added) && Array.isArray(value.changed) && Array.isArray(value.removed) && value.added.every(isSkillIndexEntry) && value.changed.every(isSkillIndexEntry) && value.removed.every(
-      (item) => isRecord6(item) && typeof item.name === "string" && typeof item.previousPath === "string"
+      (item) => isRecord7(item) && typeof item.name === "string" && typeof item.previousPath === "string"
     );
-    isSkillIndexEntry = (value) => isRecord6(value) && typeof value.name === "string" && typeof value.path === "string" && (value.scope === "user" || value.scope === "project" || value.scope === "extension") && typeof value.description === "string" && typeof value.mtimeMs === "number" && typeof value.size === "number" && typeof value.contentHash === "string" && typeof value.priority === "number";
+    isSkillIndexEntry = (value) => isRecord7(value) && typeof value.name === "string" && typeof value.path === "string" && (value.scope === "user" || value.scope === "project" || value.scope === "extension") && typeof value.description === "string" && typeof value.mtimeMs === "number" && typeof value.size === "number" && typeof value.contentHash === "string" && typeof value.priority === "number";
     appendHarnessItemToContext = (messages, event) => {
       const reminder = renderSystemReminder(event.item.content);
       const last = messages.at(-1);
@@ -3924,7 +4084,7 @@ ${reminder}` }]
       }
       return false;
     };
-    isToolResultWithContent = (value) => isRecord6(value) && Array.isArray(value.content);
+    isToolResultWithContent = (value) => isRecord7(value) && Array.isArray(value.content);
     renderSystemReminder = (content) => `<system-reminder>
 ${content}
 </system-reminder>`;
@@ -3948,21 +4108,20 @@ ${content}
     cloneMessage = (message) => ({
       ...message,
       content: message.content.map((block) => {
-        if (block.type !== "tool_result" || !isRecord6(block.result)) {
+        if (block.type !== "tool_result" || !isRecord7(block.result)) {
           return { ...block };
         }
-        const content = Array.isArray(block.result.content) ? { content: block.result.content.map((item) => isRecord6(item) ? { ...item } : item) } : {};
+        const content = Array.isArray(block.result.content) ? { content: block.result.content.map((item) => isRecord7(item) ? { ...item } : item) } : {};
         return {
           ...block,
           result: {
-            ...block.result,
-            ...content
+            content: content.content ?? []
           }
         };
       }),
       ...message.meta ? { meta: { ...message.meta } } : {}
     });
-    isRecord6 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord7 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
@@ -4534,12 +4693,15 @@ var init_host_client = __esm({
 });
 
 // packages/daemon/src/index.ts
+import { execFile as execFile2 } from "node:child_process";
 import { existsSync as existsSync3 } from "node:fs";
-import { appendFile as appendFile3, mkdir as mkdir6, readFile as readFile11, readdir as readdir6, rm as rm2, writeFile as writeFile6 } from "node:fs/promises";
-import { dirname as dirname8, join as join10, resolve as resolve5 } from "node:path";
+import { appendFile as appendFile3, mkdir as mkdir6, readFile as readFile11, readdir as readdir6, rename as rename3, rm as rm2, writeFile as writeFile6 } from "node:fs/promises";
+import { userInfo as userInfo2 } from "node:os";
+import { basename as basename3, dirname as dirname8, join as join10, resolve as resolve5 } from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify as promisify2 } from "node:util";
 import { WebSocketServer } from "ws";
-var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode4, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, runtimeChannelContextFromWire, parseQueuedChannelContext, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord7, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
+var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode4, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger2, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord8, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
 var init_src4 = __esm({
   "packages/daemon/src/index.ts"() {
     "use strict";
@@ -4554,6 +4716,7 @@ var init_src4 = __esm({
     daemonPackageName = "@scorel/daemon";
     SESSION_MEMORY_COMPACT_WAIT_MS = 5e3;
     AUTO_COMPACT_RETAINED_EVENTS = 8;
+    execFileAsync2 = promisify2(execFile2);
     localDaemonStateFile = (stateDir) => join10(stateDir, "daemon.json");
     createLocalDaemonState = async (options) => {
       const state = {
@@ -4765,9 +4928,10 @@ var init_src4 = __esm({
       }
       server.close((error) => error ? reject(error) : resolve7());
     });
-    createRealRuntime = (options) => {
+    createRealRuntime = async (options) => {
       const selection = resolveModelSelection(options.config, options.modelSelection);
       const model = resolvePiAiModel(selection.config);
+      const rtkExecutable = options.rtkExecutable ?? (options.config.runtime.tokenSavingRtk ? (await detectRtk()).executable : void 0);
       const runtime = new ScorelRuntime({
         provider: createPiAiProvider({
           model,
@@ -4775,7 +4939,16 @@ var init_src4 = __esm({
         })
       });
       if (options.includeTools !== false) {
-        for (const tool of createCodingTools({ cwd: options.cwd, contextWindow: model.contextWindow })) {
+        for (const tool of createCodingTools({
+          cwd: options.cwd,
+          contextWindow: model.contextWindow,
+          tokenSaving: {
+            rtk: {
+              enabled: options.config.runtime.tokenSavingRtk,
+              executable: rtkExecutable
+            }
+          }
+        })) {
           runtime.registerTool(tool);
         }
       }
@@ -4794,6 +4967,8 @@ var init_src4 = __esm({
       #createRuntime;
       #memoryHomeDir;
       #onSessionListChanged;
+      #idleShutdownMs;
+      #onIdleShutdown;
       #now;
       #createId;
       #sessions = /* @__PURE__ */ new Map();
@@ -4805,6 +4980,8 @@ var init_src4 = __esm({
       #imExtensions = /* @__PURE__ */ new Map();
       #imBindings = /* @__PURE__ */ new Map();
       #registry;
+      #runtimeStatsQueue = Promise.resolve();
+      #idleShutdownTimer;
       #started = false;
       constructor(options) {
         this.#sessionsDir = options.sessionsDir;
@@ -4819,6 +4996,8 @@ var init_src4 = __esm({
         this.#createRuntime = options.createRuntime;
         this.#memoryHomeDir = options.memoryHomeDir;
         this.#onSessionListChanged = options.onSessionListChanged;
+        this.#idleShutdownMs = options.idleShutdownMs;
+        this.#onIdleShutdown = options.onIdleShutdown;
         this.#now = options.now ?? Date.now;
         this.#createId = options.createId ?? (() => crypto.randomUUID());
         this.#registry = new ProjectRegistry({
@@ -4833,8 +5012,10 @@ var init_src4 = __esm({
         await mkdir6(this.#scorelHomeDir, { recursive: true });
         await this.#loadImBindings();
         await this.#startEnabledImExtensions();
+        this.#scheduleIdleShutdownCheck();
       }
       async shutdown() {
+        this.#clearIdleShutdownTimer();
         for (const schedule of this.#memoryDreams.values()) {
           if (schedule.timer) {
             clearTimeout(schedule.timer);
@@ -4849,9 +5030,11 @@ var init_src4 = __esm({
         this.#assertStarted();
         await this.#stopImExtensions();
         await this.#startEnabledImExtensions();
+        this.#scheduleIdleShutdownCheck();
       }
       connect(connection, sessionId) {
         this.#assertStarted();
+        this.#clearIdleShutdownTimer();
         connection.sessionId = sessionId;
         this.#connections.add(connection);
         if (sessionId) {
@@ -4876,6 +5059,7 @@ var init_src4 = __esm({
           });
         }
         this.#connections.delete(connection);
+        this.#scheduleIdleShutdownCheck();
       }
       releaseSessionEventBuffer(sessionId) {
         this.#events.delete(sessionId);
@@ -4896,6 +5080,8 @@ var init_src4 = __esm({
             return;
           }
           throw cause;
+        } finally {
+          this.#scheduleIdleShutdownCheck();
         }
       }
       async listDirectories(path) {
@@ -5015,6 +5201,14 @@ var init_src4 = __esm({
             this.#respond(connection, message, { memory: await this.#handleUpsertMemorySettings(message) });
             break;
           }
+          case "get_runtime_settings": {
+            this.#respond(connection, message, { runtime: await this.#runtimeSettingsForProject(message.projectId) });
+            break;
+          }
+          case "upsert_runtime_settings": {
+            this.#respond(connection, message, { runtime: await this.#handleUpsertRuntimeSettings(message) });
+            break;
+          }
           case "get_extension_settings": {
             this.#respond(connection, message, { extension: await this.#extensionSettings(message.extensionId) });
             break;
@@ -5042,6 +5236,39 @@ var init_src4 = __esm({
             await this.#handleCancel(connection, message);
             break;
         }
+      }
+      #scheduleIdleShutdownCheck() {
+        this.#clearIdleShutdownTimer();
+        if (!this.#shouldIdleShutdown()) {
+          return;
+        }
+        this.#idleShutdownTimer = setTimeout(() => {
+          this.#idleShutdownTimer = void 0;
+          if (this.#shouldIdleShutdown()) {
+            this.#onIdleShutdown?.();
+          }
+        }, this.#idleShutdownMs);
+      }
+      #clearIdleShutdownTimer() {
+        if (!this.#idleShutdownTimer) {
+          return;
+        }
+        clearTimeout(this.#idleShutdownTimer);
+        this.#idleShutdownTimer = void 0;
+      }
+      #shouldIdleShutdown() {
+        return this.#started && this.#idleShutdownMs !== void 0 && this.#idleShutdownMs > 0 && this.#connections.size === 0 && this.#imExtensions.size === 0 && !this.#hasActiveWork();
+      }
+      #hasActiveWork() {
+        for (const lane of this.#sessions.values()) {
+          if (lane.runtime.running) {
+            return true;
+          }
+          if (lane.session.tree.controlState.queues.follow_up.length > 0 || lane.session.tree.controlState.queues.steer.length > 0) {
+            return true;
+          }
+        }
+        return false;
       }
       async #handleCreateSession(connection, request) {
         const sessionId = request.sessionId ?? asSessionId(`ses_${this.#createId()}`);
@@ -5578,6 +5805,18 @@ var init_src4 = __esm({
                 ]
               }
             });
+            const rtkSavings = rtkSavingsFromToolResult(rawEvent.result);
+            if (rtkSavings) {
+              await this.#recordRtkSavings({
+                projectId: lane.project.projectId,
+                sessionId: lane.session.header.sessionId,
+                savings: rtkSavings
+              }).catch(
+                (cause) => this.#appendDiagnostic(lane.session.header.sessionId, "runtime_stats_update_failed", {
+                  message: cause instanceof Error ? cause.message : String(cause)
+                })
+              );
+            }
             state.parentId = toolResultId;
             break;
           }
@@ -6845,6 +7084,58 @@ var init_src4 = __esm({
         });
         return this.#memorySettingsForProject(project.projectId);
       }
+      async #runtimeSettingsForProject(projectId, installStatus) {
+        const config = await this.#configProfileForProject(projectId).catch((cause) => {
+          if (isMissingConfigError(cause)) {
+            return void 0;
+          }
+          throw cause;
+        });
+        const detected = await detectRtk();
+        const savings = await readRuntimeStats(this.#runtimeStatsPath());
+        return {
+          tokenSavingRtk: config?.runtime.tokenSavingRtk ?? false,
+          rtkAvailable: detected.available,
+          ...detected.executable ? { rtkExecutable: detected.executable } : {},
+          ...detected.version ? { rtkVersion: detected.version } : {},
+          ...installStatus?.installStatus ? { installStatus: installStatus.installStatus } : {},
+          ...installStatus?.installMessage ? { installMessage: installStatus.installMessage } : {},
+          estimatedOutputTokens: savings.rtk.outputTokens,
+          estimatedSavedTokens: savings.rtk.savedTokens
+        };
+      }
+      async #handleUpsertRuntimeSettings(request) {
+        const project = await this.#registry.require(request.projectId);
+        const configPath = join10(project.workDir, ".scorel", "config.toml");
+        let existingConfigText;
+        try {
+          existingConfigText = await readFile11(configPath, "utf8");
+        } catch (cause) {
+          if (!isNodeErrorCode4(cause, "ENOENT")) {
+            throw cause;
+          }
+        }
+        await mkdir6(join10(project.workDir, ".scorel"), { recursive: true });
+        await writeFile6(
+          configPath,
+          renderRuntimeConfig({
+            tokenSavingRtk: request.tokenSavingRtk,
+            existingConfigText
+          }),
+          "utf8"
+        );
+        const installResult = request.tokenSavingRtk === true ? await ensureRtkAvailable() : { status: "idle" };
+        await this.#appendHostDiagnostic("runtime_settings_upserted", {
+          projectId: project.projectId,
+          workDir: project.workDir,
+          tokenSavingRtk: request.tokenSavingRtk,
+          installStatus: installResult.status
+        });
+        return this.#runtimeSettingsForProject(project.projectId, {
+          installStatus: installResult.status,
+          ...installResult.message ? { installMessage: installResult.message } : {}
+        });
+      }
       async #extensionSettings(extensionId) {
         const config = await this.#loadUserConfigProfile().catch((cause) => {
           if (isMissingConfigError(cause)) {
@@ -7018,6 +7309,20 @@ var init_src4 = __esm({
         await appendFile3(join10(this.#sessionsDir, "host.log"), `${line}
 `, "utf8");
       }
+      #runtimeStatsPath() {
+        return join10(this.#scorelHomeDir, "runtime-stats.json");
+      }
+      async #recordRtkSavings(input) {
+        const updateTask = this.#runtimeStatsQueue.then(async () => {
+          const path = this.#runtimeStatsPath();
+          const stats = await readRuntimeStats(path);
+          addRtkSavings(stats, String(input.projectId), String(input.sessionId), input.savings);
+          await writeRuntimeStats(path, stats);
+        });
+        this.#runtimeStatsQueue = updateTask.catch(() => {
+        });
+        await updateTask;
+      }
       async #resolveProject(sessionId, projectId) {
         const project = await this.#registry.require(projectId);
         await this.#appendDiagnostic(sessionId, "project_resolved", {
@@ -7124,7 +7429,7 @@ var init_src4 = __esm({
         return void 0;
       }
       const parsed = JSON.parse(text);
-      if (!isRecord7(parsed)) {
+      if (!isRecord8(parsed)) {
         return void 0;
       }
       return {
@@ -7144,6 +7449,147 @@ var init_src4 = __esm({
       dreamIdleMinutes: 60,
       autoCompactThreshold: 0.8
     });
+    detectRtk = async () => {
+      try {
+        const shell = resolveDefaultShell2();
+        const path = (await execFileAsync2(shell, shellCommandArgs2(shell, "command -v rtk"), { timeout: 5e3 })).stdout.trim();
+        if (!path) {
+          return { available: false };
+        }
+        const version = await execFileAsync2(path, ["--version"], { timeout: 5e3 }).then((result) => result.stdout.trim() || result.stderr.trim()).catch(() => void 0);
+        return {
+          available: true,
+          executable: path,
+          ...version ? { version } : {}
+        };
+      } catch {
+        return { available: false };
+      }
+    };
+    ensureRtkAvailable = async () => {
+      const existing = await detectRtk();
+      if (existing.available) {
+        return { status: "installed", message: existing.version ?? existing.executable };
+      }
+      const shell = resolveDefaultShell2();
+      const brew = await execFileAsync2(shell, shellCommandArgs2(shell, "command -v brew"), { timeout: 5e3 }).then((result) => result.stdout.trim()).catch(() => "");
+      if (!brew) {
+        return { status: "failed", message: "Homebrew is not available; install RTK manually with `brew install rtk`." };
+      }
+      try {
+        await execFileAsync2(brew, ["install", "rtk"], { timeout: 12e4, maxBuffer: 2e7 });
+        const installed = await detectRtk();
+        return installed.available ? { status: "installed", message: installed.version ?? installed.executable } : { status: "failed", message: "RTK install finished but `rtk` is still not on PATH." };
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        return { status: "failed", message };
+      }
+    };
+    emptyRuntimeStats = () => ({
+      version: 1,
+      rtk: {
+        outputTokens: 0,
+        savedTokens: 0,
+        byProject: {},
+        bySession: {}
+      }
+    });
+    readRuntimeStats = async (path) => {
+      try {
+        return parseRuntimeStats(JSON.parse(await readFile11(path, "utf8")));
+      } catch (cause) {
+        if (isNodeErrorCode4(cause, "ENOENT")) {
+          return emptyRuntimeStats();
+        }
+        return emptyRuntimeStats();
+      }
+    };
+    writeRuntimeStats = async (path, stats) => {
+      await mkdir6(dirname8(path), { recursive: true });
+      const tempPath = join10(dirname8(path), `.runtime-stats-${process.pid}-${Date.now()}.tmp`);
+      try {
+        await writeFile6(tempPath, `${JSON.stringify(stats, null, 2)}
+`, "utf8");
+        await rename3(tempPath, path);
+      } catch (cause) {
+        await rm2(tempPath, { force: true }).catch(() => void 0);
+        throw cause;
+      }
+    };
+    parseRuntimeStats = (value) => {
+      if (!isRecord8(value) || !isRecord8(value.rtk)) {
+        return emptyRuntimeStats();
+      }
+      return {
+        version: 1,
+        rtk: {
+          outputTokens: nonNegativeInteger2(value.rtk.outputTokens),
+          savedTokens: nonNegativeInteger2(value.rtk.savedTokens),
+          byProject: parseRuntimeStatsBuckets(value.rtk.byProject),
+          bySession: parseRuntimeStatsBuckets(value.rtk.bySession)
+        }
+      };
+    };
+    parseRuntimeStatsBuckets = (value) => {
+      if (!isRecord8(value)) {
+        return {};
+      }
+      return Object.fromEntries(
+        Object.entries(value).map(([key, bucket]) => [
+          key,
+          isRecord8(bucket) ? {
+            outputTokens: nonNegativeInteger2(bucket.outputTokens),
+            savedTokens: nonNegativeInteger2(bucket.savedTokens)
+          } : { outputTokens: 0, savedTokens: 0 }
+        ])
+      );
+    };
+    addRtkSavings = (stats, projectId, sessionId, savings) => {
+      addRuntimeStatsBucket(stats.rtk, savings);
+      stats.rtk.byProject[projectId] = addRuntimeStatsBucket(stats.rtk.byProject[projectId] ?? { outputTokens: 0, savedTokens: 0 }, savings);
+      stats.rtk.bySession[sessionId] = addRuntimeStatsBucket(stats.rtk.bySession[sessionId] ?? { outputTokens: 0, savedTokens: 0 }, savings);
+    };
+    addRuntimeStatsBucket = (bucket, savings) => {
+      bucket.outputTokens += savings.outputTokens;
+      bucket.savedTokens += savings.savedTokens;
+      return bucket;
+    };
+    rtkSavingsFromToolResult = (result) => {
+      if (!isRecord8(result) || !isRecord8(result.details)) {
+        return void 0;
+      }
+      const rtk = result.details.rtk;
+      if (!isRecord8(rtk) || rtk.applied !== true) {
+        return void 0;
+      }
+      const outputTokens = nonNegativeInteger2(rtk.estimatedOutputTokens);
+      const savedTokens = nonNegativeInteger2(rtk.estimatedSavedTokens);
+      return outputTokens > 0 || savedTokens > 0 ? { outputTokens, savedTokens } : void 0;
+    };
+    nonNegativeInteger2 = (value) => {
+      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+        return 0;
+      }
+      return Math.floor(value);
+    };
+    resolveDefaultShell2 = () => {
+      const shell = process.env.SHELL || userShell2() || "/bin/sh";
+      return shell.trim() || "/bin/sh";
+    };
+    shellCommandArgs2 = (shell, command) => {
+      const name = basename3(shell).toLowerCase();
+      if (name === "csh" || name === "tcsh" || name === "fish") {
+        return ["-c", command];
+      }
+      return ["-lc", command];
+    };
+    userShell2 = () => {
+      try {
+        return userInfo2().shell ?? void 0;
+      } catch {
+        return void 0;
+      }
+    };
     runtimeChannelContextFromWire = (context) => ({
       extensionId: context.channel,
       channel: context.channel,
@@ -7158,7 +7604,7 @@ var init_src4 = __esm({
       ...context.data ? { data: context.data } : {}
     });
     parseQueuedChannelContext = (value) => {
-      if (!isRecord7(value)) {
+      if (!isRecord8(value)) {
         return void 0;
       }
       if (typeof value.channel !== "string" || typeof value.externalConversationId !== "string") {
@@ -7170,7 +7616,7 @@ var init_src4 = __esm({
         ...typeof value.conversationType === "string" ? { conversationType: value.conversationType } : {},
         ...typeof value.senderDisplayName === "string" ? { senderDisplayName: value.senderDisplayName } : {},
         ...typeof value.mentionedBot === "boolean" ? { mentionedBot: value.mentionedBot } : {},
-        ...isRecord7(value.data) ? { data: value.data } : {}
+        ...isRecord8(value.data) ? { data: value.data } : {}
       });
     };
     imBindingKey = (extensionId, externalConversationId) => `${extensionId}:${externalConversationId}`;
@@ -7203,7 +7649,7 @@ var init_src4 = __esm({
     };
     isSteerMessage = (text) => /^\/(?:steer|interrupt)\b/i.test(text.trim());
     stripImCommandPrefix = (text) => text.trim().replace(/^\/(?:steer|interrupt)\s*/i, "").trim() || text;
-    isRecord7 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord8 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
     parseMemoryUpdate = (raw) => {
       const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
       if (!text) {
@@ -7310,9 +7756,11 @@ var init_relay_cli = __esm({
 
 // apps/cli/src/daemon-cli.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
+import { spawn } from "node:child_process";
 import { homedir as homedir6 } from "node:os";
-import { join as join12 } from "node:path";
-var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runServeCommand, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep, writeDaemonUsage;
+import { dirname as dirname9, join as join12 } from "node:path";
+import { fileURLToPath } from "node:url";
+var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, START_READY_TIMEOUT_MS, DEFAULT_IDLE_SHUTDOWN_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runStartCommand, runServeCommand, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep, waitForDaemonReady, detachBackgroundDaemon, nodeEntrypointArgs, writeDaemonUsage;
 var init_daemon_cli = __esm({
   "apps/cli/src/daemon-cli.ts"() {
     "use strict";
@@ -7322,6 +7770,8 @@ var init_daemon_cli = __esm({
     DEFAULT_PORT = 7777;
     STOP_POLL_INTERVAL_MS = 200;
     STOP_GRACE_MS = 5e3;
+    START_READY_TIMEOUT_MS = 1e4;
+    DEFAULT_IDLE_SHUTDOWN_MS = 15 * 60 * 1e3;
     defaultStateDir2 = () => join12(homedir6(), ".scorel");
     isLoopbackHost = (host) => host === "127.0.0.1" || host === "::1" || host === "localhost";
     formatTimestamp = (epochMs) => new Date(epochMs).toISOString();
@@ -7329,6 +7779,8 @@ var init_daemon_cli = __esm({
       const [command, ...rest] = argv;
       const stateDir = options.stateDir ?? defaultStateDir2();
       switch (command) {
+        case "start":
+          return runStartCommand(rest, { ...options, stateDir });
         case "serve":
           return runServeCommand(rest, { ...options, stateDir });
         case "status":
@@ -7345,6 +7797,63 @@ var init_daemon_cli = __esm({
           writeDaemonUsage(options.error);
           return 1;
       }
+    };
+    runStartCommand = async (argv, options) => {
+      let flags;
+      try {
+        flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env);
+      } catch (cause) {
+        options.error.write(`scorel daemon start error: ${cause.message}
+`);
+        return 1;
+      }
+      const readState = options.readState ?? ((stateDir) => readLocalDaemonState({ stateDir }));
+      const existing = await readState(options.stateDir);
+      if (existing && daemonStateLiveness(existing) === "running") {
+        options.output.write(`scorel host already running url=${existing.wsUrl} pid=${existing.pid}
+`);
+        return 0;
+      }
+      const cliEntrypoint = options.cliEntrypoint ?? fileURLToPath(import.meta.url).replace(/daemon-cli\.ts$/, "index.ts");
+      const child = (options.spawn ?? spawn)(process.execPath, [
+        ...nodeEntrypointArgs(cliEntrypoint),
+        "host",
+        "serve",
+        "--host",
+        flags.host,
+        "--port",
+        String(flags.port),
+        "--cwd",
+        flags.cwd,
+        "--idle-timeout-ms",
+        String(flags.idleShutdownMs),
+        ...flags.token ? ["--token", flags.token] : [],
+        ...flags.relayUrl ? ["--relay", flags.relayUrl] : ["--no-relay"],
+        ...flags.replace ? ["--replace"] : []
+      ], {
+        cwd: dirname9(cliEntrypoint),
+        env: { ...process.env, ...options.env ?? {} },
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      try {
+        await waitForDaemonReady(child, options.daemonReadyTimeoutMs ?? START_READY_TIMEOUT_MS);
+      } catch (cause) {
+        options.error.write(`scorel daemon start error: ${cause.message}
+`);
+        child.kill("SIGTERM");
+        return 1;
+      }
+      const state = await readState(options.stateDir);
+      if (!state || daemonStateLiveness(state) !== "running") {
+        options.error.write("scorel daemon start error: daemon state missing after start\n");
+        child.kill("SIGTERM");
+        return 1;
+      }
+      detachBackgroundDaemon(child);
+      options.output.write(`scorel host started url=${state.wsUrl} pid=${state.pid}
+`);
+      return 0;
     };
     runServeCommand = async (argv, options) => {
       let flags;
@@ -7373,11 +7882,19 @@ Use --replace to stop it and start a new one.
       }
       const token = flags.token ?? existing?.token ?? randomUUID4();
       const identity = await loadOrCreateHostDeviceIdentity({ stateDir: options.stateDir });
+      let signalReason = "natural";
+      let resolveStopWaiter;
+      const requestStop = (reason) => {
+        signalReason = reason;
+        resolveStopWaiter?.();
+      };
       const daemon = new ScorelHost({
         sessionsDir: options.sessionsDir ?? scorelSessionsDir(homedir6()),
         projectsPath: join12(options.stateDir, "projects.json"),
         deviceId: identity.deviceId,
         deviceDisplayName: identity.displayName,
+        idleShutdownMs: flags.idleShutdownMs,
+        onIdleShutdown: () => requestStop("idle"),
         loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir }),
         loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir }),
         createRuntime: async ({ project, selectedModel, purpose }) => createRealRuntime({
@@ -7441,20 +7958,18 @@ Use --replace to stop it and start a new one.
           await markDaemonStopped({ stateDir: options.stateDir, stoppedAt: Date.now() });
         }
       };
-      let signalReason = "natural";
       const signalHandlers = /* @__PURE__ */ new Map();
       const stopWaiter = new Promise((resolve7) => {
+        resolveStopWaiter = resolve7;
         if (options.serveSignal) {
           if (options.serveSignal.aborted) {
-            signalReason = "abort";
-            resolve7();
+            requestStop("abort");
             return;
           }
           options.serveSignal.addEventListener(
             "abort",
             () => {
-              signalReason = "abort";
-              resolve7();
+              requestStop("abort");
             },
             { once: true }
           );
@@ -7462,8 +7977,7 @@ Use --replace to stop it and start a new one.
         }
         const installSignal = (signal) => {
           const handler = () => {
-            signalReason = signal;
-            resolve7();
+            requestStop(signal);
           };
           signalHandlers.set(signal, handler);
           process.once(signal, handler);
@@ -7593,6 +8107,7 @@ Use --replace to stop it and start a new one.
       let token;
       let relayUrl = resolveDefaultRelayUrl(env);
       let replace = false;
+      let idleShutdownMs = DEFAULT_IDLE_SHUTDOWN_MS;
       for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === "--host") {
@@ -7636,9 +8151,17 @@ Use --replace to stop it and start a new one.
           replace = true;
           continue;
         }
+        if (arg === "--idle-timeout-ms") {
+          idleShutdownMs = Number(requireValue2(argv, index, "--idle-timeout-ms"));
+          if (!Number.isInteger(idleShutdownMs) || idleShutdownMs < 0) {
+            throw new Error("--idle-timeout-ms must be a non-negative integer");
+          }
+          index += 1;
+          continue;
+        }
         throw new Error(`Unknown serve option: ${arg}`);
       }
-      return { host, port, token, cwd, relayUrl, replace };
+      return { host, port, token, cwd, relayUrl, replace, idleShutdownMs };
     };
     parseStatusFlags = (argv) => {
       let showToken = false;
@@ -7661,11 +8184,66 @@ Use --replace to stop it and start a new one.
     sleep = (ms) => new Promise((resolve7) => {
       setTimeout(resolve7, ms);
     });
+    waitForDaemonReady = (child, timeoutMs) => new Promise((resolveReady, rejectReady) => {
+      if (!child.stdout) {
+        rejectReady(new Error("daemon child has no stdout stream"));
+        return;
+      }
+      let buffer = "";
+      let stderrBuffer = "";
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        rejectReady(new Error("timed out waiting for daemon ready line"));
+      }, timeoutMs);
+      const onData = (chunk) => {
+        buffer += chunk.toString();
+        if (!buffer.includes("\n")) return;
+        if (buffer.includes("scorel daemon serving url=") || buffer.includes("scorel host serving url=")) {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolveReady();
+        }
+        const newlineIndex = buffer.lastIndexOf("\n");
+        buffer = newlineIndex >= 0 ? buffer.slice(newlineIndex + 1) : buffer;
+      };
+      const onStderr = (chunk) => {
+        stderrBuffer += chunk.toString();
+      };
+      const onExit = (code) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        const trimmed = stderrBuffer.trim();
+        const detail = trimmed ? `: ${trimmed}` : "";
+        rejectReady(new Error(`daemon exited before ready code=${code}${detail}`));
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        child.stdout?.off("data", onData);
+        child.stderr?.off("data", onStderr);
+        child.off("exit", onExit);
+      };
+      child.stdout.on("data", onData);
+      child.stderr?.on("data", onStderr);
+      child.once("exit", onExit);
+    });
+    detachBackgroundDaemon = (child) => {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
+    };
+    nodeEntrypointArgs = (entrypoint) => entrypoint.endsWith(".ts") ? ["--import", "tsx", entrypoint] : [entrypoint];
     writeDaemonUsage = (output) => {
       output.write(
         [
           "Usage: scorel host serve [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
-          "                        [--relay <relay-url> | --no-relay] [--replace]",
+          "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
+          "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
+          "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
           "       scorel host status [--show-token]",
           "       scorel host stop",
           "       scorel host reset",
@@ -8289,11 +8867,11 @@ var init_relay_server_cli = __esm({
 });
 
 // apps/cli/src/up-cli.ts
-import { spawn } from "node:child_process";
+import { spawn as spawn2 } from "node:child_process";
 import { homedir as homedir8 } from "node:os";
-import { join as join15 } from "node:path";
-import { fileURLToPath } from "node:url";
-var DEFAULT_DAEMON_PORT, DEFAULT_WEBUI_PORT, DEFAULT_DAEMON_READY_TIMEOUT_MS, defaultStateDir3, defaultAttachSigint, runCliUp, parseUpFlags, requireValue4, waitForDaemonReady, pipeWithPrefix, pipeStreamLines, once;
+import { dirname as dirname10, join as join15 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+var DEFAULT_DAEMON_PORT, DEFAULT_WEBUI_PORT, DEFAULT_DAEMON_READY_TIMEOUT_MS, defaultStateDir3, defaultAttachSigint, runCliUp, parseUpFlags, requireValue4, waitForDaemonReady2, pipeWithPrefix, detachBackgroundDaemon2, nodeEntrypointArgs2, pipeStreamLines, once;
 var init_up_cli = __esm({
   "apps/cli/src/up-cli.ts"() {
     "use strict";
@@ -8316,8 +8894,8 @@ var init_up_cli = __esm({
         return 1;
       }
       const stateDir = options.stateDir ?? defaultStateDir3();
-      const cliEntrypoint = options.cliEntrypoint ?? fileURLToPath(import.meta.url).replace(/up-cli\.ts$/, "index.ts");
-      const spawnFn = options.spawn ?? spawn;
+      const cliEntrypoint = options.cliEntrypoint ?? fileURLToPath2(import.meta.url).replace(/up-cli\.ts$/, "index.ts");
+      const spawnFn = options.spawn ?? spawn2;
       const readState = options.readState ?? ((dir) => readLocalDaemonState({ stateDir: dir }));
       const attachSigint = options.attachSigint ?? defaultAttachSigint;
       const readyTimeout = options.daemonReadyTimeoutMs ?? DEFAULT_DAEMON_READY_TIMEOUT_MS;
@@ -8328,9 +8906,7 @@ var init_up_cli = __esm({
       let daemonState = existingState;
       if (!reuseDaemon) {
         const daemonArgs = [
-          "--import",
-          "tsx",
-          cliEntrypoint,
+          ...nodeEntrypointArgs2(cliEntrypoint),
           "daemon",
           "serve",
           "--port",
@@ -8340,19 +8916,19 @@ var init_up_cli = __esm({
           "--no-relay"
         ];
         daemonChild = spawnFn(process.execPath, daemonArgs, {
-          cwd: flags.cwd,
+          cwd: dirname10(cliEntrypoint),
           env: { ...process.env },
+          detached: true,
           stdio: ["ignore", "pipe", "pipe"]
         });
         try {
-          await waitForDaemonReady(daemonChild, readyTimeout);
+          await waitForDaemonReady2(daemonChild, readyTimeout);
         } catch (cause) {
           options.error.write(`scorel up error: ${cause.message}
 `);
           daemonChild.kill("SIGTERM");
           return 1;
         }
-        pipeWithPrefix(daemonChild, "[daemon]", options.output, options.error);
         daemonState = await readState(stateDir);
       }
       if (!daemonState) {
@@ -8360,16 +8936,17 @@ var init_up_cli = __esm({
         daemonChild?.kill("SIGTERM");
         return 1;
       }
+      if (daemonChild) {
+        detachBackgroundDaemon2(daemonChild);
+      }
       const webuiArgs = [
-        "--import",
-        "tsx",
-        cliEntrypoint,
+        ...nodeEntrypointArgs2(cliEntrypoint),
         "webui",
         "--port",
         String(flags.webuiPort)
       ];
       const webuiChild = spawnFn(process.execPath, webuiArgs, {
-        cwd: flags.cwd,
+        cwd: dirname10(cliEntrypoint),
         env: { ...process.env },
         stdio: ["ignore", "pipe", "pipe"]
       });
@@ -8386,33 +8963,21 @@ var init_up_cli = __esm({
           return;
         }
         shuttingDown = true;
-        daemonChild?.kill("SIGTERM");
         webuiChild.kill("SIGTERM");
       });
-      const daemonExit = daemonChild ? once(daemonChild) : Promise.resolve(0);
       const webuiExit = once(webuiChild);
-      const daemonDeathWatcher = daemonChild ? daemonExit.then((code) => {
-        if (!shuttingDown) {
-          shuttingDown = true;
-          options.error.write(`scorel up daemon exited code=${code}
-`);
-          webuiChild.kill("SIGTERM");
-        }
-        return code;
-      }) : Promise.resolve(0);
       const webuiDeathWatcher = webuiExit.then((code) => {
         if (!shuttingDown) {
           shuttingDown = true;
           options.error.write(`scorel up webui exited code=${code}
 `);
-          daemonChild?.kill("SIGTERM");
         }
         return code;
       });
-      const [daemonCode, webuiCode] = await Promise.all([daemonDeathWatcher, webuiDeathWatcher]);
+      const webuiCode = await webuiDeathWatcher;
       detachSigint();
       options.output.write("scorel up stopped\n");
-      return daemonCode === 0 && webuiCode === 0 ? 0 : 1;
+      return webuiCode === 0 ? 0 : 1;
     };
     parseUpFlags = (argv, defaultCwd) => {
       let daemonPort = DEFAULT_DAEMON_PORT;
@@ -8452,7 +9017,7 @@ var init_up_cli = __esm({
       }
       return value;
     };
-    waitForDaemonReady = (child, timeoutMs) => new Promise((resolveReady, rejectReady) => {
+    waitForDaemonReady2 = (child, timeoutMs) => new Promise((resolveReady, rejectReady) => {
       if (!child.stdout) {
         rejectReady(new Error("daemon child has no stdout stream"));
         return;
@@ -8509,6 +9074,12 @@ var init_up_cli = __esm({
         pipeStreamLines(child.stderr, prefix, error);
       }
     };
+    detachBackgroundDaemon2 = (child) => {
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      child.unref();
+    };
+    nodeEntrypointArgs2 = (entrypoint) => entrypoint.endsWith(".ts") ? ["--import", "tsx", entrypoint] : [entrypoint];
     pipeStreamLines = (stream, prefix, destination) => {
       let buffer = "";
       stream.setEncoding?.("utf8");
@@ -8538,10 +9109,10 @@ var init_up_cli = __esm({
 });
 
 // apps/cli/src/webui-cli.ts
-import { spawn as spawn2 } from "node:child_process";
+import { spawn as spawn3 } from "node:child_process";
 import { existsSync as existsSync4 } from "node:fs";
-import { dirname as dirname9, resolve as resolve6 } from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { dirname as dirname11, resolve as resolve6 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 var DEFAULT_PORT3, DEFAULT_HOST3, runCliWebUi, findWebuiAppDir, buildWebUiSpawnPlan, parseWebUiFlags, requireValue5, waitForChildExit;
 var init_webui_cli = __esm({
   "apps/cli/src/webui-cli.ts"() {
@@ -8563,7 +9134,7 @@ var init_webui_cli = __esm({
         return 1;
       }
       const plan = buildWebUiSpawnPlan(flags, webuiAppDir);
-      const spawnFn = options.spawn ?? spawn2;
+      const spawnFn = options.spawn ?? spawn3;
       const child = spawnFn(plan.command, plan.argv, {
         cwd: plan.cwd,
         env: plan.env,
@@ -8572,7 +9143,7 @@ var init_webui_cli = __esm({
       return await waitForChildExit(child, options);
     };
     findWebuiAppDir = () => {
-      let cursor = dirname9(fileURLToPath2(import.meta.url));
+      let cursor = dirname11(fileURLToPath3(import.meta.url));
       for (let depth = 0; depth < 8; depth += 1) {
         const candidate = resolve6(cursor, "apps/webui/package.json");
         if (existsSync4(candidate)) {
@@ -8664,8 +9235,8 @@ import { createHash as createHash3 } from "node:crypto";
 import { appendFile as appendFile4, mkdir as mkdir8, readFile as readFile13, realpath as realpath3, readdir as readdir7, writeFile as writeFile8 } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { homedir as homedir9 } from "node:os";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
-import { basename as basename2, dirname as dirname10, join as join16 } from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
+import { basename as basename4, dirname as dirname12, join as join16 } from "node:path";
 var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, createSigintHandler, loadOrCreateSession, parseChatOptions, requireValue6, promptIfInteractive, writeUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
 var init_index = __esm({
   async "apps/cli/src/index.ts"() {
@@ -8998,7 +9569,7 @@ var init_index = __esm({
       if (!sessionsDir) {
         return defaultStateDir4();
       }
-      return basename2(sessionsDir) === "sessions" ? dirname10(sessionsDir) : sessionsDir;
+      return basename4(sessionsDir) === "sessions" ? dirname12(sessionsDir) : sessionsDir;
     };
     AttachDiagnostics = class {
       #stateDir;
@@ -9050,7 +9621,7 @@ var init_index = __esm({
         }
         const filePath = attachDiagnosticsFilePath(this.#stateDir, this.#scope, this.#sessionId);
         this.#writes.push(
-          mkdir8(dirname10(filePath), { recursive: true }).then(() => appendFile4(filePath, `${line}
+          mkdir8(dirname12(filePath), { recursive: true }).then(() => appendFile4(filePath, `${line}
 `, "utf8"))
         );
       }
@@ -9080,7 +9651,7 @@ var init_index = __esm({
       const filePath = attachCacheFilePath(stateDir, scope, sessionId);
       const uniqueEvents = mergePersistentEvents(snapshot.events);
       const transients = removeCompletedTransients(snapshot.transients, uniqueEvents);
-      await mkdir8(dirname10(filePath), { recursive: true });
+      await mkdir8(dirname12(filePath), { recursive: true });
       await writeFile8(
         filePath,
         `${JSON.stringify({ version: 1, scope, sessionId: String(sessionId), events: uniqueEvents, transients }, null, 2)}
@@ -9356,8 +9927,10 @@ var init_index = __esm({
           "Usage: scorel chat [--session <id>] [--cwd <dir>]",
           "       scorel [--session <id>] [--cwd <dir>]",
           "       scorel attach --session <id> --remote <ws-url> --token <token>",
+          "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
+          "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
           "       scorel host serve [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
-          "                        [--relay <relay-url> | --no-relay] [--replace]",
+          "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
           "       scorel host status [--show-token]",
           "       scorel host stop",
           "       scorel host reset",
@@ -9496,7 +10069,7 @@ ${text}
       if (!process.argv[1]) return false;
       const [argvPath, modulePath] = await Promise.all([
         realpath3(process.argv[1]).catch(() => process.argv[1]),
-        realpath3(fileURLToPath3(import.meta.url)).catch(() => fileURLToPath3(import.meta.url))
+        realpath3(fileURLToPath4(import.meta.url)).catch(() => fileURLToPath4(import.meta.url))
       ]);
       return argvPath === modulePath;
     };

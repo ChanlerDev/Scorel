@@ -303,7 +303,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - `scorel daemon serve` 全部 flag 有合理默认;token 在 `~/.scorel/daemon.json` 持久化,跨重启复用。
 - `~/.scorel/daemon.json` 不再每次启动删除;通过 pid liveness + `stoppedAt` 判存活。
 - WebUI Settings 页面通过 `/api/local-daemon` server route 自动发现本地 daemon,一键添加 device。
-- `scorel up` 同时拉起 daemon serve + webui,Ctrl+C 一并退出。
+- `scorel up` 确保 singleton daemon 可用并启动 WebUI；退出 `scorel up` 不关闭后台 daemon；无 client/无 active work/无 active IM 后 idle 自动退出。
 - 全部改动通过自动测试,真实 LLM 手工烟雾通过。
 
 **Steps**:
@@ -315,7 +315,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 **Not in M5.6**:
 
 - WebUI 多 daemon 切换 UI;每用户单 daemon 假设。
-- 自动 supervisor / restart;仍需手工 `scorel daemon stop && serve`。
+- restart-on-crash supervisor;仍需手工 `scorel host stop && start`。
 - Windows 专属 PID 语义。
 - TLS / OAuth / 公网隧道。
 
@@ -593,6 +593,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.17 | [`S0088`](spec/ship/S0088-gui-streaming-thinking-contract.md) | Streaming thinking contract：补 thinking/content delta，使 thinking 在 turn 运行中按序显示，而不是最终 assistant_message 后才插入 | Done |
 | M9.F1.18 | [`S0089`](spec/ship/S0089-memory-reliability-and-dream-trigger.md) | Memory reliability：修复 AppendDaily 调用质量、dreaming 触发与可观测性，让 M9 后半段聚焦真实使用中的质量优化 | Done |
 | M9.F1.19 | [`S0097`](spec/ship/S0097-rtk-token-saving-settings.md) | GUI Token 节省设置 + RTK Bash output proxy + runtime config | Done |
+| M9.F1.20 | [`S0098`](spec/ship/S0098-local-daemon-singleton-unified-state.md) | 统一本机 Host state root、后台 singleton start、GUI/CLI auto-start + attach、idle shutdown、active IM 保活 | Done |
 
 **Not in M9 Follow-up**:
 
@@ -764,6 +765,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0095`](spec/ship/S0095-gui-im-session-list-refresh.md) | GUI IM session list refresh | Done |
 | [`S0096`](spec/ship/S0096-glob-stable-order.md) | Glob stable cross-platform ordering | Done |
 | [`S0097`](spec/ship/S0097-rtk-token-saving-settings.md) | RTK token saving settings and Bash output proxy | Done |
+| [`S0098`](spec/ship/S0098-local-daemon-singleton-unified-state.md) | Local daemon singleton and unified state | Done |
 
 ---
 

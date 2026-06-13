@@ -1,8 +1,12 @@
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import WebSocket from "ws";
+
 import { ScorelRuntime, type RuntimeProvider } from "@scorel/core";
+import { ScorelHost, startScorelHostWebSocketServer } from "@scorel/daemon";
+import { asDeviceId } from "@scorel/protocol";
 import { describe, expect, it } from "vitest";
 
 import { createGuiLocalHostService } from "./local-host.js";
@@ -18,6 +22,139 @@ const provider: RuntimeProvider = {
 };
 
 describe("GUI local Host service", () => {
+  it("stores local Host Project and Session state in the shared Scorel root", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-shared-state-"));
+    const scorelHomeDir = join(root, ".scorel");
+    const repo = join(root, "repo");
+    await mkdir(repo, { recursive: true });
+    const service = createGuiLocalHostService({
+      stateDir: join(scorelHomeDir, "gui"),
+      scorelHomeDir,
+      deviceId: "device_gui_test",
+      createRuntime: async () => new ScorelRuntime({ provider }),
+    });
+
+    await service.start();
+    try {
+      const project = await service.registerLocalProject(repo);
+      const sessionId = await service.createLocalSession(project.projectId);
+
+      await expect(stat(join(scorelHomeDir, "projects.json"))).resolves.toMatchObject({ isFile: expect.any(Function) });
+      await expect(stat(join(scorelHomeDir, "sessions", `${sessionId}.jsonl`))).resolves.toMatchObject({ isFile: expect.any(Function) });
+      await expect(stat(join(scorelHomeDir, "gui", "projects.json"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(join(scorelHomeDir, "gui", "sessions"))).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await service.stop();
+    }
+  });
+
+  it("attaches to an already-running singleton daemon instead of starting a GUI-local Host", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-attach-daemon-"));
+    const scorelHomeDir = join(root, ".scorel");
+    const repo = join(root, "repo");
+    await mkdir(repo, { recursive: true });
+    const host = new ScorelHost({
+      sessionsDir: join(scorelHomeDir, "sessions"),
+      projectsPath: join(scorelHomeDir, "projects.json"),
+      deviceId: asDeviceId("device_singleton_test"),
+      deviceDisplayName: "Singleton Test",
+      createRuntime: async () => new ScorelRuntime({ provider }),
+    });
+    await host.start();
+    const server = await startScorelHostWebSocketServer({
+      hostService: host,
+      host: "127.0.0.1",
+      port: 0,
+      token: "singleton-token",
+    });
+    const service = createGuiLocalHostService({
+      stateDir: join(scorelHomeDir, "gui"),
+      scorelHomeDir,
+      deviceId: "device_gui_test",
+      readDaemonState: async () => ({
+        host: server.host,
+        port: server.port,
+        wsUrl: server.url,
+        token: "singleton-token",
+        pid: process.pid,
+        startedAt: 1,
+        stoppedAt: null,
+      }),
+      createWebSocket: (url) => new WebSocket(url),
+    });
+
+    await service.start();
+    try {
+      const project = await service.registerLocalProject(repo);
+
+      await expect(service.listLocalProjects()).resolves.toEqual([project]);
+      await expect(stat(join(scorelHomeDir, "projects.json"))).resolves.toMatchObject({ isFile: expect.any(Function) });
+      await expect(stat(join(scorelHomeDir, "gui", "projects.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await service.stop();
+      await server.close();
+      await host.shutdown();
+    }
+  });
+
+  it("starts the singleton daemon when daemon state is missing, then attaches to it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-start-daemon-"));
+    const scorelHomeDir = join(root, ".scorel");
+    const repo = join(root, "repo");
+    await mkdir(repo, { recursive: true });
+    const host = new ScorelHost({
+      sessionsDir: join(scorelHomeDir, "sessions"),
+      projectsPath: join(scorelHomeDir, "projects.json"),
+      deviceId: asDeviceId("device_singleton_start_test"),
+      deviceDisplayName: "Singleton Start Test",
+      createRuntime: async () => new ScorelRuntime({ provider }),
+    });
+    await host.start();
+    const server = await startScorelHostWebSocketServer({
+      hostService: host,
+      host: "127.0.0.1",
+      port: 0,
+      token: "singleton-token",
+    });
+    let ensureCalls = 0;
+    let readCalls = 0;
+    const service = createGuiLocalHostService({
+      stateDir: join(scorelHomeDir, "gui"),
+      scorelHomeDir,
+      deviceId: "device_gui_test",
+      readDaemonState: async () => {
+        readCalls += 1;
+        if (readCalls === 1) return null;
+        return {
+          host: server.host,
+          port: server.port,
+          wsUrl: server.url,
+          token: "singleton-token",
+          pid: process.pid,
+          startedAt: 1,
+          stoppedAt: null,
+        };
+      },
+      ensureDaemon: async () => {
+        ensureCalls += 1;
+      },
+      createWebSocket: (url) => new WebSocket(url),
+    });
+
+    await service.start();
+    try {
+      const project = await service.registerLocalProject(repo);
+
+      expect(ensureCalls).toBe(1);
+      await expect(service.listLocalProjects()).resolves.toEqual([project]);
+      await expect(stat(join(scorelHomeDir, "gui", "projects.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await service.stop();
+      await server.close();
+      await host.shutdown();
+    }
+  });
+
   it("starts an embedded Host and lists registered local Projects", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-gui-host-"));
     const repo = join(root, "repo");

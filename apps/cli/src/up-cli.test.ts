@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type { SpawnOptions } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
@@ -22,8 +23,10 @@ type FakeChild = EventEmitter & {
   stdout: Readable | null;
   stderr: Readable | null;
   kill: (signal?: NodeJS.Signals) => boolean;
+  unref: () => void;
   exit: (code: number) => void;
   killSignals: NodeJS.Signals[];
+  unrefCalled: boolean;
 };
 
 const makeChild = (): FakeChild => {
@@ -31,9 +34,13 @@ const makeChild = (): FakeChild => {
   emitter.stdout = new Readable({ read() {} });
   emitter.stderr = new Readable({ read() {} });
   emitter.killSignals = [];
+  emitter.unrefCalled = false;
   emitter.kill = (signal) => {
     if (signal) emitter.killSignals.push(signal);
     return true;
+  };
+  emitter.unref = () => {
+    emitter.unrefCalled = true;
   };
   emitter.exit = (code) => {
     emitter.stdout?.push(null);
@@ -48,8 +55,10 @@ describe("scorel up orchestrator", () => {
     const daemon = makeChild();
     const webui = makeChild();
     let spawnCalls = 0;
-    const spawnFn = (_command: string, argv: string[]) => {
+    const spawnCwds: string[] = [];
+    const spawnFn = (_command: string, argv: string[], opts: SpawnOptions) => {
       spawnCalls += 1;
+      spawnCwds.push(String(opts.cwd));
       const isDaemon = argv.includes("daemon");
       return (isDaemon ? daemon : webui) as unknown as ReturnType<typeof import("node:child_process").spawn>;
     };
@@ -90,19 +99,22 @@ describe("scorel up orchestrator", () => {
     await pollUntil(() => out.toString().includes("scorel up\n"));
     expect(out.toString()).toContain("daemon  ws://127.0.0.1:7800  token=auto-token");
     expect(out.toString()).toContain("webui   http://127.0.0.1:3100");
+    expect(spawnCwds).toEqual(["/cli", "/cli"]);
 
-    // Drive a clean shutdown via SIGINT propagation.
+    expect(daemon.unrefCalled).toBe(true);
+
+    // Drive a clean shutdown via SIGINT propagation. `scorel up` only owns
+    // WebUI; the singleton daemon must keep running in the background.
     expect(sigintHandler).toBeDefined();
     sigintHandler!();
-    expect(daemon.killSignals).toContain("SIGTERM");
+    expect(daemon.killSignals).toEqual([]);
     expect(webui.killSignals).toContain("SIGTERM");
-    daemon.exit(0);
     webui.exit(0);
     await expect(upPromise).resolves.toBe(0);
     expect(out.toString()).toContain("scorel up stopped");
   });
 
-  it("kills the survivor when one child dies unexpectedly", async () => {
+  it("does not stop the singleton daemon when webui dies unexpectedly", async () => {
     const daemon = makeChild();
     const webui = makeChild();
     let spawnCalls = 0;
@@ -134,11 +146,10 @@ describe("scorel up orchestrator", () => {
     });
     daemon.stdout!.push("scorel daemon serving url=ws://127.0.0.1:7777\n");
     await pollUntil(() => spawnCalls >= 2);
-    // Simulate webui crash: it exits non-zero, daemon should get SIGTERM.
+    // Simulate webui crash: the daemon is now the singleton background host,
+    // not a survivor owned by this `scorel up` process.
     webui.exit(2);
-    await pollUntil(() => daemon.killSignals.includes("SIGTERM"));
-    expect(daemon.killSignals).toContain("SIGTERM");
-    daemon.exit(0);
+    expect(daemon.killSignals).toEqual([]);
     await expect(upPromise).resolves.toBe(1);
   });
 

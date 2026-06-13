@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Writable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
@@ -26,7 +27,116 @@ class StringWritable extends Writable {
   }
 }
 
+type FakeChild = EventEmitter & {
+  stdout: Readable | null;
+  stderr: Readable | null;
+  kill: (signal?: NodeJS.Signals) => boolean;
+  unref: () => void;
+  exit: (code: number) => void;
+  killSignals: NodeJS.Signals[];
+  unrefCalled: boolean;
+};
+
+const makeChild = (): FakeChild => {
+  const emitter = new EventEmitter() as FakeChild;
+  emitter.stdout = new Readable({ read() {} });
+  emitter.stderr = new Readable({ read() {} });
+  emitter.killSignals = [];
+  emitter.unrefCalled = false;
+  emitter.kill = (signal) => {
+    if (signal) emitter.killSignals.push(signal);
+    return true;
+  };
+  emitter.unref = () => {
+    emitter.unrefCalled = true;
+  };
+  emitter.exit = (code) => {
+    emitter.stdout?.push(null);
+    emitter.stderr?.push(null);
+    emitter.emit("exit", code);
+  };
+  return emitter;
+};
+
 describe("scorel daemon CLI", () => {
+  it("start launches the Host daemon in the background and returns after readiness", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-daemon-start-"));
+    const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-start-cwd-"));
+    const child = makeChild();
+    const spawnCalls: Array<{ command: string; argv: string[]; cwd?: string; detached?: boolean }> = [];
+    const out = new StringWritable();
+    const err = new StringWritable();
+    let readCalls = 0;
+
+    const started = runCliDaemon(["start", "--port", "0", "--cwd", cwd, "--no-relay"], {
+      stateDir,
+      output: out,
+      error: err,
+      cliEntrypoint: "/cli/index.ts",
+      spawn: (command, argv, opts) => {
+        spawnCalls.push({ command, argv, cwd: String(opts.cwd), detached: opts.detached });
+        return child as never;
+      },
+      readState: async () => {
+        readCalls += 1;
+        return readCalls > 1
+          ? {
+              host: "127.0.0.1",
+              port: 7777,
+              wsUrl: "ws://127.0.0.1:7777",
+              token: "tok",
+              pid: process.pid,
+              startedAt: 1,
+              stoppedAt: null,
+            }
+          : null;
+      },
+      daemonReadyTimeoutMs: 1000,
+    });
+
+    child.stdout!.push("scorel host serving url=ws://127.0.0.1:7777\n");
+    await expect(started).resolves.toBe(0);
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0]).toMatchObject({ command: process.execPath, cwd: "/cli", detached: true });
+    expect(spawnCalls[0]!.argv).toEqual(expect.arrayContaining(["host", "serve", "--cwd", cwd, "--no-relay"]));
+    expect(child.unrefCalled).toBe(true);
+    expect(child.killSignals).toEqual([]);
+    expect(out.toString()).toContain("scorel host started url=ws://127.0.0.1:7777");
+    expect(err.toString()).toBe("");
+  });
+
+  it("start reuses an already-running Host daemon", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-daemon-start-reuse-"));
+    await createLocalDaemonState({
+      stateDir,
+      host: "127.0.0.1",
+      port: 7777,
+      wsUrl: "ws://127.0.0.1:7777",
+      token: "tok",
+      pid: process.pid,
+      startedAt: 100,
+      stoppedAt: null,
+    });
+    const out = new StringWritable();
+    const err = new StringWritable();
+    let spawnCount = 0;
+
+    const code = await runCliDaemon(["start", "--no-relay"], {
+      stateDir,
+      output: out,
+      error: err,
+      spawn: () => {
+        spawnCount += 1;
+        return makeChild() as never;
+      },
+    });
+
+    expect(code).toBe(0);
+    expect(spawnCount).toBe(0);
+    expect(out.toString()).toContain("scorel host already running");
+    expect(err.toString()).toBe("");
+  });
+
   it("status reports `not configured` when the state file is missing", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "scorel-daemon-status-missing-"));
     const out = new StringWritable();
@@ -164,6 +274,63 @@ describe("scorel daemon CLI", () => {
     const code = await runCliDaemon(["serve", "--port", "0", "--no-relay"], { stateDir, output: out, error: err });
     expect(code).toBe(1);
     expect(err.toString()).toContain("already running");
+  });
+
+  it("serve exits on idle timeout when there are no clients or active IM extensions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-idle-"));
+    const stateDir = join(root, ".scorel");
+    const sessionsDir = join(stateDir, "sessions");
+    const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-idle-cwd-"));
+    await writeConfig(cwd);
+
+    const out = new StringWritable();
+    const err = new StringWritable();
+    const serving = runCliDaemon(["serve", "--port", "0", "--cwd", cwd, "--no-relay", "--idle-timeout-ms", "20"], {
+      stateDir,
+      sessionsDir,
+      output: out,
+      error: err,
+    });
+
+    await waitForText(out, "scorel host serving url=ws://127.0.0.1:");
+    await expect(serving).resolves.toBe(0);
+    expect(out.toString()).toContain("scorel host serve stopped reason=idle");
+    expect((await readLocalDaemonState({ stateDir }))?.stoppedAt).not.toBeNull();
+    expect(err.toString()).toBe("");
+  });
+
+  it("serve does not idle-exit while an IM extension is active", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-im-active-"));
+    const stateDir = join(root, ".scorel");
+    const sessionsDir = join(stateDir, "sessions");
+    const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-im-active-cwd-"));
+    await writeConfig(cwd);
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, "config.toml"), [
+      "[extensions.loopback]",
+      "enabled = true",
+      'kind = "im"',
+      "",
+    ].join("\n"));
+
+    const out = new StringWritable();
+    const err = new StringWritable();
+    const abort = new AbortController();
+    const serving = runCliDaemon(["serve", "--port", "0", "--cwd", cwd, "--no-relay", "--idle-timeout-ms", "20"], {
+      stateDir,
+      sessionsDir,
+      output: out,
+      error: err,
+      serveSignal: abort.signal,
+    });
+
+    await waitForText(out, "scorel host serving url=ws://127.0.0.1:");
+    await sleep(80);
+    expect(out.toString()).not.toContain("reason=idle");
+    abort.abort();
+    await expect(serving).resolves.toBe(0);
+    expect(out.toString()).toContain("scorel host serve stopped reason=abort");
+    expect(err.toString()).toBe("");
   });
 
   it("serve reuses the persisted token across restarts and clears it on reset", async () => {
@@ -330,6 +497,11 @@ const waitForText = (writable: { toString(): string }, text: string): Promise<vo
         reject(new Error(`timed out waiting for ${text}`));
       }
     }, 5);
+  });
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
   });
 
 // Touch readFile import so unused-import lint doesn't trip.

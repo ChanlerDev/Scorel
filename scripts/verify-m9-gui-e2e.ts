@@ -61,6 +61,11 @@ const verifyLocalPath = async (root: string, repo: string) => {
   const service = createGuiLocalHostService({
     stateDir: join(root, "gui-local-state"),
     deviceId: "device_gui_m9_local",
+    createRuntime: async ({ project }) =>
+      createRealRuntime({
+        cwd: project.workDir,
+        config: await loadScorelConfig({ cwd: project.workDir }),
+      }),
   });
   await service.start();
   try {

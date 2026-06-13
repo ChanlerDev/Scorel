@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   ScorelHost,
@@ -39,12 +41,18 @@ export type DaemonCommandOptions = DaemonCommandIo & {
    */
   serveSignal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
+  spawn?: (command: string, argv: string[], opts: SpawnOptions) => ChildProcess;
+  cliEntrypoint?: string;
+  daemonReadyTimeoutMs?: number;
+  readState?: (stateDir: string) => Promise<LocalDaemonState | null>;
 };
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 7777;
 const STOP_POLL_INTERVAL_MS = 200;
 const STOP_GRACE_MS = 5000;
+const START_READY_TIMEOUT_MS = 10_000;
+const DEFAULT_IDLE_SHUTDOWN_MS = 15 * 60 * 1000;
 
 const defaultStateDir = (): string => join(homedir(), ".scorel");
 
@@ -60,6 +68,8 @@ export const runCliDaemon = async (
   const [command, ...rest] = argv;
   const stateDir = options.stateDir ?? defaultStateDir();
   switch (command) {
+    case "start":
+      return runStartCommand(rest, { ...options, stateDir });
     case "serve":
       return runServeCommand(rest, { ...options, stateDir });
     case "status":
@@ -78,6 +88,67 @@ export const runCliDaemon = async (
   }
 };
 
+const runStartCommand = async (
+  argv: string[],
+  options: DaemonCommandOptions & { stateDir: string },
+): Promise<number> => {
+  let flags: ServeFlags;
+  try {
+    flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env);
+  } catch (cause) {
+    options.error.write(`scorel daemon start error: ${(cause as Error).message}\n`);
+    return 1;
+  }
+
+  const readState = options.readState ?? ((stateDir: string) => readLocalDaemonState({ stateDir }));
+  const existing = await readState(options.stateDir);
+  if (existing && daemonStateLiveness(existing) === "running") {
+    options.output.write(`scorel host already running url=${existing.wsUrl} pid=${existing.pid}\n`);
+    return 0;
+  }
+
+  const cliEntrypoint = options.cliEntrypoint ?? fileURLToPath(import.meta.url).replace(/daemon-cli\.ts$/, "index.ts");
+  const child = (options.spawn ?? spawn)(process.execPath, [
+    ...nodeEntrypointArgs(cliEntrypoint),
+    "host",
+    "serve",
+    "--host",
+    flags.host,
+    "--port",
+    String(flags.port),
+    "--cwd",
+    flags.cwd,
+    "--idle-timeout-ms",
+    String(flags.idleShutdownMs),
+    ...(flags.token ? ["--token", flags.token] : []),
+    ...(flags.relayUrl ? ["--relay", flags.relayUrl] : ["--no-relay"]),
+    ...(flags.replace ? ["--replace"] : []),
+  ], {
+    cwd: dirname(cliEntrypoint),
+    env: { ...process.env, ...(options.env ?? {}) },
+    detached: true,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  try {
+    await waitForDaemonReady(child, options.daemonReadyTimeoutMs ?? START_READY_TIMEOUT_MS);
+  } catch (cause) {
+    options.error.write(`scorel daemon start error: ${(cause as Error).message}\n`);
+    child.kill("SIGTERM");
+    return 1;
+  }
+
+  const state = await readState(options.stateDir);
+  if (!state || daemonStateLiveness(state) !== "running") {
+    options.error.write("scorel daemon start error: daemon state missing after start\n");
+    child.kill("SIGTERM");
+    return 1;
+  }
+  detachBackgroundDaemon(child);
+  options.output.write(`scorel host started url=${state.wsUrl} pid=${state.pid}\n`);
+  return 0;
+};
+
 type ServeFlags = {
   host: string;
   port: number;
@@ -85,6 +156,7 @@ type ServeFlags = {
   cwd: string;
   relayUrl?: string;
   replace: boolean;
+  idleShutdownMs: number;
 };
 
 const runServeCommand = async (
@@ -116,11 +188,19 @@ const runServeCommand = async (
 
   const token = flags.token ?? existing?.token ?? randomUUID();
   const identity = await loadOrCreateHostDeviceIdentity({ stateDir: options.stateDir });
+  let signalReason: string = "natural";
+  let resolveStopWaiter: (() => void) | undefined;
+  const requestStop = (reason: string): void => {
+    signalReason = reason;
+    resolveStopWaiter?.();
+  };
   const daemon = new ScorelHost({
     sessionsDir: options.sessionsDir ?? scorelSessionsDir(homedir()),
     projectsPath: join(options.stateDir, "projects.json"),
     deviceId: identity.deviceId,
     deviceDisplayName: identity.displayName,
+    idleShutdownMs: flags.idleShutdownMs,
+    onIdleShutdown: () => requestStop("idle"),
     loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir }),
     loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir }),
     createRuntime: async ({ project, selectedModel, purpose }) => createRealRuntime({
@@ -186,20 +266,18 @@ const runServeCommand = async (
     }
   };
 
-  let signalReason: string = "natural";
   const signalHandlers = new Map<NodeJS.Signals, () => void>();
   const stopWaiter = new Promise<void>((resolve) => {
+    resolveStopWaiter = resolve;
     if (options.serveSignal) {
       if (options.serveSignal.aborted) {
-        signalReason = "abort";
-        resolve();
+        requestStop("abort");
         return;
       }
       options.serveSignal.addEventListener(
         "abort",
         () => {
-          signalReason = "abort";
-          resolve();
+          requestStop("abort");
         },
         { once: true },
       );
@@ -207,8 +285,7 @@ const runServeCommand = async (
     }
     const installSignal = (signal: NodeJS.Signals) => {
       const handler = () => {
-        signalReason = signal;
-        resolve();
+        requestStop(signal);
       };
       signalHandlers.set(signal, handler);
       process.once(signal, handler);
@@ -361,6 +438,7 @@ const parseServeFlags = (argv: string[], defaultCwd: string, env: NodeJS.Process
   let token: string | undefined;
   let relayUrl: string | undefined = resolveDefaultRelayUrl(env);
   let replace = false;
+  let idleShutdownMs = DEFAULT_IDLE_SHUTDOWN_MS;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--host") {
@@ -404,9 +482,17 @@ const parseServeFlags = (argv: string[], defaultCwd: string, env: NodeJS.Process
       replace = true;
       continue;
     }
+    if (arg === "--idle-timeout-ms") {
+      idleShutdownMs = Number(requireValue(argv, index, "--idle-timeout-ms"));
+      if (!Number.isInteger(idleShutdownMs) || idleShutdownMs < 0) {
+        throw new Error("--idle-timeout-ms must be a non-negative integer");
+      }
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown serve option: ${arg}`);
   }
-  return { host, port, token, cwd, relayUrl, replace };
+  return { host, port, token, cwd, relayUrl, replace, idleShutdownMs };
 };
 
 const parseStatusFlags = (argv: string[]): StatusFlags => {
@@ -434,11 +520,71 @@ const sleep = (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
+const waitForDaemonReady = (child: ChildProcess, timeoutMs: number): Promise<void> =>
+  new Promise((resolveReady, rejectReady) => {
+    if (!child.stdout) {
+      rejectReady(new Error("daemon child has no stdout stream"));
+      return;
+    }
+    let buffer = "";
+    let stderrBuffer = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      rejectReady(new Error("timed out waiting for daemon ready line"));
+    }, timeoutMs);
+    const onData = (chunk: Buffer | string) => {
+      buffer += chunk.toString();
+      if (!buffer.includes("\n")) return;
+      if (buffer.includes("scorel daemon serving url=") || buffer.includes("scorel host serving url=")) {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolveReady();
+      }
+      const newlineIndex = buffer.lastIndexOf("\n");
+      buffer = newlineIndex >= 0 ? buffer.slice(newlineIndex + 1) : buffer;
+    };
+    const onStderr = (chunk: Buffer | string) => {
+      stderrBuffer += chunk.toString();
+    };
+    const onExit = (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      const trimmed = stderrBuffer.trim();
+      const detail = trimmed ? `: ${trimmed}` : "";
+      rejectReady(new Error(`daemon exited before ready code=${code}${detail}`));
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.stdout?.off("data", onData);
+      child.stderr?.off("data", onStderr);
+      child.off("exit", onExit);
+    };
+    child.stdout.on("data", onData);
+    child.stderr?.on("data", onStderr);
+    child.once("exit", onExit);
+  });
+
+const detachBackgroundDaemon = (child: ChildProcess): void => {
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  child.unref();
+};
+
+const nodeEntrypointArgs = (entrypoint: string): string[] =>
+  entrypoint.endsWith(".ts") ? ["--import", "tsx", entrypoint] : [entrypoint];
+
 const writeDaemonUsage = (output: NodeJS.WritableStream): void => {
   output.write(
     [
       "Usage: scorel host serve [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
-      "                        [--relay <relay-url> | --no-relay] [--replace]",
+      "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
+      "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
+      "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
       "       scorel host status [--show-token]",
       "       scorel host stop",
       "       scorel host reset",

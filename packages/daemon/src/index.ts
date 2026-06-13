@@ -452,6 +452,8 @@ export type ScorelHostOptions = {
   createRuntime: (options: { sessionId: SessionId; project: HostProject; selectedModel?: SelectedModelSummary; purpose: "chat" | "title" | "memory" }) => Promise<ScorelRuntime>;
   memoryHomeDir?: string;
   onSessionListChanged?: (change: { projectId: ProjectId; sessionId: SessionId }) => void;
+  idleShutdownMs?: number;
+  onIdleShutdown?: () => void;
   now?: () => number;
   createId?: () => string;
 };
@@ -616,6 +618,8 @@ export class ScorelHost {
   readonly #createRuntime: ScorelHostOptions["createRuntime"];
   readonly #memoryHomeDir: string | undefined;
   readonly #onSessionListChanged: ((change: { projectId: ProjectId; sessionId: SessionId }) => void) | undefined;
+  readonly #idleShutdownMs: number | undefined;
+  readonly #onIdleShutdown: (() => void) | undefined;
   readonly #now: () => number;
   readonly #createId: () => string;
   readonly #sessions = new Map<SessionId, SessionLane>();
@@ -628,6 +632,7 @@ export class ScorelHost {
   readonly #imBindings = new Map<string, ImSessionBinding>();
   readonly #registry: ProjectRegistry;
   #runtimeStatsQueue: Promise<void> = Promise.resolve();
+  #idleShutdownTimer: ReturnType<typeof setTimeout> | undefined;
   #started = false;
 
   constructor(options: ScorelHostOptions) {
@@ -643,6 +648,8 @@ export class ScorelHost {
     this.#createRuntime = options.createRuntime;
     this.#memoryHomeDir = options.memoryHomeDir;
     this.#onSessionListChanged = options.onSessionListChanged;
+    this.#idleShutdownMs = options.idleShutdownMs;
+    this.#onIdleShutdown = options.onIdleShutdown;
     this.#now = options.now ?? Date.now;
     this.#createId = options.createId ?? (() => crypto.randomUUID());
     this.#registry = new ProjectRegistry({
@@ -658,9 +665,11 @@ export class ScorelHost {
     await mkdir(this.#scorelHomeDir, { recursive: true });
     await this.#loadImBindings();
     await this.#startEnabledImExtensions();
+    this.#scheduleIdleShutdownCheck();
   }
 
   async shutdown(): Promise<void> {
+    this.#clearIdleShutdownTimer();
     for (const schedule of this.#memoryDreams.values()) {
       if (schedule.timer) {
         clearTimeout(schedule.timer);
@@ -676,10 +685,12 @@ export class ScorelHost {
     this.#assertStarted();
     await this.#stopImExtensions();
     await this.#startEnabledImExtensions();
+    this.#scheduleIdleShutdownCheck();
   }
 
   connect(connection: Connection, sessionId?: SessionId): ConnectResult {
     this.#assertStarted();
+    this.#clearIdleShutdownTimer();
     connection.sessionId = sessionId;
     this.#connections.add(connection);
     if (sessionId) {
@@ -705,6 +716,7 @@ export class ScorelHost {
       });
     }
     this.#connections.delete(connection);
+    this.#scheduleIdleShutdownCheck();
   }
 
   releaseSessionEventBuffer(sessionId: SessionId): void {
@@ -727,6 +739,8 @@ export class ScorelHost {
         return;
       }
       throw cause;
+    } finally {
+      this.#scheduleIdleShutdownCheck();
     }
   }
 
@@ -888,6 +902,53 @@ export class ScorelHost {
         await this.#handleCancel(connection, message);
         break;
     }
+  }
+
+  #scheduleIdleShutdownCheck(): void {
+    this.#clearIdleShutdownTimer();
+    if (!this.#shouldIdleShutdown()) {
+      return;
+    }
+    this.#idleShutdownTimer = setTimeout(() => {
+      this.#idleShutdownTimer = undefined;
+      if (this.#shouldIdleShutdown()) {
+        this.#onIdleShutdown?.();
+      }
+    }, this.#idleShutdownMs);
+  }
+
+  #clearIdleShutdownTimer(): void {
+    if (!this.#idleShutdownTimer) {
+      return;
+    }
+    clearTimeout(this.#idleShutdownTimer);
+    this.#idleShutdownTimer = undefined;
+  }
+
+  #shouldIdleShutdown(): boolean {
+    return (
+      this.#started &&
+      this.#idleShutdownMs !== undefined &&
+      this.#idleShutdownMs > 0 &&
+      this.#connections.size === 0 &&
+      this.#imExtensions.size === 0 &&
+      !this.#hasActiveWork()
+    );
+  }
+
+  #hasActiveWork(): boolean {
+    for (const lane of this.#sessions.values()) {
+      if (lane.runtime.running) {
+        return true;
+      }
+      if (
+        lane.session.tree.controlState.queues.follow_up.length > 0 ||
+        lane.session.tree.controlState.queues.steer.length > 0
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   async #handleCreateSession(connection: Connection, request: ClientRequest<"create_session">): Promise<void> {

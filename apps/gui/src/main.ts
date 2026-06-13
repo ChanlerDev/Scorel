@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
+import { spawn } from "node:child_process";
+import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { createGuiStore, type GuiRelayDevice, type GuiStore, type GuiVisibleRemoteProject } from "./main/gui-store.js";
 import { createGuiLocalHostService, type GuiLocalHostService } from "./main/local-host.js";
@@ -29,17 +31,56 @@ let mainWindow: BrowserWindow | null = null;
 
 const sessionSubscriptions = new Map<string, () => void>();
 
-const guiStateDir = (): string => join(homedir(), ".scorel", "gui");
-const guiStorePath = (): string => join(guiStateDir(), "gui-store.json");
+const scorelHomeDir = (): string => join(homedir(), ".scorel");
+const guiStorePath = (): string => join(scorelHomeDir(), "gui-store.json");
+
+const repoRoot = (): string => join(here, "..", "..", "..");
+const cliEntrypoint = (): string => process.env.SCOREL_CLI_ENTRYPOINT ?? join(repoRoot(), "apps", "cli", "src", "index.ts");
+const nodeEntrypointArgs = (entrypoint: string): string[] =>
+  entrypoint.endsWith(".ts") ? ["--import", "tsx", entrypoint] : [entrypoint];
+
+const ensureLocalDaemon = async (stateDir: string): Promise<void> => {
+  const bootstrapProject = join(stateDir, "workspace");
+  await mkdir(bootstrapProject, { recursive: true });
+  await new Promise<void>((resolve, reject) => {
+    const entrypoint = cliEntrypoint();
+    const child = spawn(process.env.SCOREL_NODE_PATH ?? process.env.npm_node_execpath ?? "node", [
+      ...nodeEntrypointArgs(entrypoint),
+      "host",
+      "start",
+      "--cwd",
+      bootstrapProject,
+      "--no-relay",
+    ], {
+      cwd: dirname(entrypoint),
+      env: { ...process.env },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(stderr.trim() || `scorel host start exited with code ${code ?? "unknown"}`));
+    });
+  });
+};
 
 const startLocalHost = async (): Promise<void> => {
   guiStore = createGuiStore(guiStorePath());
   relayService = createGuiRelayService(guiStore);
+  const stateDir = scorelHomeDir();
   localHost = createGuiLocalHostService({
-    stateDir: guiStateDir(),
-    scorelHomeDir: join(homedir(), ".scorel"),
+    stateDir,
+    scorelHomeDir: stateDir,
     deviceId: "device_gui_local",
     deviceDisplayName: "Local",
+    ensureDaemon: ensureLocalDaemon,
   });
   await localHost.start();
   localHost.onLocalSessionsChanged((change) => {
