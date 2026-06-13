@@ -374,10 +374,9 @@ describe("GUI shell rendering contract", () => {
     const html = renderToStaticMarkup(
       <SettingsShell
         devices={[]}
-        projects={[localProject]}
-        selectedProjectKey="local:project_scorel"
-        onProjectSelect={noop}
-        project={{ source: "local", projectId: localProject.projectId }}
+        selectedDeviceKey="local"
+        onDeviceSelect={noop}
+        device={{ source: "local" }}
         modelProfile={modelProfile}
         memory={memorySettings}
         memoryStatus={memoryStatus}
@@ -427,10 +426,9 @@ describe("GUI shell rendering contract", () => {
     const html = renderToStaticMarkup(
       <SettingsShell
         devices={[]}
-        projects={[localProject]}
-        selectedProjectKey="local:project_scorel"
-        onProjectSelect={noop}
-        project={{ source: "local", projectId: localProject.projectId }}
+        selectedDeviceKey="local"
+        onDeviceSelect={noop}
+        device={{ source: "local" }}
         modelProfile={modelProfile}
         memory={memorySettings}
         memoryStatus={memoryStatus}
@@ -460,14 +458,13 @@ describe("GUI shell rendering contract", () => {
     expect(html).not.toContain("Relay URL");
   });
 
-  it("shows a real settings scope selector for local and remote Projects", () => {
+  it("shows a real settings scope selector for local and remote devices", () => {
     const html = renderToStaticMarkup(
       <SettingsShell
         devices={[{ deviceId: "device_remote", label: "Remote Device", relayUrl: "wss://scorel-relay.chanler.dev", online: true, updatedAt: 1 }]}
-        projects={[localProject, remoteProject]}
-        selectedProjectKey="relay:device_remote:project_remote"
-        onProjectSelect={noop}
-        project={{ source: "relay", deviceId: "device_remote", projectId: remoteProject.projectId }}
+        selectedDeviceKey="relay:device_remote"
+        onDeviceSelect={noop}
+        device={{ source: "relay", deviceId: "device_remote" }}
         modelProfile={modelProfile}
         memory={memorySettings}
         memoryStatus={memoryStatus}
@@ -486,9 +483,11 @@ describe("GUI shell rendering contract", () => {
     );
 
     expect(html).toContain("settings-nav__scope");
-    expect(html).toContain("此电脑 / Scorel");
-    expect(html).toContain("Remote Device / Remote Repo");
-    expect(html).toContain('value="relay:device_remote:project_remote" selected=""');
+    expect(html).toContain("此电脑");
+    expect(html).toContain("Remote Device");
+    expect(html).toContain('value="relay:device_remote" selected=""');
+    expect(html).not.toContain("此电脑 / Scorel");
+    expect(html).not.toContain("Remote Device / Remote Repo");
     expect(html).not.toContain("aria-disabled=\"true\"");
   });
 
@@ -512,13 +511,16 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("device_remote");
     expect(html).toContain("IP");
     expect(html).toContain("未上报");
-    expect(html).toContain("重命名");
+    expect(html).toContain("relay-device-row__chevron");
+    expect(html).toContain("relay-device-row__edit-button");
+    expect(html).toContain("编辑 Remote Device 名称");
+    expect(html).not.toContain(">重命名<");
   });
 
   it("renders LLM provider management on its own settings page", () => {
     const html = renderToStaticMarkup(
       <ProviderSection
-        project={{ source: "local", projectId: localProject.projectId }}
+        device={{ source: "local" }}
         modelProfile={modelProfile}
         busy={false}
         setBusy={noop}
@@ -543,9 +545,10 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("配置");
     expect(html).toContain("测试模型");
     expect(html).toContain("删除提供商");
-    expect(html).toContain("provider-danger-zone");
-    expect(html).toContain("危险操作");
-    expect(html.indexOf("手动添加模型")).toBeLessThan(html.indexOf("删除提供商"));
+    expect(html).toContain("provider-form-actions");
+    expect(html).not.toContain("provider-danger-zone");
+    expect(html).not.toContain("危险操作");
+    expect(html.indexOf("删除提供商")).toBeLessThan(html.indexOf("搜索模型"));
     expect(html).not.toContain("保存提供商");
     expect(html).not.toContain("Context");
     expect(html).not.toContain("Max Tokens");
@@ -561,7 +564,7 @@ describe("GUI shell rendering contract", () => {
   it("renders real memory settings controls", () => {
     const html = renderToStaticMarkup(
       <MemorySection
-        project={{ source: "local", projectId: localProject.projectId }}
+        device={{ source: "local" }}
         memory={memorySettings}
         status={memoryStatus}
         busy={false}
@@ -586,7 +589,7 @@ describe("GUI shell rendering contract", () => {
   it("renders RTK token saving settings and Scorel savings status", () => {
     const html = renderToStaticMarkup(
       <RuntimeSection
-        project={{ source: "local", projectId: localProject.projectId }}
+        device={{ source: "local" }}
         runtime={runtimeSettings}
         busy={false}
         setBusy={noop}
@@ -598,8 +601,9 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("Token 节省");
     expect(html).toContain("RTK");
     expect(html).toContain("已可用");
-    expect(html).toContain("Scorel saved tokens");
-    expect(html).toContain("recorded by Scorel sessions");
+    expect(html).toContain("Bash 输出 Token");
+    expect(html).toContain("已节省 Token");
+    expect(html).toContain("Scorel 已记录的 Bash 工具原始输出估算量");
     expect(html).toContain("4,800");
     expect(html).toContain("1,200");
   });

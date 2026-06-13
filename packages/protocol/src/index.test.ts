@@ -281,11 +281,10 @@ describe("@scorel/protocol", () => {
     expect(response.data.models[0].roles).toEqual(["primary", "standard"]);
   });
 
-  it("round-trips upsert_model_profile as project-scoped GUI input", () => {
+  it("round-trips upsert_model_profile as device-scoped GUI input", () => {
     const request = {
       type: "upsert_model_profile",
       requestId: asRequestId("req_upsert_model_profile"),
-      projectId: asProjectId("prj_repo"),
       providerId: "chanleramp",
       providerType: "custom",
       provider: "chanleramp",
@@ -316,15 +315,14 @@ describe("@scorel/protocol", () => {
     }) satisfies ResponseFor<typeof request>;
 
     expect(response.requestType).toBe("upsert_model_profile");
-    expect(request.projectId).toBe("prj_repo");
+    expect("projectId" in request).toBe(false);
     expect(JSON.stringify(request)).not.toContain("apiKey=");
   });
 
-  it("round-trips fetch_provider_models as project-scoped provider catalog input", () => {
+  it("round-trips fetch_provider_models as device-scoped provider catalog input", () => {
     const request = {
       type: "fetch_provider_models",
       requestId: asRequestId("req_fetch_provider_models"),
-      projectId: asProjectId("prj_repo"),
       providerId: "chanleramp",
     } satisfies ClientRequest<"fetch_provider_models">;
 
@@ -341,11 +339,10 @@ describe("@scorel/protocol", () => {
     expect(response.data.models[0].id).toBe("deepseek-v4-flash");
   });
 
-  it("round-trips remove_model_provider as project-scoped provider deletion", () => {
+  it("round-trips remove_model_provider as device-scoped provider deletion", () => {
     const request = {
       type: "remove_model_provider",
       requestId: asRequestId("req_remove_model_provider"),
-      projectId: asProjectId("prj_repo"),
       providerId: "chanleramp",
     } satisfies ClientRequest<"remove_model_provider">;
 

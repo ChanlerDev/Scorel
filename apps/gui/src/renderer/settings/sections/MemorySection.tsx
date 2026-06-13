@@ -1,4 +1,4 @@
-import type { GuiMemorySettingsView, GuiMemoryStatusView, GuiProjectRef } from "../../../shared/ipc.js";
+import type { GuiDeviceRef, GuiMemorySettingsView, GuiMemoryStatusView } from "../../../shared/ipc.js";
 import { SettingsCard } from "../SettingsCard.js";
 import { SettingsHeader } from "../SettingsHeader.js";
 import { SettingsRow } from "../SettingsRow.js";
@@ -6,7 +6,7 @@ import { Select } from "../controls/Select.js";
 import { Toggle } from "../controls/Toggle.js";
 
 export type MemorySectionProps = {
-  project: GuiProjectRef | null;
+  device: GuiDeviceRef;
   memory: GuiMemorySettingsView;
   status: GuiMemoryStatusView;
   busy: boolean;
@@ -17,10 +17,9 @@ export type MemorySectionProps = {
 
 export function MemorySection(props: MemorySectionProps) {
   const update = async (patch: Partial<GuiMemorySettingsView>): Promise<void> => {
-    if (!props.project) return;
     props.setBusy(true);
     try {
-      const next = await window.scorel.upsertMemorySettings(props.project, patch);
+      const next = await window.scorel.upsertMemorySettings(props.device, patch);
       props.onMemoryChange(next);
       props.setError(null);
     } catch (cause) {
@@ -30,7 +29,7 @@ export function MemorySection(props: MemorySectionProps) {
     }
   };
 
-  const disabled = props.busy || !props.project;
+  const disabled = props.busy;
 
   return (
     <>
@@ -44,7 +43,7 @@ export function MemorySection(props: MemorySectionProps) {
           />
           <SettingsRow
             label="启用记忆"
-            description="在新会话和恢复会话时注入 root/project memory 与最近 daily。"
+            description="在新会话和恢复会话时注入设备级记忆与最近 daily。"
             control={<Toggle checked={props.memory.enabled} disabled={disabled} onChange={(enabled) => void update({ enabled })} ariaLabel="启用记忆" />}
           />
           <SettingsRow
@@ -76,7 +75,7 @@ export function MemorySection(props: MemorySectionProps) {
           />
           <SettingsRow
             label="自动 dream"
-            description="项目空闲后使用辅助模型把 daily 证据提炼到 Project MEMORY。"
+            description="设备空闲后使用辅助模型把 daily 证据提炼到长期记忆。"
             control={<Toggle checked={props.memory.autoDream} disabled={disabled || !props.memory.enabled} onChange={(autoDream) => void update({ autoDream })} ariaLabel="自动 dream" />}
           />
           <SettingsRow

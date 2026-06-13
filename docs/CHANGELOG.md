@@ -6,8 +6,8 @@
 - GUI local Host state now uses the shared `~/.scorel` root for Projects and Sessions, with `gui-store.json` stored at `~/.scorel/gui-store.json`.
 - GUI starts and attaches to the singleton local daemon instead of starting a second local Host writer.
 - Local daemon now idle-shuts down when there are no clients, no active work, and no active IM extensions; active IM keeps it alive until explicit stop.
-- GUI connection settings now default to the official Relay, hide Relay URL editing behind an edit action, show `Get Pair Code`, support paired-device rename/details, and make local/remote Project settings scope selectable.
-- GUI Provider settings now place `删除提供商` in a bottom danger row instead of the primary edit form header.
+- GUI connection settings now default to the official Relay, hide Relay URL editing behind an edit action, show `Get Pair Code`, support paired-device rename/details, and use a device-scoped settings selector.
+- GUI Provider settings now place `删除提供商` in the Provider configuration block, token-saving stats use clear Chinese labels, and Relay device rows expose expand/edit affordances.
 
 ## 0.0.3 - 2026-06-12
 

@@ -856,7 +856,7 @@ export class ScorelHost {
         break;
       }
       case "get_memory_settings": {
-        this.#respond(connection, message, { memory: await this.#memorySettingsForProject(message.projectId) });
+        this.#respond(connection, message, { memory: await this.#memorySettings(message.projectId) });
         break;
       }
       case "get_memory_status": {
@@ -868,7 +868,7 @@ export class ScorelHost {
         break;
       }
       case "get_runtime_settings": {
-        this.#respond(connection, message, { runtime: await this.#runtimeSettingsForProject(message.projectId) });
+        this.#respond(connection, message, { runtime: await this.#runtimeSettings(message.projectId) });
         break;
       }
       case "upsert_runtime_settings": {
@@ -2771,15 +2771,38 @@ export class ScorelHost {
     return join(this.#scorelHomeDir, "channels", "im-bindings.json");
   }
 
-  async #loadUserConfigProfile(): Promise<ScorelConfigProfile | undefined> {
+  async #loadUserConfigProfile(options: { includeSecrets?: boolean } = {}): Promise<ScorelConfigProfile | undefined> {
     try {
-      return await loadScorelConfigProfile({ cwd: this.#userHomeDir, homeDir: this.#userHomeDir });
+      return await loadScorelConfigProfile({ cwd: this.#userHomeDir, homeDir: this.#userHomeDir, includeSecrets: options.includeSecrets ?? false });
     } catch (cause) {
       if (isMissingConfigError(cause)) {
         return undefined;
       }
       throw cause;
     }
+  }
+
+  async #configWriteTarget(projectId?: ProjectId): Promise<{
+    configDir: string;
+    configPath: string;
+    workDir: string;
+    projectId?: ProjectId;
+  }> {
+    if (!projectId) {
+      return {
+        configDir: this.#scorelHomeDir,
+        configPath: join(this.#scorelHomeDir, "config.toml"),
+        workDir: this.#userHomeDir,
+      };
+    }
+    const project = await this.#registry.require(projectId);
+    const configDir = join(project.workDir, ".scorel");
+    return {
+      configDir,
+      configPath: join(configDir, "config.toml"),
+      workDir: project.workDir,
+      projectId: project.projectId,
+    };
   }
 
   async #listModels(projectId?: ProjectId): Promise<{
@@ -2791,13 +2814,14 @@ export class ScorelHost {
   }> {
     let config: ScorelConfig | ScorelConfigProfile | undefined;
     try {
-      config = await this.#configProfileForProject(projectId);
+      config = projectId ? await this.#configProfileForProject(projectId) : await this.#loadUserConfigProfile();
     } catch (cause) {
       if (!isMissingConfigError(cause)) {
         throw cause;
       }
       config = undefined;
     }
+    config ??= projectId ? undefined : this.#modelProfile;
     if (!config) {
       return {
         providers: [],
@@ -2829,19 +2853,18 @@ export class ScorelHost {
     roles: Record<"primary" | "standard" | "auxiliary", string>;
     warnings?: string[];
   }> {
-    const project = await this.#registry.require(request.projectId);
-    const configPath = join(project.workDir, ".scorel", "config.toml");
+    const target = await this.#configWriteTarget(request.projectId);
     let existingConfigText: string | undefined;
     try {
-      existingConfigText = await readFile(configPath, "utf8");
+      existingConfigText = await readFile(target.configPath, "utf8");
     } catch (cause) {
       if (!isNodeErrorCode(cause, "ENOENT")) {
         throw cause;
       }
     }
-    await mkdir(join(project.workDir, ".scorel"), { recursive: true });
+    await mkdir(target.configDir, { recursive: true });
     await writeFile(
-      configPath,
+      target.configPath,
       renderModelProfileConfig({
         providerId: request.providerId,
         providerType: request.providerType,
@@ -2868,12 +2891,13 @@ export class ScorelHost {
       "utf8",
     );
     await this.#appendHostDiagnostic("model_profile_upserted", {
-      projectId: project.projectId,
-      workDir: project.workDir,
+      ...(target.projectId ? { projectId: target.projectId } : {}),
+      scope: target.projectId ? "project" : "device",
+      workDir: target.workDir,
       providerId: request.providerId,
       modelId: request.modelId,
     });
-    return this.#listModels(project.projectId);
+    return this.#listModels(request.projectId);
   }
 
   async #handleRemoveModelProvider(
@@ -2886,31 +2910,34 @@ export class ScorelHost {
     warnings?: string[];
     removed: boolean;
   }> {
-    const project = await this.#registry.require(request.projectId);
-    const configPath = join(project.workDir, ".scorel", "config.toml");
+    const target = await this.#configWriteTarget(request.projectId);
     let existingConfigText: string | undefined;
     try {
-      existingConfigText = await readFile(configPath, "utf8");
+      existingConfigText = await readFile(target.configPath, "utf8");
     } catch (cause) {
       if (!isNodeErrorCode(cause, "ENOENT")) {
         throw cause;
       }
     }
-    await mkdir(join(project.workDir, ".scorel"), { recursive: true });
+    await mkdir(target.configDir, { recursive: true });
     await writeFile(
-      configPath,
+      target.configPath,
       renderModelProfileConfig({
         removeProviderId: request.providerId,
         existingConfigText,
       }),
       "utf8",
     );
-    const profile = await this.#listModels(project.projectId);
+    const profile = await this.#listModels(request.projectId);
     return { ...profile, removed: true };
   }
 
   async #memorySettingsForProject(projectId: ProjectId): Promise<MemorySettings> {
-    const config = await this.#configProfileForProject(projectId).catch((cause) => {
+    return this.#memorySettings(projectId);
+  }
+
+  async #memorySettings(projectId?: ProjectId): Promise<MemorySettings> {
+    const config = await (projectId ? this.#configProfileForProject(projectId) : this.#loadUserConfigProfile()).catch((cause) => {
       if (isMissingConfigError(cause)) {
         return undefined;
       }
@@ -2934,19 +2961,18 @@ export class ScorelHost {
   }
 
   async #handleUpsertMemorySettings(request: ClientRequest<"upsert_memory_settings">): Promise<MemorySettings> {
-    const project = await this.#registry.require(request.projectId);
-    const configPath = join(project.workDir, ".scorel", "config.toml");
+    const target = await this.#configWriteTarget(request.projectId);
     let existingConfigText: string | undefined;
     try {
-      existingConfigText = await readFile(configPath, "utf8");
+      existingConfigText = await readFile(target.configPath, "utf8");
     } catch (cause) {
       if (!isNodeErrorCode(cause, "ENOENT")) {
         throw cause;
       }
     }
-    await mkdir(join(project.workDir, ".scorel"), { recursive: true });
+    await mkdir(target.configDir, { recursive: true });
     await writeFile(
-      configPath,
+      target.configPath,
       renderMemoryConfig({
         enabled: request.enabled,
         daily: request.daily,
@@ -2960,14 +2986,19 @@ export class ScorelHost {
       "utf8",
     );
     await this.#appendHostDiagnostic("memory_settings_upserted", {
-      projectId: project.projectId,
-      workDir: project.workDir,
+      ...(target.projectId ? { projectId: target.projectId } : {}),
+      scope: target.projectId ? "project" : "device",
+      workDir: target.workDir,
     });
-    return this.#memorySettingsForProject(project.projectId);
+    return this.#memorySettings(request.projectId);
   }
 
   async #runtimeSettingsForProject(projectId: ProjectId, installStatus?: Pick<RuntimeSettings, "installStatus" | "installMessage">): Promise<RuntimeSettings> {
-    const config = await this.#configProfileForProject(projectId).catch((cause) => {
+    return this.#runtimeSettings(projectId, installStatus);
+  }
+
+  async #runtimeSettings(projectId?: ProjectId, installStatus?: Pick<RuntimeSettings, "installStatus" | "installMessage">): Promise<RuntimeSettings> {
+    const config = await (projectId ? this.#configProfileForProject(projectId) : this.#loadUserConfigProfile()).catch((cause) => {
       if (isMissingConfigError(cause)) {
         return undefined;
       }
@@ -2988,19 +3019,18 @@ export class ScorelHost {
   }
 
   async #handleUpsertRuntimeSettings(request: ClientRequest<"upsert_runtime_settings">): Promise<RuntimeSettings> {
-    const project = await this.#registry.require(request.projectId);
-    const configPath = join(project.workDir, ".scorel", "config.toml");
+    const target = await this.#configWriteTarget(request.projectId);
     let existingConfigText: string | undefined;
     try {
-      existingConfigText = await readFile(configPath, "utf8");
+      existingConfigText = await readFile(target.configPath, "utf8");
     } catch (cause) {
       if (!isNodeErrorCode(cause, "ENOENT")) {
         throw cause;
       }
     }
-    await mkdir(join(project.workDir, ".scorel"), { recursive: true });
+    await mkdir(target.configDir, { recursive: true });
     await writeFile(
-      configPath,
+      target.configPath,
       renderRuntimeConfig({
         tokenSavingRtk: request.tokenSavingRtk,
         existingConfigText,
@@ -3009,12 +3039,13 @@ export class ScorelHost {
     );
     const installResult = request.tokenSavingRtk === true ? await ensureRtkAvailable() : { status: "idle" as const };
     await this.#appendHostDiagnostic("runtime_settings_upserted", {
-      projectId: project.projectId,
-      workDir: project.workDir,
+      ...(target.projectId ? { projectId: target.projectId } : {}),
+      scope: target.projectId ? "project" : "device",
+      workDir: target.workDir,
       tokenSavingRtk: request.tokenSavingRtk,
       installStatus: installResult.status,
     });
-    return this.#runtimeSettingsForProject(project.projectId, {
+    return this.#runtimeSettings(request.projectId, {
       installStatus: installResult.status,
       ...(installResult.message ? { installMessage: installResult.message } : {}),
     });
@@ -3067,9 +3098,10 @@ export class ScorelHost {
     return this.#extensionSettings(request.extensionId);
   }
 
-  async #fetchProviderModels(projectId: ProjectId, providerId: string): Promise<ProviderCatalogModelSummary[]> {
-    const project = await this.#registry.require(projectId);
-    const config = await loadScorelConfigProfile({ cwd: project.workDir, includeSecrets: true });
+  async #fetchProviderModels(projectId: ProjectId | undefined, providerId: string): Promise<ProviderCatalogModelSummary[]> {
+    const config = projectId
+      ? await loadScorelConfigProfile({ cwd: (await this.#registry.require(projectId)).workDir, includeSecrets: true })
+      : await this.#loadUserConfigProfile({ includeSecrets: true });
     if (!config) {
       throw new Error("Model profile config is not configured");
     }

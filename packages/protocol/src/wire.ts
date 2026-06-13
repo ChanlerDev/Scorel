@@ -83,7 +83,7 @@ export type ClientRequestMap = {
     response: { providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] };
   };
   fetch_provider_models: {
-    request: { projectId: ProjectId; providerId: string };
+    request: { projectId?: ProjectId; providerId: string };
     response: { models: ProviderCatalogModelSummary[] };
   };
   remove_model_provider: {
@@ -91,7 +91,7 @@ export type ClientRequestMap = {
     response: { providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[]; removed: boolean };
   };
   get_memory_settings: {
-    request: { projectId: ProjectId };
+    request: { projectId?: ProjectId };
     response: { memory: MemorySettings };
   };
   get_memory_status: {
@@ -103,7 +103,7 @@ export type ClientRequestMap = {
     response: { memory: MemorySettings };
   };
   get_runtime_settings: {
-    request: { projectId: ProjectId };
+    request: { projectId?: ProjectId };
     response: { runtime: RuntimeSettings };
   };
   upsert_runtime_settings: {

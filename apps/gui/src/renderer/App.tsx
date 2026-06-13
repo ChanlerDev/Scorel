@@ -16,6 +16,7 @@ import { Workspace } from "./workspace/Workspace.js";
 import "./styles.css";
 import type {
   GuiProjectRef,
+  GuiDeviceRef,
   GuiProjectView,
   GuiExtensionSettingsView,
   GuiMemorySettingsView,
@@ -69,6 +70,16 @@ const projectRef = (project: GuiProjectView): GuiProjectRef =>
     ? { source: "local", projectId: project.projectId }
     : { source: "relay", deviceId: project.deviceId, projectId: project.projectId };
 
+const deviceRef = (deviceKey: string): GuiDeviceRef =>
+  deviceKey.startsWith("relay:")
+    ? { source: "relay", deviceId: deviceKey.slice("relay:".length) }
+    : { source: "local" };
+
+const projectDeviceRef = (project: GuiProjectView | undefined): GuiDeviceRef =>
+  !project || project.source === "local"
+    ? { source: "local" }
+    : { source: "relay", deviceId: project.deviceId };
+
 const clampSidebarWidth = (width: number): number =>
   Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 
@@ -79,6 +90,7 @@ export function App() {
   const [projects, setProjects] = useState<GuiProjectView[]>([]);
   const [relayDevices, setRelayDevices] = useState<GuiRelayDeviceView[]>([]);
   const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
+  const [selectedSettingsDeviceKey, setSelectedSettingsDeviceKey] = useState<string>("local");
   const [sessionsByProject, setSessionsByProject] = useState<Record<string, SessionSummary[]>>({});
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [projectorState, setProjectorState] = useState<ProjectorState>(emptyProjectorState());
@@ -148,6 +160,11 @@ export function App() {
   const selectedProject = useMemo(
     () => projects.find((project) => projectKey(project) === selectedProjectKey),
     [projects, selectedProjectKey],
+  );
+  const selectedSettingsDevice = useMemo(() => deviceRef(selectedSettingsDeviceKey), [selectedSettingsDeviceKey]);
+  const activeConfigDevice = useMemo(
+    () => view === "settings" ? selectedSettingsDevice : projectDeviceRef(selectedProject),
+    [selectedProject, selectedSettingsDevice, view],
   );
 
   const selectedSessionTitle = useMemo(() => {
@@ -299,14 +316,11 @@ export function App() {
   }, [ensureSessionsForProject, selectedProjectKey]);
 
   useEffect(() => {
-    if (!selectedProject) {
-      setModelProfile({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
-      setMemorySettings(defaultMemorySettings());
-      setRuntimeSettings(defaultRuntimeSettings());
-      setSelectedModelId("");
+    if (view === "settings" && selectedSettingsDevice.source === "relay" && !relayDevices.some((device) => device.deviceId === selectedSettingsDevice.deviceId)) {
+      setSelectedSettingsDeviceKey("local");
       return;
     }
-    void window.scorel.listModels(projectRef(selectedProject))
+    void window.scorel.listModels(activeConfigDevice)
       .then((profile) => {
         setModelProfile(profile);
         setSelectedModelId((current) => {
@@ -319,7 +333,7 @@ export function App() {
         setSelectedModelId("");
         setError(cause instanceof Error ? cause.message : String(cause));
       });
-    void window.scorel.getMemorySettings(projectRef(selectedProject))
+    void window.scorel.getMemorySettings(activeConfigDevice)
       .then((memory) => {
         setMemorySettings(memory);
       })
@@ -327,14 +341,8 @@ export function App() {
         setMemorySettings(defaultMemorySettings());
         setError(cause instanceof Error ? cause.message : String(cause));
       });
-    void window.scorel.getMemoryStatus(projectRef(selectedProject))
-      .then((status) => {
-        setMemoryStatus(status);
-      })
-      .catch(() => {
-        setMemoryStatus(defaultMemoryStatus(selectedProject.projectId));
-      });
-    void window.scorel.getRuntimeSettings(projectRef(selectedProject))
+    setMemoryStatus(defaultMemoryStatus());
+    void window.scorel.getRuntimeSettings(activeConfigDevice)
       .then((runtime) => {
         setRuntimeSettings(runtime);
       })
@@ -342,7 +350,7 @@ export function App() {
         setRuntimeSettings(defaultRuntimeSettings());
         setError(cause instanceof Error ? cause.message : String(cause));
       });
-  }, [selectedProject]);
+  }, [activeConfigDevice, relayDevices, selectedSettingsDevice, view]);
 
   const handleProjectClick = useCallback((key: string): void => {
     setSelectedProjectKey(key);
@@ -493,10 +501,9 @@ export function App() {
     return (
       <SettingsShell
         devices={relayDevices}
-        projects={projects}
-        selectedProjectKey={selectedProjectKey}
-        onProjectSelect={setSelectedProjectKey}
-        project={selectedProject ? projectRef(selectedProject) : null}
+        selectedDeviceKey={selectedSettingsDeviceKey}
+        onDeviceSelect={setSelectedSettingsDeviceKey}
+        device={selectedSettingsDevice}
         busy={busy}
         setBusy={setBusy}
         setError={setError}

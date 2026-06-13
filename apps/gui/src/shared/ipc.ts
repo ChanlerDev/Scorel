@@ -62,6 +62,11 @@ export type GuiProjectRef = {
   deviceId?: string;
 };
 
+export type GuiDeviceRef = {
+  source: "local" | "relay";
+  deviceId?: string;
+};
+
 export type GuiModelSelection = {
   modelId?: string;
   role?: ModelRole;
@@ -128,15 +133,15 @@ export type GuiApi = {
   hideRemoteProject(deviceId: string, projectId: string): Promise<boolean>;
   renameRelayDevice(deviceId: string, label: string): Promise<GuiRelayDeviceView>;
   listSessions(project: GuiProjectRef): Promise<SessionSummary[]>;
-  listModels(project: GuiProjectRef): Promise<GuiModelProfileView>;
-  upsertModelProfile(project: GuiProjectRef, input: GuiUpsertModelProfileInput): Promise<GuiModelProfileView>;
-  removeModelProvider(project: GuiProjectRef, providerId: string): Promise<GuiModelProfileView & { removed: boolean }>;
-  fetchProviderModels(project: GuiProjectRef, providerId: string): Promise<GuiProviderCatalogModelView[]>;
-  getMemorySettings(project: GuiProjectRef): Promise<GuiMemorySettingsView>;
+  listModels(device: GuiDeviceRef): Promise<GuiModelProfileView>;
+  upsertModelProfile(device: GuiDeviceRef, input: GuiUpsertModelProfileInput): Promise<GuiModelProfileView>;
+  removeModelProvider(device: GuiDeviceRef, providerId: string): Promise<GuiModelProfileView & { removed: boolean }>;
+  fetchProviderModels(device: GuiDeviceRef, providerId: string): Promise<GuiProviderCatalogModelView[]>;
+  getMemorySettings(device: GuiDeviceRef): Promise<GuiMemorySettingsView>;
   getMemoryStatus(project: GuiProjectRef): Promise<GuiMemoryStatusView>;
-  upsertMemorySettings(project: GuiProjectRef, input: GuiUpsertMemorySettingsInput): Promise<GuiMemorySettingsView>;
-  getRuntimeSettings(project: GuiProjectRef): Promise<GuiRuntimeSettingsView>;
-  upsertRuntimeSettings(project: GuiProjectRef, input: GuiUpsertRuntimeSettingsInput): Promise<GuiRuntimeSettingsView>;
+  upsertMemorySettings(device: GuiDeviceRef, input: GuiUpsertMemorySettingsInput): Promise<GuiMemorySettingsView>;
+  getRuntimeSettings(device: GuiDeviceRef): Promise<GuiRuntimeSettingsView>;
+  upsertRuntimeSettings(device: GuiDeviceRef, input: GuiUpsertRuntimeSettingsInput): Promise<GuiRuntimeSettingsView>;
   getExtensionSettings(extensionId: string): Promise<GuiExtensionSettingsView>;
   upsertExtensionSettings(input: GuiUpsertExtensionSettingsInput): Promise<GuiExtensionSettingsView>;
   createSession(project: GuiProjectRef, modelSelection?: GuiModelSelection): Promise<SessionId>;

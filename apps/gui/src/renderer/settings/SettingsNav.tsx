@@ -4,7 +4,7 @@ import {
   ChevronLeft,
   Monitor,
 } from "../icons/index.js";
-import type { GuiProjectView, GuiRelayDeviceView } from "../../shared/ipc.js";
+import type { GuiRelayDeviceView } from "../../shared/ipc.js";
 
 export type SettingsNavGroup = {
   caption: string;
@@ -20,15 +20,16 @@ export type SettingsNavItem = {
 export type SettingsNavProps = {
   groups: SettingsNavGroup[];
   active: string;
-  projects: GuiProjectView[];
   devices: GuiRelayDeviceView[];
-  selectedProjectKey: string | null;
+  selectedDeviceKey: string;
   onSelect(id: string): void;
-  onProjectSelect(key: string): void;
+  onDeviceSelect(key: string): void;
   onBack(): void;
 };
 
-export function SettingsNav({ groups, active, projects, devices, selectedProjectKey, onSelect, onProjectSelect, onBack }: SettingsNavProps) {
+export function SettingsNav({ groups, active, devices, selectedDeviceKey, onSelect, onDeviceSelect, onBack }: SettingsNavProps) {
+  const scopes = deviceScopes(devices);
+
   return (
     <aside className="settings-nav">
       <button type="button" className="settings-nav__back" onClick={onBack} aria-label="返回应用">
@@ -38,17 +39,15 @@ export function SettingsNav({ groups, active, projects, devices, selectedProject
       <label className="settings-nav__scope">
         <Monitor />
         <select
-          value={selectedProjectKey ?? ""}
-          onChange={(event) => {
-            if (event.currentTarget.value) onProjectSelect(event.currentTarget.value);
-          }}
-          aria-label="设置作用域"
+          value={selectedDeviceKey}
+          onChange={(event) => onDeviceSelect(event.currentTarget.value)}
+          aria-label="配置设备"
         >
-          {projects.length === 0 ? <option value="">没有项目</option> : null}
-          {projects.map((project) => {
-            const key = settingsProjectKey(project);
-            return <option key={key} value={key}>{projectScopeLabel(project, devices)}</option>;
-          })}
+          {scopes.map((scope) => (
+            <option key={scope.scopeKey} value={scope.scopeKey}>
+              {scope.label}
+            </option>
+          ))}
         </select>
       </label>
       <div className="settings-nav__scroll">
@@ -73,13 +72,15 @@ export function SettingsNav({ groups, active, projects, devices, selectedProject
   );
 }
 
-const settingsProjectKey = (project: GuiProjectView): string =>
-  project.source === "local" ? `local:${project.projectId}` : `relay:${project.deviceId}:${project.projectId}`;
-
-const projectScopeLabel = (project: GuiProjectView, devices: GuiRelayDeviceView[]): string => {
-  if (project.source === "local") {
-    return `此电脑 / ${project.displayName}`;
-  }
-  const device = devices.find((candidate) => candidate.deviceId === project.deviceId);
-  return `${device?.label ?? project.deviceId} / ${project.displayName}`;
+type DeviceScope = {
+  scopeKey: string;
+  label: string;
 };
+
+const deviceScopes = (devices: GuiRelayDeviceView[]): DeviceScope[] => [
+  { scopeKey: "local", label: "此电脑" },
+  ...devices.map((device) => ({
+    scopeKey: `relay:${device.deviceId}`,
+    label: device.label,
+  })),
+];

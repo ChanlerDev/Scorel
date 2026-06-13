@@ -337,4 +337,41 @@ describe("GUI local Host service", () => {
       await service.stop();
     }
   });
+
+  it("updates local model and runtime settings in the device config", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-device-config-"));
+    const scorelHomeDir = join(root, ".scorel");
+    const repo = join(root, "repo");
+    await mkdir(repo, { recursive: true });
+    const service = createGuiLocalHostService({
+      stateDir: join(root, "gui"),
+      scorelHomeDir,
+      deviceId: "device_gui_test",
+      createRuntime: async () => new ScorelRuntime({ provider }),
+    });
+
+    await service.start();
+    try {
+      await service.registerLocalProject(repo);
+      await service.upsertLocalModelProfile({
+        providerId: "chanleramp",
+        providerType: "custom",
+        provider: "chanleramp",
+        api: "openai-completions",
+        baseUrl: "https://amp.chanler.dev/v1/",
+        apiKeyEnv: "SCOREL_API_KEY",
+        modelId: "main",
+        providerModelId: "deepseek-v4-flash",
+        displayName: "DeepSeek Flash",
+      });
+      await service.upsertLocalRuntimeSettings({ tokenSavingRtk: false });
+
+      const deviceConfig = await readFile(join(scorelHomeDir, "config.toml"), "utf8");
+      expect(deviceConfig).toContain("[providers.chanleramp]");
+      expect(deviceConfig).toContain("[runtime]");
+      await expect(readFile(join(repo, ".scorel", "config.toml"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await service.stop();
+    }
+  });
 });

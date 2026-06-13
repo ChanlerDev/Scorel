@@ -1,12 +1,12 @@
 import { useState } from "react";
 
-import type { GuiModelProfileView, GuiProjectRef, GuiUpsertModelProfileInput } from "../../../shared/ipc.js";
+import type { GuiDeviceRef, GuiModelProfileView, GuiUpsertModelProfileInput } from "../../../shared/ipc.js";
 import { SettingsCard } from "../SettingsCard.js";
 import { SettingsHeader } from "../SettingsHeader.js";
 import { SettingsRow } from "../SettingsRow.js";
 
 export type ModelSectionProps = {
-  project: GuiProjectRef | null;
+  device: GuiDeviceRef;
   modelProfile: GuiModelProfileView;
   busy: boolean;
   setBusy(value: boolean): void;
@@ -21,7 +21,7 @@ const roleLabels = {
 } as const;
 
 export function ModelSection({
-  project,
+  device,
   modelProfile,
   busy,
   setBusy,
@@ -37,10 +37,9 @@ export function ModelSection({
   };
 
   const save = async (input: GuiUpsertModelProfileInput): Promise<void> => {
-    if (!project) return;
     setBusy(true);
     try {
-      const profile = await window.scorel.upsertModelProfile(project, input);
+      const profile = await window.scorel.upsertModelProfile(device, input);
       onModelProfileChange(profile);
       setRolesForm(profile.roles);
       setError(null);
@@ -95,7 +94,7 @@ export function ModelSection({
           </div>
           <div className="settings-card__head">
             <span className="settings-value">主对话默认使用“默认”模型，标题等轻量任务使用“辅助”模型。</span>
-            <button type="button" className="button button--primary" disabled={busy || !project || roleOptions.length === 0} onClick={() => void saveRoles()}>
+            <button type="button" className="button button--primary" disabled={busy || roleOptions.length === 0} onClick={() => void saveRoles()}>
               保存工作模型
             </button>
           </div>

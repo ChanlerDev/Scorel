@@ -1,11 +1,11 @@
-import type { GuiProjectRef, GuiRuntimeSettingsView } from "../../../shared/ipc.js";
+import type { GuiDeviceRef, GuiRuntimeSettingsView } from "../../../shared/ipc.js";
 import { SettingsCard } from "../SettingsCard.js";
 import { SettingsHeader } from "../SettingsHeader.js";
 import { SettingsRow } from "../SettingsRow.js";
 import { Toggle } from "../controls/Toggle.js";
 
 export type RuntimeSectionProps = {
-  project: GuiProjectRef | null;
+  device: GuiDeviceRef;
   runtime: GuiRuntimeSettingsView;
   busy: boolean;
   setBusy(value: boolean): void;
@@ -15,10 +15,9 @@ export type RuntimeSectionProps = {
 
 export function RuntimeSection(props: RuntimeSectionProps) {
   const update = async (patch: Partial<Pick<GuiRuntimeSettingsView, "tokenSavingRtk">>): Promise<void> => {
-    if (!props.project) return;
     props.setBusy(true);
     try {
-      const next = await window.scorel.upsertRuntimeSettings(props.project, patch);
+      const next = await window.scorel.upsertRuntimeSettings(props.device, patch);
       props.onRuntimeChange(next);
       props.setError(null);
     } catch (cause) {
@@ -28,7 +27,7 @@ export function RuntimeSection(props: RuntimeSectionProps) {
     }
   };
 
-  const disabled = props.busy || !props.project;
+  const disabled = props.busy;
 
   return (
     <>
@@ -46,8 +45,13 @@ export function RuntimeSection(props: RuntimeSectionProps) {
             control={<Toggle checked={props.runtime.tokenSavingRtk} disabled={disabled} onChange={(tokenSavingRtk) => void update({ tokenSavingRtk })} ariaLabel="启用 RTK" />}
           />
           <SettingsRow
-            label="Scorel saved tokens"
-            description={`RTK savings recorded by Scorel sessions on this host. Output ${formatNumber(props.runtime.estimatedOutputTokens)} tokens.`}
+            label="Bash 输出 Token"
+            description="Scorel 已记录的 Bash 工具原始输出估算量。"
+            control={<span className="settings-value">{formatNumber(props.runtime.estimatedOutputTokens)}</span>}
+          />
+          <SettingsRow
+            label="已节省 Token"
+            description="RTK 压缩后预计少进入模型上下文的 Token。"
             control={<span className="settings-value">{formatNumber(props.runtime.estimatedSavedTokens)}</span>}
           />
         </SettingsCard>

@@ -2,7 +2,9 @@
 
 ## Goal
 
-Make GUI connection setup match the hosted Relay product path and make remote configuration scope explicit, so users can pair devices, rename paired devices, inspect connection details, and switch settings to a remote Project without wondering whether model/provider settings are local or remote.
+Make GUI connection setup match the hosted Relay product path, so users can pair devices, rename paired devices, and inspect connection details.
+
+S0101 supersedes the original settings-scope part of this spec: settings configuration is device-scoped, not Project-scoped.
 
 ## Scope
 
@@ -15,9 +17,8 @@ Make GUI connection setup match the hosted Relay product path and make remote co
   - preserve the Relay-reported label as fallback when no local name exists;
   - show device details from the generic device view: status, Device ID, IP when available, and Relay URL.
 - GUI Settings scope:
-  - replace the disabled "此电脑" nav row with a real Project scope selector;
-  - include local and remote Projects in the selector;
-  - keep model/provider/memory/runtime settings bound to the selected `GuiProjectRef`, so selecting a remote Project reads and writes the remote Host environment through Relay.
+  - superseded by S0101;
+  - the correct product model is device-scoped configuration.
 - Tests and docs:
   - cover local device rename persistence;
   - cover the connection section rendering contract;
@@ -39,9 +40,7 @@ Make GUI connection setup match the hosted Relay product path and make remote co
 - A pair code is still created with the default official Relay when the URL field has not been edited.
 - Paired devices can be renamed from the Connections page, and the local name persists in `~/.scorel/gui-store.json`.
 - Paired device details expose status, Device ID, Relay URL, and an IP row that is populated only when the device view has IP information.
-- Settings nav shows the current Project scope instead of a disabled "此电脑" label.
-- Selecting a remote Project in Settings changes the `GuiProjectRef` used by model/provider/memory/runtime settings, so model lists and provider edits are remote-scoped.
-- Existing remote Project selection remains explicit: remote Projects appear in Settings only after the GUI has added that remote Project.
+- Settings nav behavior is governed by S0101: it shows devices, not Projects.
 
 ## Test Requirements
 
@@ -57,7 +56,7 @@ Manual:
 - Confirm the Relay URL input is hidden by default and `Get Pair Code` returns a pair code against the official Relay.
 - Click edit, change Relay URL, and confirm pair/refresh use the edited URL.
 - Pair or seed a Relay Device, rename it, refresh, and confirm the local name remains.
-- Add a remote Project, open Settings, select that remote Project from the scope selector, and confirm Model/Provider pages show the remote Project's model profile.
+- Open Settings and confirm the settings selector follows S0101 device-scoped behavior.
 
 ## Impacted Files
 
@@ -78,7 +77,7 @@ Manual:
 ## Risks And Boundaries
 
 - Device rename is GUI-local metadata, not a Relay identity mutation. Refresh must not overwrite a user's local name with a Relay label.
-- Settings scope is Project-based because model/provider/memory/runtime APIs are Project-scoped. A bare remote Device without an added Project cannot safely act as the target for those settings.
+- Settings scope is device-based as of S0101. Projects are workspace/session objects, not configuration owners.
 - IP is optional because the current Relay protocol does not report it; the UI contract must tolerate absence without inventing a fake value.
 
 ## Status

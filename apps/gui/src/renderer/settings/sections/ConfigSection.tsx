@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import type { GuiRelayDeviceView, GuiRelayPairSessionView } from "../../../shared/ipc.js";
-import { Pencil } from "../../icons/index.js";
+import { ChevronRight, Pencil } from "../../icons/index.js";
 import { SettingsCard } from "../SettingsCard.js";
 import { SettingsHeader } from "../SettingsHeader.js";
 import { SettingsRow } from "../SettingsRow.js";
@@ -68,6 +68,11 @@ export function ConfigSection({ devices, busy, setBusy, setError, refresh }: Con
     } finally {
       setBusy(false);
     }
+  };
+
+  const cancelRename = (): void => {
+    setRenamingDeviceId(null);
+    setRenameValue("");
   };
 
   return (
@@ -146,8 +151,50 @@ export function ConfigSection({ devices, busy, setBusy, setError, refresh }: Con
             devices.map((device) => (
               <details key={device.deviceId} className="relay-device-row">
                 <summary className="relay-device-row__summary">
+                  <ChevronRight className="relay-device-row__chevron" size={14} />
                   <span className={`project-tree__online${device.online ? "" : " project-tree__online--off"}`} />
-                  <span className="relay-device-row__name">{device.label}</span>
+                  <span className="relay-device-row__name">
+                    {renamingDeviceId === device.deviceId ? (
+                      <input
+                        className="input-text relay-device-row__name-input"
+                        value={renameValue}
+                        autoFocus
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onChange={(event) => setRenameValue(event.currentTarget.value)}
+                        onBlur={() => void saveRename(device)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.currentTarget.blur();
+                          } else if (event.key === "Escape") {
+                            event.preventDefault();
+                            cancelRename();
+                          }
+                        }}
+                        aria-label="设备名称"
+                      />
+                    ) : (
+                      <>
+                        <span className="relay-device-row__name-text">{device.label}</span>
+                        <button
+                          type="button"
+                          className="relay-device-row__edit-button"
+                          disabled={busy}
+                          title="编辑名称"
+                          aria-label={`编辑 ${device.label} 名称`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            startRename(device);
+                          }}
+                        >
+                          <Pencil size={12} />
+                        </button>
+                      </>
+                    )}
+                  </span>
                   <span className="relay-device-row__url">{device.relayUrl}</span>
                 </summary>
                 <div className="relay-device-row__details">
@@ -166,28 +213,6 @@ export function ConfigSection({ devices, busy, setBusy, setError, refresh }: Con
                   <div className="relay-device-row__detail">
                     <span>Relay URL</span>
                     <strong>{device.relayUrl}</strong>
-                  </div>
-                  <div className="relay-device-row__rename">
-                    {renamingDeviceId === device.deviceId ? (
-                      <>
-                        <input
-                          className="input-text"
-                          value={renameValue}
-                          onChange={(event) => setRenameValue(event.currentTarget.value)}
-                          aria-label="设备名称"
-                        />
-                        <button type="button" className="button button--primary" disabled={busy} onClick={() => void saveRename(device)}>
-                          保存
-                        </button>
-                        <button type="button" className="button" disabled={busy} onClick={() => setRenamingDeviceId(null)}>
-                          取消
-                        </button>
-                      </>
-                    ) : (
-                      <button type="button" className="button" disabled={busy} onClick={() => startRename(device)}>
-                        重命名
-                      </button>
-                    )}
                   </div>
                 </div>
               </details>

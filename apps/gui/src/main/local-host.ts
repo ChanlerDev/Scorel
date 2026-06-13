@@ -64,14 +64,14 @@ export type GuiLocalHostService = {
   listLocalProjects(): Promise<HostProject[]>;
   registerLocalProject(workDir: string): Promise<HostProject>;
   listLocalSessions(projectId: string): Promise<SessionSummary[]>;
-  listLocalModels(projectId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
+  listLocalModels(): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
   upsertLocalModelProfile(input: UpsertModelProfileInput): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[] }>;
-  removeLocalModelProvider(projectId: string, providerId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[]; removed: boolean }>;
-  fetchLocalProviderModels(projectId: string, providerId: string): Promise<ProviderCatalogModelSummary[]>;
-  getLocalMemorySettings(projectId: string): Promise<MemorySettings>;
+  removeLocalModelProvider(providerId: string): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[]; removed: boolean }>;
+  fetchLocalProviderModels(providerId: string): Promise<ProviderCatalogModelSummary[]>;
+  getLocalMemorySettings(): Promise<MemorySettings>;
   getLocalMemoryStatus(projectId: string): Promise<MemoryStatus>;
   upsertLocalMemorySettings(input: UpsertMemorySettingsInput): Promise<MemorySettings>;
-  getLocalRuntimeSettings(projectId: string): Promise<RuntimeSettings>;
+  getLocalRuntimeSettings(): Promise<RuntimeSettings>;
   upsertLocalRuntimeSettings(input: UpsertRuntimeSettingsInput): Promise<RuntimeSettings>;
   getLocalExtensionSettings(extensionId: string): Promise<ExtensionSettings>;
   upsertLocalExtensionSettings(input: UpsertExtensionSettingsInput): Promise<ExtensionSettings>;
@@ -179,20 +179,20 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     listLocalSessions(projectId) {
       return client.listSessions({ projectId: asProjectId(projectId) as ProjectId });
     },
-    listLocalModels(projectId) {
-      return client.listModels({ projectId: asProjectId(projectId) as ProjectId });
+    listLocalModels() {
+      return client.listModels();
     },
     upsertLocalModelProfile(input) {
       return client.upsertModelProfile(input);
     },
-    removeLocalModelProvider(projectId, providerId) {
-      return client.removeModelProvider({ projectId: asProjectId(projectId) as ProjectId, providerId });
+    removeLocalModelProvider(providerId) {
+      return client.removeModelProvider({ providerId });
     },
-    fetchLocalProviderModels(projectId, providerId) {
-      return client.fetchProviderModels({ projectId: asProjectId(projectId) as ProjectId, providerId });
+    fetchLocalProviderModels(providerId) {
+      return client.fetchProviderModels({ providerId });
     },
-    getLocalMemorySettings(projectId) {
-      return client.getMemorySettings({ projectId: asProjectId(projectId) as ProjectId });
+    getLocalMemorySettings() {
+      return client.getMemorySettings();
     },
     getLocalMemoryStatus(projectId) {
       return client.getMemoryStatus({ projectId: asProjectId(projectId) as ProjectId });
@@ -200,8 +200,8 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     upsertLocalMemorySettings(input) {
       return client.upsertMemorySettings(input);
     },
-    getLocalRuntimeSettings(projectId) {
-      return client.getRuntimeSettings({ projectId: asProjectId(projectId) as ProjectId });
+    getLocalRuntimeSettings() {
+      return client.getRuntimeSettings();
     },
     upsertLocalRuntimeSettings(input) {
       return client.upsertRuntimeSettings(input);

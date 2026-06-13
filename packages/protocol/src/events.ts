@@ -70,7 +70,7 @@ export type ProviderCatalogModelSummary = {
 };
 
 export type UpsertModelProfileInput = {
-  projectId: ProjectId;
+  projectId?: ProjectId;
   providerId?: string;
   providerType?: "builtin" | "custom";
   provider?: string;
@@ -94,7 +94,7 @@ export type UpsertModelProfileInput = {
 };
 
 export type RemoveModelProviderInput = {
-  projectId: ProjectId;
+  projectId?: ProjectId;
   providerId: string;
 };
 
@@ -137,11 +137,11 @@ export type MemoryStatus = {
 };
 
 export type UpsertMemorySettingsInput = Partial<MemorySettings> & {
-  projectId: ProjectId;
+  projectId?: ProjectId;
 };
 
 export type UpsertRuntimeSettingsInput = {
-  projectId: ProjectId;
+  projectId?: ProjectId;
   tokenSavingRtk?: boolean;
 };
 

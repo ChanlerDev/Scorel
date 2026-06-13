@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { GuiModelProfileView, GuiProjectRef, GuiProviderCatalogModelView, GuiUpsertModelProfileInput } from "../../../shared/ipc.js";
+import type { GuiDeviceRef, GuiModelProfileView, GuiProviderCatalogModelView, GuiUpsertModelProfileInput } from "../../../shared/ipc.js";
 import { Check, Settings as SettingsIcon, X } from "../../icons/index.js";
 import { SettingsCard } from "../SettingsCard.js";
 import { SettingsHeader } from "../SettingsHeader.js";
 
 export type ProviderSectionProps = {
-  project: GuiProjectRef | null;
+  device: GuiDeviceRef;
   modelProfile: GuiModelProfileView;
   busy: boolean;
   setBusy(value: boolean): void;
@@ -77,7 +77,7 @@ const DEFAULT_PROVIDER_MODEL_FORM: ProviderModelForm = {
 };
 
 export function ProviderSection({
-  project,
+  device,
   modelProfile,
   busy,
   setBusy,
@@ -140,10 +140,9 @@ export function ProviderSection({
   });
 
   const save = async (input: GuiUpsertModelProfileInput): Promise<void> => {
-    if (!project) return;
     setBusy(true);
     try {
-      const profile = await window.scorel.upsertModelProfile(project, input);
+      const profile = await window.scorel.upsertModelProfile(device, input);
       onModelProfileChange(profile);
       setError(null);
     } catch (cause) {
@@ -173,10 +172,10 @@ export function ProviderSection({
     save(providerInput(form));
 
   const removeSelectedProvider = async (): Promise<void> => {
-    if (!project || !selectedProvider || busy) return;
+    if (!selectedProvider || busy) return;
     setBusy(true);
     try {
-      const profile = await window.scorel.removeModelProvider(project, selectedProvider.providerId);
+      const profile = await window.scorel.removeModelProvider(device, selectedProvider.providerId);
       onModelProfileChange(profile);
       const nextProvider = profile.providers[0];
       setSelectedProviderId(nextProvider?.providerId ?? "");
@@ -194,11 +193,10 @@ export function ProviderSection({
   };
 
   const saveNewProvider = async (): Promise<void> => {
-    if (!project) return;
     const input = providerInput(newProviderForm);
     setBusy(true);
     try {
-      const profile = await window.scorel.upsertModelProfile(project, input);
+      const profile = await window.scorel.upsertModelProfile(device, input);
       onModelProfileChange(profile);
       setSelectedProviderId(input.providerId ?? "");
       setProviderForm({ ...newProviderForm, provider: providerName(newProviderForm.provider), apiKey: "" });
@@ -282,10 +280,10 @@ export function ProviderSection({
   };
 
   const fetchProviderCatalog = async (): Promise<GuiProviderCatalogModelView[]> => {
-    if (!project || !selectedProvider) return [];
+    if (!selectedProvider) return [];
     setBusy(true);
     try {
-      const models = await window.scorel.fetchProviderModels(project, selectedProvider.providerId);
+      const models = await window.scorel.fetchProviderModels(device, selectedProvider.providerId);
       setCatalogModels(models);
       setError(null);
       return models;
@@ -321,12 +319,12 @@ export function ProviderSection({
   };
 
   const autoSaveProvider = (form = providerForm): void => {
-    if (!project || busy) return;
+    if (busy) return;
     void saveProvider(form);
   };
 
   const autoSaveModel = (form = providerModelForm): void => {
-    if (!project || busy || !form.providerModelId.trim()) return;
+    if (busy || !form.providerModelId.trim()) return;
     void saveProviderModel(form);
   };
 
@@ -372,7 +370,7 @@ export function ProviderSection({
 
             <div className="provider-detail">
               <div className="provider-detail__scroll">
-                <div className="settings-form settings-form--compact">
+                <div className="settings-form settings-form--compact provider-config-grid">
                   <label>
                     <span>提供商名称</span>
                     <input
@@ -416,6 +414,13 @@ export function ProviderSection({
                       <input className="input-text" type="password" placeholder="已配置则留空保留" value={providerForm.apiKey} onChange={(event) => setProviderForm({ ...providerForm, apiKey: event.currentTarget.value })} onBlur={() => autoSaveProvider()} />
                     </label>
                   )}
+                  {selectedProvider ? (
+                    <div className="provider-form-actions">
+                      <button type="button" className="button button--danger" disabled={busy} onClick={() => void removeSelectedProvider()}>
+                        删除提供商
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="provider-catalog">
@@ -424,7 +429,7 @@ export function ProviderSection({
                     <div className="settings-card__head-meta">
                       <input className="input-text provider-catalog__search" placeholder="搜索模型" value={catalogQuery} onChange={(event) => setCatalogQuery(event.currentTarget.value)} />
                       <span className="settings-value">{filteredModelCards.length}/{modelCards.length} models</span>
-                      <button type="button" className="button" disabled={busy || !project || !selectedProvider} onClick={() => void fetchProviderModels()}>
+                      <button type="button" className="button" disabled={busy || !selectedProvider} onClick={() => void fetchProviderModels()}>
                         获取模型
                       </button>
                     </div>
@@ -449,14 +454,14 @@ export function ProviderSection({
                               </span>
                             </div>
                             <div className="provider-model-card__actions">
-                              <button type="button" className={testButtonClass(modelTestStates[model.providerModelKey])} disabled={busy || !project || !selectedProvider} onClick={() => void testProviderModel(model)} title="测试模型" aria-label="测试模型">
+                              <button type="button" className={testButtonClass(modelTestStates[model.providerModelKey])} disabled={busy || !selectedProvider} onClick={() => void testProviderModel(model)} title="测试模型" aria-label="测试模型">
                                 {modelTestStates[model.providerModelKey] === "pass" ? <Check size={14} /> : modelTestStates[model.providerModelKey] === "fail" ? <X size={14} /> : <span>测</span>}
                               </button>
                               <button type="button" className="provider-model-card__config-button" onClick={() => openModelConfig(model)} title="配置" aria-label="配置">
                                 <SettingsIcon size={14} />
                                 <span>配置</span>
                               </button>
-                              <button type="button" className={model.selected ? "button button--selected" : "button"} disabled={busy || !project} onClick={() => void toggleProviderModelAvailable(model)}>
+                              <button type="button" className={model.selected ? "button button--selected" : "button"} disabled={busy} onClick={() => void toggleProviderModelAvailable(model)}>
                                 {model.selected ? "取消选用" : "选用"}
                               </button>
                             </div>
@@ -476,20 +481,12 @@ export function ProviderSection({
                         <span>模型名称</span>
                         <input className="input-text" value={providerModelForm.displayName} onChange={(event) => setProviderModelForm({ ...providerModelForm, displayName: event.currentTarget.value })} />
                       </label>
-                      <button type="button" className="button button--primary" disabled={busy || !project} onClick={() => void saveProviderModel()}>
+                      <button type="button" className="button button--primary" disabled={busy} onClick={() => void saveProviderModel()}>
                         保存模型
                       </button>
                     </div>
                   </details>
                 </div>
-                {selectedProvider ? (
-                  <div className="provider-danger-zone">
-                    <span>危险操作</span>
-                    <button type="button" className="button button--danger" disabled={busy || !project} onClick={() => void removeSelectedProvider()}>
-                      删除提供商
-                    </button>
-                  </div>
-                ) : null}
               </div>
             </div>
           </div>
@@ -568,7 +565,7 @@ export function ProviderSection({
             <ProviderFormFields form={newProviderForm} setForm={setNewProviderForm} />
             <div className="modal__footer">
               <button type="button" className="button" onClick={() => setNewProviderModalOpen(false)}>取消</button>
-              <button type="button" className="button button--primary" disabled={busy || !project} onClick={() => void saveNewProvider()}>
+              <button type="button" className="button button--primary" disabled={busy} onClick={() => void saveNewProvider()}>
                 保存提供商
               </button>
             </div>

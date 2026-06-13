@@ -14,6 +14,7 @@ import {
   type GuiModelSelection,
   type GuiUpsertMemorySettingsInput,
   type GuiUpsertModelProfileInput,
+  type GuiDeviceRef,
   type GuiProjectRef,
   type GuiRemoteProjectView,
   type GuiUpsertRuntimeSettingsInput,
@@ -165,36 +166,36 @@ const registerIpc = (): void => {
       ? requireConnectedLocalHost().listLocalSessions(ref.projectId)
       : relayService.listRemoteSessions(requireRelayDeviceId(ref), ref.projectId);
   });
-  ipcMain.handle(guiIpcChannels.listModels, async (_event, project: GuiProjectRef) => {
-    const ref = normalizeProjectRef(project);
+  ipcMain.handle(guiIpcChannels.listModels, async (_event, device: GuiDeviceRef) => {
+    const ref = normalizeDeviceRef(device);
     return ref.source === "local"
-      ? requireConnectedLocalHost().listLocalModels(ref.projectId)
-      : relayService.listRemoteModels(requireRelayDeviceId(ref), ref.projectId);
+      ? requireConnectedLocalHost().listLocalModels()
+      : relayService.listRemoteModels(requireDeviceId(ref));
   });
-  ipcMain.handle(guiIpcChannels.upsertModelProfile, async (_event, project: GuiProjectRef, input: GuiUpsertModelProfileInput) => {
-    const ref = normalizeProjectRef(project);
-    const payload = { ...input, projectId: ref.projectId as never };
+  ipcMain.handle(guiIpcChannels.upsertModelProfile, async (_event, device: GuiDeviceRef, input: GuiUpsertModelProfileInput) => {
+    const ref = normalizeDeviceRef(device);
+    const payload = { ...input };
     return ref.source === "local"
       ? requireConnectedLocalHost().upsertLocalModelProfile(payload)
-      : relayService.upsertRemoteModelProfile(requireRelayDeviceId(ref), payload);
+      : relayService.upsertRemoteModelProfile(requireDeviceId(ref), payload);
   });
-  ipcMain.handle(guiIpcChannels.removeModelProvider, async (_event, project: GuiProjectRef, providerId: string) => {
-    const ref = normalizeProjectRef(project);
+  ipcMain.handle(guiIpcChannels.removeModelProvider, async (_event, device: GuiDeviceRef, providerId: string) => {
+    const ref = normalizeDeviceRef(device);
     return ref.source === "local"
-      ? requireConnectedLocalHost().removeLocalModelProvider(ref.projectId, providerId)
-      : relayService.removeRemoteModelProvider(requireRelayDeviceId(ref), ref.projectId, providerId);
+      ? requireConnectedLocalHost().removeLocalModelProvider(providerId)
+      : relayService.removeRemoteModelProvider(requireDeviceId(ref), providerId);
   });
-  ipcMain.handle(guiIpcChannels.fetchProviderModels, async (_event, project: GuiProjectRef, providerId: string) => {
-    const ref = normalizeProjectRef(project);
+  ipcMain.handle(guiIpcChannels.fetchProviderModels, async (_event, device: GuiDeviceRef, providerId: string) => {
+    const ref = normalizeDeviceRef(device);
     return ref.source === "local"
-      ? requireConnectedLocalHost().fetchLocalProviderModels(ref.projectId, providerId)
-      : relayService.fetchRemoteProviderModels(requireRelayDeviceId(ref), ref.projectId, providerId);
+      ? requireConnectedLocalHost().fetchLocalProviderModels(providerId)
+      : relayService.fetchRemoteProviderModels(requireDeviceId(ref), providerId);
   });
-  ipcMain.handle(guiIpcChannels.getMemorySettings, async (_event, project: GuiProjectRef) => {
-    const ref = normalizeProjectRef(project);
+  ipcMain.handle(guiIpcChannels.getMemorySettings, async (_event, device: GuiDeviceRef) => {
+    const ref = normalizeDeviceRef(device);
     return ref.source === "local"
-      ? requireConnectedLocalHost().getLocalMemorySettings(ref.projectId)
-      : relayService.getRemoteMemorySettings(requireRelayDeviceId(ref), ref.projectId);
+      ? requireConnectedLocalHost().getLocalMemorySettings()
+      : relayService.getRemoteMemorySettings(requireDeviceId(ref));
   });
   ipcMain.handle(guiIpcChannels.getMemoryStatus, async (_event, project: GuiProjectRef) => {
     const ref = normalizeProjectRef(project);
@@ -202,25 +203,25 @@ const registerIpc = (): void => {
       ? requireConnectedLocalHost().getLocalMemoryStatus(ref.projectId)
       : relayService.getRemoteMemoryStatus(requireRelayDeviceId(ref), ref.projectId);
   });
-  ipcMain.handle(guiIpcChannels.upsertMemorySettings, async (_event, project: GuiProjectRef, input: GuiUpsertMemorySettingsInput) => {
-    const ref = normalizeProjectRef(project);
-    const payload = { ...input, projectId: ref.projectId as never };
+  ipcMain.handle(guiIpcChannels.upsertMemorySettings, async (_event, device: GuiDeviceRef, input: GuiUpsertMemorySettingsInput) => {
+    const ref = normalizeDeviceRef(device);
+    const payload = { ...input };
     return ref.source === "local"
       ? requireConnectedLocalHost().upsertLocalMemorySettings(payload)
-      : relayService.upsertRemoteMemorySettings(requireRelayDeviceId(ref), payload);
+      : relayService.upsertRemoteMemorySettings(requireDeviceId(ref), payload);
   });
-  ipcMain.handle(guiIpcChannels.getRuntimeSettings, async (_event, project: GuiProjectRef) => {
-    const ref = normalizeProjectRef(project);
+  ipcMain.handle(guiIpcChannels.getRuntimeSettings, async (_event, device: GuiDeviceRef) => {
+    const ref = normalizeDeviceRef(device);
     return ref.source === "local"
-      ? requireConnectedLocalHost().getLocalRuntimeSettings(ref.projectId)
-      : relayService.getRemoteRuntimeSettings(requireRelayDeviceId(ref), ref.projectId);
+      ? requireConnectedLocalHost().getLocalRuntimeSettings()
+      : relayService.getRemoteRuntimeSettings(requireDeviceId(ref));
   });
-  ipcMain.handle(guiIpcChannels.upsertRuntimeSettings, async (_event, project: GuiProjectRef, input: GuiUpsertRuntimeSettingsInput) => {
-    const ref = normalizeProjectRef(project);
-    const payload = { ...input, projectId: ref.projectId as never };
+  ipcMain.handle(guiIpcChannels.upsertRuntimeSettings, async (_event, device: GuiDeviceRef, input: GuiUpsertRuntimeSettingsInput) => {
+    const ref = normalizeDeviceRef(device);
+    const payload = { ...input };
     return ref.source === "local"
       ? requireConnectedLocalHost().upsertLocalRuntimeSettings(payload)
-      : relayService.upsertRemoteRuntimeSettings(requireRelayDeviceId(ref), payload);
+      : relayService.upsertRemoteRuntimeSettings(requireDeviceId(ref), payload);
   });
   ipcMain.handle(guiIpcChannels.getExtensionSettings, async (_event, extensionId: string) =>
     requireConnectedLocalHost().getLocalExtensionSettings(extensionId),
@@ -376,6 +377,26 @@ const normalizeProjectRef = (input: GuiProjectRef): GuiProjectRef => {
     throw new Error("Relay Project reference requires a Device");
   }
   return input;
+};
+
+const normalizeDeviceRef = (input: GuiDeviceRef): GuiDeviceRef => {
+  if (!input || (input.source !== "local" && input.source !== "relay")) {
+    throw new Error("Invalid Device reference");
+  }
+  if ("projectId" in input) {
+    throw new Error("Settings configuration is device-scoped and does not accept a Project");
+  }
+  if (input.source === "relay" && typeof input.deviceId !== "string") {
+    throw new Error("Relay Device reference requires a Device");
+  }
+  return input;
+};
+
+const requireDeviceId = (input: GuiDeviceRef): string => {
+  if (input.source !== "relay" || !input.deviceId) {
+    throw new Error("Relay Device is required");
+  }
+  return input.deviceId;
 };
 
 const requireRelayDeviceId = (input: GuiProjectRef): string => {

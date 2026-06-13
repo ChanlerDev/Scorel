@@ -2001,18 +2001,15 @@ a {
   overflow: auto;
 }
 
-.provider-danger-zone {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-  box-shadow: inset 0 1px 0 var(--color-border-hairline);
+.provider-config-grid {
+  align-items: end;
 }
 
-.provider-danger-zone span {
-  color: var(--color-text-muted);
-  font-size: 12px;
+.provider-form-actions {
+  display: flex;
+  align-self: end;
+  justify-self: end;
+  grid-column: 3;
 }
 
 .provider-catalog {
@@ -2301,7 +2298,7 @@ a {
 
 .relay-device-row__summary {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-columns: 14px 8px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   padding: 10px 16px;
@@ -2312,12 +2309,53 @@ a {
   display: none;
 }
 
+.relay-device-row__chevron {
+  color: var(--color-text-muted);
+  transition: transform 120ms ease;
+}
+
+.relay-device-row[open] .relay-device-row__chevron {
+  transform: rotate(90deg);
+}
+
 .relay-device-row__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 500;
+}
+
+.relay-device-row__name-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
+}
+
+.relay-device-row__edit-button {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-muted);
+  background: transparent;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.relay-device-row__edit-button:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.relay-device-row__name-input {
+  height: 26px;
+  min-width: 120px;
 }
 
 .relay-device-row__url {
@@ -2332,7 +2370,7 @@ a {
 .relay-device-row__details {
   display: grid;
   gap: 8px;
-  padding: 0 16px 12px 34px;
+  padding: 0 16px 12px 48px;
 }
 
 .relay-device-row__detail {
@@ -2354,16 +2392,14 @@ a {
   color: var(--color-text);
 }
 
-.relay-device-row__rename {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 2px;
-}
-
 @media (max-width: 760px) {
   .settings-form {
     grid-template-columns: 1fr;
+  }
+
+  .provider-form-actions {
+    grid-column: 1;
+    justify-self: start;
   }
 }
 

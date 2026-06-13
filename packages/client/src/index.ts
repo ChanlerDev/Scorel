@@ -307,17 +307,17 @@ export class DaemonClient {
     return this.#request("upsert_model_profile", input);
   }
 
-  async fetchProviderModels(input: { projectId: ProjectId; providerId: string }): Promise<ProviderCatalogModelSummary[]> {
+  async fetchProviderModels(input: { projectId?: ProjectId; providerId: string }): Promise<ProviderCatalogModelSummary[]> {
     this.#assertDaemonConnected();
     return (await this.#request("fetch_provider_models", input)).models;
   }
 
-  async removeModelProvider(input: { projectId: ProjectId; providerId: string }): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[]; removed: boolean }> {
+  async removeModelProvider(input: { projectId?: ProjectId; providerId: string }): Promise<{ providers: ProviderConnectionSummary[]; providerModels: ProviderModelSummary[]; models: AvailableModelSummary[]; roles: Record<ModelRole, string>; warnings?: string[]; removed: boolean }> {
     this.#assertDaemonConnected();
     return this.#request("remove_model_provider", input);
   }
 
-  async getMemorySettings(input: { projectId: ProjectId }): Promise<MemorySettings> {
+  async getMemorySettings(input: { projectId?: ProjectId } = {}): Promise<MemorySettings> {
     this.#assertDaemonConnected();
     return (await this.#request("get_memory_settings", input)).memory;
   }
@@ -332,7 +332,7 @@ export class DaemonClient {
     return (await this.#request("upsert_memory_settings", input)).memory;
   }
 
-  async getRuntimeSettings(input: { projectId: ProjectId }): Promise<RuntimeSettings> {
+  async getRuntimeSettings(input: { projectId?: ProjectId } = {}): Promise<RuntimeSettings> {
     this.#assertDaemonConnected();
     return (await this.#request("get_runtime_settings", input)).runtime;
   }

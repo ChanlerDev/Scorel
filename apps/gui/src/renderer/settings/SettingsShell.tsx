@@ -7,7 +7,7 @@ import {
   Smartphone,
   Terminal,
 } from "../icons/index.js";
-import type { GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiProjectRef, GuiProjectView, GuiRelayDeviceView, GuiRuntimeSettingsView } from "../../shared/ipc.js";
+import type { GuiDeviceRef, GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiRelayDeviceView, GuiRuntimeSettingsView } from "../../shared/ipc.js";
 import { ConfigSection } from "./sections/ConfigSection.js";
 import { ImSection } from "./sections/ImSection.js";
 import { MemorySection } from "./sections/MemorySection.js";
@@ -18,9 +18,8 @@ import { SettingsNav, type SettingsNavGroup } from "./SettingsNav.js";
 
 export type SettingsShellProps = {
   devices: GuiRelayDeviceView[];
-  projects: GuiProjectView[];
-  selectedProjectKey: string | null;
-  project: GuiProjectRef | null;
+  selectedDeviceKey: string;
+  device: GuiDeviceRef;
   modelProfile: GuiModelProfileView;
   memory: GuiMemorySettingsView;
   memoryStatus: GuiMemoryStatusView;
@@ -34,7 +33,7 @@ export type SettingsShellProps = {
   setBusy(value: boolean): void;
   setError(message: string | null): void;
   refresh(): Promise<void>;
-  onProjectSelect(key: string): void;
+  onDeviceSelect(key: string): void;
   onBack(): void;
 };
 
@@ -60,7 +59,7 @@ export function SettingsShell(props: SettingsShellProps) {
     case "model":
       content = (
         <ModelSection
-          project={props.project}
+          device={props.device}
           modelProfile={props.modelProfile}
           busy={props.busy}
           setBusy={props.setBusy}
@@ -72,7 +71,7 @@ export function SettingsShell(props: SettingsShellProps) {
     case "provider":
       content = (
         <ProviderSection
-          project={props.project}
+          device={props.device}
           modelProfile={props.modelProfile}
           busy={props.busy}
           setBusy={props.setBusy}
@@ -84,7 +83,7 @@ export function SettingsShell(props: SettingsShellProps) {
     case "memory":
       content = (
         <MemorySection
-          project={props.project}
+          device={props.device}
           memory={props.memory}
           status={props.memoryStatus}
           busy={props.busy}
@@ -97,7 +96,7 @@ export function SettingsShell(props: SettingsShellProps) {
     case "runtime":
       content = (
         <RuntimeSection
-          project={props.project}
+          device={props.device}
           runtime={props.runtime}
           busy={props.busy}
           setBusy={props.setBusy}
@@ -137,11 +136,10 @@ export function SettingsShell(props: SettingsShellProps) {
       <SettingsNav
         groups={NAV_GROUPS}
         active={active}
-        projects={props.projects}
         devices={props.devices}
-        selectedProjectKey={props.selectedProjectKey}
+        selectedDeviceKey={props.selectedDeviceKey}
         onSelect={setActive}
-        onProjectSelect={props.onProjectSelect}
+        onDeviceSelect={props.onDeviceSelect}
         onBack={props.onBack}
       />
       <main className="settings-main">{content}</main>
