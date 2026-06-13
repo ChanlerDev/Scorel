@@ -32,6 +32,7 @@ export type GuiStore = {
   load(): Promise<GuiStoreSnapshot>;
   listRelayDevices(): Promise<GuiRelayDevice[]>;
   upsertRelayDevice(input: Omit<GuiRelayDevice, "createdAt" | "updatedAt">): Promise<GuiRelayDevice>;
+  renameRelayDevice(deviceId: DeviceId, label: string): Promise<GuiRelayDevice>;
   upsertVisibleRemoteProject(input: {
     device: GuiRelayDevice;
     project: HostProject;
@@ -80,10 +81,11 @@ export const createGuiStore = (filePath: string): GuiStore => {
       const snapshot = await load();
       const now = Date.now();
       const index = snapshot.relayDevices.findIndex((device) => device.deviceId === input.deviceId);
+      const existing = index >= 0 ? snapshot.relayDevices[index] : undefined;
       const next: GuiRelayDevice = {
         ...input,
-        label: input.label.trim() || String(input.deviceId),
-        createdAt: index >= 0 ? snapshot.relayDevices[index]!.createdAt : now,
+        label: existing?.label.trim() || input.label.trim() || String(input.deviceId),
+        createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       };
       const relayDevices = [...snapshot.relayDevices];
@@ -92,6 +94,22 @@ export const createGuiStore = (filePath: string): GuiStore => {
       } else {
         relayDevices.push(next);
       }
+      await commit({ ...snapshot, relayDevices: sortRelayDevices(relayDevices) });
+      return next;
+    },
+    async renameRelayDevice(deviceId, label) {
+      const snapshot = await load();
+      const index = snapshot.relayDevices.findIndex((device) => device.deviceId === deviceId);
+      if (index < 0) {
+        throw new Error(`Relay Device is not configured: ${deviceId}`);
+      }
+      const next: GuiRelayDevice = {
+        ...snapshot.relayDevices[index]!,
+        label: label.trim() || String(deviceId),
+        updatedAt: Date.now(),
+      };
+      const relayDevices = [...snapshot.relayDevices];
+      relayDevices[index] = next;
       await commit({ ...snapshot, relayDevices: sortRelayDevices(relayDevices) });
       return next;
     },

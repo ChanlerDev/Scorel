@@ -77,4 +77,52 @@ describe("GUI store", () => {
       visibleRemoteProjects: [],
     });
   });
+
+  it("renames a paired Relay Device without changing its Relay identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-store-"));
+    const store = createGuiStore(join(root, "gui-store.json"));
+    await store.upsertRelayDevice({
+      deviceId: asDeviceId("device_relay"),
+      label: "Relay host",
+      relayUrl: "ws://127.0.0.1:1234",
+      clientId: asClientId("client_gui"),
+      online: true,
+    });
+
+    const renamed = await store.renameRelayDevice(asDeviceId("device_relay"), "Build laptop");
+    const snapshot = await store.load();
+
+    expect(renamed).toMatchObject({
+      deviceId: "device_relay",
+      label: "Build laptop",
+      relayUrl: "ws://127.0.0.1:1234",
+      clientId: "client_gui",
+      online: true,
+    });
+    expect(snapshot.relayDevices).toMatchObject([{ deviceId: "device_relay", label: "Build laptop" }]);
+  });
+
+  it("keeps a GUI Relay Device rename when Relay refresh returns the same device", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-gui-store-"));
+    const store = createGuiStore(join(root, "gui-store.json"));
+    await store.upsertRelayDevice({
+      deviceId: asDeviceId("device_relay"),
+      label: "Build laptop",
+      relayUrl: "ws://127.0.0.1:1234",
+      clientId: asClientId("client_gui"),
+      online: true,
+    });
+
+    await store.upsertRelayDevice({
+      deviceId: asDeviceId("device_relay"),
+      label: "Relay host",
+      relayUrl: "ws://127.0.0.1:1234",
+      clientId: asClientId("client_gui"),
+      online: false,
+    });
+
+    await expect(store.load()).resolves.toMatchObject({
+      relayDevices: [{ deviceId: "device_relay", label: "Build laptop", online: false }],
+    });
+  });
 });

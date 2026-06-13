@@ -493,6 +493,9 @@ export function App() {
     return (
       <SettingsShell
         devices={relayDevices}
+        projects={projects}
+        selectedProjectKey={selectedProjectKey}
+        onProjectSelect={setSelectedProjectKey}
         project={selectedProject ? projectRef(selectedProject) : null}
         busy={busy}
         setBusy={setBusy}

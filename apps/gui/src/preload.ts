@@ -12,6 +12,7 @@ const api: GuiApi = {
   listRemoteDirectories: (deviceId, path) => ipcRenderer.invoke(guiIpcChannels.listRemoteDirectories, deviceId, path),
   addRemoteProject: (deviceId, workDir) => ipcRenderer.invoke(guiIpcChannels.addRemoteProject, deviceId, workDir),
   hideRemoteProject: (deviceId, projectId) => ipcRenderer.invoke(guiIpcChannels.hideRemoteProject, deviceId, projectId),
+  renameRelayDevice: (deviceId, label) => ipcRenderer.invoke(guiIpcChannels.renameRelayDevice, deviceId, label),
   listSessions: (project) => ipcRenderer.invoke(guiIpcChannels.listSessions, project),
   listModels: (project) => ipcRenderer.invoke(guiIpcChannels.listModels, project),
   upsertModelProfile: (project, input) => ipcRenderer.invoke(guiIpcChannels.upsertModelProfile, project, input),

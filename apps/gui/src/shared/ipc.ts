@@ -29,6 +29,7 @@ export type GuiRelayDeviceView = {
   deviceId: string;
   label: string;
   relayUrl: string;
+  ip?: string;
   online?: boolean;
   updatedAt: number;
 };
@@ -125,6 +126,7 @@ export type GuiApi = {
   listRemoteDirectories(deviceId: string, path?: string): Promise<DirectoryListing>;
   addRemoteProject(deviceId: string, workDir: string): Promise<GuiRemoteProjectView>;
   hideRemoteProject(deviceId: string, projectId: string): Promise<boolean>;
+  renameRelayDevice(deviceId: string, label: string): Promise<GuiRelayDeviceView>;
   listSessions(project: GuiProjectRef): Promise<SessionSummary[]>;
   listModels(project: GuiProjectRef): Promise<GuiModelProfileView>;
   upsertModelProfile(project: GuiProjectRef, input: GuiUpsertModelProfileInput): Promise<GuiModelProfileView>;
@@ -157,6 +159,7 @@ export const guiIpcChannels = {
   listRemoteDirectories: "scorel:listRemoteDirectories",
   addRemoteProject: "scorel:addRemoteProject",
   hideRemoteProject: "scorel:hideRemoteProject",
+  renameRelayDevice: "scorel:renameRelayDevice",
   listSessions: "scorel:listSessions",
   listModels: "scorel:listModels",
   upsertModelProfile: "scorel:upsertModelProfile",

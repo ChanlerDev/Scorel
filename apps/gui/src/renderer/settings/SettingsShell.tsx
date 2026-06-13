@@ -7,7 +7,7 @@ import {
   Smartphone,
   Terminal,
 } from "../icons/index.js";
-import type { GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiProjectRef, GuiRelayDeviceView, GuiRuntimeSettingsView } from "../../shared/ipc.js";
+import type { GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiProjectRef, GuiProjectView, GuiRelayDeviceView, GuiRuntimeSettingsView } from "../../shared/ipc.js";
 import { ConfigSection } from "./sections/ConfigSection.js";
 import { ImSection } from "./sections/ImSection.js";
 import { MemorySection } from "./sections/MemorySection.js";
@@ -18,6 +18,8 @@ import { SettingsNav, type SettingsNavGroup } from "./SettingsNav.js";
 
 export type SettingsShellProps = {
   devices: GuiRelayDeviceView[];
+  projects: GuiProjectView[];
+  selectedProjectKey: string | null;
   project: GuiProjectRef | null;
   modelProfile: GuiModelProfileView;
   memory: GuiMemorySettingsView;
@@ -32,6 +34,7 @@ export type SettingsShellProps = {
   setBusy(value: boolean): void;
   setError(message: string | null): void;
   refresh(): Promise<void>;
+  onProjectSelect(key: string): void;
   onBack(): void;
 };
 
@@ -134,7 +137,11 @@ export function SettingsShell(props: SettingsShellProps) {
       <SettingsNav
         groups={NAV_GROUPS}
         active={active}
+        projects={props.projects}
+        devices={props.devices}
+        selectedProjectKey={props.selectedProjectKey}
         onSelect={setActive}
+        onProjectSelect={props.onProjectSelect}
         onBack={props.onBack}
       />
       <main className="settings-main">{content}</main>

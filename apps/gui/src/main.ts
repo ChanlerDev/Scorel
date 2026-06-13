@@ -156,6 +156,9 @@ const registerIpc = (): void => {
   ipcMain.handle(guiIpcChannels.hideRemoteProject, async (_event, deviceId: string, projectId: string) =>
     guiStore.hideVisibleRemoteProject(deviceId as never, projectId as never),
   );
+  ipcMain.handle(guiIpcChannels.renameRelayDevice, async (_event, deviceId: string, label: string) =>
+    toRelayDeviceView(await guiStore.renameRelayDevice(deviceId as never, label)),
+  );
   ipcMain.handle(guiIpcChannels.listSessions, async (_event, project: GuiProjectRef) => {
     const ref = normalizeProjectRef(project);
     return ref.source === "local"

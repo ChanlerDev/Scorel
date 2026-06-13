@@ -7,6 +7,7 @@ import { MemorySection } from "./settings/sections/MemorySection.js";
 import { RuntimeSection } from "./settings/sections/RuntimeSection.js";
 import { ImSection } from "./settings/sections/ImSection.js";
 import { ProviderSection } from "./settings/sections/ProviderSection.js";
+import { ConfigSection } from "./settings/sections/ConfigSection.js";
 import { SettingsShell } from "./settings/SettingsShell.js";
 import { Sidebar } from "./shell/Sidebar.js";
 import { EmptyState } from "./workspace/EmptyState.js";
@@ -126,6 +127,15 @@ const localProject: GuiProjectView = {
   workDir: "/Users/chanler/Scorel",
   createdAt: 0,
   updatedAt: 0,
+};
+
+const remoteProject: GuiProjectView = {
+  source: "relay",
+  deviceId: "device_remote",
+  projectId: "project_remote" as never,
+  displayName: "Remote Repo",
+  workDir: "/srv/remote-repo",
+  relayUrl: "wss://scorel-relay.chanler.dev",
 };
 
 describe("GUI shell rendering contract", () => {
@@ -364,6 +374,9 @@ describe("GUI shell rendering contract", () => {
     const html = renderToStaticMarkup(
       <SettingsShell
         devices={[]}
+        projects={[localProject]}
+        selectedProjectKey="local:project_scorel"
+        onProjectSelect={noop}
         project={{ source: "local", projectId: localProject.projectId }}
         modelProfile={modelProfile}
         memory={memorySettings}
@@ -414,6 +427,9 @@ describe("GUI shell rendering contract", () => {
     const html = renderToStaticMarkup(
       <SettingsShell
         devices={[]}
+        projects={[localProject]}
+        selectedProjectKey="local:project_scorel"
+        onProjectSelect={noop}
         project={{ source: "local", projectId: localProject.projectId }}
         modelProfile={modelProfile}
         memory={memorySettings}
@@ -442,6 +458,61 @@ describe("GUI shell rendering contract", () => {
     expect(html).not.toContain("模型来源");
     expect(html).not.toContain("Provider type");
     expect(html).not.toContain("Relay URL");
+  });
+
+  it("shows a real settings scope selector for local and remote Projects", () => {
+    const html = renderToStaticMarkup(
+      <SettingsShell
+        devices={[{ deviceId: "device_remote", label: "Remote Device", relayUrl: "wss://scorel-relay.chanler.dev", online: true, updatedAt: 1 }]}
+        projects={[localProject, remoteProject]}
+        selectedProjectKey="relay:device_remote:project_remote"
+        onProjectSelect={noop}
+        project={{ source: "relay", deviceId: "device_remote", projectId: remoteProject.projectId }}
+        modelProfile={modelProfile}
+        memory={memorySettings}
+        memoryStatus={memoryStatus}
+        runtime={runtimeSettings}
+        imExtensions={imExtensions}
+        onModelProfileChange={noop}
+        onMemoryChange={noop}
+        onRuntimeChange={noop}
+        onExtensionChange={noop}
+        busy={false}
+        setBusy={noop}
+        setError={noop}
+        refresh={async () => undefined}
+        onBack={noop}
+      />,
+    );
+
+    expect(html).toContain("settings-nav__scope");
+    expect(html).toContain("此电脑 / Scorel");
+    expect(html).toContain("Remote Device / Remote Repo");
+    expect(html).toContain('value="relay:device_remote:project_remote" selected=""');
+    expect(html).not.toContain("aria-disabled=\"true\"");
+  });
+
+  it("renders connection setup with official Relay default and editable device details", () => {
+    const html = renderToStaticMarkup(
+      <ConfigSection
+        devices={[{ deviceId: "device_remote", label: "Remote Device", relayUrl: "wss://scorel-relay.chanler.dev", online: true, updatedAt: 1 }]}
+        busy={false}
+        setBusy={noop}
+        setError={noop}
+        refresh={async () => undefined}
+      />,
+    );
+
+    expect(html).toContain("官方 Relay");
+    expect(html).toContain("Get Pair Code");
+    expect(html).toContain("编辑");
+    expect(html).not.toContain('data-testid="relay-url"');
+    expect(html).toContain("Remote Device");
+    expect(html).toContain("Device ID");
+    expect(html).toContain("device_remote");
+    expect(html).toContain("IP");
+    expect(html).toContain("未上报");
+    expect(html).toContain("重命名");
   });
 
   it("renders LLM provider management on its own settings page", () => {
