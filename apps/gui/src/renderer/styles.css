@@ -2001,6 +2001,20 @@ a {
   overflow: auto;
 }
 
+.provider-danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  box-shadow: inset 0 1px 0 var(--color-border-hairline);
+}
+
+.provider-danger-zone span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
 .provider-catalog {
   display: grid;
   box-shadow: inset 0 1px 0 var(--color-border-hairline);

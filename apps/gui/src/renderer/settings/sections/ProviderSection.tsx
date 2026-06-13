@@ -372,13 +372,6 @@ export function ProviderSection({
 
             <div className="provider-detail">
               <div className="provider-detail__scroll">
-                {selectedProvider ? (
-                  <div className="provider-detail__actions">
-                    <button type="button" className="button button--danger" disabled={busy || !project} onClick={() => void removeSelectedProvider()}>
-                      删除提供商
-                    </button>
-                  </div>
-                ) : null}
                 <div className="settings-form settings-form--compact">
                   <label>
                     <span>提供商名称</span>
@@ -489,6 +482,14 @@ export function ProviderSection({
                     </div>
                   </details>
                 </div>
+                {selectedProvider ? (
+                  <div className="provider-danger-zone">
+                    <span>危险操作</span>
+                    <button type="button" className="button button--danger" disabled={busy || !project} onClick={() => void removeSelectedProvider()}>
+                      删除提供商
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

@@ -595,6 +595,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.19 | [`S0097`](spec/ship/S0097-rtk-token-saving-settings.md) | GUI Token 节省设置 + RTK Bash output proxy + runtime config | Done |
 | M9.F1.20 | [`S0098`](spec/ship/S0098-local-daemon-singleton-unified-state.md) | 统一本机 Host state root、后台 singleton start、GUI/CLI auto-start + attach、idle shutdown、active IM 保活 | Done |
 | M9.F1.21 | [`S0099`](spec/ship/S0099-gui-connection-device-settings.md) | GUI 连接设置默认官方 Relay、配对设备命名/详情、Settings 远端 Project 作用域切换 | Done |
+| M9.F1.22 | [`S0100`](spec/ship/S0100-gui-provider-danger-zone.md) | GUI Provider 删除按钮移到底部危险操作区，避免干扰主要配置表单 | Done |
 
 **Not in M9 Follow-up**:
 
