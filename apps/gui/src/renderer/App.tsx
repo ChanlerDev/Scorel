@@ -23,6 +23,7 @@ import type {
   GuiModelProfileView,
   GuiRelayDeviceView,
   GuiRemoteProjectView,
+  GuiRuntimeSettingsView,
   GuiSnapshot,
 } from "../shared/ipc.js";
 
@@ -46,6 +47,13 @@ const defaultMemoryStatus = (projectId = ""): GuiMemoryStatusView => ({
   projectId: projectId as never,
   dirty: false,
   running: false,
+});
+
+const defaultRuntimeSettings = (): GuiRuntimeSettingsView => ({
+  tokenSavingRtk: false,
+  rtkAvailable: false,
+  estimatedOutputTokens: 0,
+  estimatedSavedTokens: 0,
 });
 
 const defaultExtensionSettings = (extensionId: string): GuiExtensionSettingsView => ({
@@ -81,6 +89,7 @@ export function App() {
   const [modelProfile, setModelProfile] = useState<GuiModelProfileView>({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
   const [memorySettings, setMemorySettings] = useState<GuiMemorySettingsView>(defaultMemorySettings());
   const [memoryStatus, setMemoryStatus] = useState<GuiMemoryStatusView>(defaultMemoryStatus());
+  const [runtimeSettings, setRuntimeSettings] = useState<GuiRuntimeSettingsView>(defaultRuntimeSettings());
   const [imSettings, setImSettings] = useState<Record<string, GuiExtensionSettingsView>>({
     telegram: defaultExtensionSettings("telegram"),
     qq: defaultExtensionSettings("qq"),
@@ -293,6 +302,7 @@ export function App() {
     if (!selectedProject) {
       setModelProfile({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
       setMemorySettings(defaultMemorySettings());
+      setRuntimeSettings(defaultRuntimeSettings());
       setSelectedModelId("");
       return;
     }
@@ -323,6 +333,14 @@ export function App() {
       })
       .catch(() => {
         setMemoryStatus(defaultMemoryStatus(selectedProject.projectId));
+      });
+    void window.scorel.getRuntimeSettings(projectRef(selectedProject))
+      .then((runtime) => {
+        setRuntimeSettings(runtime);
+      })
+      .catch((cause) => {
+        setRuntimeSettings(defaultRuntimeSettings());
+        setError(cause instanceof Error ? cause.message : String(cause));
       });
   }, [selectedProject]);
 
@@ -485,6 +503,7 @@ export function App() {
         modelProfile={modelProfile}
         memory={memorySettings}
         memoryStatus={memoryStatus}
+        runtime={runtimeSettings}
         imExtensions={imSettings}
         onModelProfileChange={(profile) => {
           setModelProfile(profile);
@@ -494,6 +513,7 @@ export function App() {
           });
         }}
         onMemoryChange={setMemorySettings}
+        onRuntimeChange={setRuntimeSettings}
         onExtensionChange={(extension) => setImSettings((current) => ({ ...current, [extension.extensionId]: extension }))}
         onBack={() => setView("workspace")}
       />

@@ -14,6 +14,7 @@ import {
   type GuiUpsertModelProfileInput,
   type GuiProjectRef,
   type GuiRemoteProjectView,
+  type GuiUpsertRuntimeSettingsInput,
   type GuiSnapshot,
 } from "./shared/ipc.js";
 
@@ -163,6 +164,19 @@ const registerIpc = (): void => {
     return ref.source === "local"
       ? requireConnectedLocalHost().upsertLocalMemorySettings(payload)
       : relayService.upsertRemoteMemorySettings(requireRelayDeviceId(ref), payload);
+  });
+  ipcMain.handle(guiIpcChannels.getRuntimeSettings, async (_event, project: GuiProjectRef) => {
+    const ref = normalizeProjectRef(project);
+    return ref.source === "local"
+      ? requireConnectedLocalHost().getLocalRuntimeSettings(ref.projectId)
+      : relayService.getRemoteRuntimeSettings(requireRelayDeviceId(ref), ref.projectId);
+  });
+  ipcMain.handle(guiIpcChannels.upsertRuntimeSettings, async (_event, project: GuiProjectRef, input: GuiUpsertRuntimeSettingsInput) => {
+    const ref = normalizeProjectRef(project);
+    const payload = { ...input, projectId: ref.projectId as never };
+    return ref.source === "local"
+      ? requireConnectedLocalHost().upsertLocalRuntimeSettings(payload)
+      : relayService.upsertRemoteRuntimeSettings(requireRelayDeviceId(ref), payload);
   });
   ipcMain.handle(guiIpcChannels.getExtensionSettings, async (_event, extensionId: string) =>
     requireConnectedLocalHost().getLocalExtensionSettings(extensionId),

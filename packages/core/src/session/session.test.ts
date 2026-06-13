@@ -86,6 +86,7 @@ const toolResultEvent = (
   seq: number,
   content: string,
   toolCallId = "call_1",
+  details?: unknown,
 ): PersistentEvent => ({
   type: "tool_result",
   id: asEventId(id),
@@ -101,7 +102,10 @@ const toolResultEvent = (
         type: "tool_result",
         toolCallId,
         toolName: "Read",
-        result: { content: [{ type: "text", text: content }] },
+        result: {
+          content: [{ type: "text", text: content }],
+          ...(details ? { details } : {}),
+        },
       },
     ],
   },
@@ -331,6 +335,33 @@ describe("session core", () => {
     expect(original && "message" in original ? original.message : undefined).toEqual(
       "message" in expectedOriginal ? expectedOriginal.message : undefined,
     );
+  });
+
+  it("omits tool execution details from rebuilt model context", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    const details = { command: "rtk git status", rtk: { applied: true } };
+    await session.append(userEvent("evt_1", null, 1, "hello"));
+    await session.append(toolResultEvent("evt_2", "evt_1", 2, "clean", "call_1", details));
+
+    const context = buildContext(session.tree, asEventId("evt_2"));
+    const toolResult = context[1]?.content[0];
+    expect(toolResult?.type).toBe("tool_result");
+    if (toolResult?.type !== "tool_result") {
+      throw new Error("expected tool result");
+    }
+    expect(toolResult.result).toEqual({ content: [{ type: "text", text: "clean" }] });
+    expect(JSON.stringify(session.tree.get(asEventId("evt_2"))?.event)).toContain("rtk git status");
   });
 
   it("uses compact events as context barriers while keeping later messages", async () => {

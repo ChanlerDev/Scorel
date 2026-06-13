@@ -11,6 +11,7 @@ import {
   renderExtensionConfig,
   renderMemoryConfig,
   renderModelProfileConfig,
+  renderRuntimeConfig,
   scorelProjectConfigPath,
   scorelSessionsDir,
   scorelUserConfigPath,
@@ -162,6 +163,45 @@ autoCompactThreshold = 0.75
     expect(rendered).toContain("promoteRoot = true");
     expect(rendered).toContain("dreamIdleMinutes = 60");
     expect(rendered).toContain("autoCompactThreshold = 0.8");
+  });
+
+  it("loads and renders RTK token saving runtime settings", async () => {
+    const cwd = await mkProject(`
+[providers.openai]
+type = "builtin"
+provider = "openai"
+apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.openai_gpt_54_mini]
+provider = "openai"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.main]
+model = "openai_gpt_54_mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
+
+[runtime]
+tokenSavingRtk = true
+`);
+
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "secret" } })).resolves.toMatchObject({
+      runtime: {
+        tokenSavingRtk: true,
+      },
+    });
+
+    const rendered = renderRuntimeConfig({
+      existingConfigText: await readProjectConfig(cwd),
+      tokenSavingRtk: false,
+    });
+
+    expect(rendered).toContain("[runtime]");
+    expect(rendered).toContain("tokenSavingRtk = false");
   });
 
   it("loads extension enablement and config without resolving secrets", async () => {

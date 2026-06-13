@@ -260,6 +260,162 @@ describe("coding tools", () => {
     ).rejects.toThrow("timed out");
   });
 
+  it("runs Bash through the configured default shell without rewriting the command", async () => {
+    const cwd = await tempRoot();
+    const shell = join(cwd, "scorel-shell");
+    await writeFile(
+      shell,
+      [
+        "#!/bin/sh",
+        "printf 'shell-argv:%s\\n' \"$*\"",
+        "if [ \"$1\" = \"-lc\" ]; then shift; exec /bin/sh -c \"$1\"; fi",
+        "exec /bin/sh \"$@\"",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const bash = createCodingTools({ cwd, defaultShell: shell }).find((tool) => tool.name === "Bash")!;
+
+    const result = await bash.execute(
+      "call_bash",
+      { command: "printf 'from-default-shell'", maxOutputBytes: 1_000 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(result)).toContain("shell-argv:-lc printf 'from-default-shell'");
+    expect(textOf(result)).toContain("from-default-shell");
+    expect(result.details).toMatchObject({
+      shell,
+    });
+  });
+
+  it("uses csh-compatible command flags for csh-like default shells", async () => {
+    const cwd = await tempRoot();
+    const shell = join(cwd, "csh");
+    await writeFile(
+      shell,
+      [
+        "#!/bin/sh",
+        "printf 'shell-argv:%s\\n' \"$*\"",
+        "if [ \"$1\" = \"-c\" ]; then shift; exec /bin/sh -c \"$1\"; fi",
+        "echo unexpected shell args >&2",
+        "exit 9",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const bash = createCodingTools({ cwd, defaultShell: shell }).find((tool) => tool.name === "Bash")!;
+
+    const result = await bash.execute(
+      "call_bash",
+      { command: "printf 'from-csh-compatible-shell'", maxOutputBytes: 1_000 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(result)).toContain("shell-argv:-c printf 'from-csh-compatible-shell'");
+    expect(textOf(result)).toContain("from-csh-compatible-shell");
+    expect(result.details).toMatchObject({
+      shell,
+    });
+  });
+
+  it("runs Bash through RTK rewrite when token saving is enabled", async () => {
+    const cwd = await tempRoot();
+    const shell = join(cwd, "scorel-shell");
+    await writeFile(
+      shell,
+      [
+        "#!/bin/sh",
+        "if [ \"$1\" = \"-lc\" ]; then shift; exec /bin/sh -c \"$1\"; fi",
+        "exec /bin/sh \"$@\"",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const rtk = join(cwd, "rtk");
+    const gainMarker = join(cwd, "rtk-gain-after");
+    await writeFile(
+      rtk,
+      [
+        "#!/bin/sh",
+        "if [ \"$1\" = \"gain\" ] && [ \"$2\" = \"--project\" ] && [ \"$3\" = \"--format\" ] && [ \"$4\" = \"json\" ]; then",
+        `  if [ -f '${gainMarker}' ]; then printf '%s\\n' '{\"summary\":{\"total_saved\":124}}'; else printf '%s\\n' '{\"summary\":{\"total_saved\":100}}'; fi`,
+        "  exit 0",
+        "fi",
+        "if [ \"$1\" = \"rewrite\" ] && [ \"$2\" = \"git status\" ]; then echo 'rtk git status'; exit 3; fi",
+        "printf 'rtk-argv:%s\\n' \"$*\"",
+        `if [ "$1" = "git" ] && [ "$2" = "status" ]; then touch '${gainMarker}'; echo '* main...origin/main [ahead 2]'; echo 'clean — nothing to commit'; exit 0; fi`,
+        "exit 9",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const bash = createCodingTools({
+      cwd,
+      defaultShell: shell,
+      tokenSaving: {
+        rtk: {
+          enabled: true,
+          executable: rtk,
+        },
+      },
+    }).find((tool) => tool.name === "Bash")!;
+
+    const result = await bash.execute(
+      "call_bash",
+      { command: "git status", maxOutputBytes: 1_000 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(result)).toContain("rtk-argv:git status");
+    expect(textOf(result)).toContain("* main...origin/main [ahead 2]");
+    expect(textOf(result)).toContain("clean — nothing to commit");
+    expect(result.details).toMatchObject({
+      exitCode: 0,
+      shell,
+      command: "rtk git status",
+      rtk: {
+        enabled: true,
+        applied: true,
+        executable: rtk,
+        rewrittenCommand: "rtk git status",
+        estimatedSavedTokens: 24,
+      },
+    });
+  });
+
+  it("keeps Bash on the direct shell path when RTK token saving is disabled", async () => {
+    const cwd = await tempRoot();
+    const bash = createCodingTools({
+      cwd,
+      tokenSaving: {
+        rtk: {
+          enabled: false,
+          executable: "/missing/rtk",
+        },
+      },
+    }).find((tool) => tool.name === "Bash")!;
+
+    const result = await bash.execute(
+      "call_bash",
+      { command: "printf 'direct'", maxOutputBytes: 1_000 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(result)).toContain("direct");
+    expect(result.details).toMatchObject({
+      exitCode: 0,
+      rtk: {
+        enabled: false,
+        applied: false,
+      },
+    });
+  });
+
   it("finds files with Glob using stable result limits", async () => {
     const cwd = await tempRoot();
     await mkdir(join(cwd, "src"));

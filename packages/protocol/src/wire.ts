@@ -15,8 +15,10 @@ import type {
   UpsertModelProfileInput,
   MemoryStatus,
   MemorySettings,
+  RuntimeSettings,
   UpsertExtensionSettingsInput,
   UpsertMemorySettingsInput,
+  UpsertRuntimeSettingsInput,
   PersistentEvent,
   QueueItem,
   QueueName,
@@ -99,6 +101,14 @@ export type ClientRequestMap = {
   upsert_memory_settings: {
     request: UpsertMemorySettingsInput;
     response: { memory: MemorySettings };
+  };
+  get_runtime_settings: {
+    request: { projectId: ProjectId };
+    response: { runtime: RuntimeSettings };
+  };
+  upsert_runtime_settings: {
+    request: UpsertRuntimeSettingsInput;
+    response: { runtime: RuntimeSettings };
   };
   get_extension_settings: {
     request: { extensionId: string };

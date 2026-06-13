@@ -219,6 +219,56 @@ describe("ScorelRuntime", () => {
     });
   });
 
+  it("does not pass tool execution details into the next provider turn", async () => {
+    const providerCalls: ScorelMessage[][] = [];
+    const provider: RuntimeProvider = {
+      streamTurn: async function* ({ context }) {
+        providerCalls.push(context);
+        if (providerCalls.length === 1) {
+          return {
+            role: "assistant",
+            content: [{ type: "tool_call", toolCallId: "call_1", toolName: "echo", args: { text: "ok" } }],
+            stopReason: "tool_call",
+          };
+        }
+        return assistantMessage("done");
+      },
+    };
+    const runtime = new ScorelRuntime({ provider });
+    runtime.registerTool(
+      defineTool({
+        name: "echo",
+        description: "Echo text",
+        execute: async () => ({
+          content: [{ type: "text", text: "ok" }],
+          details: { command: "rtk echo ok", rtk: { applied: true } },
+        }),
+      }),
+    );
+
+    const events = await collect(runtime);
+
+    const execution = events.find((event) => event.type === "tool_execution_end");
+    expect(execution).toMatchObject({
+      type: "tool_execution_end",
+      result: {
+        details: { command: "rtk echo ok", rtk: { applied: true } },
+      },
+    });
+    expect(providerCalls[1]?.at(-1)).toEqual({
+      role: "tool_result",
+      content: [
+        {
+          type: "tool_result",
+          toolCallId: "call_1",
+          toolName: "echo",
+          result: { content: [{ type: "text", text: "ok" }] },
+          isError: false,
+        },
+      ],
+    });
+  });
+
   it("can refresh context after tool execution before the next provider turn", async () => {
     const providerCalls: ScorelMessage[][] = [];
     const provider: RuntimeProvider = {

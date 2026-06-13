@@ -5,13 +5,15 @@ import {
   FileText,
   Server,
   Smartphone,
+  Terminal,
 } from "../icons/index.js";
-import type { GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiProjectRef, GuiRelayDeviceView } from "../../shared/ipc.js";
+import type { GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiProjectRef, GuiRelayDeviceView, GuiRuntimeSettingsView } from "../../shared/ipc.js";
 import { ConfigSection } from "./sections/ConfigSection.js";
 import { ImSection } from "./sections/ImSection.js";
 import { MemorySection } from "./sections/MemorySection.js";
 import { ModelSection } from "./sections/ModelSection.js";
 import { ProviderSection } from "./sections/ProviderSection.js";
+import { RuntimeSection } from "./sections/RuntimeSection.js";
 import { SettingsNav, type SettingsNavGroup } from "./SettingsNav.js";
 
 export type SettingsShellProps = {
@@ -20,9 +22,11 @@ export type SettingsShellProps = {
   modelProfile: GuiModelProfileView;
   memory: GuiMemorySettingsView;
   memoryStatus: GuiMemoryStatusView;
+  runtime: GuiRuntimeSettingsView;
   imExtensions: Record<string, GuiExtensionSettingsView>;
   onModelProfileChange(profile: GuiModelProfileView): void;
   onMemoryChange(memory: GuiMemorySettingsView): void;
+  onRuntimeChange(runtime: GuiRuntimeSettingsView): void;
   onExtensionChange(extension: GuiExtensionSettingsView): void;
   busy: boolean;
   setBusy(value: boolean): void;
@@ -38,6 +42,7 @@ const NAV_GROUPS: SettingsNavGroup[] = [
       { id: "model", label: "模型", icon: <Box size={14} /> },
       { id: "provider", label: "Provider", icon: <Box size={14} /> },
       { id: "memory", label: "记忆", icon: <FileText size={14} /> },
+      { id: "runtime", label: "Token 节省", icon: <Terminal size={14} /> },
       { id: "im", label: "IM", icon: <Smartphone size={14} /> },
       { id: "connections", label: "连接", icon: <Server size={14} /> },
     ],
@@ -83,6 +88,18 @@ export function SettingsShell(props: SettingsShellProps) {
           setBusy={props.setBusy}
           setError={props.setError}
           onMemoryChange={props.onMemoryChange}
+        />
+      );
+      break;
+    case "runtime":
+      content = (
+        <RuntimeSection
+          project={props.project}
+          runtime={props.runtime}
+          busy={props.busy}
+          setBusy={props.setBusy}
+          setError={props.setError}
+          onRuntimeChange={props.onRuntimeChange}
         />
       );
       break;

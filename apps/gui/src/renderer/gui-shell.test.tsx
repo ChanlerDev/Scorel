@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { GuiModelProfileView, GuiProjectView } from "../shared/ipc.js";
 import { ProjectPickerMenu } from "./composer/ProjectPickerMenu.js";
 import { MemorySection } from "./settings/sections/MemorySection.js";
+import { RuntimeSection } from "./settings/sections/RuntimeSection.js";
 import { ImSection } from "./settings/sections/ImSection.js";
 import { ProviderSection } from "./settings/sections/ProviderSection.js";
 import { SettingsShell } from "./settings/SettingsShell.js";
@@ -75,6 +76,15 @@ const memoryStatus = {
   lastDailyAppendAt: Date.UTC(2026, 5, 12, 8, 30),
   scheduledFor: Date.UTC(2026, 5, 12, 9, 30),
   lastProjectMemoryUpdateAt: Date.UTC(2026, 5, 12, 7, 30),
+};
+
+const runtimeSettings = {
+  tokenSavingRtk: true,
+  rtkAvailable: true,
+  rtkExecutable: "/usr/local/bin/rtk",
+  rtkVersion: "rtk 0.42.4",
+  estimatedOutputTokens: 1200,
+  estimatedSavedTokens: 4800,
 };
 
 const telegramSettings = {
@@ -358,9 +368,11 @@ describe("GUI shell rendering contract", () => {
         modelProfile={modelProfile}
         memory={memorySettings}
         memoryStatus={memoryStatus}
+        runtime={runtimeSettings}
         imExtensions={imExtensions}
         onModelProfileChange={noop}
         onMemoryChange={noop}
+        onRuntimeChange={noop}
         onExtensionChange={noop}
         busy={false}
         setBusy={noop}
@@ -373,6 +385,7 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("模型");
     expect(html).toContain("Provider");
     expect(html).toContain("记忆");
+    expect(html).toContain("Token 节省");
     expect(html).toContain("Main Model");
     expect(html).toContain("工作模型");
     expect(html).toContain("已选用模型");
@@ -405,9 +418,11 @@ describe("GUI shell rendering contract", () => {
         modelProfile={modelProfile}
         memory={memorySettings}
         memoryStatus={memoryStatus}
+        runtime={runtimeSettings}
         imExtensions={imExtensions}
         onModelProfileChange={noop}
         onMemoryChange={noop}
+        onRuntimeChange={noop}
         onExtensionChange={noop}
         busy={false}
         setBusy={noop}
@@ -420,6 +435,7 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("模型");
     expect(html).toContain("Provider");
     expect(html).toContain("记忆");
+    expect(html).toContain("Token 节省");
     expect(html).toContain("连接");
     expect(html).toContain("已选用模型");
     expect(html).not.toContain("加入可用模型");
@@ -491,6 +507,27 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("自动 dream");
     expect(html).toContain("Dream 延迟");
     expect(html).toContain("提升到全局");
+  });
+
+  it("renders RTK token saving settings and Scorel savings status", () => {
+    const html = renderToStaticMarkup(
+      <RuntimeSection
+        project={{ source: "local", projectId: localProject.projectId }}
+        runtime={runtimeSettings}
+        busy={false}
+        setBusy={noop}
+        setError={noop}
+        onRuntimeChange={noop}
+      />,
+    );
+
+    expect(html).toContain("Token 节省");
+    expect(html).toContain("RTK");
+    expect(html).toContain("已可用");
+    expect(html).toContain("Scorel saved tokens");
+    expect(html).toContain("recorded by Scorel sessions");
+    expect(html).toContain("4,800");
+    expect(html).toContain("1,200");
   });
 
   it("renders compact IM platform rows collapsed by default", () => {

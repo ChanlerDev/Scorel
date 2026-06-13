@@ -238,7 +238,7 @@ export class ScorelRuntime {
       type: "tool_result",
       toolCallId: toolCall.toolCallId,
       toolName: toolCall.toolName,
-      result,
+      result: toolResultForContext(result),
       isError,
     };
 
@@ -248,6 +248,10 @@ export class ScorelRuntime {
     };
   }
 }
+
+const toolResultForContext = (result: ToolResult): ToolResult => ({
+  content: result.content,
+});
 
 const normalizeAssistantMessage = (
   value: ScorelMessage | void,

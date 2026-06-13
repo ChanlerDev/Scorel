@@ -15,6 +15,10 @@ type BashResult = {
   exitCode?: number;
 };
 
+type BashDetails = {
+  exitCode?: unknown;
+};
+
 const COLLAPSE_AT = 12;
 
 function truncate(value: string, limit: number): string {
@@ -23,7 +27,7 @@ function truncate(value: string, limit: number): string {
 
 function parseBashResult(value: unknown): { text: string; exitCode?: number } {
   const toolText = extractToolText(value);
-  const details = extractToolDetails(value) as { exitCode?: unknown } | undefined;
+  const details = extractToolDetails(value) as BashDetails | undefined;
   if (toolText) {
     return {
       text: toolText,
@@ -44,8 +48,8 @@ function parseBashResult(value: unknown): { text: string; exitCode?: number } {
 
 export function BashBlock({ call, result, pending }: ToolBlockProps) {
   const args = (call.args ?? {}) as BashArgs;
-  const command = args.command ?? "";
   const out = parseBashResult(result?.result);
+  const command = args.command ?? "";
   const [showAll, setShowAll] = useState<boolean>(false);
   const lines = out.text ? out.text.split(/\r?\n/) : [];
   const visible = !showAll && lines.length > COLLAPSE_AT ? lines.slice(0, COLLAPSE_AT) : lines;

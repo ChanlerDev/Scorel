@@ -1,14 +1,15 @@
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { ScorelRuntime, loadScorelConfig, loadScorelConfigProfile, type RuntimeProvider, type RuntimeProviderTurn, type ScorelConfig } from "@scorel/core";
+import { ScorelRuntime, defineTool, loadScorelConfig, loadScorelConfigProfile, type RuntimeProvider, type RuntimeProviderTurn, type ScorelConfig } from "@scorel/core";
 import {
   asClientId,
   asDeviceId,
+  asProjectId,
   asRequestId,
   asSessionId,
   type DaemonMessage,
@@ -16,7 +17,7 @@ import {
   type ScorelMessage,
 } from "@scorel/protocol";
 
-import { ScorelHost, createEmbeddedTransport } from "../index.js";
+import { ScorelHost, createEmbeddedTransport, createRealRuntime } from "../index.js";
 
 const assistantMessage = (text: string): ScorelMessage => ({
   role: "assistant",
@@ -77,6 +78,9 @@ const modelProfile: ScorelConfig = {
     promoteRoot: true,
     dreamIdleMinutes: 60,
     autoCompactThreshold: 0.8,
+  },
+  runtime: {
+    tokenSavingRtk: false,
   },
   extensions: {},
 };
@@ -185,6 +189,88 @@ describe("ScorelHost + embedded transport", () => {
     expect((await host.listProjects()).map((project) => project.projectId).sort()).toEqual(
       [projectA.projectId, projectB.projectId].sort(),
     );
+  });
+
+  it("maintains RTK savings totals when Scorel persists tool results", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-rtk-stats-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    const savingsProvider: RuntimeProvider = {
+      streamTurn: async function* ({ context }) {
+        const hasToolResult = context.some((message) => message.role === "tool_result");
+        if (!hasToolResult) {
+          return {
+            role: "assistant",
+            content: [{ type: "tool_call", toolCallId: "call_savings", toolName: "SavingsTool", args: {} }],
+            stopReason: "tool_call",
+          };
+        }
+        return assistantMessage("ok");
+      },
+    };
+    const sessionId = asSessionId("ses_rtk_stats");
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () => {
+        const runtime = new ScorelRuntime({ provider: savingsProvider });
+        runtime.registerTool(
+          defineTool({
+            name: "SavingsTool",
+            description: "Return RTK savings details",
+            execute: async () => ({
+              content: [{ type: "text", text: "saved" }],
+              details: {
+                rtk: {
+                  applied: true,
+                  estimatedOutputTokens: 11,
+                  estimatedSavedTokens: 5,
+                },
+              },
+            }),
+          }),
+        );
+        return runtime;
+      },
+      now: () => 1_000,
+    });
+    await host.start();
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_rtk_stats_create"),
+      sessionId,
+      meta: { projectId: project.projectId },
+    });
+    const response = waitForResponse(transport, "req_rtk_stats_send");
+
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_rtk_stats_send"),
+      sessionId,
+      content: "record savings",
+    });
+
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    const stats = JSON.parse(await readFile(join(root, "runtime-stats.json"), "utf8")) as {
+      rtk: {
+        outputTokens: number;
+        savedTokens: number;
+        byProject: Record<string, { outputTokens: number; savedTokens: number }>;
+        bySession: Record<string, { outputTokens: number; savedTokens: number }>;
+      };
+    };
+    expect(stats.rtk.outputTokens).toBe(11);
+    expect(stats.rtk.savedTokens).toBe(5);
+    expect(stats.rtk.byProject[project.projectId]).toEqual({ outputTokens: 11, savedTokens: 5 });
+    expect(stats.rtk.bySession[sessionId]).toEqual({ outputTokens: 11, savedTokens: 5 });
+    await host.shutdown();
   });
 
   it("lists configured models without provider credentials", async () => {
@@ -1188,6 +1274,244 @@ auxiliary = "main"
     expect(providerRemovedConfig).not.toContain("[model_profile.roles]");
   });
 
+  it("detects RTK through the user's default shell environment", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-rtk-shell-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const repo = join(root, "repo");
+    await Promise.all([mkdir(sessionsDir), mkdir(repo)]);
+    const rtk = join(root, "rtk");
+    await writeFile(
+      rtk,
+      [
+        "#!/bin/sh",
+        "if [ \"$1\" = \"gain\" ] && [ \"$2\" = \"--project\" ] && [ \"$3\" = \"--format\" ] && [ \"$4\" = \"json\" ]; then",
+        "  printf '%s\\n' '{\"summary\":{\"total_output\":130,\"total_saved\":48}}'",
+        "  exit 0",
+        "fi",
+        "echo 'rtk 0.0.0-test'",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const shell = join(root, "zsh");
+    await writeFile(
+      shell,
+      [
+        "#!/bin/sh",
+        "if [ \"$1\" = \"-lc\" ] && [ \"$2\" = \"command -v rtk\" ]; then",
+        `  printf '%s\\n' '${rtk}'`,
+        "  exit 0",
+        "fi",
+        "exit 127",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const previousShell = process.env.SHELL;
+    process.env.SHELL = shell;
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () => new ScorelRuntime({ provider }),
+      now: () => 1_000,
+    });
+    try {
+      await host.start();
+      const project = await host.registerProject(repo);
+      await writeFile(
+        join(root, "runtime-stats.json"),
+        `${JSON.stringify({
+          version: 1,
+          rtk: {
+            outputTokens: 12,
+            savedTokens: 7,
+            byProject: { [project.projectId]: { outputTokens: 12, savedTokens: 7 } },
+            bySession: { ses_rtk_savings: { outputTokens: 12, savedTokens: 7 } },
+          },
+        })}\n`,
+      );
+      const transport = createEmbeddedTransport(host);
+      const response = waitForResponse(transport, "req_runtime");
+      await transport.connect({ clientId: asClientId("client_test") });
+
+      await transport.send({
+        type: "get_runtime_settings",
+        requestId: asRequestId("req_runtime"),
+        projectId: project.projectId,
+      });
+
+      await expect(response).resolves.toMatchObject({
+        type: "response",
+        requestType: "get_runtime_settings",
+        data: {
+          runtime: {
+            rtkAvailable: true,
+            rtkExecutable: rtk,
+            rtkVersion: "rtk 0.0.0-test",
+            estimatedOutputTokens: 12,
+            estimatedSavedTokens: 7,
+          },
+        },
+      });
+    } finally {
+      if (previousShell === undefined) {
+        delete process.env.SHELL;
+      } else {
+        process.env.SHELL = previousShell;
+      }
+      await host.shutdown();
+    }
+  });
+
+  it("applies RTK to Bash tools when runtime config enables token saving", async () => {
+    let requests = 0;
+    const server = createServer((_request, response) => {
+      requests += 1;
+      if (requests === 1) {
+        writeOpenAiSse(response, [
+          {
+            id: "chatcmpl-scorel-rtk",
+            object: "chat.completion.chunk",
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_bash",
+                      type: "function",
+                      function: {
+                        name: "Bash",
+                        arguments: "{\"command\":\"git status\",\"maxOutputBytes\":1000}",
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+          {
+            id: "chatcmpl-scorel-rtk",
+            object: "chat.completion.chunk",
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          },
+        ]);
+        return;
+      }
+      writeOpenAiSse(response, [
+        {
+          id: "chatcmpl-scorel-rtk",
+          object: "chat.completion.chunk",
+          choices: [
+            {
+              index: 0,
+              delta: { content: "done" },
+            },
+          ],
+        },
+        {
+          id: "chatcmpl-scorel-rtk",
+          object: "chat.completion.chunk",
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        },
+      ]);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("expected local server address");
+
+    const root = await mkdtemp(join(tmpdir(), "scorel-runtime-rtk-applied-"));
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const rtk = join(root, "rtk");
+    await writeFile(
+      rtk,
+      [
+        "#!/bin/sh",
+        "if [ \"$1\" = \"--version\" ]; then echo 'rtk 0.0.0-test'; exit 0; fi",
+        "if [ \"$1\" = \"rewrite\" ] && [ \"$2\" = \"git status\" ]; then echo 'rtk git status'; exit 3; fi",
+        "if [ \"$1\" = \"git\" ] && [ \"$2\" = \"status\" ]; then echo '* main...origin/main [ahead 2]'; echo 'clean — nothing to commit'; exit 0; fi",
+        "exit 9",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const shell = join(root, "zsh");
+    await writeFile(
+      shell,
+      [
+        "#!/bin/sh",
+        "if [ \"$1\" = \"-lc\" ] && [ \"$2\" = \"command -v rtk\" ]; then",
+        `  printf '%s\\n' '${rtk}'`,
+        "  exit 0",
+        "fi",
+        "if [ \"$1\" = \"-lc\" ]; then shift; exec /bin/sh -c \"$1\"; fi",
+        "exit 127",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const previousShell = process.env.SHELL;
+    process.env.SHELL = shell;
+    try {
+      const runtime = await createRealRuntime({
+        cwd: repo,
+        config: {
+          ...modelProfile,
+          providers: {
+            test: {
+              type: "custom",
+              api: "openai-completions",
+              provider: "scorel-test",
+              baseUrl: `http://127.0.0.1:${address.port}`,
+              apiKey: "secret",
+            },
+          },
+          runtime: {
+            tokenSavingRtk: true,
+          },
+        },
+        includeTools: true,
+      });
+
+      const events = [];
+      for await (const event of runtime.executeTurn(
+        [{ role: "user", content: [{ type: "text", text: "run bash" }] }],
+        "system",
+        {},
+      )) {
+        events.push(event);
+      }
+
+      const bashResult = events.find((event) => event.type === "tool_execution_end" && event.toolName === "Bash");
+      expect(bashResult).toMatchObject({
+        type: "tool_execution_end",
+        result: {
+          details: {
+            shell,
+            rtk: {
+              enabled: true,
+              applied: true,
+              executable: rtk,
+              rewrittenCommand: "rtk git status",
+            },
+            command: "rtk git status",
+          },
+        },
+      });
+    } finally {
+      if (previousShell === undefined) {
+        delete process.env.SHELL;
+      } else {
+        process.env.SHELL = previousShell;
+      }
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("fetches provider catalog models through a real /models endpoint", async () => {
     const server = createServer((request, response) => {
       if (request.url !== "/v1/models") {
@@ -1797,6 +2121,18 @@ const waitForResponse = (transport: ReturnType<typeof createEmbeddedTransport>, 
       }
     });
   });
+
+const writeOpenAiSse = (response: ServerResponse, chunks: unknown[]): void => {
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  for (const chunk of chunks) {
+    response.write(`data: ${JSON.stringify(chunk)}\n\n`);
+  }
+  response.end("data: [DONE]\n\n");
+};
 
 const deferred = <T>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;

@@ -73,6 +73,28 @@ describe("GUI tool blocks", () => {
     expect(container!.textContent).toContain("pass");
   });
 
+  it("keeps the original Bash command visible when RTK rewrites execution", async () => {
+    renderTool(
+      <BashBlock
+        call={toolCall("Bash", { command: "git status" })}
+        result={toolResult("Bash", "exitCode: 0\ncwd: /tmp/project\nstdout:\nclean\nstderr:\n", {
+          exitCode: 0,
+          cwd: "/tmp/project",
+          command: "rtk git status",
+          rtk: {
+            enabled: true,
+            applied: true,
+            rewrittenCommand: "rtk git status",
+          },
+        })}
+        pending={false}
+      />,
+    );
+
+    expect(container!.textContent).toContain("$ git status");
+    expect(container!.textContent).not.toContain("$ rtk git status");
+  });
+
   it("keeps Edit diffs visible by default", async () => {
     renderTool(
       <EditWriteBlock

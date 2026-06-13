@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, extname, isAbsolute, relative, resolve } from "node:path";
+import { userInfo } from "node:os";
+import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import type { AgentTool, ToolResult } from "./index.js";
@@ -16,6 +17,13 @@ export type CodingToolsOptions = {
   maxOutputBytes?: number;
   maxReadTokens?: number;
   contextWindow?: number;
+  defaultShell?: string;
+  tokenSaving?: {
+    rtk?: {
+      enabled: boolean;
+      executable?: string;
+    };
+  };
 };
 
 type FileReadSnapshot = {
@@ -114,6 +122,7 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
   const maxOutputBytes = options.maxOutputBytes ?? 16_000;
   const normalReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, READ_TOKEN_BUDGET_RATIO);
   const fullReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, FULL_READ_TOKEN_BUDGET_RATIO);
+  const defaultShell = resolveDefaultShell(options.defaultShell);
 
   const resolveWorkspacePath = (input: string): string => {
     if (input.length === 0) {
@@ -283,26 +292,53 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
         const commandCwd = input.cwd ? resolveWorkspacePath(input.cwd) : root;
         const timeoutMs = Math.min(input.timeoutMs ?? defaultTimeoutMs, maxTimeoutMs);
         const outputLimit = input.maxOutputBytes ?? maxOutputBytes;
+        const rtk = options.tokenSaving?.rtk;
+        const rtkCommand = await resolveRtkCommand(rtk, input.command);
+        const command = rtkCommand.rewrittenCommand ?? input.command;
+        const executionCommand = rtkCommand.executionCommand ?? input.command;
+        const executable = defaultShell;
+        const argv = shellCommandArgs(defaultShell, executionCommand);
+        const rtkGainBefore = rtkCommand.applied && rtk?.executable ? await readRtkGain(rtk.executable, commandCwd) : undefined;
+        const rtkResult = {
+          enabled: rtk?.enabled === true,
+          applied: rtkCommand.applied,
+          ...(rtk?.executable ? { executable: rtk.executable } : {}),
+          ...(rtkCommand.rewrittenCommand ? { rewrittenCommand: rtkCommand.rewrittenCommand } : {}),
+        };
 
         try {
-          const result = await execFileAsync("/bin/bash", ["-lc", input.command], {
+          const result = await execFileAsync(executable, argv, {
             cwd: commandCwd,
             timeout: timeoutMs,
             signal,
             maxBuffer: Math.max(outputLimit * 4, 1024 * 1024),
           });
-          return bashResult({ exitCode: 0, stdout: result.stdout, stderr: result.stderr, cwd: commandCwd, outputLimit });
+          const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : undefined;
+          return bashResult({
+            exitCode: 0,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            cwd: commandCwd,
+            outputLimit,
+            shell: defaultShell,
+            command,
+            rtk: withRtkSavings(rtkResult, rtkSavedTokens),
+          });
         } catch (cause) {
           if (isTimeoutError(cause)) {
             throw new Error(`Bash command timed out after ${timeoutMs}ms`);
           }
           if (isExecError(cause)) {
+            const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : undefined;
             return bashResult({
               exitCode: typeof cause.code === "number" ? cause.code : 1,
               stdout: String(cause.stdout ?? ""),
               stderr: String(cause.stderr ?? cause.message),
               cwd: commandCwd,
               outputLimit,
+              shell: defaultShell,
+              command,
+              rtk: withRtkSavings(rtkResult, rtkSavedTokens),
             });
           }
           throw cause;
@@ -726,13 +762,135 @@ const bashResult = (input: {
   stderr: string;
   cwd: string;
   outputLimit: number;
+  shell?: string;
+  command?: string;
+  rtk?: {
+    enabled: boolean;
+    applied: boolean;
+    executable?: string;
+    rewrittenCommand?: string;
+    estimatedSavedTokens?: number;
+  };
 }): ToolResult => {
   const stdout = truncate(input.stdout, input.outputLimit, "stdout");
   const stderr = truncate(input.stderr, input.outputLimit, "stderr");
   return textResult(`exitCode: ${input.exitCode}\ncwd: ${input.cwd}\nstdout:\n${stdout}\nstderr:\n${stderr}`, {
     exitCode: input.exitCode,
     cwd: input.cwd,
+    ...(input.shell ? { shell: input.shell } : {}),
+    ...(input.command ? { command: input.command } : {}),
+    ...(input.rtk ? {
+      rtk: {
+        ...input.rtk,
+        estimatedOutputTokens: estimateTokens(`${stdout}\n${stderr}`),
+      },
+    } : {}),
   });
+};
+
+const resolveDefaultShell = (input: string | undefined): string => {
+  const shell = input || process.env.SHELL || userShell() || "/bin/sh";
+  return shell.trim() || "/bin/sh";
+};
+
+const resolveRtkCommand = async (
+  rtk: NonNullable<CodingToolsOptions["tokenSaving"]>["rtk"] | undefined,
+  command: string,
+): Promise<{ applied: boolean; rewrittenCommand?: string; executionCommand?: string }> => {
+  if (rtk?.enabled !== true || typeof rtk.executable !== "string" || rtk.executable.length === 0) {
+    return { applied: false };
+  }
+  try {
+    const result = await execFileAsync(rtk.executable, ["rewrite", command], {
+      timeout: 5_000,
+      maxBuffer: 1024 * 1024,
+    });
+    return rtkRewriteResult(result.stdout, rtk.executable);
+  } catch (cause) {
+    if (isExecError(cause) && typeof cause.stdout === "string") {
+      return rtkRewriteResult(cause.stdout, rtk.executable);
+    }
+    return { applied: false };
+  }
+};
+
+const rtkRewriteResult = (
+  stdout: string,
+  executable: string,
+): { applied: boolean; rewrittenCommand?: string; executionCommand?: string } => {
+  const rewrittenCommand = stdout.trim();
+  return rewrittenCommand
+    ? { applied: true, rewrittenCommand, executionCommand: executableRewriteCommand(rewrittenCommand, executable) }
+    : { applied: false };
+};
+
+const executableRewriteCommand = (command: string, executable: string): string =>
+  command.replace(/^rtk(?=\s|$)/, shellQuote(executable));
+
+const readRtkGain = async (rtkExecutable: string, cwd: string): Promise<{ savedTokens: number } | undefined> => {
+  try {
+    const { stdout } = await execFileAsync(rtkExecutable, ["gain", "--project", "--format", "json"], {
+      cwd,
+      timeout: 5_000,
+      maxBuffer: 5_000_000,
+    });
+    const parsed = JSON.parse(stdout) as unknown;
+    if (!isRecord(parsed) || !isRecord(parsed.summary)) {
+      return undefined;
+    }
+    return { savedTokens: nonNegativeInteger(parsed.summary.total_saved) };
+  } catch {
+    return undefined;
+  }
+};
+
+const rtkSavedTokenDelta = async (
+  rtkExecutable: string,
+  cwd: string,
+  before: { savedTokens: number } | undefined,
+): Promise<number | undefined> => {
+  if (!before) {
+    return undefined;
+  }
+  const after = await readRtkGain(rtkExecutable, cwd);
+  if (!after) {
+    return undefined;
+  }
+  return Math.max(0, after.savedTokens - before.savedTokens);
+};
+
+const withRtkSavings = <T extends { applied: boolean }>(rtk: T, savedTokens: number | undefined): T & { estimatedSavedTokens?: number } => ({
+  ...rtk,
+  ...(rtk.applied && savedTokens !== undefined ? { estimatedSavedTokens: savedTokens } : {}),
+});
+
+const nonNegativeInteger = (value: unknown): number => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return Math.floor(value);
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const shellQuote = (value: string): string =>
+  `'${value.replace(/'/g, "'\\''")}'`;
+
+const shellCommandArgs = (shell: string, command: string): string[] => {
+  const name = basename(shell).toLowerCase();
+  if (name === "csh" || name === "tcsh" || name === "fish") {
+    return ["-c", command];
+  }
+  return ["-lc", command];
+};
+
+const userShell = (): string | undefined => {
+  try {
+    return userInfo().shell ?? undefined;
+  } catch {
+    return undefined;
+  }
 };
 
 const truncate = (value: string, maxBytes: number, label: string): string => {

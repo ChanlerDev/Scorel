@@ -27,6 +27,9 @@ export const SCOREL_CONFIG_SCHEMA = {
     memory: {
       keys: ["enabled", "daily", "sessionMemory", "autoDream", "promoteRoot", "dreamIdleMinutes", "autoCompactThreshold"],
     },
+    runtime: {
+      keys: ["tokenSavingRtk"],
+    },
     extension: {
       keys: ["enabled", "kind"],
     },
@@ -100,6 +103,7 @@ export type ScorelConfig = {
     roles: Record<ModelRole, string>;
   };
   memory: MemoryConfig;
+  runtime: RuntimeConfig;
   extensions: Record<string, ExtensionConfig>;
 };
 
@@ -111,6 +115,10 @@ export type MemoryConfig = {
   promoteRoot: boolean;
   dreamIdleMinutes: number;
   autoCompactThreshold: number;
+};
+
+export type RuntimeConfig = {
+  tokenSavingRtk: boolean;
 };
 
 export type ExtensionConfig = {
@@ -142,6 +150,7 @@ export type ScorelConfigProfile = {
     roles: Record<ModelRole, string>;
   };
   memory: MemoryConfig;
+  runtime: RuntimeConfig;
   extensions: Record<string, ExtensionConfig>;
   warnings?: string[];
 };
@@ -212,6 +221,10 @@ export type UpsertMemoryConfigInput = Partial<MemoryConfig> & {
   existingConfigText?: string;
 };
 
+export type UpsertRuntimeConfigInput = Partial<RuntimeConfig> & {
+  existingConfigText?: string;
+};
+
 export type ConfigValue = string | number | boolean;
 
 export type UpsertExtensionConfigInput = {
@@ -263,6 +276,7 @@ type RawConfig = {
     roles?: Partial<Record<ModelRole, string>>;
   };
   memory?: Partial<MemoryConfig>;
+  runtime?: Partial<RuntimeConfig>;
   extensions: Record<string, {
     enabled?: boolean;
     kind?: string;
@@ -277,6 +291,7 @@ type ConfigSection =
   | { kind: "availableModel"; id: string }
   | { kind: "modelProfileRoles" }
   | { kind: "memory" }
+  | { kind: "runtime" }
   | { kind: "extension"; id: string }
   | { kind: "extensionConfig"; id: string };
 export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promise<ScorelConfig> => {
@@ -293,6 +308,7 @@ export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promis
     models,
     modelProfile: { roles },
     memory: loadMemory(raw),
+    runtime: loadRuntime(raw),
     extensions: loadExtensions(raw),
   };
 };
@@ -311,6 +327,7 @@ export const loadScorelConfigProfile = async (options: LoadScorelConfigOptions &
     models,
     modelProfile: { roles },
     memory: loadMemory(raw),
+    runtime: loadRuntime(raw),
     extensions: loadExtensions(raw),
   };
 };
@@ -590,6 +607,15 @@ export const renderMemoryConfig = (input: UpsertMemoryConfigInput): string => {
   return renderRawConfig(raw);
 };
 
+export const renderRuntimeConfig = (input: UpsertRuntimeConfigInput): string => {
+  const raw = parseEditableConfig(input.existingConfigText);
+  raw.runtime = {
+    ...loadRuntime(raw),
+    ...(input.tokenSavingRtk !== undefined ? { tokenSavingRtk: requireBoolean(input.tokenSavingRtk, "runtime.tokenSavingRtk") } : {}),
+  };
+  return renderRawConfig(raw);
+};
+
 export const renderExtensionConfig = (input: UpsertExtensionConfigInput): string => {
   const raw = parseEditableConfig(input.existingConfigText);
   const extensionId = requireIdentifier(input.extensionId, "extensionId");
@@ -623,6 +649,10 @@ const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   autoCompactThreshold: 0.8,
 };
 
+const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
+  tokenSavingRtk: false,
+};
+
 const loadMemory = (raw: RawConfig): MemoryConfig => ({
   enabled: raw.memory?.enabled ?? DEFAULT_MEMORY_CONFIG.enabled,
   daily: raw.memory?.daily ?? DEFAULT_MEMORY_CONFIG.daily,
@@ -631,6 +661,10 @@ const loadMemory = (raw: RawConfig): MemoryConfig => ({
   promoteRoot: raw.memory?.promoteRoot ?? DEFAULT_MEMORY_CONFIG.promoteRoot,
   dreamIdleMinutes: requireNonNegativeNumber(raw.memory?.dreamIdleMinutes ?? DEFAULT_MEMORY_CONFIG.dreamIdleMinutes, "memory.dreamIdleMinutes"),
   autoCompactThreshold: requireCompactThreshold(raw.memory?.autoCompactThreshold ?? DEFAULT_MEMORY_CONFIG.autoCompactThreshold),
+});
+
+const loadRuntime = (raw: RawConfig): RuntimeConfig => ({
+  tokenSavingRtk: raw.runtime?.tokenSavingRtk ?? DEFAULT_RUNTIME_CONFIG.tokenSavingRtk,
 });
 
 const loadExtensions = (raw: RawConfig): Record<string, ExtensionConfig> => {
@@ -950,6 +984,12 @@ const renderRawConfig = (raw: RawConfig): string => {
     lines.push(`autoCompactThreshold = ${memory.autoCompactThreshold}`);
     lines.push("");
   }
+  if (raw.runtime) {
+    const runtime = loadRuntime(raw);
+    lines.push("[runtime]");
+    lines.push(`tokenSavingRtk = ${runtime.tokenSavingRtk}`);
+    lines.push("");
+  }
   for (const [extensionId, extension] of Object.entries(raw.extensions).sort(([left], [right]) => left.localeCompare(right))) {
     lines.push(`[extensions.${extensionId}]`);
     lines.push(`enabled = ${extension.enabled === true}`);
@@ -1107,6 +1147,9 @@ const requireSection = (section: string): ConfigSection => {
   if (section === "memory") {
     return { kind: "memory" };
   }
+  if (section === "runtime") {
+    return { kind: "runtime" };
+  }
   const extensionConfigMatch = /^extensions\.([A-Za-z0-9_-]+)\.config$/.exec(section);
   if (extensionConfigMatch?.[1]) {
     return { kind: "extensionConfig", id: extensionConfigMatch[1] };
@@ -1130,6 +1173,8 @@ const ensureSection = (config: RawConfig, section: ConfigSection): void => {
     config.modelProfile.roles ??= {};
   } else if (section.kind === "memory") {
     config.memory ??= {};
+  } else if (section.kind === "runtime") {
+    config.runtime ??= {};
   } else if (section.kind === "extension") {
     config.extensions[section.id] ??= {};
   } else if (section.kind === "extensionConfig") {
@@ -1156,6 +1201,9 @@ const setConfigValue = (config: RawConfig, section: ConfigSection, key: string, 
   } else if (section.kind === "memory") {
     config.memory ??= {};
     setValue(config.memory, key, value);
+  } else if (section.kind === "runtime") {
+    config.runtime ??= {};
+    setValue(config.runtime, key, value);
   } else if (section.kind === "extension") {
     config.extensions[section.id] ??= {};
     setValue(config.extensions[section.id], key, value);

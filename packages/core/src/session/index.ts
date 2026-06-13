@@ -645,8 +645,7 @@ const cloneMessage = (message: ScorelMessage): ScorelMessage => ({
     return {
       ...block,
       result: {
-        ...block.result,
-        ...content,
+        content: content.content ?? [],
       },
     };
   }),

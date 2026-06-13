@@ -5,6 +5,7 @@ import type {
   ModelRole,
   MemoryStatus,
   MemorySettings,
+  RuntimeSettings,
   ExtensionSettings,
   ProviderCatalogModelSummary,
   ProviderConnectionSummary,
@@ -15,6 +16,7 @@ import type {
   SessionSummary,
   UpsertModelProfileInput,
   UpsertMemorySettingsInput,
+  UpsertRuntimeSettingsInput,
   UpsertExtensionSettingsInput,
 } from "@scorel/protocol";
 
@@ -80,6 +82,10 @@ export type GuiMemoryStatusView = MemoryStatus;
 
 export type GuiUpsertMemorySettingsInput = Omit<UpsertMemorySettingsInput, "projectId">;
 
+export type GuiRuntimeSettingsView = RuntimeSettings;
+
+export type GuiUpsertRuntimeSettingsInput = Omit<UpsertRuntimeSettingsInput, "projectId">;
+
 export type GuiExtensionSettingsView = ExtensionSettings;
 
 export type GuiUpsertExtensionSettingsInput = UpsertExtensionSettingsInput;
@@ -127,6 +133,8 @@ export type GuiApi = {
   getMemorySettings(project: GuiProjectRef): Promise<GuiMemorySettingsView>;
   getMemoryStatus(project: GuiProjectRef): Promise<GuiMemoryStatusView>;
   upsertMemorySettings(project: GuiProjectRef, input: GuiUpsertMemorySettingsInput): Promise<GuiMemorySettingsView>;
+  getRuntimeSettings(project: GuiProjectRef): Promise<GuiRuntimeSettingsView>;
+  upsertRuntimeSettings(project: GuiProjectRef, input: GuiUpsertRuntimeSettingsInput): Promise<GuiRuntimeSettingsView>;
   getExtensionSettings(extensionId: string): Promise<GuiExtensionSettingsView>;
   upsertExtensionSettings(input: GuiUpsertExtensionSettingsInput): Promise<GuiExtensionSettingsView>;
   createSession(project: GuiProjectRef, modelSelection?: GuiModelSelection): Promise<SessionId>;
@@ -157,6 +165,8 @@ export const guiIpcChannels = {
   getMemorySettings: "scorel:getMemorySettings",
   getMemoryStatus: "scorel:getMemoryStatus",
   upsertMemorySettings: "scorel:upsertMemorySettings",
+  getRuntimeSettings: "scorel:getRuntimeSettings",
+  upsertRuntimeSettings: "scorel:upsertRuntimeSettings",
   getExtensionSettings: "scorel:getExtensionSettings",
   upsertExtensionSettings: "scorel:upsertExtensionSettings",
   createSession: "scorel:createSession",

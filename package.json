@@ -36,7 +36,9 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "verify:m8-relay": "node --import tsx scripts/verify-m8-relay-e2e.ts",
-    "verify:m9-gui": "node --import tsx scripts/verify-m9-gui-e2e.ts",
+    "verify:m9-gui": "pnpm verify:m9-gui:service && pnpm verify:m9-gui:cdp",
+    "verify:m9-gui:service": "node --import tsx scripts/verify-m9-gui-e2e.ts",
+    "verify:m9-gui:cdp": "node --import tsx scripts/verify-m9-gui-cdp-e2e.ts",
     "scorel": "node --import tsx apps/cli/src/index.ts",
     "dev": "node --import tsx apps/cli/src/index.ts up",
     "gui": "pnpm --filter @scorel/app-gui dev"

@@ -1381,6 +1381,9 @@ const testConfig = (baseURL: string): ScorelConfig => ({
     dreamIdleMinutes: 60,
     autoCompactThreshold: 0.8,
   },
+  runtime: {
+    tokenSavingRtk: false,
+  },
   extensions: {},
 });
 

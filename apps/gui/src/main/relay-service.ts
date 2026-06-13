@@ -13,11 +13,13 @@ import {
   type ModelRole,
   type MemoryStatus,
   type MemorySettings,
+  type RuntimeSettings,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
   type ProviderModelSummary,
   type UpsertModelProfileInput,
   type UpsertMemorySettingsInput,
+  type UpsertRuntimeSettingsInput,
   type PersistentEvent,
   type ProjectId,
   type RelayAuthorizedDevice,
@@ -57,6 +59,8 @@ export type GuiRelayService = {
   getRemoteMemorySettings(deviceId: string, projectId: string): Promise<MemorySettings>;
   getRemoteMemoryStatus(deviceId: string, projectId: string): Promise<MemoryStatus>;
   upsertRemoteMemorySettings(deviceId: string, input: UpsertMemorySettingsInput): Promise<MemorySettings>;
+  getRemoteRuntimeSettings(deviceId: string, projectId: string): Promise<RuntimeSettings>;
+  upsertRemoteRuntimeSettings(deviceId: string, input: UpsertRuntimeSettingsInput): Promise<RuntimeSettings>;
   createRemoteSession(deviceId: string, projectId: string, modelSelection?: ModelSelectionInput): Promise<SessionId>;
   openRemoteSession(deviceId: string, sessionId: string): Promise<PersistentEvent[]>;
   attachRemoteSession(
@@ -158,6 +162,12 @@ export const createGuiRelayService = (store: GuiStore): GuiRelayService => {
     },
     async upsertRemoteMemorySettings(deviceId, input) {
       return (await connectedClient(deviceId)).upsertMemorySettings(input);
+    },
+    async getRemoteRuntimeSettings(deviceId, projectId) {
+      return (await connectedClient(deviceId)).getRuntimeSettings({ projectId: asProjectId(projectId) as ProjectId });
+    },
+    async upsertRemoteRuntimeSettings(deviceId, input) {
+      return (await connectedClient(deviceId)).upsertRuntimeSettings(input);
     },
     async createRemoteSession(deviceId, projectId, modelSelection) {
       return (await connectedClient(deviceId)).createSession({ meta: { projectId: asProjectId(projectId) as ProjectId, modelSelection } });

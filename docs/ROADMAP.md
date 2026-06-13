@@ -592,6 +592,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.16 | [`S0087`](spec/ship/S0087-gui-ui-polish-sweep.md) | Codex-inspired GUI visual pass：学习 Codex 的比例、层级和克制风格，并把 GUI tool blocks 收敛为低噪声执行证据流 | Done |
 | M9.F1.17 | [`S0088`](spec/ship/S0088-gui-streaming-thinking-contract.md) | Streaming thinking contract：补 thinking/content delta，使 thinking 在 turn 运行中按序显示，而不是最终 assistant_message 后才插入 | Done |
 | M9.F1.18 | [`S0089`](spec/ship/S0089-memory-reliability-and-dream-trigger.md) | Memory reliability：修复 AppendDaily 调用质量、dreaming 触发与可观测性，让 M9 后半段聚焦真实使用中的质量优化 | Done |
+| M9.F1.19 | [`S0097`](spec/ship/S0097-rtk-token-saving-settings.md) | GUI Token 节省设置 + RTK Bash output proxy + runtime config | Done |
 
 **Not in M9 Follow-up**:
 
@@ -762,6 +763,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0094`](spec/ship/S0094-im-inbound-runtime.md) | IM inbound runtime receive paths | Done |
 | [`S0095`](spec/ship/S0095-gui-im-session-list-refresh.md) | GUI IM session list refresh | Done |
 | [`S0096`](spec/ship/S0096-glob-stable-order.md) | Glob stable cross-platform ordering | Done |
+| [`S0097`](spec/ship/S0097-rtk-token-saving-settings.md) | RTK token saving settings and Bash output proxy | Done |
 
 ---
 

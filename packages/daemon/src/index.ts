@@ -1,7 +1,10 @@
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { appendFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { userInfo } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { listDirectories as browseDirectories } from "./projects/directories.js";
@@ -30,6 +33,7 @@ import {
   loadExtensionManifest,
   loadSession,
   renderMemoryConfig,
+  renderRuntimeConfig,
   renderExtensionConfig,
   renderMemoryHarness,
   renderSkillDelta,
@@ -93,6 +97,7 @@ import {
   type MemoryStatus,
   type ExtensionSettings,
   type MemorySettings,
+  type RuntimeSettings,
 } from "@scorel/protocol";
 
 export const daemonPackageName = "@scorel/daemon" as const;
@@ -101,6 +106,7 @@ export const daemonProtocolDependency = protocolPackageName;
 export const daemonProtocolVersion = protocolVersion;
 const SESSION_MEMORY_COMPACT_WAIT_MS = 5_000;
 const AUTO_COMPACT_RETAINED_EVENTS = 8;
+const execFileAsync = promisify(execFile);
 export type ScorelHostTransport = DaemonTransport;
 export { loadScorelConfig, loadScorelConfigProfile, scorelSessionsDir, type ScorelConfig };
 export {
@@ -430,6 +436,7 @@ export type RuntimeFactoryOptions = {
   config: ScorelConfig;
   modelSelection?: { modelId?: string; role?: "primary" | "standard" | "auxiliary" };
   includeTools?: boolean;
+  rtkExecutable?: string;
 };
 
 export type ScorelHostOptions = {
@@ -491,9 +498,10 @@ export type ImAdapter = {
   getOutbox?(): ImOutgoingMessage[];
 };
 
-export const createRealRuntime = (options: RuntimeFactoryOptions): ScorelRuntime => {
+export const createRealRuntime = async (options: RuntimeFactoryOptions): Promise<ScorelRuntime> => {
   const selection = resolveModelSelection(options.config, options.modelSelection);
   const model = resolvePiAiModel(selection.config);
+  const rtkExecutable = options.rtkExecutable ?? (options.config.runtime.tokenSavingRtk ? (await detectRtk()).executable : undefined);
   const runtime = new ScorelRuntime({
     provider: createPiAiProvider({
       model,
@@ -501,7 +509,16 @@ export const createRealRuntime = (options: RuntimeFactoryOptions): ScorelRuntime
     }),
   });
   if (options.includeTools !== false) {
-    for (const tool of createCodingTools({ cwd: options.cwd, contextWindow: model.contextWindow })) {
+    for (const tool of createCodingTools({
+      cwd: options.cwd,
+      contextWindow: model.contextWindow,
+      tokenSaving: {
+        rtk: {
+          enabled: options.config.runtime.tokenSavingRtk,
+          executable: rtkExecutable,
+        },
+      },
+    })) {
       runtime.registerTool(tool);
     }
   }
@@ -610,6 +627,7 @@ export class ScorelHost {
   readonly #imExtensions = new Map<string, LoadedImExtension>();
   readonly #imBindings = new Map<string, ImSessionBinding>();
   readonly #registry: ProjectRegistry;
+  #runtimeStatsQueue: Promise<void> = Promise.resolve();
   #started = false;
 
   constructor(options: ScorelHostOptions) {
@@ -833,6 +851,14 @@ export class ScorelHost {
       }
       case "upsert_memory_settings": {
         this.#respond(connection, message, { memory: await this.#handleUpsertMemorySettings(message) });
+        break;
+      }
+      case "get_runtime_settings": {
+        this.#respond(connection, message, { runtime: await this.#runtimeSettingsForProject(message.projectId) });
+        break;
+      }
+      case "upsert_runtime_settings": {
+        this.#respond(connection, message, { runtime: await this.#handleUpsertRuntimeSettings(message) });
         break;
       }
       case "get_extension_settings": {
@@ -1469,6 +1495,18 @@ export class ScorelHost {
             ],
           },
         });
+        const rtkSavings = rtkSavingsFromToolResult(rawEvent.result);
+        if (rtkSavings) {
+          await this.#recordRtkSavings({
+            projectId: lane.project.projectId,
+            sessionId: lane.session.header.sessionId,
+            savings: rtkSavings,
+          }).catch((cause) =>
+            this.#appendDiagnostic(lane.session.header.sessionId, "runtime_stats_update_failed", {
+              message: cause instanceof Error ? cause.message : String(cause),
+            }),
+          );
+        }
         state.parentId = toolResultId;
         break;
       }
@@ -2867,6 +2905,60 @@ export class ScorelHost {
     return this.#memorySettingsForProject(project.projectId);
   }
 
+  async #runtimeSettingsForProject(projectId: ProjectId, installStatus?: Pick<RuntimeSettings, "installStatus" | "installMessage">): Promise<RuntimeSettings> {
+    const config = await this.#configProfileForProject(projectId).catch((cause) => {
+      if (isMissingConfigError(cause)) {
+        return undefined;
+      }
+      throw cause;
+    });
+    const detected = await detectRtk();
+    const savings = await readRuntimeStats(this.#runtimeStatsPath());
+    return {
+      tokenSavingRtk: config?.runtime.tokenSavingRtk ?? false,
+      rtkAvailable: detected.available,
+      ...(detected.executable ? { rtkExecutable: detected.executable } : {}),
+      ...(detected.version ? { rtkVersion: detected.version } : {}),
+      ...(installStatus?.installStatus ? { installStatus: installStatus.installStatus } : {}),
+      ...(installStatus?.installMessage ? { installMessage: installStatus.installMessage } : {}),
+      estimatedOutputTokens: savings.rtk.outputTokens,
+      estimatedSavedTokens: savings.rtk.savedTokens,
+    };
+  }
+
+  async #handleUpsertRuntimeSettings(request: ClientRequest<"upsert_runtime_settings">): Promise<RuntimeSettings> {
+    const project = await this.#registry.require(request.projectId);
+    const configPath = join(project.workDir, ".scorel", "config.toml");
+    let existingConfigText: string | undefined;
+    try {
+      existingConfigText = await readFile(configPath, "utf8");
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+    await mkdir(join(project.workDir, ".scorel"), { recursive: true });
+    await writeFile(
+      configPath,
+      renderRuntimeConfig({
+        tokenSavingRtk: request.tokenSavingRtk,
+        existingConfigText,
+      }),
+      "utf8",
+    );
+    const installResult = request.tokenSavingRtk === true ? await ensureRtkAvailable() : { status: "idle" as const };
+    await this.#appendHostDiagnostic("runtime_settings_upserted", {
+      projectId: project.projectId,
+      workDir: project.workDir,
+      tokenSavingRtk: request.tokenSavingRtk,
+      installStatus: installResult.status,
+    });
+    return this.#runtimeSettingsForProject(project.projectId, {
+      installStatus: installResult.status,
+      ...(installResult.message ? { installMessage: installResult.message } : {}),
+    });
+  }
+
   async #extensionSettings(extensionId: string): Promise<ExtensionSettings> {
     const config = await this.#loadUserConfigProfile().catch((cause) => {
       if (isMissingConfigError(cause)) {
@@ -3060,6 +3152,21 @@ export class ScorelHost {
     await appendFile(join(this.#sessionsDir, "host.log"), `${line}\n`, "utf8");
   }
 
+  #runtimeStatsPath(): string {
+    return join(this.#scorelHomeDir, "runtime-stats.json");
+  }
+
+  async #recordRtkSavings(input: { projectId: ProjectId; sessionId: SessionId; savings: RtkSavingsDelta }): Promise<void> {
+    const updateTask = this.#runtimeStatsQueue.then(async () => {
+      const path = this.#runtimeStatsPath();
+      const stats = await readRuntimeStats(path);
+      addRtkSavings(stats, String(input.projectId), String(input.sessionId), input.savings);
+      await writeRuntimeStats(path, stats);
+    });
+    this.#runtimeStatsQueue = updateTask.catch(() => {});
+    await updateTask;
+  }
+
   async #resolveProject(sessionId: SessionId, projectId: ProjectId): Promise<HostProject> {
     const project = await this.#registry.require(projectId);
     await this.#appendDiagnostic(sessionId, "project_resolved", {
@@ -3226,6 +3333,183 @@ const disabledMemorySettings = (): MemorySettings => ({
   dreamIdleMinutes: 60,
   autoCompactThreshold: 0.8,
 });
+
+const detectRtk = async (): Promise<{ available: boolean; executable?: string; version?: string }> => {
+  try {
+    const shell = resolveDefaultShell();
+    const path = (await execFileAsync(shell, shellCommandArgs(shell, "command -v rtk"), { timeout: 5_000 })).stdout.trim();
+    if (!path) {
+      return { available: false };
+    }
+    const version = await execFileAsync(path, ["--version"], { timeout: 5_000 })
+      .then((result) => result.stdout.trim() || result.stderr.trim())
+      .catch(() => undefined);
+    return {
+      available: true,
+      executable: path,
+      ...(version ? { version } : {}),
+    };
+  } catch {
+    return { available: false };
+  }
+};
+
+const ensureRtkAvailable = async (): Promise<{ status: "idle" | "installed" | "failed"; message?: string }> => {
+  const existing = await detectRtk();
+  if (existing.available) {
+    return { status: "installed", message: existing.version ?? existing.executable };
+  }
+  const shell = resolveDefaultShell();
+  const brew = await execFileAsync(shell, shellCommandArgs(shell, "command -v brew"), { timeout: 5_000 })
+    .then((result) => result.stdout.trim())
+    .catch(() => "");
+  if (!brew) {
+    return { status: "failed", message: "Homebrew is not available; install RTK manually with `brew install rtk`." };
+  }
+  try {
+    await execFileAsync(brew, ["install", "rtk"], { timeout: 120_000, maxBuffer: 20_000_000 });
+    const installed = await detectRtk();
+    return installed.available
+      ? { status: "installed", message: installed.version ?? installed.executable }
+      : { status: "failed", message: "RTK install finished but `rtk` is still not on PATH." };
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    return { status: "failed", message };
+  }
+};
+
+type RtkSavingsDelta = {
+  outputTokens: number;
+  savedTokens: number;
+};
+
+type RuntimeStatsBucket = RtkSavingsDelta;
+
+type RuntimeStats = {
+  version: 1;
+  rtk: RuntimeStatsBucket & {
+    byProject: Record<string, RuntimeStatsBucket>;
+    bySession: Record<string, RuntimeStatsBucket>;
+  };
+};
+
+const emptyRuntimeStats = (): RuntimeStats => ({
+  version: 1,
+  rtk: {
+    outputTokens: 0,
+    savedTokens: 0,
+    byProject: {},
+    bySession: {},
+  },
+});
+
+const readRuntimeStats = async (path: string): Promise<RuntimeStats> => {
+  try {
+    return parseRuntimeStats(JSON.parse(await readFile(path, "utf8")));
+  } catch (cause) {
+    if (isNodeErrorCode(cause, "ENOENT")) {
+      return emptyRuntimeStats();
+    }
+    return emptyRuntimeStats();
+  }
+};
+
+const writeRuntimeStats = async (path: string, stats: RuntimeStats): Promise<void> => {
+  await mkdir(dirname(path), { recursive: true });
+  const tempPath = join(dirname(path), `.runtime-stats-${process.pid}-${Date.now()}.tmp`);
+  try {
+    await writeFile(tempPath, `${JSON.stringify(stats, null, 2)}\n`, "utf8");
+    await rename(tempPath, path);
+  } catch (cause) {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw cause;
+  }
+};
+
+const parseRuntimeStats = (value: unknown): RuntimeStats => {
+  if (!isRecord(value) || !isRecord(value.rtk)) {
+    return emptyRuntimeStats();
+  }
+  return {
+    version: 1,
+    rtk: {
+      outputTokens: nonNegativeInteger(value.rtk.outputTokens),
+      savedTokens: nonNegativeInteger(value.rtk.savedTokens),
+      byProject: parseRuntimeStatsBuckets(value.rtk.byProject),
+      bySession: parseRuntimeStatsBuckets(value.rtk.bySession),
+    },
+  };
+};
+
+const parseRuntimeStatsBuckets = (value: unknown): Record<string, RuntimeStatsBucket> => {
+  if (!isRecord(value)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value).map(([key, bucket]) => [
+      key,
+      isRecord(bucket)
+        ? {
+            outputTokens: nonNegativeInteger(bucket.outputTokens),
+            savedTokens: nonNegativeInteger(bucket.savedTokens),
+          }
+        : { outputTokens: 0, savedTokens: 0 },
+    ]),
+  );
+};
+
+const addRtkSavings = (stats: RuntimeStats, projectId: string, sessionId: string, savings: RtkSavingsDelta): void => {
+  addRuntimeStatsBucket(stats.rtk, savings);
+  stats.rtk.byProject[projectId] = addRuntimeStatsBucket(stats.rtk.byProject[projectId] ?? { outputTokens: 0, savedTokens: 0 }, savings);
+  stats.rtk.bySession[sessionId] = addRuntimeStatsBucket(stats.rtk.bySession[sessionId] ?? { outputTokens: 0, savedTokens: 0 }, savings);
+};
+
+const addRuntimeStatsBucket = <T extends RuntimeStatsBucket>(bucket: T, savings: RtkSavingsDelta): T => {
+  bucket.outputTokens += savings.outputTokens;
+  bucket.savedTokens += savings.savedTokens;
+  return bucket;
+};
+
+const rtkSavingsFromToolResult = (result: unknown): RtkSavingsDelta | undefined => {
+  if (!isRecord(result) || !isRecord(result.details)) {
+    return undefined;
+  }
+  const rtk = result.details.rtk;
+  if (!isRecord(rtk) || rtk.applied !== true) {
+    return undefined;
+  }
+  const outputTokens = nonNegativeInteger(rtk.estimatedOutputTokens);
+  const savedTokens = nonNegativeInteger(rtk.estimatedSavedTokens);
+  return outputTokens > 0 || savedTokens > 0 ? { outputTokens, savedTokens } : undefined;
+};
+
+const nonNegativeInteger = (value: unknown): number => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return Math.floor(value);
+};
+
+const resolveDefaultShell = (): string => {
+  const shell = process.env.SHELL || userShell() || "/bin/sh";
+  return shell.trim() || "/bin/sh";
+};
+
+const shellCommandArgs = (shell: string, command: string): string[] => {
+  const name = basename(shell).toLowerCase();
+  if (name === "csh" || name === "tcsh" || name === "fish") {
+    return ["-c", command];
+  }
+  return ["-lc", command];
+};
+
+const userShell = (): string | undefined => {
+  try {
+    return userInfo().shell ?? undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 const runtimeChannelContextFromWire = (context: ChannelContext): RuntimeChannelContext => ({
   extensionId: context.channel,

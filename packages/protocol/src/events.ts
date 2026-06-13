@@ -108,6 +108,17 @@ export type MemorySettings = {
   autoCompactThreshold: number;
 };
 
+export type RuntimeSettings = {
+  tokenSavingRtk: boolean;
+  rtkAvailable: boolean;
+  rtkExecutable?: string;
+  rtkVersion?: string;
+  installStatus?: "idle" | "installed" | "failed";
+  installMessage?: string;
+  estimatedOutputTokens: number;
+  estimatedSavedTokens: number;
+};
+
 export type MemoryStatus = {
   projectId: ProjectId;
   dirty: boolean;
@@ -127,6 +138,11 @@ export type MemoryStatus = {
 
 export type UpsertMemorySettingsInput = Partial<MemorySettings> & {
   projectId: ProjectId;
+};
+
+export type UpsertRuntimeSettingsInput = {
+  projectId: ProjectId;
+  tokenSavingRtk?: boolean;
 };
 
 export type ExtensionSettings = {

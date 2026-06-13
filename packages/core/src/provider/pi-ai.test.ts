@@ -217,6 +217,9 @@ const builtinProfile: ScorelConfig = {
     dreamIdleMinutes: 60,
     autoCompactThreshold: 0.8,
   },
+  runtime: {
+    tokenSavingRtk: false,
+  },
   extensions: {},
 };
 
@@ -259,6 +262,9 @@ const customProfile: ScorelConfig = {
     promoteRoot: true,
     dreamIdleMinutes: 60,
     autoCompactThreshold: 0.8,
+  },
+  runtime: {
+    tokenSavingRtk: false,
   },
   extensions: {},
 };

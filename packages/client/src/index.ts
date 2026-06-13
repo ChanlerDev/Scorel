@@ -22,6 +22,7 @@ import {
   type AvailableModelSummary,
   type ModelRole,
   type MemoryStatus,
+  type RuntimeSettings,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
   type ProviderModelSummary,
@@ -29,6 +30,7 @@ import {
   type MemorySettings,
   type UpsertExtensionSettingsInput,
   type UpsertMemorySettingsInput,
+  type UpsertRuntimeSettingsInput,
   type PersistentEvent,
   type ProjectId,
   type QueueItem,
@@ -328,6 +330,16 @@ export class DaemonClient {
   async upsertMemorySettings(input: UpsertMemorySettingsInput): Promise<MemorySettings> {
     this.#assertDaemonConnected();
     return (await this.#request("upsert_memory_settings", input)).memory;
+  }
+
+  async getRuntimeSettings(input: { projectId: ProjectId }): Promise<RuntimeSettings> {
+    this.#assertDaemonConnected();
+    return (await this.#request("get_runtime_settings", input)).runtime;
+  }
+
+  async upsertRuntimeSettings(input: UpsertRuntimeSettingsInput): Promise<RuntimeSettings> {
+    this.#assertDaemonConnected();
+    return (await this.#request("upsert_runtime_settings", input)).runtime;
   }
 
   async getExtensionSettings(input: { extensionId: string }): Promise<ExtensionSettings> {

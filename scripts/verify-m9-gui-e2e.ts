@@ -66,7 +66,8 @@ const verifyLocalPath = async (root: string, repo: string) => {
   try {
     const project = await service.registerLocalProject(repo);
     const sessionId = await service.createLocalSession(project.projectId);
-    const events = await service.sendLocalMessage(sessionId, "M9 GUI local e2e. Reply with one short sentence.");
+    await service.sendLocalMessage(sessionId, "M9 GUI local e2e. Reply with one short sentence.");
+    const events = await service.openLocalSession(sessionId);
     assertAssistant(events, "local");
     return {
       projectId: project.projectId,
@@ -135,7 +136,8 @@ const verifyRelayPath = async (root: string, repo: string) => {
     }
     const selected = await guiRelay.registerRemoteProject(device.deviceId, repo);
     const sessionId = await guiRelay.createRemoteSession(device.deviceId, selected.projectId);
-    const events = await guiRelay.sendRemoteMessage(device.deviceId, sessionId, "M9 GUI Relay e2e. Reply with one short sentence.");
+    await guiRelay.sendRemoteMessage(device.deviceId, sessionId, "M9 GUI Relay e2e. Reply with one short sentence.");
+    const events = await guiRelay.openRemoteSession(device.deviceId, sessionId);
     assertAssistant(events, "relay");
     return {
       relayUrl: relay.url,

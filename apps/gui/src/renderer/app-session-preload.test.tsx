@@ -165,6 +165,12 @@ function installScorelApi(overrides: {
         dirty: false,
         running: false,
       })),
+      getRuntimeSettings: vi.fn(async () => ({
+        tokenSavingRtk: false,
+        rtkAvailable: false,
+        estimatedOutputTokens: 0,
+        estimatedSavedTokens: 0,
+      })),
       onSessionEvent: vi.fn(() => () => undefined),
       onSessionsChanged: overrides.onSessionsChanged ?? vi.fn(() => () => undefined),
       onOpenSettings: vi.fn(() => () => undefined),
