@@ -2,6 +2,51 @@
 
 ## Unreleased
 
+## 0.0.4 - 2026-06-14
+
+### Highlights
+
+- Config is now device-scoped only; project-level config is no longer read or written.
+- GUI settings are device-scoped with relay device rename and project scope selector.
+- Local daemon is a singleton background process with idle shutdown and shared state root.
+- RTK token saving settings available in GUI for Bash execution.
+
+### Changes
+
+- GUI connection settings default to official Relay URL; editing requires explicit click.
+- Pairing button label changed to 'Get Pair Code'.
+- Paired Relay devices can be renamed locally; name persists across refresh.
+- Provider delete button moved to a danger zone at bottom of settings panel.
+- Token-saving statistics labels changed to Chinese (Bash 输出 Token / 已节省 Token).
+- RTK token saving can be enabled/disabled in GUI settings, persisted in project config.
+- Cumulative RTK savings stats are maintained across sessions and projects.
+- RTK is detected from default shell; can be installed via Homebrew if missing.
+
+### Fixes
+
+- Glob results are now sorted by workspace-relative path for deterministic ordering across platforms.
+
+### Breaking Changes
+
+- Runtime no longer reads project `.scorel/config.toml`; existing project configs are ignored.
+- GUI local projects and sessions are now stored under `~/.scorel/` instead of `~/.scorel/gui/`; old state is not migrated automatically.
+
+### Verification
+
+- Core config tests prove project config is ignored and device config is used.
+- Daemon embedded tests prove settings writes with projectId write device config only.
+- GUI rendering tests confirm device-scoped selector, provider delete placement, and Chinese token labels.
+- New local-host test verifies device config writes to ~/.scorel/config.toml.
+- E2E CDP script validates shared state paths and daemon lifecycle.
+- Unit tests cover RTK detection, Bash execution with RTK, and runtime stats recording.
+
+### Internal
+
+- `scorel host start` launches a singleton background daemon; `scorel host serve` gains `--idle-timeout-ms` flag.
+- `scorel up` ensures daemon is running but no longer owns its lifecycle.
+- GUI attaches to singleton daemon instead of running embedded Host.
+- gui-store.json lives at `~/.scorel/gui-store.json`.
+
 - Add `scorel host start` for background singleton Host startup; `scorel up` now leaves the singleton Host running when WebUI exits.
 - GUI local Host state now uses the shared `~/.scorel` root for Projects and Sessions, with `gui-store.json` stored at `~/.scorel/gui-store.json`.
 - GUI starts and attaches to the singleton local daemon instead of starting a second local Host writer.

@@ -261,7 +261,7 @@ var init_src2 = __esm({
         this.#assertDaemonConnected();
         return this.#request("remove_model_provider", input);
       }
-      async getMemorySettings(input) {
+      async getMemorySettings(input = {}) {
         this.#assertDaemonConnected();
         return (await this.#request("get_memory_settings", input)).memory;
       }
@@ -273,7 +273,7 @@ var init_src2 = __esm({
         this.#assertDaemonConnected();
         return (await this.#request("upsert_memory_settings", input)).memory;
       }
-      async getRuntimeSettings(input) {
+      async getRuntimeSettings(input = {}) {
         this.#assertDaemonConnected();
         return (await this.#request("get_runtime_settings", input)).runtime;
       }
@@ -815,7 +815,7 @@ var init_sessions = __esm({
 // packages/core/src/config/index.ts
 import { readFile as readFile3 } from "node:fs/promises";
 import { join as join4 } from "node:path";
-var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, scorelProjectConfigPath, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, removeProvider, renderMemoryConfig, renderRuntimeConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, DEFAULT_RUNTIME_CONFIG, loadMemory, loadRuntime, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireCompactThreshold, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, requireModelRole, modelRoles;
+var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, removeProvider, renderMemoryConfig, renderRuntimeConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, DEFAULT_RUNTIME_CONFIG, loadMemory, loadRuntime, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, configPathForDevice, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireCompactThreshold, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, isNodeErrorCode, requireModelRole, modelRoles;
 var init_config = __esm({
   "packages/core/src/config/index.ts"() {
     "use strict";
@@ -823,8 +823,7 @@ var init_config = __esm({
       fixedPaths: {
         userRoot: "~/.scorel",
         userConfig: "~/.scorel/config.toml",
-        sessionsDir: "~/.scorel/sessions",
-        projectConfig: ".scorel/config.toml"
+        sessionsDir: "~/.scorel/sessions"
       },
       sections: {
         root: {
@@ -859,7 +858,6 @@ var init_config = __esm({
     scorelUserRoot = (homeDir) => join4(homeDir, ".scorel");
     scorelUserConfigPath = (homeDir) => join4(scorelUserRoot(homeDir), "config.toml");
     scorelSessionsDir = (homeDir) => join4(scorelUserRoot(homeDir), "sessions");
-    scorelProjectConfigPath = (cwd) => join4(cwd, ".scorel", "config.toml");
     loadScorelConfig = async (options) => {
       const env = options.env ?? process.env;
       const raw = parseToml(await readConfigText(options));
@@ -1363,21 +1361,25 @@ var init_config = __esm({
       };
     };
     readConfigText = async (options) => {
-      const projectPath = scorelProjectConfigPath(options.cwd);
+      const userPath = configPathForDevice(options);
       try {
-        return await readFile3(projectPath, "utf8");
-      } catch {
-        const home = options.homeDir ?? process.env.HOME;
-        if (!home) {
-          throw new Error(`Scorel config not found: ${projectPath}`);
+        return await readFile3(userPath, "utf8");
+      } catch (cause) {
+        if (isNodeErrorCode(cause, "ENOENT")) {
+          throw new Error(`Scorel config not found: ${userPath}`);
         }
-        const userPath = scorelUserConfigPath(home);
-        try {
-          return await readFile3(userPath, "utf8");
-        } catch {
-          throw new Error(`Scorel config not found: ${projectPath} or ${userPath}`);
-        }
+        throw cause;
       }
+    };
+    configPathForDevice = (options) => {
+      if (options.scorelHomeDir) {
+        return join4(options.scorelHomeDir, "config.toml");
+      }
+      const home = options.homeDir ?? process.env.HOME;
+      if (!home) {
+        throw new Error("Scorel config not found: HOME is not set");
+      }
+      return scorelUserConfigPath(home);
     };
     parseToml = (text) => {
       const result = emptyRawConfig();
@@ -1725,6 +1727,7 @@ var init_config = __esm({
     };
     tomlString = (value) => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
     renderTomlValue = (value) => typeof value === "string" ? tomlString(value) : String(value);
+    isNodeErrorCode = (cause, code) => typeof cause === "object" && cause !== null && "code" in cause && cause.code === code;
     requireModelRole = (value, role, models) => {
       const modelId = requireString(value, `model_profile.roles.${role}`);
       if (!models[modelId]) {
@@ -2770,7 +2773,7 @@ import { existsSync } from "node:fs";
 import { readdir as readdir4, readFile as readFile6 } from "node:fs/promises";
 import { homedir as homedir2, platform, release } from "node:os";
 import { dirname as dirname5, join as join5, resolve as resolve3 } from "node:path";
-var BASELINE_PROMPT, buildInstructionSnapshot, renderSystemPrompt, section, discoverAgentsSources, projectAgentsPaths, findGitRoot, renderAgentsBlock, renderWorkspaceBlock, renderEnvironmentBlock, renderTimeBlock, isNodeErrorCode;
+var BASELINE_PROMPT, buildInstructionSnapshot, renderSystemPrompt, section, discoverAgentsSources, projectAgentsPaths, findGitRoot, renderAgentsBlock, renderWorkspaceBlock, renderEnvironmentBlock, renderTimeBlock, isNodeErrorCode2;
 var init_instructions = __esm({
   "packages/core/src/instructions/index.ts"() {
     "use strict";
@@ -2834,7 +2837,7 @@ var init_instructions = __esm({
             content
           });
         } catch (cause) {
-          if (!isNodeErrorCode(cause, "ENOENT") && !isNodeErrorCode(cause, "ENOTDIR")) {
+          if (!isNodeErrorCode2(cause, "ENOENT") && !isNodeErrorCode2(cause, "ENOTDIR")) {
             throw cause;
           }
         }
@@ -2897,7 +2900,7 @@ var init_instructions = __esm({
     };
     renderEnvironmentBlock = (env) => [`Platform: ${platform()} ${release()}`, `Shell: ${env.SHELL ?? "unknown"}`].join("\n");
     renderTimeBlock = (timestamp) => [`Session started at: ${new Date(timestamp).toISOString()}`, `Timezone: ${Intl.DateTimeFormat().resolvedOptions().timeZone}`].join("\n");
-    isNodeErrorCode = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
+    isNodeErrorCode2 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
   }
 });
 
@@ -2905,7 +2908,7 @@ var init_instructions = __esm({
 import { appendFile, mkdir as mkdir3, readFile as readFile7, writeFile as writeFile3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { join as join6 } from "node:path";
-var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord6, safeProjectId, isNodeErrorCode2;
+var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord6, safeProjectId, isNodeErrorCode3;
 var init_memory = __esm({
   "packages/core/src/memory/index.ts"() {
     "use strict";
@@ -3107,7 +3110,7 @@ var init_memory = __esm({
       try {
         await writeFile3(path, content, { encoding: "utf8", flag: "wx", mode: 384 });
       } catch (cause) {
-        if (!isNodeErrorCode2(cause, "EEXIST")) {
+        if (!isNodeErrorCode3(cause, "EEXIST")) {
           throw cause;
         }
       }
@@ -3116,7 +3119,7 @@ var init_memory = __esm({
       try {
         return await readFile7(path, "utf8");
       } catch (cause) {
-        if (isNodeErrorCode2(cause, "ENOENT")) {
+        if (isNodeErrorCode3(cause, "ENOENT")) {
           return "";
         }
         throw cause;
@@ -3215,7 +3218,7 @@ var init_memory = __esm({
       }
       return projectId;
     };
-    isNodeErrorCode2 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
+    isNodeErrorCode3 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
   }
 });
 
@@ -4131,7 +4134,7 @@ import { existsSync as existsSync2 } from "node:fs";
 import { readdir as readdir5, readFile as readFile9, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir4 } from "node:os";
 import { dirname as dirname7, join as join8, resolve as resolve4 } from "node:path";
-var scanSkillIndex, diffSkillIndex, hasSkillIndexDelta, renderSkillListing, renderSkillDelta, createSkillTool, projectSkillRoots, readSkillEntry, parseSkillMetadata, firstParagraph, parseSkillArgs, findGitRoot2, isNodeErrorCode3;
+var scanSkillIndex, diffSkillIndex, hasSkillIndexDelta, renderSkillListing, renderSkillDelta, createSkillTool, projectSkillRoots, readSkillEntry, parseSkillMetadata, firstParagraph, parseSkillArgs, findGitRoot2, isNodeErrorCode4;
 var init_skills = __esm({
   "packages/core/src/skills/index.ts"() {
     "use strict";
@@ -4154,7 +4157,7 @@ var init_skills = __esm({
         try {
           children = await readdir5(root.path);
         } catch (cause) {
-          if (isNodeErrorCode3(cause, "ENOENT") || isNodeErrorCode3(cause, "ENOTDIR")) {
+          if (isNodeErrorCode4(cause, "ENOENT") || isNodeErrorCode4(cause, "ENOTDIR")) {
             continue;
           }
           throw cause;
@@ -4267,7 +4270,7 @@ var init_skills = __esm({
       try {
         [fileStat, content] = await Promise.all([stat4(options.skillPath), readFile9(options.skillPath, "utf8")]);
       } catch (cause) {
-        if (isNodeErrorCode3(cause, "ENOENT") || isNodeErrorCode3(cause, "ENOTDIR")) {
+        if (isNodeErrorCode4(cause, "ENOENT") || isNodeErrorCode4(cause, "ENOTDIR")) {
           return void 0;
         }
         throw cause;
@@ -4347,7 +4350,7 @@ var init_skills = __esm({
         current = next;
       }
     };
-    isNodeErrorCode3 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
+    isNodeErrorCode4 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
   }
 });
 
@@ -4701,7 +4704,7 @@ import { basename as basename3, dirname as dirname8, join as join10, resolve as 
 import { pathToFileURL } from "node:url";
 import { promisify as promisify2 } from "node:util";
 import { WebSocketServer } from "ws";
-var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode4, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger2, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord8, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
+var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger2, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord8, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
 var init_src4 = __esm({
   "packages/daemon/src/index.ts"() {
     "use strict";
@@ -5190,7 +5193,7 @@ var init_src4 = __esm({
             break;
           }
           case "get_memory_settings": {
-            this.#respond(connection, message, { memory: await this.#memorySettingsForProject(message.projectId) });
+            this.#respond(connection, message, { memory: await this.#memorySettings(message.projectId) });
             break;
           }
           case "get_memory_status": {
@@ -5202,7 +5205,7 @@ var init_src4 = __esm({
             break;
           }
           case "get_runtime_settings": {
-            this.#respond(connection, message, { runtime: await this.#runtimeSettingsForProject(message.projectId) });
+            this.#respond(connection, message, { runtime: await this.#runtimeSettings(message.projectId) });
             break;
           }
           case "upsert_runtime_settings": {
@@ -5286,7 +5289,7 @@ var init_src4 = __esm({
         try {
           lane = await this.#createLane(sessionId, request.meta, project);
         } catch (cause) {
-          if (!request.sessionId || !isNodeErrorCode4(cause, "EEXIST")) {
+          if (!request.sessionId || !isNodeErrorCode5(cause, "EEXIST")) {
             throw cause;
           }
           lane = await this.#getLane(sessionId);
@@ -6637,7 +6640,7 @@ var init_src4 = __esm({
           await this.#getLane(sessionId);
           return true;
         } catch (cause) {
-          if (isNodeErrorCode4(cause, "ENOENT")) {
+          if (isNodeErrorCode5(cause, "ENOENT")) {
             return false;
           }
           throw cause;
@@ -6795,7 +6798,7 @@ var init_src4 = __esm({
           try {
             children = await readdir6(root);
           } catch (cause) {
-            if (isNodeErrorCode4(cause, "ENOENT") || isNodeErrorCode4(cause, "ENOTDIR")) {
+            if (isNodeErrorCode5(cause, "ENOENT") || isNodeErrorCode5(cause, "ENOTDIR")) {
               continue;
             }
             throw cause;
@@ -6905,7 +6908,7 @@ var init_src4 = __esm({
             this.#imBindings.set(imBindingKey(binding.extensionId, binding.externalConversationId), binding);
           }
         } catch (cause) {
-          if (!isNodeErrorCode4(cause, "ENOENT")) {
+          if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
@@ -6919,9 +6922,13 @@ var init_src4 = __esm({
       #imBindingsPath() {
         return join10(this.#scorelHomeDir, "channels", "im-bindings.json");
       }
-      async #loadUserConfigProfile() {
+      async #loadUserConfigProfile(options = {}) {
         try {
-          return await loadScorelConfigProfile({ cwd: this.#userHomeDir, homeDir: this.#userHomeDir });
+          return await loadScorelConfigProfile({
+            cwd: this.#userHomeDir,
+            scorelHomeDir: this.#scorelHomeDir,
+            includeSecrets: options.includeSecrets ?? false
+          });
         } catch (cause) {
           if (isMissingConfigError(cause)) {
             return void 0;
@@ -6929,16 +6936,24 @@ var init_src4 = __esm({
           throw cause;
         }
       }
+      #configWriteTarget() {
+        return {
+          configDir: this.#scorelHomeDir,
+          configPath: join10(this.#scorelHomeDir, "config.toml"),
+          workDir: this.#userHomeDir
+        };
+      }
       async #listModels(projectId) {
         let config;
         try {
-          config = await this.#configProfileForProject(projectId);
+          config = projectId ? await this.#configProfileForProject(projectId) : await this.#loadUserConfigProfile();
         } catch (cause) {
           if (!isMissingConfigError(cause)) {
             throw cause;
           }
           config = void 0;
         }
+        config ??= projectId ? void 0 : this.#modelProfile;
         if (!config) {
           return {
             providers: [],
@@ -6961,19 +6976,18 @@ var init_src4 = __esm({
         };
       }
       async #handleUpsertModelProfile(request) {
-        const project = await this.#registry.require(request.projectId);
-        const configPath = join10(project.workDir, ".scorel", "config.toml");
+        const target = this.#configWriteTarget();
         let existingConfigText;
         try {
-          existingConfigText = await readFile11(configPath, "utf8");
+          existingConfigText = await readFile11(target.configPath, "utf8");
         } catch (cause) {
-          if (!isNodeErrorCode4(cause, "ENOENT")) {
+          if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
-        await mkdir6(join10(project.workDir, ".scorel"), { recursive: true });
+        await mkdir6(target.configDir, { recursive: true });
         await writeFile6(
-          configPath,
+          target.configPath,
           renderModelProfileConfig({
             providerId: request.providerId,
             providerType: request.providerType,
@@ -7000,38 +7014,41 @@ var init_src4 = __esm({
           "utf8"
         );
         await this.#appendHostDiagnostic("model_profile_upserted", {
-          projectId: project.projectId,
-          workDir: project.workDir,
+          ...request.projectId ? { ignoredProjectId: request.projectId } : {},
+          scope: "device",
+          workDir: target.workDir,
           providerId: request.providerId,
           modelId: request.modelId
         });
-        return this.#listModels(project.projectId);
+        return this.#listModels();
       }
       async #handleRemoveModelProvider(request) {
-        const project = await this.#registry.require(request.projectId);
-        const configPath = join10(project.workDir, ".scorel", "config.toml");
+        const target = this.#configWriteTarget();
         let existingConfigText;
         try {
-          existingConfigText = await readFile11(configPath, "utf8");
+          existingConfigText = await readFile11(target.configPath, "utf8");
         } catch (cause) {
-          if (!isNodeErrorCode4(cause, "ENOENT")) {
+          if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
-        await mkdir6(join10(project.workDir, ".scorel"), { recursive: true });
+        await mkdir6(target.configDir, { recursive: true });
         await writeFile6(
-          configPath,
+          target.configPath,
           renderModelProfileConfig({
             removeProviderId: request.providerId,
             existingConfigText
           }),
           "utf8"
         );
-        const profile = await this.#listModels(project.projectId);
+        const profile = await this.#listModels();
         return { ...profile, removed: true };
       }
       async #memorySettingsForProject(projectId) {
-        const config = await this.#configProfileForProject(projectId).catch((cause) => {
+        return this.#memorySettings(projectId);
+      }
+      async #memorySettings(projectId) {
+        const config = await (projectId ? this.#configProfileForProject(projectId) : this.#loadUserConfigProfile()).catch((cause) => {
           if (isMissingConfigError(cause)) {
             return void 0;
           }
@@ -7053,19 +7070,18 @@ var init_src4 = __esm({
         }
       }
       async #handleUpsertMemorySettings(request) {
-        const project = await this.#registry.require(request.projectId);
-        const configPath = join10(project.workDir, ".scorel", "config.toml");
+        const target = this.#configWriteTarget();
         let existingConfigText;
         try {
-          existingConfigText = await readFile11(configPath, "utf8");
+          existingConfigText = await readFile11(target.configPath, "utf8");
         } catch (cause) {
-          if (!isNodeErrorCode4(cause, "ENOENT")) {
+          if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
-        await mkdir6(join10(project.workDir, ".scorel"), { recursive: true });
+        await mkdir6(target.configDir, { recursive: true });
         await writeFile6(
-          configPath,
+          target.configPath,
           renderMemoryConfig({
             enabled: request.enabled,
             daily: request.daily,
@@ -7079,13 +7095,17 @@ var init_src4 = __esm({
           "utf8"
         );
         await this.#appendHostDiagnostic("memory_settings_upserted", {
-          projectId: project.projectId,
-          workDir: project.workDir
+          ...request.projectId ? { ignoredProjectId: request.projectId } : {},
+          scope: "device",
+          workDir: target.workDir
         });
-        return this.#memorySettingsForProject(project.projectId);
+        return this.#memorySettings();
       }
       async #runtimeSettingsForProject(projectId, installStatus) {
-        const config = await this.#configProfileForProject(projectId).catch((cause) => {
+        return this.#runtimeSettings(projectId, installStatus);
+      }
+      async #runtimeSettings(projectId, installStatus) {
+        const config = await (projectId ? this.#configProfileForProject(projectId) : this.#loadUserConfigProfile()).catch((cause) => {
           if (isMissingConfigError(cause)) {
             return void 0;
           }
@@ -7105,19 +7125,18 @@ var init_src4 = __esm({
         };
       }
       async #handleUpsertRuntimeSettings(request) {
-        const project = await this.#registry.require(request.projectId);
-        const configPath = join10(project.workDir, ".scorel", "config.toml");
+        const target = this.#configWriteTarget();
         let existingConfigText;
         try {
-          existingConfigText = await readFile11(configPath, "utf8");
+          existingConfigText = await readFile11(target.configPath, "utf8");
         } catch (cause) {
-          if (!isNodeErrorCode4(cause, "ENOENT")) {
+          if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
-        await mkdir6(join10(project.workDir, ".scorel"), { recursive: true });
+        await mkdir6(target.configDir, { recursive: true });
         await writeFile6(
-          configPath,
+          target.configPath,
           renderRuntimeConfig({
             tokenSavingRtk: request.tokenSavingRtk,
             existingConfigText
@@ -7126,12 +7145,13 @@ var init_src4 = __esm({
         );
         const installResult = request.tokenSavingRtk === true ? await ensureRtkAvailable() : { status: "idle" };
         await this.#appendHostDiagnostic("runtime_settings_upserted", {
-          projectId: project.projectId,
-          workDir: project.workDir,
+          ...request.projectId ? { ignoredProjectId: request.projectId } : {},
+          scope: "device",
+          workDir: target.workDir,
           tokenSavingRtk: request.tokenSavingRtk,
           installStatus: installResult.status
         });
-        return this.#runtimeSettingsForProject(project.projectId, {
+        return this.#runtimeSettings(void 0, {
           installStatus: installResult.status,
           ...installResult.message ? { installMessage: installResult.message } : {}
         });
@@ -7158,7 +7178,7 @@ var init_src4 = __esm({
         try {
           existingConfigText = await readFile11(configPath, "utf8");
         } catch (cause) {
-          if (!isNodeErrorCode4(cause, "ENOENT")) {
+          if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
@@ -7182,8 +7202,11 @@ var init_src4 = __esm({
         return this.#extensionSettings(request.extensionId);
       }
       async #fetchProviderModels(projectId, providerId) {
-        const project = await this.#registry.require(projectId);
-        const config = await loadScorelConfigProfile({ cwd: project.workDir, includeSecrets: true });
+        const config = projectId ? await loadScorelConfigProfile({
+          cwd: (await this.#registry.require(projectId)).workDir,
+          scorelHomeDir: this.#scorelHomeDir,
+          includeSecrets: true
+        }) : await this.#loadUserConfigProfile({ includeSecrets: true });
         if (!config) {
           throw new Error("Model profile config is not configured");
         }
@@ -7268,7 +7291,7 @@ var init_src4 = __esm({
           }
           const project = await this.#registry.require(projectId);
           try {
-            return await loadScorelConfigProfile({ cwd: project.workDir });
+            return await loadScorelConfigProfile({ cwd: project.workDir, scorelHomeDir: this.#scorelHomeDir });
           } catch (cause) {
             if (!isMissingConfigError(cause)) {
               throw cause;
@@ -7378,7 +7401,7 @@ var init_src4 = __esm({
         }
       };
     };
-    isNodeErrorCode4 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
+    isNodeErrorCode5 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
     wireErrorCode = (cause) => {
       if (!(cause instanceof ProjectRegistryError)) {
         return "internal_error";
@@ -7498,7 +7521,7 @@ var init_src4 = __esm({
       try {
         return parseRuntimeStats(JSON.parse(await readFile11(path, "utf8")));
       } catch (cause) {
-        if (isNodeErrorCode4(cause, "ENOENT")) {
+        if (isNodeErrorCode5(cause, "ENOENT")) {
           return emptyRuntimeStats();
         }
         return emptyRuntimeStats();
@@ -7882,10 +7905,13 @@ Use --replace to stop it and start a new one.
       }
       const token = flags.token ?? existing?.token ?? randomUUID4();
       const identity = await loadOrCreateHostDeviceIdentity({ stateDir: options.stateDir });
+      const configScope = { scorelHomeDir: options.stateDir };
       let signalReason = "natural";
       let resolveStopWaiter;
+      let stopRequested = false;
       const requestStop = (reason) => {
         signalReason = reason;
+        stopRequested = true;
         resolveStopWaiter?.();
       };
       const daemon = new ScorelHost({
@@ -7895,11 +7921,12 @@ Use --replace to stop it and start a new one.
         deviceDisplayName: identity.displayName,
         idleShutdownMs: flags.idleShutdownMs,
         onIdleShutdown: () => requestStop("idle"),
-        loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir }),
-        loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir }),
+        scorelHomeDir: options.stateDir,
+        loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir, ...configScope }),
+        loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir, ...configScope }),
         createRuntime: async ({ project, selectedModel, purpose }) => createRealRuntime({
           cwd: project.workDir,
-          config: await loadScorelConfig({ cwd: project.workDir }),
+          config: await loadScorelConfig({ cwd: project.workDir, ...configScope }),
           modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : void 0,
           includeTools: purpose === "chat"
         })
@@ -7961,6 +7988,10 @@ Use --replace to stop it and start a new one.
       const signalHandlers = /* @__PURE__ */ new Map();
       const stopWaiter = new Promise((resolve7) => {
         resolveStopWaiter = resolve7;
+        if (stopRequested) {
+          resolve7();
+          return;
+        }
         if (options.serveSignal) {
           if (options.serveSignal.aborted) {
             requestStop("abort");
@@ -9788,12 +9819,14 @@ var init_index = __esm({
       return { sessionId, tail, attach, remoteUrl };
     };
     runChat = async (options, io) => {
-      const loadProjectConfig = async (project2) => options.config ?? await loadScorelConfig({ cwd: project2.workDir });
-      const loadProjectConfigProfile = async (project2) => options.config ?? await loadScorelConfigProfile({ cwd: project2.workDir });
+      const configScope = { scorelHomeDir: options.stateDir };
+      const loadProjectConfig = async (project2) => options.config ?? await loadScorelConfig({ cwd: project2.workDir, ...configScope });
+      const loadProjectConfigProfile = async (project2) => options.config ?? await loadScorelConfigProfile({ cwd: project2.workDir, ...configScope });
       const daemon = new ScorelHost({
         sessionsDir: options.sessionsDir,
         projectsPath: join16(options.stateDir, "projects.json"),
         deviceId: asDeviceId("device_local"),
+        scorelHomeDir: options.stateDir,
         loadConfig: async ({ project: project2 }) => loadProjectConfig(project2),
         loadConfigProfile: async ({ project: project2 }) => loadProjectConfigProfile(project2),
         createRuntime: async ({ project: project2, selectedModel, purpose }) => createRealRuntime({
