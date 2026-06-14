@@ -8,7 +8,7 @@ RTK here means Rust Token Killer: a CLI command rewriter/filter that compresses 
 
 ## Scope
 
-- Add project-scoped `[runtime] tokenSavingRtk = boolean` config.
+- Add device-scoped `[runtime] tokenSavingRtk = boolean` config.
 - Add GUI Settings page `Token 节省` with an RTK enable toggle and status.
 - When the user enables the setting, Host ensures the `rtk` binary is available:
   - first detect `rtk` on PATH;

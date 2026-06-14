@@ -711,14 +711,16 @@ const parseLogsOptions = (argv: string[]): LogsOptions => {
 };
 
 export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> => {
+  const configScope = { scorelHomeDir: options.stateDir };
   const loadProjectConfig = async (project: { workDir: string }) =>
-    options.config ?? (await loadScorelConfig({ cwd: project.workDir }));
+    options.config ?? (await loadScorelConfig({ cwd: project.workDir, ...configScope }));
   const loadProjectConfigProfile = async (project: { workDir: string }) =>
-    options.config ?? (await loadScorelConfigProfile({ cwd: project.workDir }));
+    options.config ?? (await loadScorelConfigProfile({ cwd: project.workDir, ...configScope }));
   const daemon = new ScorelHost({
     sessionsDir: options.sessionsDir,
     projectsPath: join(options.stateDir, "projects.json"),
     deviceId: asDeviceId("device_local"),
+    scorelHomeDir: options.stateDir,
     loadConfig: async ({ project }) => loadProjectConfig(project),
     loadConfigProfile: async ({ project }) => loadProjectConfigProfile(project),
     createRuntime: async ({ project, selectedModel, purpose }) => createRealRuntime({

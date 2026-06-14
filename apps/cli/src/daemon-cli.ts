@@ -188,10 +188,13 @@ const runServeCommand = async (
 
   const token = flags.token ?? existing?.token ?? randomUUID();
   const identity = await loadOrCreateHostDeviceIdentity({ stateDir: options.stateDir });
+  const configScope = { scorelHomeDir: options.stateDir };
   let signalReason: string = "natural";
   let resolveStopWaiter: (() => void) | undefined;
+  let stopRequested = false;
   const requestStop = (reason: string): void => {
     signalReason = reason;
+    stopRequested = true;
     resolveStopWaiter?.();
   };
   const daemon = new ScorelHost({
@@ -201,11 +204,12 @@ const runServeCommand = async (
     deviceDisplayName: identity.displayName,
     idleShutdownMs: flags.idleShutdownMs,
     onIdleShutdown: () => requestStop("idle"),
-    loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir }),
-    loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir }),
+    scorelHomeDir: options.stateDir,
+    loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir, ...configScope }),
+    loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir, ...configScope }),
     createRuntime: async ({ project, selectedModel, purpose }) => createRealRuntime({
       cwd: project.workDir,
-      config: await loadScorelConfig({ cwd: project.workDir }),
+      config: await loadScorelConfig({ cwd: project.workDir, ...configScope }),
       modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
       includeTools: purpose === "chat",
     }),
@@ -269,6 +273,10 @@ const runServeCommand = async (
   const signalHandlers = new Map<NodeJS.Signals, () => void>();
   const stopWaiter = new Promise<void>((resolve) => {
     resolveStopWaiter = resolve;
+    if (stopRequested) {
+      resolve();
+      return;
+    }
     if (options.serveSignal) {
       if (options.serveSignal.aborted) {
         requestStop("abort");

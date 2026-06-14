@@ -56,7 +56,7 @@ page hierarchy.
 ### 4. Existing Host contract
 
 Continue using the Host-owned `list_models` and `upsert_model_profile` path. Renderer
-code must not write `.scorel/config.toml` directly.
+code must not write `~/.scorel/config.toml` directly.
 
 This spec can reuse the S0073 data model and does not need a new protocol message unless
 the UI needs one for clean implementation.

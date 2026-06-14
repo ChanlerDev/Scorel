@@ -103,12 +103,12 @@ The response must be display-safe:
 - if the target Project has no model profile config yet, `list_models` returns an empty
   model list instead of surfacing config-not-found as a user-facing error.
 
-Expose a Host API for adding/updating a Project's provider/model profile. GUI must use
-this Host-owned path for both local and Relay Projects; renderer code must not write
-`.scorel/config.toml` directly.
+Expose a Host API for adding/updating the device provider/model profile. GUI must use
+this Host-owned path for both local and Relay devices; renderer code must not write
+`~/.scorel/config.toml` directly.
 
 Saving a provider/model profile is a config edit, not a provider call. It must validate
-shape and merge into the existing Project config, but it must not require the target
+shape and merge into the existing device config, but it must not require the target
 Host process to already have the provider API key env var set. Missing credentials
 should block runtime use, not saving.
 
@@ -186,8 +186,8 @@ This spec does not implement a new subagent execution engine.
   - using the selected model's context window.
 - Daemon/client tests cover:
   - model profile summary is exposed without API keys;
-  - a Project with no model config returns an empty model profile summary;
-  - adding/updating a provider/model profile writes a valid `.scorel/config.toml`
+  - a device with no model config returns an empty model profile summary;
+  - adding/updating a provider/model profile writes a valid `~/.scorel/config.toml`
     without requiring API key env vars;
   - adding a second model under the same provider preserves the existing provider and
     model entries;

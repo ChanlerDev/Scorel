@@ -911,7 +911,7 @@ describe("ScorelHost + embedded transport", () => {
     )).toBe(true);
   });
 
-  it("returns an empty model profile when project config is missing", async () => {
+  it("returns an empty model profile when device config is missing", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-empty-models-"));
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
@@ -952,13 +952,13 @@ describe("ScorelHost + embedded transport", () => {
     });
   });
 
-  it("surfaces development-stage legacy models config as a schema error", async () => {
+  it("surfaces development-stage legacy models device config as a schema error", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-legacy-models-"));
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
     const repo = join(root, "repo");
-    await Promise.all([mkdir(sessionsDir), mkdir(join(repo, ".scorel"), { recursive: true })]);
-    await writeFile(join(repo, ".scorel", "config.toml"), `
+    await Promise.all([mkdir(sessionsDir), mkdir(repo)]);
+    await writeDeviceConfig(root, `
 [providers.openai]
 type = "builtin"
 provider = "openai"
@@ -978,32 +978,16 @@ displayName = "GPT 5.4 Mini"
       createRuntime: async () => new ScorelRuntime({ provider }),
       now: () => 1_000,
     });
-    await host.start();
-    const project = await host.registerProject(repo);
-    const transport = createEmbeddedTransport(host);
-    await transport.connect({ clientId: asClientId("client_test") });
-    const response = waitForResponse(transport, "req_models_legacy");
-
-    await transport.send({
-      type: "list_models",
-      requestId: asRequestId("req_models_legacy"),
-      projectId: project.projectId,
-    });
-
-    await expect(response).resolves.toMatchObject({
-      type: "error",
-      code: "internal_error",
-      message: expect.stringContaining("Unsupported config section: models.main"),
-    });
+    await expect(host.start()).rejects.toThrow("Unsupported config section: models.main");
   });
 
-  it("surfaces the deprecated single model config as a schema error", async () => {
+  it("surfaces the deprecated single model device config as a schema error", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-legacy-single-model-"));
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
     const repo = join(root, "repo");
-    await Promise.all([mkdir(sessionsDir), mkdir(join(repo, ".scorel"), { recursive: true })]);
-    await writeFile(join(repo, ".scorel", "config.toml"), `
+    await Promise.all([mkdir(sessionsDir), mkdir(repo)]);
+    await writeDeviceConfig(root, `
 [model]
 type = "builtin"
 provider = "openai"
@@ -1019,23 +1003,7 @@ apiKeyEnv = "SCOREL_API_KEY"
       createRuntime: async () => new ScorelRuntime({ provider }),
       now: () => 1_000,
     });
-    await host.start();
-    const project = await host.registerProject(repo);
-    const transport = createEmbeddedTransport(host);
-    await transport.connect({ clientId: asClientId("client_test") });
-    const response = waitForResponse(transport, "req_models_legacy_single");
-
-    await transport.send({
-      type: "list_models",
-      requestId: asRequestId("req_models_legacy_single"),
-      projectId: project.projectId,
-    });
-
-    await expect(response).resolves.toMatchObject({
-      type: "error",
-      code: "internal_error",
-      message: expect.stringContaining("Unsupported config section: model"),
-    });
+    await expect(host.start()).rejects.toThrow("Unsupported config section: model");
   });
 
   it("surfaces invalid model profile config instead of treating it as empty", async () => {
@@ -1043,8 +1011,8 @@ apiKeyEnv = "SCOREL_API_KEY"
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
     const repo = join(root, "repo");
-    await Promise.all([mkdir(sessionsDir), mkdir(join(repo, ".scorel"), { recursive: true })]);
-    await writeFile(join(repo, ".scorel", "config.toml"), `
+    await Promise.all([mkdir(sessionsDir), mkdir(repo)]);
+    await writeDeviceConfig(root, `
 [providers.openai]
 type = "builtin"
 provider = "openai"
@@ -1073,26 +1041,12 @@ auxiliary = "main"
       createRuntime: async () => new ScorelRuntime({ provider }),
       now: () => 1_000,
     });
-    await host.start();
-    const project = await host.registerProject(repo);
-    const transport = createEmbeddedTransport(host);
-    await transport.connect({ clientId: asClientId("client_test") });
-    const response = waitForResponse(transport, "req_models_invalid");
-
-    await transport.send({
-      type: "list_models",
-      requestId: asRequestId("req_models_invalid"),
-      projectId: project.projectId,
-    });
-
-    await expect(response).resolves.toMatchObject({
-      type: "error",
-      requestId: "req_models_invalid",
-      message: "model_profile.roles.standard must reference a configured model",
-    });
+    await expect(host.start()).rejects.toThrow("model_profile.roles.standard must reference a configured model");
   });
 
-  it("writes GUI model profile changes without requiring provider credentials", async () => {
+  it("writes GUI model profile changes to device config without requiring provider credentials", async () => {
+    const previousScorelApiKey = process.env.SCOREL_API_KEY;
+    delete process.env.SCOREL_API_KEY;
     const root = await mkdtemp(join(tmpdir(), "scorel-host-upsert-models-"));
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
@@ -1160,7 +1114,7 @@ auxiliary = "main"
         ],
       },
     });
-    const config = await readFile(join(repo, ".scorel", "config.toml"), "utf8");
+    const config = await readFile(join(root, "config.toml"), "utf8");
     expect(config).toContain("[providers.chanleramp]");
     expect(config).toContain("[provider_models.chanleramp_main]");
     expect(config).toContain("[available_models.main]");
@@ -1169,6 +1123,7 @@ auxiliary = "main"
     expect(config).not.toContain("maxTokens");
     expect(config).not.toContain("reasoning");
     expect(config).not.toContain("secret");
+    await expect(readFile(join(repo, ".scorel", "config.toml"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
 
     const secondResponse = waitForResponse(transport, "req_upsert_aux_model");
     await transport.send({
@@ -1206,7 +1161,7 @@ auxiliary = "main"
         ],
       },
     });
-    const mergedConfig = await readFile(join(repo, ".scorel", "config.toml"), "utf8");
+    const mergedConfig = await readFile(join(root, "config.toml"), "utf8");
     expect(mergedConfig).toContain("[provider_models.chanleramp_main]");
     expect(mergedConfig).toContain("[provider_models.chanleramp_aux]");
     expect(mergedConfig).toContain("[available_models.main]");
@@ -1238,7 +1193,7 @@ auxiliary = "main"
         ],
       },
     });
-    const removedConfig = await readFile(join(repo, ".scorel", "config.toml"), "utf8");
+    const removedConfig = await readFile(join(root, "config.toml"), "utf8");
     expect(removedConfig).toContain("[provider_models.chanleramp_aux]");
     expect(removedConfig).not.toContain("[available_models.aux]");
     expect(removedConfig).toContain('auxiliary = "main"');
@@ -1266,12 +1221,86 @@ auxiliary = "main"
         },
       },
     });
-    const providerRemovedConfig = await readFile(join(repo, ".scorel", "config.toml"), "utf8");
+    const providerRemovedConfig = await readFile(join(root, "config.toml"), "utf8");
     expect(providerRemovedConfig).not.toContain("[providers.chanleramp]");
     expect(providerRemovedConfig).not.toContain("[provider_models.chanleramp_main]");
     expect(providerRemovedConfig).not.toContain("[provider_models.chanleramp_aux]");
     expect(providerRemovedConfig).not.toContain("[available_models.main]");
     expect(providerRemovedConfig).not.toContain("[model_profile.roles]");
+    if (previousScorelApiKey === undefined) {
+      delete process.env.SCOREL_API_KEY;
+    } else {
+      process.env.SCOREL_API_KEY = previousScorelApiKey;
+    }
+  });
+
+  it("ignores projectId when writing memory and runtime settings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-device-settings-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const repo = join(root, "repo");
+    await Promise.all([mkdir(sessionsDir), mkdir(repo)]);
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () => new ScorelRuntime({ provider }),
+      now: () => 1_000,
+    });
+    await host.start();
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+
+    const memoryResponse = waitForResponse(transport, "req_memory_device");
+    await transport.send({
+      type: "upsert_memory_settings",
+      requestId: asRequestId("req_memory_device"),
+      projectId: project.projectId,
+      enabled: true,
+      daily: false,
+      sessionMemory: true,
+      autoDream: false,
+      promoteRoot: true,
+      dreamIdleMinutes: 45,
+      autoCompactThreshold: 0.7,
+    });
+    await expect(memoryResponse).resolves.toMatchObject({
+      type: "response",
+      requestType: "upsert_memory_settings",
+      data: {
+        memory: {
+          enabled: true,
+          daily: false,
+          dreamIdleMinutes: 45,
+        },
+      },
+    });
+
+    const runtimeResponse = waitForResponse(transport, "req_runtime_device");
+    await transport.send({
+      type: "upsert_runtime_settings",
+      requestId: asRequestId("req_runtime_device"),
+      projectId: project.projectId,
+      tokenSavingRtk: false,
+    });
+    await expect(runtimeResponse).resolves.toMatchObject({
+      type: "response",
+      requestType: "upsert_runtime_settings",
+      data: {
+        runtime: {
+          tokenSavingRtk: false,
+        },
+      },
+    });
+
+    const config = await readFile(join(root, "config.toml"), "utf8");
+    expect(config).toContain("[memory]");
+    expect(config).toContain("daily = false");
+    expect(config).toContain("dreamIdleMinutes = 45");
+    expect(config).toContain("[runtime]");
+    expect(config).toContain("tokenSavingRtk = false");
+    await expect(readFile(join(repo, ".scorel", "config.toml"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("detects RTK through the user's default shell environment", async () => {
@@ -1533,8 +1562,8 @@ auxiliary = "main"
       const sessionsDir = join(root, "sessions");
       const projectsPath = join(root, "projects.json");
       const repo = join(root, "repo");
-      await Promise.all([mkdir(sessionsDir), mkdir(join(repo, ".scorel"), { recursive: true })]);
-      await writeFile(join(repo, ".scorel", "config.toml"), `
+      await Promise.all([mkdir(sessionsDir), mkdir(repo)]);
+      await writeDeviceConfig(root, `
 [providers.chanleramp]
 type = "custom"
 api = "openai-completions"
@@ -2132,6 +2161,11 @@ const writeOpenAiSse = (response: ServerResponse, chunks: unknown[]): void => {
     response.write(`data: ${JSON.stringify(chunk)}\n\n`);
   }
   response.end("data: [DONE]\n\n");
+};
+
+const writeDeviceConfig = async (scorelHomeDir: string, config: string): Promise<void> => {
+  await mkdir(scorelHomeDir, { recursive: true });
+  await writeFile(join(scorelHomeDir, "config.toml"), config);
 };
 
 const deferred = <T>() => {

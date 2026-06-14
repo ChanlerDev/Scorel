@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   SCOREL_CONFIG_SCHEMA,
@@ -12,27 +12,32 @@ import {
   renderMemoryConfig,
   renderModelProfileConfig,
   renderRuntimeConfig,
-  scorelProjectConfigPath,
   scorelSessionsDir,
   scorelUserConfigPath,
   scorelUserRoot,
 } from "./index.js";
 
 describe("loadScorelConfig", () => {
+  beforeEach(async () => {
+    vi.stubEnv("HOME", await mkHome());
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("keeps fixed product paths out of user config", () => {
     expect(scorelUserRoot("/home/alice")).toBe("/home/alice/.scorel");
     expect(scorelUserConfigPath("/home/alice")).toBe("/home/alice/.scorel/config.toml");
     expect(scorelSessionsDir("/home/alice")).toBe("/home/alice/.scorel/sessions");
-    expect(scorelProjectConfigPath("/repo")).toBe("/repo/.scorel/config.toml");
     expect(SCOREL_CONFIG_SCHEMA.fixedPaths).toEqual({
       userRoot: "~/.scorel",
       userConfig: "~/.scorel/config.toml",
       sessionsDir: "~/.scorel/sessions",
-      projectConfig: ".scorel/config.toml",
     });
   });
 
-  it("loads a builtin provider model profile from project .scorel/config.toml", async () => {
+  it("loads a builtin provider model profile from device config", async () => {
     const cwd = await mkProject(`
 [providers.openai]
 type = "builtin"
@@ -149,7 +154,7 @@ autoCompactThreshold = 0.75
     });
 
     const rendered = renderMemoryConfig({
-      existingConfigText: await readProjectConfig(cwd),
+      existingConfigText: await readDeviceConfig(),
       daily: true,
       sessionMemory: false,
       promoteRoot: true,
@@ -196,7 +201,7 @@ tokenSavingRtk = true
     });
 
     const rendered = renderRuntimeConfig({
-      existingConfigText: await readProjectConfig(cwd),
+      existingConfigText: await readDeviceConfig(),
       tokenSavingRtk: false,
     });
 
@@ -225,6 +230,53 @@ pollIntervalMs = 1000
             pollIntervalMs: 1000,
           },
         },
+      },
+    });
+  });
+
+  it("ignores project .scorel/config.toml when loading config", async () => {
+    const cwd = await mkProject(`
+[providers.device]
+type = "custom"
+api = "openai-completions"
+provider = "device"
+baseUrl = "https://device.example.test/v1"
+apiKeyEnv = "DEVICE_KEY"
+
+[provider_models.device_main]
+provider = "device"
+id = "device-main"
+displayName = "Device Main"
+
+[available_models.main]
+model = "device_main"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
+`);
+    await mkdir(join(cwd, ".scorel"));
+    await writeFile(join(cwd, ".scorel", "config.toml"), `
+[providers.project]
+type = "custom"
+api = "openai-completions"
+provider = "project"
+baseUrl = "https://project.example.test/v1"
+apiKeyEnv = "PROJECT_KEY"
+`);
+
+    await expect(loadScorelConfig({ cwd, env: { DEVICE_KEY: "device-secret", PROJECT_KEY: "project-secret" } })).resolves.toMatchObject({
+      providers: {
+        device: {
+          provider: "device",
+          apiKey: "device-secret",
+        },
+      },
+    });
+    await expect(loadScorelConfig({ cwd, env: { DEVICE_KEY: "device-secret", PROJECT_KEY: "project-secret" } })).resolves.not.toMatchObject({
+      providers: {
+        project: expect.anything(),
       },
     });
   });
@@ -763,10 +815,26 @@ auxiliary = "main"
 
 const mkProject = async (config: string): Promise<string> => {
   const cwd = await import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "scorel-config-")));
-  await mkdir(join(cwd, ".scorel"));
-  await writeFile(join(cwd, ".scorel", "config.toml"), config);
+  await writeDeviceConfig(config);
   return cwd;
 };
 
-const readProjectConfig = (cwd: string): Promise<string> =>
-  readFile(join(cwd, ".scorel", "config.toml"), "utf8");
+const mkHome = async (): Promise<string> =>
+  import("node:fs/promises").then(({ mkdtemp }) => mkdtemp(join(tmpdir(), "scorel-config-home-")));
+
+const writeDeviceConfig = async (config: string): Promise<void> => {
+  const home = process.env.HOME;
+  if (!home) {
+    throw new Error("HOME is not set");
+  }
+  await mkdir(join(home, ".scorel"), { recursive: true });
+  await writeFile(join(home, ".scorel", "config.toml"), config);
+};
+
+const readDeviceConfig = (): Promise<string> => {
+  const home = process.env.HOME;
+  if (!home) {
+    throw new Error("HOME is not set");
+  }
+  return readFile(join(home, ".scorel", "config.toml"), "utf8");
+};

@@ -87,6 +87,7 @@ export type GuiLocalHostService = {
 
 export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): GuiLocalHostService => {
   const hostStateDir = options.scorelHomeDir ?? options.stateDir;
+  const configScope = { scorelHomeDir: hostStateDir };
   const sessionsDir = join(hostStateDir, "sessions");
   const projectsPath = join(hostStateDir, "projects.json");
   let started = false;
@@ -106,15 +107,15 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     ...(options.createRuntime
       ? {}
       : {
-          loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir }),
-          loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir }),
+          loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir, ...configScope }),
+          loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir, ...configScope }),
         }),
     createRuntime:
       options.createRuntime ??
       (async ({ project, selectedModel, purpose }) =>
         createRealRuntime({
           cwd: project.workDir,
-          config: await loadScorelConfig({ cwd: project.workDir }),
+          config: await loadScorelConfig({ cwd: project.workDir, ...configScope }),
           modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
           includeTools: purpose === "chat",
         })),

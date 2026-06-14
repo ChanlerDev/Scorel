@@ -38,7 +38,7 @@ The verifier starts:
 - a real local Relay process with durable file store
 - a real local Host daemon process connected outbound to Relay
 - a real WebUI Next dev server
-- a temporary real Project with project-level `.scorel/config.toml`
+- a temporary real Project using the device-level `~/.scorel/config.toml`
 - a Relay Entry using `RelayTransport` and `DaemonClient`
 
 The verifier then:

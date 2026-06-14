@@ -37,7 +37,7 @@ selecting a draft provider.
 Provider config supports either:
 
 - `apiKeyEnv`, resolved from environment variables; or
-- `apiKey`, stored directly in `.scorel/config.toml`.
+- `apiKey`, stored directly in the device `~/.scorel/config.toml`.
 
 GUI never receives direct API key values when listing providers. Editing an existing
 direct-key provider shows only that a direct key is configured. Saving a provider with

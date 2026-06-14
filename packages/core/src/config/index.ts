@@ -6,7 +6,6 @@ export const SCOREL_CONFIG_SCHEMA = {
     userRoot: "~/.scorel",
     userConfig: "~/.scorel/config.toml",
     sessionsDir: "~/.scorel/sessions",
-    projectConfig: ".scorel/config.toml",
   },
   sections: {
     root: {
@@ -241,11 +240,10 @@ export const scorelUserConfigPath = (homeDir: string): string => join(scorelUser
 
 export const scorelSessionsDir = (homeDir: string): string => join(scorelUserRoot(homeDir), "sessions");
 
-export const scorelProjectConfigPath = (cwd: string): string => join(cwd, ".scorel", "config.toml");
-
 export type LoadScorelConfigOptions = {
   cwd: string;
   homeDir?: string;
+  scorelHomeDir?: string;
   env?: Record<string, string | undefined>;
 };
 
@@ -857,21 +855,26 @@ const loadRoles = (
 };
 
 const readConfigText = async (options: LoadScorelConfigOptions): Promise<string> => {
-  const projectPath = scorelProjectConfigPath(options.cwd);
+  const userPath = configPathForDevice(options);
   try {
-    return await readFile(projectPath, "utf8");
-  } catch {
-    const home = options.homeDir ?? process.env.HOME;
-    if (!home) {
-      throw new Error(`Scorel config not found: ${projectPath}`);
+    return await readFile(userPath, "utf8");
+  } catch (cause) {
+    if (isNodeErrorCode(cause, "ENOENT")) {
+      throw new Error(`Scorel config not found: ${userPath}`);
     }
-    const userPath = scorelUserConfigPath(home);
-    try {
-      return await readFile(userPath, "utf8");
-    } catch {
-      throw new Error(`Scorel config not found: ${projectPath} or ${userPath}`);
-    }
+    throw cause;
   }
+};
+
+const configPathForDevice = (options: LoadScorelConfigOptions): string => {
+  if (options.scorelHomeDir) {
+    return join(options.scorelHomeDir, "config.toml");
+  }
+  const home = options.homeDir ?? process.env.HOME;
+  if (!home) {
+    throw new Error("Scorel config not found: HOME is not set");
+  }
+  return scorelUserConfigPath(home);
 };
 
 const parseToml = (text: string): RawConfig => {
@@ -1265,6 +1268,9 @@ const tomlString = (value: string): string => `"${value.replaceAll("\\", "\\\\")
 
 const renderTomlValue = (value: ConfigValue): string =>
   typeof value === "string" ? tomlString(value) : String(value);
+
+const isNodeErrorCode = (cause: unknown, code: string): boolean =>
+  typeof cause === "object" && cause !== null && "code" in cause && cause.code === code;
 
 const requireModelRole = (
   value: string | undefined,

@@ -69,7 +69,7 @@ GUI Settings Memory section exposes:
 - session memory toggle;
 - auto compact threshold select.
 
-These controls use the existing project-scoped memory config path.
+These controls use the device-scoped memory config path; memory status and persisted memory artifacts remain project-aware activity data.
 
 ## Not In Scope
 

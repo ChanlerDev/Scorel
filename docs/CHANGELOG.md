@@ -8,6 +8,7 @@
 - Local daemon now idle-shuts down when there are no clients, no active work, and no active IM extensions; active IM keeps it alive until explicit stop.
 - GUI connection settings now default to the official Relay, hide Relay URL editing behind an edit action, show `Get Pair Code`, support paired-device rename/details, and use a device-scoped settings selector.
 - GUI Provider settings now place `删除提供商` in the Provider configuration block, token-saving stats use clear Chinese labels, and Relay device rows expose expand/edit affordances.
+- Config loading now uses the device config only; Project `.scorel/config.toml` is no longer a runtime or Settings config source.
 
 ## 0.0.3 - 2026-06-12
 

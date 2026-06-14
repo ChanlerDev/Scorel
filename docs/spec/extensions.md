@@ -152,11 +152,12 @@ class PromptBuilder {
 
 **格式**：TOML
 
-**读取顺序**（高 → 低）：
-1. `.scorel/config.toml`（项目级）
-2. `~/.scorel/config.toml`（用户级）
+**读取路径**：
+1. `~/.scorel/config.toml`（用户级 / 设备级唯一 config）
 
-`~/.scorel` 是固定用户级根目录；`~/.scorel/config.toml` 是固定用户级配置文件；JSONL session 默认固定写入 `~/.scorel/sessions`。这些路径是产品约定，不作为可配置字段暴露。测试和内部嵌入场景可以通过代码注入临时 session 目录，但这不是用户配置面。
+一个设备只有一份 config。Project 是 workspace/session 对象，不拥有 Provider、Model、Memory、Runtime 或 Extension 配置；运行时不会读取项目目录下的 `.scorel/config.toml`。
+
+`~/.scorel` 是固定用户级根目录；`~/.scorel/config.toml` 是固定用户级配置文件；JSONL session 默认固定写入 `~/.scorel/sessions`。这些路径是产品约定，不作为可配置字段暴露。测试和内部嵌入场景可以通过代码注入临时 `scorelHomeDir` / session 目录，但这不是用户配置面。
 
 环境变量不参与通用配置覆盖，只通过 `apiKeyEnv` 指向具体密钥。CLI 参数也不复制完整 config schema；只有明确属于交互控制的参数才进入 CLI。
 
@@ -244,7 +245,7 @@ auxiliary = "aux"
 
 `available_models.*` 是 Scorel 的 available model / use pool。它们从 `provider_models.*` 里引用少量真正允许 Scorel 使用的模型；Runtime、GUI composer 和未来 subagent selection 只能选择 pool 内模型，不能直接选择 provider catalog 或 provider model 里的任意条目。
 
-GUI 的 provider/model 写入必须 merge 到现有 `.scorel/config.toml`：同一 provider 下追加第二个 provider model，或把 provider model 加入 available models 时，不能删除已存在 provider、provider model、available model 或 role assignment，除非用户明确覆盖对应字段。
+GUI 的 provider/model 写入必须 merge 到现有设备级 `config.toml`：同一 provider 下追加第二个 provider model，或把 provider model 加入 available models 时，不能删除已存在 provider、provider model、available model 或 role assignment，除非用户明确覆盖对应字段。
 
 Scorel 仍处在开发阶段，没有存量配置兼容要求。旧 `[models.*]` section 不再支持；遇到旧 section 必须按未知 section 报错。
 
