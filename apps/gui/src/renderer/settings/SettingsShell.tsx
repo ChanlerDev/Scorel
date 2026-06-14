@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { Component, useState, type ErrorInfo, type ReactNode } from "react";
 
 import {
   Box,
@@ -142,7 +142,45 @@ export function SettingsShell(props: SettingsShellProps) {
         onDeviceSelect={props.onDeviceSelect}
         onBack={props.onBack}
       />
-      <main className="settings-main">{content}</main>
+      <main className="settings-main">
+        <SettingsErrorBoundary resetKey={`${active}:${props.selectedDeviceKey}`}>
+          {content}
+        </SettingsErrorBoundary>
+      </main>
     </div>
   );
+}
+
+class SettingsErrorBoundary extends Component<{ children: ReactNode; resetKey: string }, { message: string | null; resetKey: string }> {
+  constructor(props: { children: ReactNode; resetKey: string }) {
+    super(props);
+    this.state = { message: null, resetKey: props.resetKey };
+  }
+
+  static getDerivedStateFromError(cause: unknown): { message: string } {
+    return { message: cause instanceof Error ? cause.message : String(cause) };
+  }
+
+  static getDerivedStateFromProps(
+    props: { resetKey: string },
+    state: { message: string | null; resetKey: string },
+  ): { message: null; resetKey: string } | null {
+    if (props.resetKey === state.resetKey) return null;
+    return { message: null, resetKey: props.resetKey };
+  }
+
+  override componentDidCatch(cause: Error, info: ErrorInfo): void {
+    console.error("Settings render error", cause, info.componentStack);
+  }
+
+  override render(): ReactNode {
+    if (!this.state.message) return this.props.children;
+    return (
+      <section className="settings-section settings-section--wide">
+        <div className="settings-card">
+          <div className="settings-empty">设置页面渲染失败：{this.state.message}</div>
+        </div>
+      </section>
+    );
+  }
 }

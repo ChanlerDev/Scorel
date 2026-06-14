@@ -56,9 +56,11 @@ describe("scorel up orchestrator", () => {
     const webui = makeChild();
     let spawnCalls = 0;
     const spawnCwds: string[] = [];
+    const spawnArgvs: string[][] = [];
     const spawnFn = (_command: string, argv: string[], opts: SpawnOptions) => {
       spawnCalls += 1;
       spawnCwds.push(String(opts.cwd));
+      spawnArgvs.push(argv);
       const isDaemon = argv.includes("daemon");
       return (isDaemon ? daemon : webui) as unknown as ReturnType<typeof import("node:child_process").spawn>;
     };
@@ -100,6 +102,7 @@ describe("scorel up orchestrator", () => {
     expect(out.toString()).toContain("daemon  ws://127.0.0.1:7800  token=auto-token");
     expect(out.toString()).toContain("webui   http://127.0.0.1:3100");
     expect(spawnCwds).toEqual(["/cli", "/cli"]);
+    expect(spawnArgvs[0]).toEqual(expect.arrayContaining(["daemon", "serve", "--idle-timeout-ms", "900000"]));
 
     expect(daemon.unrefCalled).toBe(true);
 

@@ -34,6 +34,7 @@ const sessionSubscriptions = new Map<string, () => void>();
 
 const scorelHomeDir = (): string => join(homedir(), ".scorel");
 const guiStorePath = (): string => join(scorelHomeDir(), "gui-store.json");
+const AUTO_STARTED_IDLE_SHUTDOWN_MS = 15 * 60 * 1000;
 
 const repoRoot = (): string => join(here, "..", "..", "..");
 const cliEntrypoint = (): string => process.env.SCOREL_CLI_ENTRYPOINT ?? join(repoRoot(), "apps", "cli", "src", "index.ts");
@@ -49,8 +50,12 @@ const ensureLocalDaemon = async (stateDir: string): Promise<void> => {
       ...nodeEntrypointArgs(entrypoint),
       "host",
       "start",
+      "--port",
+      "0",
       "--cwd",
       bootstrapProject,
+      "--idle-timeout-ms",
+      String(AUTO_STARTED_IDLE_SHUTDOWN_MS),
       "--no-relay",
     ], {
       cwd: dirname(entrypoint),

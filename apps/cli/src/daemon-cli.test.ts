@@ -99,6 +99,7 @@ describe("scorel daemon CLI", () => {
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0]).toMatchObject({ command: process.execPath, cwd: "/cli", detached: true });
     expect(spawnCalls[0]!.argv).toEqual(expect.arrayContaining(["host", "serve", "--cwd", cwd, "--no-relay"]));
+    expect(spawnCalls[0]!.argv).toEqual(expect.arrayContaining(["--idle-timeout-ms", "0"]));
     expect(child.unrefCalled).toBe(true);
     expect(child.killSignals).toEqual([]);
     expect(out.toString()).toContain("scorel host started url=ws://127.0.0.1:7777");
@@ -296,6 +297,33 @@ describe("scorel daemon CLI", () => {
     await expect(serving).resolves.toBe(0);
     expect(out.toString()).toContain("scorel host serve stopped reason=idle");
     expect((await readLocalDaemonState({ stateDir }))?.stoppedAt).not.toBeNull();
+    expect(err.toString()).toBe("");
+  });
+
+  it("serve stays alive by default until the foreground process is stopped", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-foreground-"));
+    const stateDir = join(root, ".scorel");
+    const sessionsDir = join(stateDir, "sessions");
+    const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-foreground-cwd-"));
+    await writeConfig(cwd);
+
+    const out = new StringWritable();
+    const err = new StringWritable();
+    const abort = new AbortController();
+    const serving = runCliDaemon(["serve", "--port", "0", "--cwd", cwd, "--no-relay"], {
+      stateDir,
+      sessionsDir,
+      output: out,
+      error: err,
+      serveSignal: abort.signal,
+    });
+
+    await waitForText(out, "scorel host serving url=ws://127.0.0.1:");
+    await sleep(80);
+    expect(out.toString()).not.toContain("reason=idle");
+    abort.abort();
+    await expect(serving).resolves.toBe(0);
+    expect(out.toString()).toContain("scorel host serve stopped reason=abort");
     expect(err.toString()).toBe("");
   });
 

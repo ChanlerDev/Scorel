@@ -6,6 +6,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 
 import { App } from "./App.js";
+import type { GuiDeviceRef, GuiModelProfileView } from "../shared/ipc.js";
 
 const projects = [
   {
@@ -131,17 +132,73 @@ describe("GUI App session preload", () => {
     });
     expect(container!.textContent).toContain("qq: qq:private:user_1");
   });
+
+  it("keeps remote settings data when an older local settings request resolves later", async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+    let openSettings: (() => void) | undefined;
+    const localModels = deferred<GuiModelProfileView>();
+    const remoteModels = deferred<GuiModelProfileView>();
+    const listModels = vi.fn((device: GuiDeviceRef) =>
+      device.source === "relay" ? remoteModels.promise : localModels.promise,
+    );
+
+    installScorelApi({
+      listSessions: vi.fn(async () => []),
+      listModels,
+      onOpenSettings: vi.fn((handler) => {
+        openSettings = handler;
+        return () => undefined;
+      }),
+      snapshot: {
+        projects,
+        relayDevices: [{ deviceId: "device_remote", label: "Remote Device", relayUrl: "wss://scorel-relay.chanler.dev", online: true, updatedAt: 1 }],
+      },
+    });
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root!.render(<App />);
+    });
+    await act(async () => {
+      openSettings?.();
+    });
+    await waitFor(() => expect(container!.querySelector(".settings-shell")).not.toBeNull());
+    const select = container!.querySelector(".settings-nav__scope select") as HTMLSelectElement | null;
+    expect(select).not.toBeNull();
+
+    await act(async () => {
+      select!.value = "relay:device_remote";
+      select!.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    remoteModels.resolve(profileWithModel("remote_model", "Remote Model"));
+    await waitFor(() => expect(container!.textContent).toContain("Remote Model"));
+
+    localModels.resolve(profileWithModel("local_model", "Local Model"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(container!.textContent).toContain("Remote Model");
+    expect(container!.textContent).not.toContain("Local Model");
+  });
 });
 
 function installScorelApi(overrides: {
   listSessions: ReturnType<typeof vi.fn>;
+  listModels?: ReturnType<typeof vi.fn>;
   onSessionsChanged?: ReturnType<typeof vi.fn>;
+  onOpenSettings?: ReturnType<typeof vi.fn>;
+  snapshot?: { projects: typeof projects; relayDevices: Array<{ deviceId: string; label: string; relayUrl: string; online: boolean; updatedAt: number }> };
 }): void {
   Object.defineProperty(window, "scorel", {
     configurable: true,
     value: {
       getHostStatus: vi.fn(async () => ({ state: "running" })),
-      getSnapshot: vi.fn(async () => ({ projects, relayDevices: [] })),
+      getSnapshot: vi.fn(async () => overrides.snapshot ?? { projects, relayDevices: [] }),
       listSessions: overrides.listSessions,
       getExtensionSettings: vi.fn(async () => ({
         extensionId: "telegram",
@@ -150,7 +207,7 @@ function installScorelApi(overrides: {
         config: {},
         active: false,
       })),
-      listModels: vi.fn(async () => ({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } })),
+      listModels: overrides.listModels ?? vi.fn(async () => ({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } })),
       getMemorySettings: vi.fn(async () => ({
         enabled: true,
         daily: true,
@@ -173,10 +230,54 @@ function installScorelApi(overrides: {
       })),
       onSessionEvent: vi.fn(() => () => undefined),
       onSessionsChanged: overrides.onSessionsChanged ?? vi.fn(() => () => undefined),
-      onOpenSettings: vi.fn(() => () => undefined),
+      onOpenSettings: overrides.onOpenSettings ?? vi.fn(() => () => undefined),
       detachSession: vi.fn(async () => undefined),
     },
   });
+}
+
+function profileWithModel(modelId: string, displayName: string): GuiModelProfileView {
+  return {
+    providers: [{
+      providerId: `${modelId}_provider`,
+      type: "custom",
+      provider: "scorel-test",
+      api: "openai-completions",
+      baseUrl: "https://llm.example.test/v1",
+      credentialSource: "direct",
+      credentialStatus: "available",
+    }],
+    providerModels: [{
+      providerModelId: `${modelId}_provider_model`,
+      providerId: `${modelId}_provider`,
+      provider: "scorel-test",
+      id: modelId,
+      displayName,
+      availableModelIds: [modelId],
+    }],
+    models: [{
+      modelId,
+      providerModelId: `${modelId}_provider_model`,
+      providerId: `${modelId}_provider`,
+      provider: "scorel-test",
+      id: modelId,
+      displayName,
+      roles: ["standard"],
+    }],
+    roles: {
+      primary: modelId,
+      standard: modelId,
+      auxiliary: modelId,
+    },
+  };
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
 }
 
 async function waitFor(assertion: () => void): Promise<void> {

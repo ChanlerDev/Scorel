@@ -70,12 +70,14 @@ const main = async (): Promise<void> => {
   try {
     await cdp.send("Runtime.enable");
     await cdp.send("Page.enable");
+    await installRendererErrorCapture(cdp);
     await waitFor(cdp, "app shell", "Boolean(document.querySelector('.app-shell'))");
-    const daemonState = await waitForDaemonState(home);
+    const daemonState = await waitForDaemonState(home, cdp, stderr);
     await waitFor(cdp, "seeded local project", "document.body.innerText.includes('scorel-cdp-repo')");
 
     await clickButton(cdp, "设置");
     await waitFor(cdp, "settings shell", "Boolean(document.querySelector('.settings-shell'))");
+    await stressRemoteSettings(cdp);
     await clickButton(cdp, "Token 节省");
     await waitFor(cdp, "runtime settings section", "document.body.innerText.includes('启用 RTK')");
 
@@ -84,7 +86,7 @@ const main = async (): Promise<void> => {
       await clickSwitch(cdp, "启用 RTK");
       await waitFor(cdp, "RTK toggle enabled", "document.querySelector('[role=\"switch\"][aria-label=\"启用 RTK\"]')?.getAttribute('aria-checked') === 'true'");
     }
-    await waitForConfig(repo, "tokenSavingRtk = true");
+    await waitForConfig(home, "tokenSavingRtk = true");
 
     await clickButton(cdp, "返回应用");
     await waitFor(cdp, "composer", "Boolean(document.querySelector('textarea.composer__textarea'))");
@@ -106,7 +108,7 @@ const main = async (): Promise<void> => {
       port,
       home,
       repo,
-      projectConfig: join(repo, ".scorel", "config.toml"),
+      deviceConfig: join(home, ".scorel", "config.toml"),
       sessionFile: session.file,
       promptPersisted: session.promptPersisted,
       assistantPersisted: session.assistantPersisted,
@@ -124,9 +126,9 @@ const main = async (): Promise<void> => {
 
 const seedProject = async (home: string, repo: string, baseUrl: string): Promise<void> => {
   await mkdir(join(home, ".scorel"), { recursive: true });
-  await mkdir(join(repo, ".scorel"), { recursive: true });
+  await mkdir(repo, { recursive: true });
   await writeFile(join(repo, "README.md"), "# Scorel CDP GUI E2E\n", "utf8");
-  await writeFile(join(repo, ".scorel", "config.toml"), `
+  await writeFile(join(home, ".scorel", "config.toml"), `
 [providers.chanleramp]
 type = "custom"
 api = "openai-completions"
@@ -165,6 +167,20 @@ auxiliary = "main"
         updatedAt: now,
       },
     ],
+  }, null, 2)}\n`, "utf8");
+  await writeFile(join(home, ".scorel", "gui-store.json"), `${JSON.stringify({
+    relayDevices: [
+      {
+        deviceId: "device_remote_cdp",
+        label: "Remote CDP Device",
+        relayUrl: "ws://127.0.0.1:1",
+        clientId: "client_gui",
+        online: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    visibleRemoteProjects: [],
   }, null, 2)}\n`, "utf8");
 };
 
@@ -230,6 +246,54 @@ const evaluateExpression = async <T>(cdp: Cdp, expression: string): Promise<T> =
   return result.result?.value as T;
 };
 
+const installRendererErrorCapture = async (cdp: Cdp): Promise<void> => {
+  await evaluateExpression(cdp, `(() => {
+    window.__scorelRendererErrors = [];
+    window.addEventListener("error", (event) => {
+      window.__scorelRendererErrors.push(event.error?.stack || event.message || String(event.error));
+    });
+    window.addEventListener("unhandledrejection", (event) => {
+      window.__scorelRendererErrors.push(event.reason?.stack || event.reason?.message || String(event.reason));
+    });
+    return true;
+  })()`);
+};
+
+const assertNoRendererErrors = async (cdp: Cdp): Promise<void> => {
+  const errors = await evaluateExpression<string[]>(cdp, "window.__scorelRendererErrors || []");
+  if (errors.length > 0) {
+    throw new Error(`Renderer errors during CDP run:\n${errors.join("\n")}`);
+  }
+};
+
+const stressRemoteSettings = async (cdp: Cdp): Promise<void> => {
+  await waitFor(cdp, "remote device selector option", "Array.from(document.querySelectorAll('.settings-nav__scope option')).some((option) => option.textContent?.includes('Remote CDP Device'))");
+  await evaluateExpression(cdp, `(() => {
+    const select = document.querySelector('.settings-nav__scope select');
+    if (!select) return false;
+    select.value = "relay:device_remote_cdp";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  for (const label of ["模型", "Provider", "记忆", "Token 节省", "IM", "连接", "Provider", "模型"]) {
+    await clickButton(cdp, label);
+    await waitFor(cdp, `settings still mounted after ${label}`, "Boolean(document.querySelector('.settings-shell'))", 5_000);
+  }
+  const stillMounted = await evaluateExpression<boolean>(cdp, "Boolean(document.querySelector('.settings-shell')) && document.body.innerText.trim().length > 0");
+  if (!stillMounted) {
+    throw new Error("Settings shell disappeared during remote settings stress");
+  }
+  await assertNoRendererErrors(cdp);
+  await evaluateExpression(cdp, `(() => {
+    const select = document.querySelector('.settings-nav__scope select');
+    if (!select) return false;
+    select.value = "local";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`);
+  await waitFor(cdp, "local settings selected after remote stress", "document.querySelector('.settings-nav__scope select')?.value === 'local'", 5_000);
+};
+
 const waitFor = async (cdp: Cdp, label: string, expression: string, timeoutMs = 180_000): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -284,8 +348,8 @@ const clickSend = async (cdp: Cdp): Promise<void> => {
   if (!ok) throw new Error("Send button was not clickable");
 };
 
-const waitForConfig = async (repo: string, text: string): Promise<void> => {
-  const file = join(repo, ".scorel", "config.toml");
+const waitForConfig = async (home: string, text: string): Promise<void> => {
+  const file = join(home, ".scorel", "config.toml");
   await waitUntil(`config containing ${text}`, async () => (await readFile(file, "utf8")).includes(text));
 };
 
@@ -340,22 +404,27 @@ type DaemonState = {
   stoppedAt: number | null;
 };
 
-const waitForDaemonState = async (home: string): Promise<DaemonState> => {
+const waitForDaemonState = async (home: string, cdp: Cdp, stderr: string[]): Promise<DaemonState> => {
   const file = join(home, ".scorel", "daemon.json");
   let state: DaemonState | undefined;
-  await waitUntil("GUI-started daemon state", async () => {
-    const parsed = JSON.parse(await readFile(file, "utf8")) as Partial<DaemonState>;
-    if (typeof parsed.wsUrl !== "string" || typeof parsed.token !== "string" || typeof parsed.pid !== "number" || parsed.stoppedAt !== null) {
-      return false;
-    }
-    try {
-      process.kill(parsed.pid, 0);
-    } catch {
-      return false;
-    }
-    state = parsed as DaemonState;
-    return true;
-  });
+  try {
+    await waitUntil("GUI-started daemon state", async () => {
+      const parsed = JSON.parse(await readFile(file, "utf8")) as Partial<DaemonState>;
+      if (typeof parsed.wsUrl !== "string" || typeof parsed.token !== "string" || typeof parsed.pid !== "number" || parsed.stoppedAt !== null) {
+        return false;
+      }
+      try {
+        process.kill(parsed.pid, 0);
+      } catch {
+        return false;
+      }
+      state = parsed as DaemonState;
+      return true;
+    });
+  } catch (cause) {
+    const body = await evaluateExpression<string>(cdp, "document.body.innerText").catch(() => "");
+    throw new Error(`${cause instanceof Error ? cause.message : String(cause)}\nElectron stderr:\n${stderr.join("")}\nRenderer text:\n${body}`);
+  }
   return state!;
 };
 

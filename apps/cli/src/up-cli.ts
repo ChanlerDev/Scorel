@@ -8,6 +8,7 @@ import {
   readLocalDaemonState,
   type LocalDaemonState,
 } from "@scorel/daemon";
+import { AUTO_STARTED_IDLE_SHUTDOWN_MS } from "./daemon-cli.js";
 
 export type UpCommandOptions = {
   output: NodeJS.WritableStream;
@@ -90,6 +91,8 @@ export const runCliUp = async (argv: string[], options: UpCommandOptions): Promi
       String(flags.daemonPort),
       "--cwd",
       flags.cwd,
+      "--idle-timeout-ms",
+      String(AUTO_STARTED_IDLE_SHUTDOWN_MS),
       "--no-relay",
     ];
     daemonChild = spawnFn(process.execPath, daemonArgs, {

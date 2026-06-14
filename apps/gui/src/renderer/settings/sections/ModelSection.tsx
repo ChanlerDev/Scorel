@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { GuiDeviceRef, GuiModelProfileView, GuiUpsertModelProfileInput } from "../../../shared/ipc.js";
 import { SettingsCard } from "../SettingsCard.js";
@@ -51,6 +51,10 @@ export function ModelSection({
   };
 
   const saveRoles = (): Promise<void> => save({ roles });
+
+  useEffect(() => {
+    setRolesForm(modelProfile.roles);
+  }, [deviceScopeKey(device), modelProfile.roles]);
 
   return (
     <>
@@ -123,3 +127,6 @@ export function ModelSection({
 }
 
 const providerName = (value: string): string => value.split("/")[0]?.trim() || value.trim();
+
+const deviceScopeKey = (device: GuiDeviceRef): string =>
+  device.source === "relay" ? `relay:${device.deviceId ?? ""}` : "local";

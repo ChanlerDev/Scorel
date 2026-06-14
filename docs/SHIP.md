@@ -35,7 +35,7 @@ open https://scorel.chanler.dev
 pnpm scorel pair <pair-code>
 ```
 
-`scorel host serve` 会以前台调试模式启动本机 Host、注册当前目录为初始 Project，并默认连接官方 Relay。`scorel host start` 会启动或复用后台 singleton Host，并返回到 shell；`scorel host stop` 显式关闭它。`scorel up` / `pnpm dev` 只作为本地开发便利入口：确保后台 Host 可用，然后启动本地 WebUI，但不拥有 Host 生命周期。后台 Host 无 client、无 active work、无 active IM 时会按 idle timeout 自动退出；active IM 会保持 Host 存活。
+`scorel host serve` 会以前台调试模式启动本机 Host、注册当前目录为初始 Project，并默认连接官方 Relay；前台 Host 默认一直存活，直到 Ctrl+C / SIGTERM，除非显式传入 `--idle-timeout-ms`。`scorel host start` 会启动或复用后台 singleton Host，并返回到 shell；直接后台启动的 CLI Host 默认一直存活，直到 `scorel host stop` 或进程退出。`scorel up` / `pnpm dev` 只作为本地开发便利入口：确保后台 Host 可用，然后启动本地 WebUI，但不拥有 Host 生命周期。GUI / CUI 自动拉起的后台 Host 无 client、无 active work、无 active IM 时会按 15 分钟 idle timeout 自动退出；active IM 会保持 Host 存活。
 
 ---
 

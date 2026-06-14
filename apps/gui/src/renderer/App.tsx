@@ -57,6 +57,13 @@ const defaultRuntimeSettings = (): GuiRuntimeSettingsView => ({
   estimatedSavedTokens: 0,
 });
 
+const defaultModelProfile = (): GuiModelProfileView => ({
+  providers: [],
+  providerModels: [],
+  models: [],
+  roles: { primary: "", standard: "", auxiliary: "" },
+});
+
 const defaultExtensionSettings = (extensionId: string): GuiExtensionSettingsView => ({
   extensionId,
   enabled: false,
@@ -98,7 +105,7 @@ export function App() {
   const [inFlight, setInFlight] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string>("");
-  const [modelProfile, setModelProfile] = useState<GuiModelProfileView>({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
+  const [modelProfile, setModelProfile] = useState<GuiModelProfileView>(defaultModelProfile());
   const [memorySettings, setMemorySettings] = useState<GuiMemorySettingsView>(defaultMemorySettings());
   const [memoryStatus, setMemoryStatus] = useState<GuiMemoryStatusView>(defaultMemoryStatus());
   const [runtimeSettings, setRuntimeSettings] = useState<GuiRuntimeSettingsView>(defaultRuntimeSettings());
@@ -120,6 +127,7 @@ export function App() {
   const batcherRef = useRef<ReturnType<typeof createRafBatcher> | null>(null);
   const sessionsByProjectRef = useRef<Record<string, SessionSummary[]>>({});
   const loadingSessionsRef = useRef<Set<string>>(new Set());
+  const settingsLoadSeqRef = useRef(0);
 
   const flushPending = useCallback(() => {
     const queued = pendingEventsRef.current;
@@ -320,8 +328,18 @@ export function App() {
       setSelectedSettingsDeviceKey("local");
       return;
     }
+    const loadSeq = settingsLoadSeqRef.current + 1;
+    settingsLoadSeqRef.current = loadSeq;
+    let cancelled = false;
+    const isCurrent = (): boolean => !cancelled && settingsLoadSeqRef.current === loadSeq;
+    setModelProfile(defaultModelProfile());
+    setSelectedModelId("");
+    setMemorySettings(defaultMemorySettings());
+    setMemoryStatus(defaultMemoryStatus());
+    setRuntimeSettings(defaultRuntimeSettings());
     void window.scorel.listModels(activeConfigDevice)
       .then((profile) => {
+        if (!isCurrent()) return;
         setModelProfile(profile);
         setSelectedModelId((current) => {
           if (current && profile.models.some((model) => model.modelId === current)) return current;
@@ -329,27 +347,34 @@ export function App() {
         });
       })
       .catch((cause) => {
-        setModelProfile({ providers: [], providerModels: [], models: [], roles: { primary: "", standard: "", auxiliary: "" } });
+        if (!isCurrent()) return;
+        setModelProfile(defaultModelProfile());
         setSelectedModelId("");
         setError(cause instanceof Error ? cause.message : String(cause));
       });
     void window.scorel.getMemorySettings(activeConfigDevice)
       .then((memory) => {
+        if (!isCurrent()) return;
         setMemorySettings(memory);
       })
       .catch((cause) => {
+        if (!isCurrent()) return;
         setMemorySettings(defaultMemorySettings());
         setError(cause instanceof Error ? cause.message : String(cause));
       });
-    setMemoryStatus(defaultMemoryStatus());
     void window.scorel.getRuntimeSettings(activeConfigDevice)
       .then((runtime) => {
+        if (!isCurrent()) return;
         setRuntimeSettings(runtime);
       })
       .catch((cause) => {
+        if (!isCurrent()) return;
         setRuntimeSettings(defaultRuntimeSettings());
         setError(cause instanceof Error ? cause.message : String(cause));
       });
+    return () => {
+      cancelled = true;
+    };
   }, [activeConfigDevice, relayDevices, selectedSettingsDevice, view]);
 
   const handleProjectClick = useCallback((key: string): void => {

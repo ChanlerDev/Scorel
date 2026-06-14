@@ -598,6 +598,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.22 | [`S0100`](spec/ship/S0100-gui-provider-danger-zone.md) | GUI Provider 删除按钮位置初版 | Done |
 | M9.F1.23 | [`S0101`](spec/ship/S0101-gui-device-settings-polish.md) | GUI Settings 改为设备级配置，修正 Provider 删除位置、Token 文案、设备展开/重命名交互 | Done |
 | M9.F1.24 | [`S0102`](spec/ship/S0102-device-only-config.md) | Config 彻底收敛为设备级唯一配置，移除 Project config 运行时语义 | Done |
+| M9.F1.25 | [`S0103`](spec/ship/S0103-daemon-lifecycle-and-settings-resilience.md) | Daemon 生命周期按入口区分，并修复 GUI Settings remote 切换黑屏风险 | Done |
 
 **Not in M9 Follow-up**:
 
@@ -774,6 +775,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0100`](spec/ship/S0100-gui-provider-danger-zone.md) | GUI Provider danger-zone placement | Done |
 | [`S0101`](spec/ship/S0101-gui-device-settings-polish.md) | GUI device-scoped Settings polish | Done |
 | [`S0102`](spec/ship/S0102-device-only-config.md) | Device-only config | Done |
+| [`S0103`](spec/ship/S0103-daemon-lifecycle-and-settings-resilience.md) | Daemon lifecycle and Settings resilience | Done |
 
 ---
 

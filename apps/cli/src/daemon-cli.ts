@@ -52,7 +52,8 @@ const DEFAULT_PORT = 7777;
 const STOP_POLL_INTERVAL_MS = 200;
 const STOP_GRACE_MS = 5000;
 const START_READY_TIMEOUT_MS = 10_000;
-const DEFAULT_IDLE_SHUTDOWN_MS = 15 * 60 * 1000;
+export const AUTO_STARTED_IDLE_SHUTDOWN_MS = 15 * 60 * 1000;
+const FOREGROUND_IDLE_SHUTDOWN_MS = 0;
 
 const defaultStateDir = (): string => join(homedir(), ".scorel");
 
@@ -94,7 +95,7 @@ const runStartCommand = async (
 ): Promise<number> => {
   let flags: ServeFlags;
   try {
-    flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env);
+    flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, FOREGROUND_IDLE_SHUTDOWN_MS);
   } catch (cause) {
     options.error.write(`scorel daemon start error: ${(cause as Error).message}\n`);
     return 1;
@@ -165,7 +166,7 @@ const runServeCommand = async (
 ): Promise<number> => {
   let flags: ServeFlags;
   try {
-    flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env);
+    flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, FOREGROUND_IDLE_SHUTDOWN_MS);
   } catch (cause) {
     options.error.write(`scorel daemon serve error: ${(cause as Error).message}\n`);
     return 1;
@@ -439,14 +440,14 @@ const formatStatusLine = (
   return `stopped url=${state.wsUrl} last-pid=${state.pid} stoppedAt=${stoppedAt} liveness=${liveness}`;
 };
 
-const parseServeFlags = (argv: string[], defaultCwd: string, env: NodeJS.ProcessEnv): ServeFlags => {
+const parseServeFlags = (argv: string[], defaultCwd: string, env: NodeJS.ProcessEnv, defaultIdleShutdownMs: number): ServeFlags => {
   let host = DEFAULT_HOST;
   let port = DEFAULT_PORT;
   let cwd = defaultCwd;
   let token: string | undefined;
   let relayUrl: string | undefined = resolveDefaultRelayUrl(env);
   let replace = false;
-  let idleShutdownMs = DEFAULT_IDLE_SHUTDOWN_MS;
+  let idleShutdownMs = defaultIdleShutdownMs;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--host") {

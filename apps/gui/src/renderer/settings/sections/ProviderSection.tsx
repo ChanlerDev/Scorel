@@ -101,11 +101,22 @@ export function ProviderSection({
   );
   const selectedProvider = selectedProviderId ? providerById.get(selectedProviderId) ?? modelProfile.providers[0] : undefined;
   useEffect(() => {
-    if (selectedProviderId || modelProfile.providers.length === 0) return;
-    const firstProvider = modelProfile.providers[0];
-    setSelectedProviderId(firstProvider.providerId);
-    setProviderForm(providerToForm(firstProvider) ?? DEFAULT_PROVIDER_FORM);
-  }, [modelProfile.providers, selectedProviderId]);
+    const nextProvider = selectedProviderId ? providerById.get(selectedProviderId) : modelProfile.providers[0];
+    if (nextProvider) {
+      setSelectedProviderId(nextProvider.providerId);
+      setProviderForm(providerToForm(nextProvider) ?? DEFAULT_PROVIDER_FORM);
+      setProviderModelForm(providerModelToForm(modelProfile.providerModels.find((model) => model.providerId === nextProvider.providerId), nextProvider.providerId) ?? DEFAULT_PROVIDER_MODEL_FORM);
+    } else {
+      setSelectedProviderId("");
+      setProviderForm(DEFAULT_PROVIDER_FORM);
+      setProviderModelForm(DEFAULT_PROVIDER_MODEL_FORM);
+    }
+    setCatalogModels([]);
+    setCatalogQuery("");
+    setConfigModel(null);
+    setModelTestStates({});
+    setModelTestMessage(null);
+  }, [deviceScopeKey(device), modelProfile.providers, modelProfile.providerModels, providerById, selectedProviderId]);
   const selectedProviderModels = modelProfile.providerModels.filter((model) => model.providerId === selectedProvider?.providerId);
   const availableProviderModelIds = new Set(modelProfile.models.map((model) => model.providerModelId));
   const modelCards: ProviderModelCard[] = [
@@ -636,6 +647,9 @@ const newProviderDraft = (): ProviderForm => ({
 });
 
 const providerName = (value: string): string => value.split("/")[0]?.trim() || value.trim();
+
+const deviceScopeKey = (device: GuiDeviceRef): string =>
+  device.source === "relay" ? `relay:${device.deviceId ?? ""}` : "local";
 const identifierFromModelId = (value: string): string => value.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "") || "model";
 const identifierFromProviderName = (value: string): string => identifierFromModelId(providerName(value).toLowerCase());
 const providerModelKey = (providerId: string, modelId: string): string => `${providerId || "provider"}_${identifierFromModelId(modelId)}`;
