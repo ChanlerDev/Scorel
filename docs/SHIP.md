@@ -102,7 +102,7 @@ docs/spec/ship/S####-slug.md
 - 影响文件 / 包
 - 风险与边界
 
-没有 S spec，不开始实现。Bug fix 也需要 S spec，可以很短。
+没有 S spec，不开始实现。局部 bug fix 可以不创建 S spec；如果修复会改变稳定契约、配置/协议/数据边界或用户可见产品方向，就先补 S spec。
 
 ### 3. Ship
 
@@ -140,7 +140,7 @@ S####: <type>: <description>
 
 规则：
 
-- 一个 PR 对应一个 S spec。
+- 一个 PR 对应一个 S spec；局部 bug fix 可以不对应 S spec。
 - Commit message 使用 title-only semantic commit：只写标题，不写正文。
 - 按业务含义拆 commit，不把无关实现混在一起。
 - 文档、实现、测试可以拆 commit，但 PR title 必须带 S 编号。
