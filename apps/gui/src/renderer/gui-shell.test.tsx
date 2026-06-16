@@ -1,7 +1,12 @@
+// @vitest-environment jsdom
+
+import { act, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GuiModelProfileView, GuiProjectView } from "../shared/ipc.js";
+import { modelSelectionFromValue, selectedModelValue } from "./App.js";
 import { ProjectPickerMenu } from "./composer/ProjectPickerMenu.js";
 import { MemorySection } from "./settings/sections/MemorySection.js";
 import { RuntimeSection } from "./settings/sections/RuntimeSection.js";
@@ -15,6 +20,20 @@ import { Topbar } from "./workspace/Topbar.js";
 import { Workspace } from "./workspace/Workspace.js";
 
 const noop = (): void => {};
+let root: Root | undefined;
+let container: HTMLDivElement | undefined;
+
+afterEach(() => {
+  if (root) {
+    act(() => {
+      root?.unmount();
+    });
+  }
+  root = undefined;
+  container?.remove();
+  container = undefined;
+  vi.restoreAllMocks();
+});
 
 const modelProfile: GuiModelProfileView = {
   providers: [
@@ -559,6 +578,82 @@ describe("GUI shell rendering contract", () => {
     expect(html).not.toContain("chanleramp");
     expect(html).not.toContain("deepseek-v4-flash");
     expect(html).not.toContain("Relay URL");
+  });
+
+  it("keeps provider model configuration open across autosave profile refreshes", async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const updatedProfile = {
+      ...modelProfile,
+      providerModels: modelProfile.providerModels.map((model) => ({
+        ...model,
+        displayName: "Main Model Updated",
+      })),
+    };
+    const upsertModelProfile = vi.fn(async () => updatedProfile);
+    Object.defineProperty(window, "scorel", {
+      configurable: true,
+      value: {
+        upsertModelProfile,
+      },
+    });
+
+    function Harness() {
+      const [profile, setProfile] = useState<GuiModelProfileView>(modelProfile);
+      return (
+        <ProviderSection
+          device={{ source: "local" }}
+          modelProfile={profile}
+          busy={false}
+          setBusy={noop}
+          setError={noop}
+          onModelProfileChange={setProfile}
+        />
+      );
+    }
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root!.render(<Harness />);
+    });
+    await act(async () => {
+      (container!.querySelector('[aria-label="配置"]') as HTMLButtonElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    const dialog = () => container!.querySelector('[role="dialog"][aria-label="Model configuration"]') as HTMLElement | null;
+    expect(dialog()).not.toBeNull();
+
+    await act(async () => {
+      const input = dialog()!.querySelector("input") as HTMLInputElement;
+      input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(upsertModelProfile).toHaveBeenCalledTimes(1);
+    expect(dialog()).not.toBeNull();
+    expect((dialog()!.querySelector("input") as HTMLInputElement).value).toBe("Main Model Updated");
+
+    await act(async () => {
+      dialog()!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(dialog()).not.toBeNull();
+
+    await act(async () => {
+      (dialog()!.querySelector('[aria-label="Close"]') as HTMLButtonElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    expect(dialog()).toBeNull();
+  });
+
+  it("normalizes composer model selections before creating sessions", () => {
+    expect(modelSelectionFromValue("main", modelProfile)).toEqual({ modelId: "main" });
+    expect(modelSelectionFromValue("standard", modelProfile)).toBeUndefined();
+    expect(modelSelectionFromValue("missing", modelProfile)).toBeUndefined();
+    expect(selectedModelValue({
+      ...modelProfile,
+      roles: { primary: "primary", standard: "standard", auxiliary: "auxiliary" },
+    }, "")).toBe("main");
   });
 
   it("renders real memory settings controls", () => {

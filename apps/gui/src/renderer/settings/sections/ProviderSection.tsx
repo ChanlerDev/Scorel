@@ -103,20 +103,34 @@ export function ProviderSection({
   useEffect(() => {
     const nextProvider = selectedProviderId ? providerById.get(selectedProviderId) : modelProfile.providers[0];
     if (nextProvider) {
+      const activeModel = configModel
+        ? modelProfile.providerModels.find((model) => model.providerModelId === configModel.providerModelKey && model.providerId === nextProvider.providerId)
+        : undefined;
+      const firstProviderModel = modelProfile.providerModels.find((model) => model.providerId === nextProvider.providerId);
       setSelectedProviderId(nextProvider.providerId);
       setProviderForm(providerToForm(nextProvider) ?? DEFAULT_PROVIDER_FORM);
-      setProviderModelForm(providerModelToForm(modelProfile.providerModels.find((model) => model.providerId === nextProvider.providerId), nextProvider.providerId) ?? DEFAULT_PROVIDER_MODEL_FORM);
+      setProviderModelForm(providerModelToForm(activeModel ?? firstProviderModel, nextProvider.providerId) ?? DEFAULT_PROVIDER_MODEL_FORM);
+      setConfigModel((current) => {
+        if (!current) return null;
+        if (!activeModel) return null;
+        if (current.id === activeModel.id && current.displayName === activeModel.displayName) return current;
+        return { ...current, id: activeModel.id, displayName: activeModel.displayName };
+      });
     } else {
       setSelectedProviderId("");
       setProviderForm(DEFAULT_PROVIDER_FORM);
       setProviderModelForm(DEFAULT_PROVIDER_MODEL_FORM);
+      setConfigModel(null);
     }
+  }, [configModel?.providerModelKey, modelProfile.providers, modelProfile.providerModels, providerById, selectedProviderId]);
+
+  useEffect(() => {
     setCatalogModels([]);
     setCatalogQuery("");
     setConfigModel(null);
     setModelTestStates({});
     setModelTestMessage(null);
-  }, [deviceScopeKey(device), modelProfile.providers, modelProfile.providerModels, providerById, selectedProviderId]);
+  }, [deviceScopeKey(device), selectedProvider?.providerId]);
   const selectedProviderModels = modelProfile.providerModels.filter((model) => model.providerId === selectedProvider?.providerId);
   const availableProviderModelIds = new Set(modelProfile.models.map((model) => model.providerModelId));
   const modelCards: ProviderModelCard[] = [
@@ -504,7 +518,7 @@ export function ProviderSection({
         </SettingsCard>
       </section>
       {configModel ? (
-        <div className="modal" onMouseDown={() => setConfigModel(null)} role="dialog" aria-label="Model configuration">
+        <div className="modal" role="dialog" aria-label="Model configuration">
           <div className="modal__panel provider-modal" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal__header">
               <h2 className="modal__title">配置模型</h2>

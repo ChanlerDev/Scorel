@@ -26,6 +26,7 @@ import type {
   GuiRemoteProjectView,
   GuiRuntimeSettingsView,
   GuiSnapshot,
+  GuiModelSelection,
 } from "../shared/ipc.js";
 
 type ViewMode = "workspace" | "settings";
@@ -89,6 +90,20 @@ const projectDeviceRef = (project: GuiProjectView | undefined): GuiDeviceRef =>
 
 const clampSidebarWidth = (width: number): number =>
   Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+
+export const selectedModelValue = (profile: GuiModelProfileView, current: string): string => {
+  if (current && profile.models.some((model) => model.modelId === current)) return current;
+  if (profile.roles.standard && profile.models.some((model) => model.modelId === profile.roles.standard)) {
+    return profile.roles.standard;
+  }
+  return profile.models[0]?.modelId || "";
+};
+
+export const modelSelectionFromValue = (value: string, profile: GuiModelProfileView): GuiModelSelection | undefined => {
+  if (!value) return undefined;
+  if (profile.models.some((model) => model.modelId === value)) return { modelId: value };
+  return undefined;
+};
 
 export function App() {
   const [view, setView] = useState<ViewMode>("workspace");
@@ -342,8 +357,7 @@ export function App() {
         if (!isCurrent()) return;
         setModelProfile(profile);
         setSelectedModelId((current) => {
-          if (current && profile.models.some((model) => model.modelId === current)) return current;
-          return profile.roles.standard || profile.models[0]?.modelId || "";
+          return selectedModelValue(profile, current);
         });
       })
       .catch((cause) => {
@@ -439,7 +453,7 @@ export function App() {
       if (!sessionId) {
         sessionId = (await window.scorel.createSession(
           projectRef(targetProject),
-          selectedModelId ? { modelId: selectedModelId } : undefined,
+          modelSelectionFromValue(selectedModelId, modelProfile),
         )) as string;
         setSelectedSessionId(sessionId);
         await refreshSessionsForProject(targetProject);
@@ -458,6 +472,7 @@ export function App() {
     projects,
     selectedSessionId,
     selectedModelId,
+    modelProfile,
     message,
     refreshSessionsForProject,
     attachToSession,
@@ -543,8 +558,7 @@ export function App() {
         onModelProfileChange={(profile) => {
           setModelProfile(profile);
           setSelectedModelId((current) => {
-            if (current && profile.models.some((model) => model.modelId === current)) return current;
-            return profile.roles.standard || profile.models[0]?.modelId || "";
+            return selectedModelValue(profile, current);
           });
         }}
         onMemoryChange={setMemorySettings}
