@@ -459,7 +459,12 @@ export function App() {
         await refreshSessionsForProject(targetProject);
         await attachToSession(targetProject, sessionId);
       }
-      await window.scorel.sendMessage(projectRef(targetProject), sessionId as SessionId, content);
+      await window.scorel.sendMessage(
+        projectRef(targetProject),
+        sessionId as SessionId,
+        content,
+        modelSelectionFromValue(selectedModelId, modelProfile),
+      );
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

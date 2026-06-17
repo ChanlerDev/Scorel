@@ -15,6 +15,7 @@ import type {
   UpsertModelProfileInput,
   MemoryStatus,
   MemorySettings,
+  ModelSelectionInput,
   RuntimeSettings,
   UpsertExtensionSettingsInput,
   UpsertMemorySettingsInput,
@@ -32,6 +33,7 @@ export type SendMessageOptions = {
   parentId?: EventId | null;
   runningBehavior?: QueueName;
   channelContext?: ChannelContext;
+  modelSelection?: ModelSelectionInput;
 };
 
 export type ChannelContext = {

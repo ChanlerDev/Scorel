@@ -1677,6 +1677,90 @@ apiKey = "secret"
     expect(restoredSelections).toEqual(["aux"]);
   });
 
+  it("falls back to the current standard model when a restored session references a removed model", async () => {
+    const { root, sessionsDir, projectsPath, host, runtimeSelections } = await fixtureWithModelProfile();
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_seed") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_model_stale"),
+      meta: { projectId: project.projectId, modelSelection: { modelId: "aux" } },
+    });
+    await host.shutdown();
+
+    const currentProfile: ScorelConfig = {
+      ...modelProfile,
+      models: {
+        main: modelProfile.models.main,
+      },
+      modelProfile: {
+        roles: {
+          primary: "main",
+          standard: "main",
+          auxiliary: "main",
+        },
+      },
+    };
+    const restoredSelections: string[] = [];
+    const restored = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      modelProfile: currentProfile,
+      memoryHomeDir: root,
+      createRuntime: async ({ selectedModel }) => {
+        restoredSelections.push(selectedModel?.modelId ?? "none");
+        return new ScorelRuntime({ provider });
+      },
+    });
+    await restored.start();
+    const restoredTransport = createEmbeddedTransport(restored);
+    await restoredTransport.connect({ clientId: asClientId("client_restored") });
+
+    const response = waitForResponse(restoredTransport, "req_load");
+    await restoredTransport.send({
+      type: "load_session",
+      requestId: asRequestId("req_load"),
+      sessionId: asSessionId("ses_model_stale"),
+    });
+
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "load_session" });
+    expect(runtimeSelections).toEqual(["aux"]);
+    expect(restoredSelections).toEqual(["main"]);
+  });
+
+  it("uses explicit send-message model selection for the next chat turn", async () => {
+    const { root, host, runtimeSelections } = await fixtureWithModelProfile();
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_model_send"),
+      meta: { projectId: project.projectId, title: "Manual title" },
+    });
+
+    const response = waitForResponse(transport, "req_send_selected");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send_selected"),
+      sessionId: asSessionId("ses_model_send"),
+      content: "use selected model",
+      options: { modelSelection: { modelId: "aux" } },
+    });
+
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    expect(runtimeSelections).toEqual(["main", "aux"]);
+  });
+
   it("generates a first-message session title with the auxiliary model", async () => {
     const { root, sessionsDir, host, runtimeSelections } = await fixtureWithModelProfile();
     const repo = join(root, "repo");

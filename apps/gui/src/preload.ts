@@ -29,7 +29,8 @@ const api: GuiApi = {
   openSession: (project, sessionId) => ipcRenderer.invoke(guiIpcChannels.openSession, project, sessionId),
   attachSession: (project, sessionId) => ipcRenderer.invoke(guiIpcChannels.attachSession, project, sessionId),
   detachSession: (sessionId) => ipcRenderer.invoke(guiIpcChannels.detachSession, sessionId),
-  sendMessage: (project, sessionId, content) => ipcRenderer.invoke(guiIpcChannels.sendMessage, project, sessionId, content),
+  sendMessage: (project, sessionId, content, modelSelection) =>
+    ipcRenderer.invoke(guiIpcChannels.sendMessage, project, sessionId, content, modelSelection),
   onSessionEvent: (handler) => {
     const listener = (_event: IpcRendererEvent, payload: GuiSessionEventPayload): void => {
       handler(payload);

@@ -252,11 +252,11 @@ const registerIpc = (): void => {
   ipcMain.handle(guiIpcChannels.detachSession, async (_event, sessionId: string) => {
     detachSubscription(sessionId);
   });
-  ipcMain.handle(guiIpcChannels.sendMessage, async (_event, project: GuiProjectRef, sessionId: string, content: string) => {
+  ipcMain.handle(guiIpcChannels.sendMessage, async (_event, project: GuiProjectRef, sessionId: string, content: string, modelSelection?: GuiModelSelection) => {
     const ref = normalizeProjectRef(project);
     return ref.source === "local"
-      ? requireConnectedLocalHost().sendLocalMessage(sessionId, content)
-      : relayService.sendRemoteMessage(requireRelayDeviceId(ref), sessionId, content);
+      ? requireConnectedLocalHost().sendLocalMessage(sessionId, content, modelSelection)
+      : relayService.sendRemoteMessage(requireRelayDeviceId(ref), sessionId, content, modelSelection);
   });
 };
 

@@ -95,6 +95,7 @@ import {
   type ClientRequestMap,
   type ChannelContext,
   type MemoryStatus,
+  type ModelSelectionInput,
   type ExtensionSettings,
   type MemorySettings,
   type RuntimeSettings,
@@ -531,6 +532,7 @@ type SessionLane = {
   session: JsonlSession;
   project: HostProject;
   runtime: ScorelRuntime;
+  selectedModel?: SelectedModelSummary;
   queue: Promise<unknown>;
   appendQueue: Promise<void>;
   followUpWaiters: Map<string, { connection: Connection; request: ClientRequest<"send_message"> }>;
@@ -1036,6 +1038,7 @@ export class ScorelHost {
         content: normalizeContent(request.content),
         parentId: request.options?.parentId,
         source: "user",
+        modelSelection: request.options?.modelSelection,
         channelContext: request.options?.channelContext ? runtimeChannelContextFromWire(request.options.channelContext) : undefined,
         onComplete: (result) => this.#respond(connection, request, { ...result, status: "completed" }),
       });
@@ -1071,15 +1074,18 @@ export class ScorelHost {
       parentId?: EventId | null;
       source: "user" | "follow_up";
       queueItemId?: string;
+      modelSelection?: ModelSelectionInput;
       channelContext?: RuntimeChannelContext;
       onComplete?: (result: Required<Pick<ClientRequestMap["send_message"]["response"], "userEventId" | "assistantEventId">>) => void;
     },
   ): Promise<ClientRequestMap["send_message"]["response"]> {
     const sessionId = lane.session.header.sessionId;
+    await this.#selectChatRuntime(lane, input.modelSelection);
     await this.#appendDiagnostic(sessionId, "send_message_started", {
       clientId,
       activeLeafId: lane.session.activeLeafId,
       source: input.source,
+      selectedModelId: lane.selectedModel?.modelId,
     });
     const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, clientId);
     await this.#syncSkillIndex(lane, clientId);
@@ -1308,7 +1314,9 @@ export class ScorelHost {
       createdAt: now,
       updatedAt: now,
       clientId: connection.clientId,
-      ...(request.options?.channelContext ? { data: { channelContext: request.options.channelContext } } : {}),
+      ...(request.options?.channelContext || request.options?.modelSelection
+        ? { data: { channelContext: request.options.channelContext, modelSelection: request.options.modelSelection } }
+        : {}),
     };
     lane.followUpWaiters.set(item.id, { connection, request });
     await this.#appendQueueRewrite(lane, "follow_up", [...lane.session.tree.controlState.queues.follow_up, item], {
@@ -1367,6 +1375,7 @@ export class ScorelHost {
         parentId: lane.session.activeLeafId,
         source: "follow_up",
         queueItemId: item.id,
+        modelSelection: parseQueuedModelSelection(item.data?.modelSelection),
         channelContext: parseQueuedChannelContext(item.data?.channelContext),
         onComplete: waiter
           ? (result) => this.#respond(waiter.connection, waiter.request, { ...result, status: "completed" })
@@ -2450,6 +2459,7 @@ export class ScorelHost {
       session: loaded,
       project,
       runtime,
+      ...(selectedModel ? { selectedModel } : {}),
       queue: Promise.resolve(),
       appendQueue: Promise.resolve(),
       followUpWaiters: new Map(),
@@ -2505,6 +2515,7 @@ export class ScorelHost {
       session,
       project,
       runtime,
+      ...(selectedModel ? { selectedModel } : {}),
       queue: Promise.resolve(),
       appendQueue: Promise.resolve(),
       followUpWaiters: new Map(),
@@ -2520,6 +2531,33 @@ export class ScorelHost {
         listNames: () => Object.keys(lane.session.tree.controlState.skillIndex).sort(),
       }),
     );
+  }
+
+  async #selectChatRuntime(lane: SessionLane, modelSelection: ModelSelectionInput | undefined): Promise<void> {
+    if (!modelSelection) {
+      return;
+    }
+    const selectedModel = await this.#selectedModelFromMeta(
+      { projectId: lane.project.projectId, modelSelection },
+      lane.project,
+    );
+    if (!selectedModel || lane.selectedModel?.modelId === selectedModel.modelId) {
+      return;
+    }
+    lane.runtime = await this.#createRuntime({
+      sessionId: lane.session.header.sessionId,
+      project: lane.project,
+      selectedModel,
+      purpose: "chat",
+    });
+    lane.selectedModel = selectedModel;
+    this.#registerLaneTools(lane);
+    await this.#appendDiagnostic(lane.session.header.sessionId, "chat_model_selected", {
+      projectId: lane.project.projectId,
+      workDir: lane.project.workDir,
+      selectedModelId: selectedModel.modelId,
+      role: selectedModel.role,
+    });
   }
 
   #syncChannelTool(lane: SessionLane, channelContext: RuntimeChannelContext | undefined): void {
@@ -3148,11 +3186,16 @@ export class ScorelHost {
     }
     const persistedSelection = "selectedModel" in meta ? meta.selectedModel : undefined;
     const requestedSelection = "modelSelection" in meta ? meta.modelSelection : undefined;
+    const selectionInput = persistedSelection
+      ? config.models[persistedSelection.modelId]
+        ? { modelId: persistedSelection.modelId, role: persistedSelection.role }
+        : persistedSelection.role
+          ? { role: persistedSelection.role }
+          : undefined
+      : requestedSelection;
     const selection = resolveModelSelection(
       config,
-      persistedSelection
-        ? { modelId: persistedSelection.modelId, role: persistedSelection.role }
-        : requestedSelection,
+      selectionInput,
     );
     const model = resolvePiAiModel(selection.config);
     return {
@@ -3630,6 +3673,20 @@ const parseQueuedChannelContext = (value: unknown): RuntimeChannelContext | unde
     ...(typeof value.mentionedBot === "boolean" ? { mentionedBot: value.mentionedBot } : {}),
     ...(isRecord(value.data) ? { data: value.data } : {}),
   });
+};
+
+const parseQueuedModelSelection = (value: unknown): ModelSelectionInput | undefined => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const selection: ModelSelectionInput = {};
+  if (typeof value.modelId === "string") {
+    selection.modelId = value.modelId;
+  }
+  if (value.role === "primary" || value.role === "standard" || value.role === "auxiliary") {
+    selection.role = value.role;
+  }
+  return selection.modelId || selection.role ? selection : undefined;
 };
 
 const imBindingKey = (extensionId: string, externalConversationId: string): string =>

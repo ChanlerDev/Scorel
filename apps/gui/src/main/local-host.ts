@@ -82,7 +82,7 @@ export type GuiLocalHostService = {
     unsubscribe: () => void;
   }>;
   onLocalSessionsChanged(handler: GuiLocalSessionsChangedHandler): () => void;
-  sendLocalMessage(sessionId: string, content: string): Promise<{ accepted: true }>;
+  sendLocalMessage(sessionId: string, content: string, modelSelection?: ModelSelectionInput): Promise<{ accepted: true }>;
 };
 
 export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): GuiLocalHostService => {
@@ -235,9 +235,9 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
         sessionChangeHandlers.delete(handler);
       };
     },
-    async sendLocalMessage(sessionId, content) {
+    async sendLocalMessage(sessionId, content, modelSelection) {
       await client.loadSession(asSessionId(sessionId));
-      await client.sendMessage(content);
+      await client.sendMessage(content, { modelSelection });
       return { accepted: true };
     },
   };

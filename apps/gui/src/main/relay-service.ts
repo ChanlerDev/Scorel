@@ -68,7 +68,7 @@ export type GuiRelayService = {
     sessionId: string,
     handler: GuiRelaySubscriber,
   ): Promise<{ events: PersistentEvent[]; unsubscribe: () => void }>;
-  sendRemoteMessage(deviceId: string, sessionId: string, content: string): Promise<{ accepted: true }>;
+  sendRemoteMessage(deviceId: string, sessionId: string, content: string, modelSelection?: ModelSelectionInput): Promise<{ accepted: true }>;
   close(): void;
 };
 
@@ -187,10 +187,10 @@ export const createGuiRelayService = (store: GuiStore): GuiRelayService => {
       const events = client.getEvents().filter((event) => event.sessionId === sessionId);
       return { events, unsubscribe };
     },
-    async sendRemoteMessage(deviceId, sessionId, content) {
+    async sendRemoteMessage(deviceId, sessionId, content, modelSelection) {
       const client = await connectedClient(deviceId);
       await client.loadSession(asSessionId(sessionId));
-      await client.sendMessage(content);
+      await client.sendMessage(content, { modelSelection });
       return { accepted: true };
     },
     close() {

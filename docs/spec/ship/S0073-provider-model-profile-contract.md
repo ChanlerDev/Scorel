@@ -76,10 +76,17 @@ Host runtime must use the selected model for each session/turn:
   available model or role;
 - CLI can continue using the default role without exposing a new command flag in this
   spec;
-- GUI composer can choose an available model for new prompts/sessions;
+- GUI composer can choose an available model for the next main chat prompt, including
+  prompts sent into an existing session;
+- background model tasks such as session title generation, session memory, foreground
+  compact, and memory dream use the configured `auxiliary` role unless a later spec
+  defines a more specific routing contract;
 - session metadata records the selected model id and role when known;
 - session header persists enough selected-model metadata to keep resume auditable if
   config later changes;
+- if a restored session references a selected model that no longer exists in the
+  current device config, Host falls back through the persisted role or current
+  `standard` role instead of failing attach/resume;
 - assistant events keep recording actual provider/model metadata from pi-ai.
 
 Tool creation must use the actual selected model's context window, not a global model

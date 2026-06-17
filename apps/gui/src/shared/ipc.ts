@@ -148,7 +148,7 @@ export type GuiApi = {
   openSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
   attachSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
   detachSession(sessionId: string): Promise<void>;
-  sendMessage(project: GuiProjectRef, sessionId: string, content: string): Promise<GuiSendMessageAck>;
+  sendMessage(project: GuiProjectRef, sessionId: string, content: string, modelSelection?: GuiModelSelection): Promise<GuiSendMessageAck>;
   onSessionEvent(handler: (payload: GuiSessionEventPayload) => void): () => void;
   onSessionsChanged(handler: (payload: GuiSessionsChangedPayload) => void): () => void;
   onOpenSettings(handler: () => void): () => void;
