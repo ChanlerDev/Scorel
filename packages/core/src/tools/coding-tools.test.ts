@@ -260,6 +260,34 @@ describe("coding tools", () => {
     ).rejects.toThrow("timed out");
   });
 
+  it("archives oversized Bash results while returning one budgeted head/tail projection", async () => {
+    const cwd = await tempRoot();
+    const artifactDir = join(cwd, ".scorel", "sessions", "ses_artifacts.artifacts");
+    const bash = createCodingTools({
+      cwd,
+      toolResultArtifacts: { dir: artifactDir },
+    }).find((tool) => tool.name === "Bash")!;
+
+    const result = await bash.execute(
+      "call_bash_artifact",
+      { command: "printf '0123456789abcdefghijklmnopqrstuvwxyz'", maxOutputBytes: 10 },
+      new AbortController().signal,
+      () => undefined,
+    );
+    const text = textOf(result);
+    const artifactPath = join(artifactDir, "call_bash_artifact", "result.txt");
+
+    expect(text).toContain(`artifact: ${artifactPath}`);
+    expect(text).toContain("resultBytes:");
+    expect(text).toContain("stdout head:");
+    expect(text).toContain("01234");
+    expect(text).not.toContain("0123456789");
+    expect(text).toContain("stdout tail:");
+    expect(text).toContain("vwxyz");
+    expect(text).not.toContain("qrstuvwxyz");
+    await expect(readFile(artifactPath, "utf8")).resolves.toContain("0123456789abcdefghijklmnopqrstuvwxyz");
+  });
+
   it("runs Bash through the configured default shell without rewriting the command", async () => {
     const cwd = await tempRoot();
     const shell = join(cwd, "scorel-shell");

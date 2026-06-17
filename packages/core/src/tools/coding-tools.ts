@@ -18,6 +18,9 @@ export type CodingToolsOptions = {
   maxReadTokens?: number;
   contextWindow?: number;
   defaultShell?: string;
+  toolResultArtifacts?: {
+    dir: string;
+  };
   tokenSaving?: {
     rtk?: {
       enabled: boolean;
@@ -287,7 +290,7 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
     defineTool({
       name: "Bash",
       description: "Execute a shell command in the workspace with timeout and output truncation.",
-      execute: async (_toolCallId, args, signal) => {
+      execute: async (toolCallId, args, signal) => {
         const input = parseBashArgs(args);
         const commandCwd = input.cwd ? resolveWorkspacePath(input.cwd) : root;
         const timeoutMs = Math.min(input.timeoutMs ?? defaultTimeoutMs, maxTimeoutMs);
@@ -314,12 +317,14 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
             maxBuffer: Math.max(outputLimit * 4, 1024 * 1024),
           });
           const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : undefined;
-          return bashResult({
+          return await bashResult({
             exitCode: 0,
             stdout: result.stdout,
             stderr: result.stderr,
             cwd: commandCwd,
             outputLimit,
+            artifactDir: options.toolResultArtifacts?.dir,
+            toolCallId,
             shell: defaultShell,
             command,
             rtk: withRtkSavings(rtkResult, rtkSavedTokens),
@@ -330,12 +335,14 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
           }
           if (isExecError(cause)) {
             const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : undefined;
-            return bashResult({
+            return await bashResult({
               exitCode: typeof cause.code === "number" ? cause.code : 1,
               stdout: String(cause.stdout ?? ""),
               stderr: String(cause.stderr ?? cause.message),
               cwd: commandCwd,
               outputLimit,
+              artifactDir: options.toolResultArtifacts?.dir,
+              toolCallId,
               shell: defaultShell,
               command,
               rtk: withRtkSavings(rtkResult, rtkSavedTokens),
@@ -756,12 +763,14 @@ const atomicWriteFile = async (path: string, content: string): Promise<void> => 
   }
 };
 
-const bashResult = (input: {
+const bashResult = async (input: {
   exitCode: number;
   stdout: string;
   stderr: string;
   cwd: string;
   outputLimit: number;
+  artifactDir?: string;
+  toolCallId: string;
   shell?: string;
   command?: string;
   rtk?: {
@@ -771,12 +780,42 @@ const bashResult = (input: {
     rewrittenCommand?: string;
     estimatedSavedTokens?: number;
   };
-}): ToolResult => {
-  const stdout = truncate(input.stdout, input.outputLimit, "stdout");
-  const stderr = truncate(input.stderr, input.outputLimit, "stderr");
-  return textResult(`exitCode: ${input.exitCode}\ncwd: ${input.cwd}\nstdout:\n${stdout}\nstderr:\n${stderr}`, {
+}): Promise<ToolResult> => {
+  const stdoutBytes = Buffer.byteLength(input.stdout);
+  const stderrBytes = Buffer.byteLength(input.stderr);
+  const fullResult = renderFullBashResult(input);
+  const resultBytes = Buffer.byteLength(fullResult);
+  const shouldArchive = Boolean(input.artifactDir) && resultBytes > input.outputLimit;
+  const artifactPath = shouldArchive && input.artifactDir
+    ? await writeBashArtifact(input.artifactDir, input.toolCallId, fullResult)
+    : undefined;
+  const projection = artifactPath
+    ? projectBashStreams(input.stdout, input.stderr, input.outputLimit)
+    : undefined;
+  const stdout = projection?.stdout ?? truncate(input.stdout, input.outputLimit, "stdout");
+  const stderr = projection?.stderr ?? truncate(input.stderr, input.outputLimit, "stderr");
+  const text = artifactPath
+    ? [
+        `exitCode: ${input.exitCode}`,
+        `cwd: ${input.cwd}`,
+        `artifact: ${artifactPath}`,
+        `resultBytes: ${resultBytes}`,
+        `stdoutBytes: ${stdoutBytes}`,
+        `stderrBytes: ${stderrBytes}`,
+        ...(projection?.lines ?? []),
+      ].join("\n")
+    : `exitCode: ${input.exitCode}\ncwd: ${input.cwd}\nstdout:\n${stdout}\nstderr:\n${stderr}`;
+  return textResult(text, {
     exitCode: input.exitCode,
     cwd: input.cwd,
+    ...(artifactPath ? {
+      artifact: {
+        path: artifactPath,
+        resultBytes,
+        stdoutBytes,
+        stderrBytes,
+      },
+    } : {}),
     ...(input.shell ? { shell: input.shell } : {}),
     ...(input.command ? { command: input.command } : {}),
     ...(input.rtk ? {
@@ -786,6 +825,62 @@ const bashResult = (input: {
       },
     } : {}),
   });
+};
+
+const renderFullBashResult = (input: { exitCode: number; cwd: string; stdout: string; stderr: string }): string =>
+  `exitCode: ${input.exitCode}\ncwd: ${input.cwd}\nstdout:\n${input.stdout}\nstderr:\n${input.stderr}`;
+
+const writeBashArtifact = async (artifactDir: string, toolCallId: string, content: string): Promise<string> => {
+  const directory = resolve(artifactDir, safeArtifactSegment(toolCallId));
+  await mkdir(directory, { recursive: true });
+  const path = resolve(directory, "result.txt");
+  await writeFile(path, content, { encoding: "utf8", mode: 0o600 });
+  return path;
+};
+
+const safeArtifactSegment = (value: string): string =>
+  value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120) || "tool_call";
+
+const projectBashStreams = (
+  stdout: string,
+  stderr: string,
+  maxBytes: number,
+): { lines: string[]; stdout: string; stderr: string } => {
+  const streams = [
+    { label: "stdout", value: stdout },
+    { label: "stderr", value: stderr },
+  ].filter((stream) => Buffer.byteLength(stream.value) > 0);
+  if (streams.length === 0) {
+    return { lines: ["stdout:", "", "stderr:", ""], stdout: "", stderr: "" };
+  }
+  const perStreamBudget = Math.max(1, Math.floor(maxBytes / streams.length));
+  const projected = streams.map((stream) => projectOutputStream(stream.value, perStreamBudget, stream.label));
+  const stdoutText = projected.find((stream) => stream.label === "stdout")?.text ?? "stdout:\n";
+  const stderrText = projected.find((stream) => stream.label === "stderr")?.text ?? "stderr:\n";
+  return {
+    lines: projected.map((stream) => stream.text),
+    stdout: stdoutText,
+    stderr: stderrText,
+  };
+};
+
+const projectOutputStream = (value: string, maxBytes: number, label: string): { label: string; text: string } => {
+  const bytes = Buffer.byteLength(value);
+  if (bytes <= maxBytes) {
+    return { label, text: `${label}:\n${value}` };
+  }
+  const headBytes = Math.max(1, Math.floor(maxBytes / 2));
+  const tailBytes = Math.max(1, maxBytes - headBytes);
+  return {
+    label,
+    text: [
+      `${label} head:`,
+      sliceBytes(value, 0, headBytes),
+      `${label} tail:`,
+      sliceBytes(value, Math.max(0, bytes - tailBytes), bytes),
+      `[${label} archived: ${bytes} bytes; projection budget ${maxBytes} bytes]`,
+    ].join("\n"),
+  };
 };
 
 const resolveDefaultShell = (input: string | undefined): string => {
@@ -898,9 +993,12 @@ const truncate = (value: string, maxBytes: number, label: string): string => {
   if (bytes <= maxBytes) {
     return value;
   }
-  const truncated = Buffer.from(value).subarray(0, maxBytes).toString("utf8");
+  const truncated = sliceBytes(value, 0, maxBytes);
   return `${truncated}\n[${label} truncated: ${bytes} bytes > ${maxBytes} bytes]`;
 };
+
+const sliceBytes = (value: string, start: number, end: number): string =>
+  Buffer.from(value).subarray(start, end).toString("utf8");
 
 const textResult = (text: string, details?: unknown): ToolResult => ({
   content: [{ type: "text", text }],

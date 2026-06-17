@@ -198,8 +198,9 @@ const runServeCommand = async (
     stopRequested = true;
     resolveStopWaiter?.();
   };
+  const sessionsDir = options.sessionsDir ?? scorelSessionsDir(homedir());
   const daemon = new ScorelHost({
-    sessionsDir: options.sessionsDir ?? scorelSessionsDir(homedir()),
+    sessionsDir,
     projectsPath: join(options.stateDir, "projects.json"),
     deviceId: identity.deviceId,
     deviceDisplayName: identity.displayName,
@@ -208,9 +209,11 @@ const runServeCommand = async (
     scorelHomeDir: options.stateDir,
     loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir, ...configScope }),
     loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir, ...configScope }),
-    createRuntime: async ({ project, selectedModel, purpose }) => createRealRuntime({
+    createRuntime: async ({ sessionId, project, selectedModel, purpose }) => createRealRuntime({
       cwd: project.workDir,
       config: await loadScorelConfig({ cwd: project.workDir, ...configScope }),
+      sessionsDir,
+      sessionId,
       modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
       includeTools: purpose === "chat",
     }),

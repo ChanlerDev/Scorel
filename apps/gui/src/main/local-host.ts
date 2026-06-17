@@ -112,10 +112,12 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
         }),
     createRuntime:
       options.createRuntime ??
-      (async ({ project, selectedModel, purpose }) =>
+      (async ({ sessionId, project, selectedModel, purpose }) =>
         createRealRuntime({
           cwd: project.workDir,
           config: await loadScorelConfig({ cwd: project.workDir, ...configScope }),
+          sessionsDir,
+          sessionId,
           modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
           includeTools: purpose === "chat",
         })),

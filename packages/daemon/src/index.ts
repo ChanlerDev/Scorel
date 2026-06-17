@@ -45,6 +45,7 @@ import {
   resolveModelSelection,
   resolvePiAiModel,
   scanSkillIndex,
+  sessionArtifactsDirPath,
   sessionLogFilePath,
   scorelSessionsDir,
   scorelMemoryPaths,
@@ -435,6 +436,8 @@ const closeWebSocketServer = (server: WebSocketServer): Promise<void> =>
 export type RuntimeFactoryOptions = {
   cwd: string;
   config: ScorelConfig;
+  sessionsDir?: string;
+  sessionId?: SessionId;
   modelSelection?: { modelId?: string; role?: "primary" | "standard" | "auxiliary" };
   includeTools?: boolean;
   rtkExecutable?: string;
@@ -515,6 +518,9 @@ export const createRealRuntime = async (options: RuntimeFactoryOptions): Promise
     for (const tool of createCodingTools({
       cwd: options.cwd,
       contextWindow: model.contextWindow,
+      ...(options.sessionsDir && options.sessionId
+        ? { toolResultArtifacts: { dir: sessionArtifactsDirPath(options.sessionsDir, options.sessionId) } }
+        : {}),
       tokenSaving: {
         rtk: {
           enabled: options.config.runtime.tokenSavingRtk,

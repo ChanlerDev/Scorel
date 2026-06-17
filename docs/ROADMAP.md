@@ -776,6 +776,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0101`](spec/ship/S0101-gui-device-settings-polish.md) | GUI device-scoped Settings polish | Done |
 | [`S0102`](spec/ship/S0102-device-only-config.md) | Device-only config | Done |
 | [`S0103`](spec/ship/S0103-daemon-lifecycle-and-settings-resilience.md) | Daemon lifecycle and Settings resilience | Done |
+| [`S0104`](spec/ship/S0104-tool-result-artifacts.md) | Tool result artifacts for oversized Bash output | Done |
 
 ---
 
