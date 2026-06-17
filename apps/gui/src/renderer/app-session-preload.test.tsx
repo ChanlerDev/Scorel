@@ -133,6 +133,31 @@ describe("GUI App session preload", () => {
     expect(container!.textContent).toContain("qq: qq:private:user_1");
   });
 
+  it("loads memory status for the selected Project", async () => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const getMemoryStatus = vi.fn(async () => ({
+      projectId: "project_workspace",
+      dirty: false,
+      running: false,
+      lastDailyAppendAt: 1781611581901,
+    }));
+
+    installScorelApi({
+      listSessions: vi.fn(async () => []),
+      getMemoryStatus,
+    });
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root!.render(<App />);
+    });
+
+    await waitFor(() => expect(getMemoryStatus).toHaveBeenCalledWith({ source: "local", projectId: "project_workspace" }));
+  });
+
   it("keeps remote settings data when an older local settings request resolves later", async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -190,6 +215,7 @@ describe("GUI App session preload", () => {
 function installScorelApi(overrides: {
   listSessions: ReturnType<typeof vi.fn>;
   listModels?: ReturnType<typeof vi.fn>;
+  getMemoryStatus?: ReturnType<typeof vi.fn>;
   onSessionsChanged?: ReturnType<typeof vi.fn>;
   onOpenSettings?: ReturnType<typeof vi.fn>;
   snapshot?: { projects: typeof projects; relayDevices: Array<{ deviceId: string; label: string; relayUrl: string; online: boolean; updatedAt: number }> };
@@ -217,7 +243,7 @@ function installScorelApi(overrides: {
         dreamIdleMinutes: 60,
         autoCompactThreshold: 0.8,
       })),
-      getMemoryStatus: vi.fn(async () => ({
+      getMemoryStatus: overrides.getMemoryStatus ?? vi.fn(async () => ({
         projectId: "project_scorel",
         dirty: false,
         running: false,

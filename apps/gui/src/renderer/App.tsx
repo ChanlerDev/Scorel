@@ -352,6 +352,18 @@ export function App() {
     setMemorySettings(defaultMemorySettings());
     setMemoryStatus(defaultMemoryStatus());
     setRuntimeSettings(defaultRuntimeSettings());
+    if (selectedProject) {
+      void window.scorel.getMemoryStatus(projectRef(selectedProject))
+        .then((status) => {
+          if (!isCurrent()) return;
+          setMemoryStatus(status);
+        })
+        .catch((cause) => {
+          if (!isCurrent()) return;
+          setMemoryStatus(defaultMemoryStatus(selectedProject.projectId));
+          setError(cause instanceof Error ? cause.message : String(cause));
+        });
+    }
     void window.scorel.listModels(activeConfigDevice)
       .then((profile) => {
         if (!isCurrent()) return;
@@ -389,7 +401,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeConfigDevice, relayDevices, selectedSettingsDevice, view]);
+  }, [activeConfigDevice, relayDevices, selectedProject, selectedSettingsDevice, view]);
 
   const handleProjectClick = useCallback((key: string): void => {
     setSelectedProjectKey(key);
