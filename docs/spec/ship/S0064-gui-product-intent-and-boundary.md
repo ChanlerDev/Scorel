@@ -29,7 +29,7 @@ Lock M9 GUI as a Project-first desktop app before implementation. The GUI should
 
 - Do not scaffold Electron in S0064.
 - Do not implement GUI screens.
-- Do not add SSH, direct WS + token, OAuth, account systems, or GUI auto-update.
+- Do not add SSH, direct WS + token, OAuth, account systems, or GUI auto-update in S0064. GUI auto-update is introduced later by S0105 as release infrastructure.
 - Do not publish or package desktop installers.
 - Do not change the public npm CLI package surface.
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Add `scorel version`, `scorel update`, and `scorel upgrade`.
+- Add hourly Host auto-update checks gated by active work state.
+- Add GUI macOS release packaging and Electron updater metadata to the release path.
+- Add GUI application menu and macOS status bar menu entries for manual update checks and common app actions.
+- Document unsigned macOS GUI quarantine bypass command.
+
 ## 0.0.4 - 2026-06-14
 
 ### Highlights

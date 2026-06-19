@@ -37,6 +37,7 @@ import { runCliPair } from "./relay-cli.js";
 import { runCliRelay } from "./relay-server-cli.js";
 import { runCliUp } from "./up-cli.js";
 import { runCliWebUi } from "./webui-cli.js";
+import { readInstalledScorelVersion, runCliUpdate } from "./update-cli.js";
 
 export const cliAppName = "@scorel/app-cli" as const;
 export const cliClientDependency = clientPackageName;
@@ -71,6 +72,10 @@ export const runCli = async (
   runOptions: CliRunOptions = {},
 ): Promise<number> => {
   const [command, ...rest] = argv;
+  if (command === "--version" || command === "-v" || command === "version") {
+    io.output.write(`${await readInstalledScorelVersion()}\n`);
+    return 0;
+  }
   if (!command || command === "chat") {
     if (rest.includes("--help") || rest.includes("-h")) {
       writeUsage(io.output);
@@ -115,6 +120,9 @@ export const runCli = async (
       output: io.output,
       error: io.error,
     });
+  }
+  if (command === "update" || command === "upgrade") {
+    return runCliUpdate(rest, { output: io.output, error: io.error });
   }
   if (command === "attach") {
     try {
@@ -896,6 +904,9 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
       "       scorel relay serve [--host <h>] [--port <p>] [--data-dir <dir>]",
       "       scorel webui [--port <p>] [--host <h>]",
       "       scorel up [--daemon-port <p>] [--webui-port <p>] [--cwd <d>]",
+      "       scorel update",
+      "       scorel upgrade",
+      "       scorel version",
       "       scorel logs [--attach] --session <id> [--remote <ws-url>] [--tail <n>]",
       "       scorel project list",
       "       scorel project add <dir>",

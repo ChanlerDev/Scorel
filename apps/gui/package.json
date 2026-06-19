@@ -6,9 +6,47 @@
   "main": "./.dist/main.cjs",
   "scripts": {
     "build": "node ./scripts/build.mjs",
+    "dist:mac": "pnpm build && pnpm dlx electron-builder@26.15.3 --mac --publish never",
     "dev": "pnpm build && electron .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "build": {
+    "appId": "dev.chanler.scorel",
+    "productName": "Scorel",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      ".dist/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ]
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ChanlerDev",
+        "repo": "Scorel"
+      }
+    ]
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -16,6 +54,7 @@
     "@scorel/daemon": "workspace:*",
     "@scorel/protocol": "workspace:*",
     "@shikijs/rehype": "^4.1.0",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^0.488.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

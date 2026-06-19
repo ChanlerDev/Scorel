@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -7,9 +7,10 @@ import { spawnSync } from "node:child_process";
 import { generateReleaseNotes, insertReleaseNotes } from "./release-notes.mjs";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
-const packagePaths = [
+export const packagePaths = [
   "package.json",
   "apps/cli/package.json",
+  "apps/gui/package.json",
   "apps/relay/package.json",
   "apps/webui/package.json",
   "packages/client/package.json",
@@ -17,6 +18,28 @@ const packagePaths = [
   "packages/daemon/package.json",
   "packages/protocol/package.json",
 ];
+
+export const guiReleaseAssetPaths = () => [
+  "apps/gui/release/latest-mac.yml",
+  "apps/gui/release/*.dmg",
+  "apps/gui/release/*.dmg.blockmap",
+  "apps/gui/release/*.zip",
+  "apps/gui/release/*.zip.blockmap",
+];
+
+export const collectGuiReleaseAssets = async () => {
+  const releaseDir = resolve(root, "apps/gui/release");
+  const entries = await readdir(releaseDir);
+  return entries
+    .filter((entry) =>
+      entry === "latest-mac.yml" ||
+      entry.endsWith(".dmg") ||
+      entry.endsWith(".dmg.blockmap") ||
+      entry.endsWith(".zip") ||
+      entry.endsWith(".zip.blockmap"))
+    .sort()
+    .map((entry) => ({ path: resolve(releaseDir, entry), name: entry }));
+};
 
 const usage = () => {
   console.error("Usage: pnpm release <patch|minor|major> [--dry-run] [--no-publish] [--no-push] [--allow-dirty] [--no-generate-notes] [--no-github-release]");
@@ -282,7 +305,9 @@ export const runReleaseCli = async (argv = process.argv.slice(2)) => {
   run("pnpm", ["test"]);
   run("node", ["--test", "scripts/release-notes.test.mjs"]);
   run("node", ["--test", "scripts/release.test.mjs"]);
+  run("node", ["--test", "scripts/release-gui.test.mjs"]);
   run("pnpm", ["--filter", "@scorel/app-webui", "build"]);
+  run("pnpm", ["--filter", "@scorel/app-gui", "build"]);
   run("pnpm", ["build:package"]);
   run("pnpm", ["pack:smoke"]);
 
@@ -301,6 +326,9 @@ export const runReleaseCli = async (argv = process.argv.slice(2)) => {
   run("pnpm", ["install", "--lockfile-only"]);
   run("pnpm", ["build:package"]);
   run("pnpm", ["pack:smoke"]);
+  run("pnpm", ["--filter", "@scorel/app-gui", "dist:mac"], {
+    env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: process.env.CSC_IDENTITY_AUTO_DISCOVERY ?? "false" },
+  });
   const releaseTarball = await packReleaseTarball();
   run("git", ["add", ...packagePaths, "pnpm-lock.yaml", "docs/CHANGELOG.md"]);
   run("git", ["add", "-f", "dist/index.js", "dist/index.js.map"]);
@@ -342,6 +370,15 @@ export const runReleaseCli = async (argv = process.argv.slice(2)) => {
         token: githubToken,
       });
       console.log(`uploaded GitHub Release asset ${asset.browser_download_url ?? releaseTarball.name}`);
+      for (const guiAsset of await collectGuiReleaseAssets()) {
+        const uploaded = await uploadGitHubReleaseAsset({
+          uploadUrl: release.upload_url,
+          assetPath: guiAsset.path,
+          assetName: guiAsset.name,
+          token: githubToken,
+        });
+        console.log(`uploaded GUI Release asset ${uploaded.browser_download_url ?? guiAsset.name}`);
+      }
     }
 
     console.log(`pushed ${branch} and v${nextVersion}`);

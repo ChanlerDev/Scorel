@@ -24,6 +24,13 @@ import {
 } from "@scorel/daemon";
 
 import { DEFAULT_SCOREL_WEBUI_URL, resolveDefaultRelayUrl } from "./relay-cli.js";
+import {
+  AUTO_UPDATE_INTERVAL_MS,
+  createNpmPackageUpdater,
+  readInstalledScorelVersion,
+  shouldRunAutoUpdate,
+  type PackageUpdater,
+} from "./update-cli.js";
 
 export type DaemonCommandIo = {
   output: NodeJS.WritableStream;
@@ -45,6 +52,8 @@ export type DaemonCommandOptions = DaemonCommandIo & {
   cliEntrypoint?: string;
   daemonReadyTimeoutMs?: number;
   readState?: (stateDir: string) => Promise<LocalDaemonState | null>;
+  packageUpdater?: PackageUpdater;
+  autoUpdateIntervalMs?: number;
 };
 
 const DEFAULT_HOST = "127.0.0.1";
@@ -220,6 +229,14 @@ const runServeCommand = async (
   });
   await daemon.start();
   await daemon.registerProject(flags.cwd);
+  const autoUpdater = await startAutoUpdateLoop({
+    host: daemon,
+    requestStop,
+    output: options.output,
+    error: options.error,
+    updater: options.packageUpdater,
+    intervalMs: options.autoUpdateIntervalMs ?? AUTO_UPDATE_INTERVAL_MS,
+  });
 
   const server = await startScorelHostWebSocketServer({
     hostService: daemon,
@@ -266,6 +283,7 @@ const runServeCommand = async (
 
   const shutdown = async (): Promise<void> => {
     try {
+      autoUpdater.stop();
       relayClient?.close();
       await server.close();
     } finally {
@@ -317,6 +335,48 @@ const runServeCommand = async (
 
   options.output.write(`scorel host serve stopped reason=${signalReason}\n`);
   return 0;
+};
+
+const startAutoUpdateLoop = async (options: {
+  host: ScorelHost;
+  requestStop: (reason: string) => void;
+  output: NodeJS.WritableStream;
+  error: NodeJS.WritableStream;
+  updater?: PackageUpdater;
+  intervalMs: number;
+}): Promise<{ stop(): void }> => {
+  const updater = options.updater ?? createNpmPackageUpdater({ currentVersion: await readInstalledScorelVersion() });
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const activity = options.host.activityStatus();
+      if (!shouldRunAutoUpdate({ ...activity, now: Date.now() })) {
+        return;
+      }
+      const result = await updater.update();
+      if (result.status === "updated") {
+        options.output.write(`scorel auto-updated ${result.currentVersion} -> ${result.latestVersion}; restarting host\n`);
+        options.requestStop("auto-update");
+      }
+    } catch (cause) {
+      options.error.write(`scorel auto-update error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+    } finally {
+      running = false;
+    }
+  };
+  timer = setInterval(() => void tick(), options.intervalMs);
+  timer.unref?.();
+  return {
+    stop() {
+      if (timer) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+    },
+  };
 };
 
 const stopRunningDaemon = async (

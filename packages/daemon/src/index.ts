@@ -641,6 +641,7 @@ export class ScorelHost {
   readonly #registry: ProjectRegistry;
   #runtimeStatsQueue: Promise<void> = Promise.resolve();
   #idleShutdownTimer: ReturnType<typeof setTimeout> | undefined;
+  #lastActiveWorkAt: number;
   #started = false;
 
   constructor(options: ScorelHostOptions) {
@@ -660,6 +661,7 @@ export class ScorelHost {
     this.#onIdleShutdown = options.onIdleShutdown;
     this.#now = options.now ?? Date.now;
     this.#createId = options.createId ?? (() => crypto.randomUUID());
+    this.#lastActiveWorkAt = this.#now();
     this.#registry = new ProjectRegistry({
       sessionsDir: this.#sessionsDir,
       projectsPath: options.projectsPath,
@@ -729,6 +731,14 @@ export class ScorelHost {
 
   releaseSessionEventBuffer(sessionId: SessionId): void {
     this.#events.delete(sessionId);
+  }
+
+  activityStatus(): { activeWork: boolean; lastActiveWorkAt: number } {
+    const activeWork = this.#hasActiveWork();
+    if (activeWork) {
+      this.#lastActiveWorkAt = this.#now();
+    }
+    return { activeWork, lastActiveWorkAt: this.#lastActiveWorkAt };
   }
 
   async handleMessage(connection: Connection, message: ClientMessage): Promise<void> {
@@ -1085,6 +1095,7 @@ export class ScorelHost {
       onComplete?: (result: Required<Pick<ClientRequestMap["send_message"]["response"], "userEventId" | "assistantEventId">>) => void;
     },
   ): Promise<ClientRequestMap["send_message"]["response"]> {
+    this.#lastActiveWorkAt = this.#now();
     const sessionId = lane.session.header.sessionId;
     await this.#selectChatRuntime(lane, input.modelSelection);
     await this.#appendDiagnostic(sessionId, "send_message_started", {

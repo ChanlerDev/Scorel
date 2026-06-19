@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Tray, nativeImage } from "electron";
+import { autoUpdater } from "electron-updater";
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -29,12 +30,14 @@ let relayService: GuiRelayService;
 let hostStatus: GuiHostStatus = { state: "starting" };
 let stoppingLocalHost = false;
 let mainWindow: BrowserWindow | null = null;
+let statusTray: Tray | null = null;
 
 const sessionSubscriptions = new Map<string, () => void>();
 
 const scorelHomeDir = (): string => join(homedir(), ".scorel");
 const guiStorePath = (): string => join(scorelHomeDir(), "gui-store.json");
 const AUTO_STARTED_IDLE_SHUTDOWN_MS = 15 * 60 * 1000;
+const GUI_AUTO_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 
 const repoRoot = (): string => join(here, "..", "..", "..");
 const cliEntrypoint = (): string => process.env.SCOREL_CLI_ENTRYPOINT ?? join(repoRoot(), "apps", "cli", "src", "index.ts");
@@ -287,6 +290,43 @@ const createWindow = async (): Promise<void> => {
   await win.loadFile(join(here, "index.html"));
 };
 
+const showMainWindow = async (): Promise<void> => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    await createWindow();
+  }
+  mainWindow?.show();
+  mainWindow?.focus();
+};
+
+const openSettings = async (): Promise<void> => {
+  await showMainWindow();
+  mainWindow?.webContents.send(guiIpcChannels.openSettings);
+};
+
+const checkForGuiUpdates = async (options: { manual: boolean }): Promise<void> => {
+  if (!app.isPackaged) {
+    if (options.manual) {
+      await dialog.showMessageBox({
+        type: "info",
+        message: "Updates are available in packaged builds.",
+        detail: "Run a release build or install Scorel from a GitHub Release to check for GUI updates.",
+      });
+    }
+    return;
+  }
+  try {
+    await autoUpdater.checkForUpdatesAndNotify();
+  } catch (cause) {
+    console.error("scorel gui update error", cause);
+    if (options.manual) {
+      await dialog.showErrorBox(
+        "Scorel update check failed",
+        cause instanceof Error ? cause.message : String(cause),
+      );
+    }
+  }
+};
+
 const installApplicationMenu = (): void => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
@@ -295,9 +335,11 @@ const installApplicationMenu = (): void => {
         {
           label: "Settings...",
           accelerator: "CommandOrControl+,",
-          click: () => {
-            mainWindow?.webContents.send(guiIpcChannels.openSettings);
-          },
+          click: () => void openSettings(),
+        },
+        {
+          label: "Check for Updates...",
+          click: () => void checkForGuiUpdates({ manual: true }),
         },
         { type: "separator" },
         { role: "quit" },
@@ -313,6 +355,50 @@ const installApplicationMenu = (): void => {
       role: "windowMenu",
     },
   ]));
+};
+
+const installStatusTray = (): void => {
+  statusTray?.destroy();
+  const image = nativeImage.createFromDataURL(
+    `data:image/svg+xml;utf8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18"><path fill="black" d="M9 1.5 15.5 5v8L9 16.5 2.5 13V5L9 1.5Zm0 2.2L4.5 6.1v5.8L9 14.3l4.5-2.4V6.1L9 3.7Z"/><path fill="black" d="M6.3 6.5h5.4v1.7H8v1.3h3.1v1.7H8v2.1H6.3V6.5Z"/></svg>')}`,
+  );
+  image.setTemplateImage(true);
+  statusTray = new Tray(image);
+  statusTray.setToolTip("Scorel");
+  statusTray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: "Show Scorel",
+      click: () => void showMainWindow(),
+    },
+    {
+      label: "Settings...",
+      click: () => void openSettings(),
+    },
+    {
+      label: "Check for Updates...",
+      click: () => void checkForGuiUpdates({ manual: true }),
+    },
+    { type: "separator" },
+    {
+      label: `Host: ${hostStatus.state}`,
+      enabled: false,
+    },
+    { type: "separator" },
+    {
+      label: "Quit Scorel",
+      click: () => app.quit(),
+    },
+  ]));
+};
+
+const installGuiAutoUpdater = (): void => {
+  if (!app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  const check = () => void checkForGuiUpdates({ manual: false });
+  check();
+  const timer = setInterval(check, GUI_AUTO_UPDATE_INTERVAL_MS);
+  timer.unref?.();
 };
 
 registerIpc();
@@ -421,6 +507,8 @@ app.whenReady().then(async () => {
     };
   }
   installApplicationMenu();
+  installStatusTray();
+  installGuiAutoUpdater();
   await createWindow();
 });
 

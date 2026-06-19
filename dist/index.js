@@ -1746,7 +1746,7 @@ import { mkdir as mkdir2, readFile as readFile4, rename as rename2, rm, stat as 
 import { userInfo } from "node:os";
 import { basename as basename2, dirname as dirname3, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, bashResult, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord3, shellQuote, shellCommandArgs, userShell, truncate, textResult, byteLength, isTimeoutError, isExecError, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
+var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, bashResult, renderFullBashResult, writeBashArtifact, safeArtifactSegment, projectBashStreams, projectOutputStream, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord3, shellQuote, shellCommandArgs, userShell, truncate, sliceBytes, textResult, byteLength, isTimeoutError, isExecError, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
 var init_coding_tools = __esm({
   "packages/core/src/tools/coding-tools.ts"() {
     "use strict";
@@ -1914,7 +1914,7 @@ String: ${input.old_string}`
         defineTool({
           name: "Bash",
           description: "Execute a shell command in the workspace with timeout and output truncation.",
-          execute: async (_toolCallId, args, signal) => {
+          execute: async (toolCallId, args, signal) => {
             const input = parseBashArgs(args);
             const commandCwd = input.cwd ? resolveWorkspacePath(input.cwd) : root;
             const timeoutMs = Math.min(input.timeoutMs ?? defaultTimeoutMs, maxTimeoutMs);
@@ -1940,12 +1940,14 @@ String: ${input.old_string}`
                 maxBuffer: Math.max(outputLimit * 4, 1024 * 1024)
               });
               const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : void 0;
-              return bashResult({
+              return await bashResult({
                 exitCode: 0,
                 stdout: result.stdout,
                 stderr: result.stderr,
                 cwd: commandCwd,
                 outputLimit,
+                artifactDir: options.toolResultArtifacts?.dir,
+                toolCallId,
                 shell: defaultShell,
                 command,
                 rtk: withRtkSavings(rtkResult, rtkSavedTokens)
@@ -1956,12 +1958,14 @@ String: ${input.old_string}`
               }
               if (isExecError(cause)) {
                 const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : void 0;
-                return bashResult({
+                return await bashResult({
                   exitCode: typeof cause.code === "number" ? cause.code : 1,
                   stdout: String(cause.stdout ?? ""),
                   stderr: String(cause.stderr ?? cause.message),
                   cwd: commandCwd,
                   outputLimit,
+                  artifactDir: options.toolResultArtifacts?.dir,
+                  toolCallId,
                   shell: defaultShell,
                   command,
                   rtk: withRtkSavings(rtkResult, rtkSavedTokens)
@@ -2329,17 +2333,41 @@ ${filenames.join("\n")}`,
         throw cause;
       }
     };
-    bashResult = (input) => {
-      const stdout = truncate(input.stdout, input.outputLimit, "stdout");
-      const stderr = truncate(input.stderr, input.outputLimit, "stderr");
-      return textResult(`exitCode: ${input.exitCode}
+    bashResult = async (input) => {
+      const stdoutBytes = Buffer.byteLength(input.stdout);
+      const stderrBytes = Buffer.byteLength(input.stderr);
+      const fullResult = renderFullBashResult(input);
+      const resultBytes = Buffer.byteLength(fullResult);
+      const shouldArchive = Boolean(input.artifactDir) && resultBytes > input.outputLimit;
+      const artifactPath = shouldArchive && input.artifactDir ? await writeBashArtifact(input.artifactDir, input.toolCallId, fullResult) : void 0;
+      const projection = artifactPath ? projectBashStreams(input.stdout, input.stderr, input.outputLimit) : void 0;
+      const stdout = projection?.stdout ?? truncate(input.stdout, input.outputLimit, "stdout");
+      const stderr = projection?.stderr ?? truncate(input.stderr, input.outputLimit, "stderr");
+      const text = artifactPath ? [
+        `exitCode: ${input.exitCode}`,
+        `cwd: ${input.cwd}`,
+        `artifact: ${artifactPath}`,
+        `resultBytes: ${resultBytes}`,
+        `stdoutBytes: ${stdoutBytes}`,
+        `stderrBytes: ${stderrBytes}`,
+        ...projection?.lines ?? []
+      ].join("\n") : `exitCode: ${input.exitCode}
 cwd: ${input.cwd}
 stdout:
 ${stdout}
 stderr:
-${stderr}`, {
+${stderr}`;
+      return textResult(text, {
         exitCode: input.exitCode,
         cwd: input.cwd,
+        ...artifactPath ? {
+          artifact: {
+            path: artifactPath,
+            resultBytes,
+            stdoutBytes,
+            stderrBytes
+          }
+        } : {},
         ...input.shell ? { shell: input.shell } : {},
         ...input.command ? { command: input.command } : {},
         ...input.rtk ? {
@@ -2350,6 +2378,57 @@ ${stderr}`)
           }
         } : {}
       });
+    };
+    renderFullBashResult = (input) => `exitCode: ${input.exitCode}
+cwd: ${input.cwd}
+stdout:
+${input.stdout}
+stderr:
+${input.stderr}`;
+    writeBashArtifact = async (artifactDir, toolCallId, content) => {
+      const directory = resolve(artifactDir, safeArtifactSegment(toolCallId));
+      await mkdir2(directory, { recursive: true });
+      const path = resolve(directory, "result.txt");
+      await writeFile2(path, content, { encoding: "utf8", mode: 384 });
+      return path;
+    };
+    safeArtifactSegment = (value) => value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120) || "tool_call";
+    projectBashStreams = (stdout, stderr, maxBytes) => {
+      const streams = [
+        { label: "stdout", value: stdout },
+        { label: "stderr", value: stderr }
+      ].filter((stream) => Buffer.byteLength(stream.value) > 0);
+      if (streams.length === 0) {
+        return { lines: ["stdout:", "", "stderr:", ""], stdout: "", stderr: "" };
+      }
+      const perStreamBudget = Math.max(1, Math.floor(maxBytes / streams.length));
+      const projected = streams.map((stream) => projectOutputStream(stream.value, perStreamBudget, stream.label));
+      const stdoutText = projected.find((stream) => stream.label === "stdout")?.text ?? "stdout:\n";
+      const stderrText = projected.find((stream) => stream.label === "stderr")?.text ?? "stderr:\n";
+      return {
+        lines: projected.map((stream) => stream.text),
+        stdout: stdoutText,
+        stderr: stderrText
+      };
+    };
+    projectOutputStream = (value, maxBytes, label) => {
+      const bytes = Buffer.byteLength(value);
+      if (bytes <= maxBytes) {
+        return { label, text: `${label}:
+${value}` };
+      }
+      const headBytes = Math.max(1, Math.floor(maxBytes / 2));
+      const tailBytes = Math.max(1, maxBytes - headBytes);
+      return {
+        label,
+        text: [
+          `${label} head:`,
+          sliceBytes(value, 0, headBytes),
+          `${label} tail:`,
+          sliceBytes(value, Math.max(0, bytes - tailBytes), bytes),
+          `[${label} archived: ${bytes} bytes; projection budget ${maxBytes} bytes]`
+        ].join("\n")
+      };
     };
     resolveDefaultShell = (input) => {
       const shell = input || process.env.SHELL || userShell() || "/bin/sh";
@@ -2434,10 +2513,11 @@ ${stderr}`)
       if (bytes <= maxBytes) {
         return value;
       }
-      const truncated = Buffer.from(value).subarray(0, maxBytes).toString("utf8");
+      const truncated = sliceBytes(value, 0, maxBytes);
       return `${truncated}
 [${label} truncated: ${bytes} bytes > ${maxBytes} bytes]`;
     };
+    sliceBytes = (value, start, end) => Buffer.from(value).subarray(start, end).toString("utf8");
     textResult = (text, details) => ({
       content: [{ type: "text", text }],
       details
@@ -3736,7 +3816,7 @@ function assertTreeEvent(value) {
     throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
   }
 }
-var SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, createSession, loadSession, buildContext, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, compactSummaryMessage, cloneMessage, isRecord7;
+var SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, createSession, loadSession, buildContext, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, compactSummaryMessage, cloneMessage, isRecord7;
 var init_session = __esm({
   "packages/core/src/session/index.ts"() {
     "use strict";
@@ -3917,6 +3997,7 @@ var init_session = __esm({
     };
     sessionFilePath = (sessionsDir, sessionId) => join7(sessionsDir, `${sessionId}.jsonl`);
     sessionLogFilePath = (sessionsDir, sessionId) => join7(sessionsDir, `${sessionId}.log`);
+    sessionArtifactsDirPath = (sessionsDir, sessionId) => join7(sessionsDir, `${sessionId}.artifacts`);
     createSession = async ({ sessionsDir, header }) => {
       const validHeader = parseHeader(header);
       await mkdir4(sessionsDir, { recursive: true });
@@ -4704,7 +4785,7 @@ import { basename as basename3, dirname as dirname8, join as join10, resolve as 
 import { pathToFileURL } from "node:url";
 import { promisify as promisify2 } from "node:util";
 import { WebSocketServer } from "ws";
-var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger2, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord8, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
+var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger2, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord8, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
 var init_src4 = __esm({
   "packages/daemon/src/index.ts"() {
     "use strict";
@@ -4945,6 +5026,7 @@ var init_src4 = __esm({
         for (const tool of createCodingTools({
           cwd: options.cwd,
           contextWindow: model.contextWindow,
+          ...options.sessionsDir && options.sessionId ? { toolResultArtifacts: { dir: sessionArtifactsDirPath(options.sessionsDir, options.sessionId) } } : {},
           tokenSaving: {
             rtk: {
               enabled: options.config.runtime.tokenSavingRtk,
@@ -4985,6 +5067,7 @@ var init_src4 = __esm({
       #registry;
       #runtimeStatsQueue = Promise.resolve();
       #idleShutdownTimer;
+      #lastActiveWorkAt;
       #started = false;
       constructor(options) {
         this.#sessionsDir = options.sessionsDir;
@@ -5003,6 +5086,7 @@ var init_src4 = __esm({
         this.#onIdleShutdown = options.onIdleShutdown;
         this.#now = options.now ?? Date.now;
         this.#createId = options.createId ?? (() => crypto.randomUUID());
+        this.#lastActiveWorkAt = this.#now();
         this.#registry = new ProjectRegistry({
           sessionsDir: this.#sessionsDir,
           projectsPath: options.projectsPath,
@@ -5066,6 +5150,13 @@ var init_src4 = __esm({
       }
       releaseSessionEventBuffer(sessionId) {
         this.#events.delete(sessionId);
+      }
+      activityStatus() {
+        const activeWork = this.#hasActiveWork();
+        if (activeWork) {
+          this.#lastActiveWorkAt = this.#now();
+        }
+        return { activeWork, lastActiveWorkAt: this.#lastActiveWorkAt };
       }
       async handleMessage(connection, message) {
         this.#assertStarted();
@@ -5355,6 +5446,7 @@ var init_src4 = __esm({
             content: normalizeContent(request.content),
             parentId: request.options?.parentId,
             source: "user",
+            modelSelection: request.options?.modelSelection,
             channelContext: request.options?.channelContext ? runtimeChannelContextFromWire(request.options.channelContext) : void 0,
             onComplete: (result) => this.#respond(connection, request, { ...result, status: "completed" })
           });
@@ -5380,11 +5472,14 @@ var init_src4 = __esm({
         });
       }
       async #runUserTurn(lane, clientId, input) {
+        this.#lastActiveWorkAt = this.#now();
         const sessionId = lane.session.header.sessionId;
+        await this.#selectChatRuntime(lane, input.modelSelection);
         await this.#appendDiagnostic(sessionId, "send_message_started", {
           clientId,
           activeLeafId: lane.session.activeLeafId,
-          source: input.source
+          source: input.source,
+          selectedModelId: lane.selectedModel?.modelId
         });
         const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, clientId);
         await this.#syncSkillIndex(lane, clientId);
@@ -5588,7 +5683,7 @@ var init_src4 = __esm({
           createdAt: now,
           updatedAt: now,
           clientId: connection.clientId,
-          ...request.options?.channelContext ? { data: { channelContext: request.options.channelContext } } : {}
+          ...request.options?.channelContext || request.options?.modelSelection ? { data: { channelContext: request.options.channelContext, modelSelection: request.options.modelSelection } } : {}
         };
         lane.followUpWaiters.set(item.id, { connection, request });
         await this.#appendQueueRewrite(lane, "follow_up", [...lane.session.tree.controlState.queues.follow_up, item], {
@@ -5641,6 +5736,7 @@ var init_src4 = __esm({
             parentId: lane.session.activeLeafId,
             source: "follow_up",
             queueItemId: item.id,
+            modelSelection: parseQueuedModelSelection(item.data?.modelSelection),
             channelContext: parseQueuedChannelContext(item.data?.channelContext),
             onComplete: waiter ? (result) => this.#respond(waiter.connection, waiter.request, { ...result, status: "completed" }) : void 0
           });
@@ -6623,6 +6719,7 @@ var init_src4 = __esm({
           session: loaded,
           project,
           runtime,
+          ...selectedModel ? { selectedModel } : {},
           queue: Promise.resolve(),
           appendQueue: Promise.resolve(),
           followUpWaiters: /* @__PURE__ */ new Map()
@@ -6674,6 +6771,7 @@ var init_src4 = __esm({
           session,
           project,
           runtime,
+          ...selectedModel ? { selectedModel } : {},
           queue: Promise.resolve(),
           appendQueue: Promise.resolve(),
           followUpWaiters: /* @__PURE__ */ new Map()
@@ -6688,6 +6786,32 @@ var init_src4 = __esm({
             listNames: () => Object.keys(lane.session.tree.controlState.skillIndex).sort()
           })
         );
+      }
+      async #selectChatRuntime(lane, modelSelection) {
+        if (!modelSelection) {
+          return;
+        }
+        const selectedModel = await this.#selectedModelFromMeta(
+          { projectId: lane.project.projectId, modelSelection },
+          lane.project
+        );
+        if (!selectedModel || lane.selectedModel?.modelId === selectedModel.modelId) {
+          return;
+        }
+        lane.runtime = await this.#createRuntime({
+          sessionId: lane.session.header.sessionId,
+          project: lane.project,
+          selectedModel,
+          purpose: "chat"
+        });
+        lane.selectedModel = selectedModel;
+        this.#registerLaneTools(lane);
+        await this.#appendDiagnostic(lane.session.header.sessionId, "chat_model_selected", {
+          projectId: lane.project.projectId,
+          workDir: lane.project.workDir,
+          selectedModelId: selectedModel.modelId,
+          role: selectedModel.role
+        });
       }
       #syncChannelTool(lane, channelContext) {
         if (!channelContext) {
@@ -7249,9 +7373,10 @@ var init_src4 = __esm({
         }
         const persistedSelection = "selectedModel" in meta ? meta.selectedModel : void 0;
         const requestedSelection = "modelSelection" in meta ? meta.modelSelection : void 0;
+        const selectionInput = persistedSelection ? config.models[persistedSelection.modelId] ? { modelId: persistedSelection.modelId, role: persistedSelection.role } : persistedSelection.role ? { role: persistedSelection.role } : void 0 : requestedSelection;
         const selection = resolveModelSelection(
           config,
-          persistedSelection ? { modelId: persistedSelection.modelId, role: persistedSelection.role } : requestedSelection
+          selectionInput
         );
         const model = resolvePiAiModel(selection.config);
         return {
@@ -7642,6 +7767,19 @@ var init_src4 = __esm({
         ...isRecord8(value.data) ? { data: value.data } : {}
       });
     };
+    parseQueuedModelSelection = (value) => {
+      if (!isRecord8(value)) {
+        return void 0;
+      }
+      const selection = {};
+      if (typeof value.modelId === "string") {
+        selection.modelId = value.modelId;
+      }
+      if (value.role === "primary" || value.role === "standard" || value.role === "auxiliary") {
+        selection.role = value.role;
+      }
+      return selection.modelId || selection.role ? selection : void 0;
+    };
     imBindingKey = (extensionId, externalConversationId) => `${extensionId}:${externalConversationId}`;
     defaultBuiltinExtensionsDir = () => findBuiltinExtensionsDir([
       runtimeModuleDir(),
@@ -7777,25 +7915,131 @@ var init_relay_cli = __esm({
   }
 });
 
+// apps/cli/src/update-cli.ts
+import { execFile as execFileCallback } from "node:child_process";
+import { readFile as readFile12 } from "node:fs/promises";
+import { dirname as dirname9, join as join12 } from "node:path";
+import { fileURLToPath } from "node:url";
+import { promisify as promisify3 } from "node:util";
+var SCOREL_PACKAGE_NAME, AUTO_UPDATE_INTERVAL_MS, ACTIVE_WORK_STALE_MS, execFileAsync3, compareSemver, shouldRunAutoUpdate, createNpmPackageUpdater, readInstalledScorelVersion, runCliUpdate, writeUpdateUsage, parseSemver;
+var init_update_cli = __esm({
+  "apps/cli/src/update-cli.ts"() {
+    "use strict";
+    SCOREL_PACKAGE_NAME = "@chanlerdev/scorel";
+    AUTO_UPDATE_INTERVAL_MS = 60 * 60 * 1e3;
+    ACTIVE_WORK_STALE_MS = 3 * 60 * 60 * 1e3;
+    execFileAsync3 = promisify3(execFileCallback);
+    compareSemver = (a, b) => {
+      const left = parseSemver(a);
+      const right = parseSemver(b);
+      for (let index = 0; index < 3; index += 1) {
+        const delta = left[index] - right[index];
+        if (delta !== 0) return delta;
+      }
+      return 0;
+    };
+    shouldRunAutoUpdate = (activity) => !activity.activeWork || activity.now - activity.lastActiveWorkAt >= ACTIVE_WORK_STALE_MS;
+    createNpmPackageUpdater = (options) => {
+      const packageName = options.packageName ?? SCOREL_PACKAGE_NAME;
+      const execFile3 = options.execFile ?? ((command, argv) => execFileAsync3(command, argv));
+      return {
+        async checkLatest() {
+          const result = await execFile3("npm", ["view", packageName, "version"]);
+          const latest = result.stdout.trim();
+          if (!latest) {
+            throw new Error(`npm did not return a latest version for ${packageName}`);
+          }
+          parseSemver(latest);
+          return latest;
+        },
+        async update() {
+          const latestVersion = await this.checkLatest();
+          if (compareSemver(options.currentVersion, latestVersion) >= 0) {
+            return { status: "current", currentVersion: options.currentVersion, latestVersion };
+          }
+          await execFile3("npm", ["install", "-g", `${packageName}@${latestVersion}`]);
+          return { status: "updated", currentVersion: options.currentVersion, latestVersion };
+        }
+      };
+    };
+    readInstalledScorelVersion = async () => {
+      const here = dirname9(fileURLToPath(import.meta.url));
+      for (const candidate of [
+        join12(here, "..", "package.json"),
+        join12(here, "..", "..", "package.json"),
+        join12(process.cwd(), "package.json")
+      ]) {
+        try {
+          const parsed = JSON.parse(await readFile12(candidate, "utf8"));
+          if (typeof parsed.version === "string" && (parsed.name === SCOREL_PACKAGE_NAME || parsed.name === "@scorel/app-cli")) {
+            return parsed.version;
+          }
+        } catch {
+        }
+      }
+      return "0.0.0";
+    };
+    runCliUpdate = async (argv, io, options = {}) => {
+      if (argv.includes("--help") || argv.includes("-h")) {
+        writeUpdateUsage(io.output);
+        return 0;
+      }
+      if (argv.length > 0) {
+        writeUpdateUsage(io.error);
+        return 1;
+      }
+      const currentVersion = options.currentVersion ?? await readInstalledScorelVersion();
+      const updater = options.updater ?? createNpmPackageUpdater({ currentVersion });
+      try {
+        const result = await updater.update();
+        if (result.status === "current") {
+          io.output.write(`scorel is current (${result.currentVersion})
+`);
+        } else {
+          io.output.write(`updated scorel ${result.currentVersion} -> ${result.latestVersion}
+`);
+        }
+        return 0;
+      } catch (cause) {
+        io.error.write(`scorel update error: ${cause instanceof Error ? cause.message : String(cause)}
+`);
+        return 1;
+      }
+    };
+    writeUpdateUsage = (output) => {
+      output.write("Usage: scorel update\n       scorel upgrade\n");
+    };
+    parseSemver = (version) => {
+      const match = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(version);
+      if (!match) {
+        throw new Error(`Invalid semver version: ${version}`);
+      }
+      return [Number(match[1]), Number(match[2]), Number(match[3])];
+    };
+  }
+});
+
 // apps/cli/src/daemon-cli.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { spawn } from "node:child_process";
 import { homedir as homedir6 } from "node:os";
-import { dirname as dirname9, join as join12 } from "node:path";
-import { fileURLToPath } from "node:url";
-var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, START_READY_TIMEOUT_MS, DEFAULT_IDLE_SHUTDOWN_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runStartCommand, runServeCommand, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep, waitForDaemonReady, detachBackgroundDaemon, nodeEntrypointArgs, writeDaemonUsage;
+import { dirname as dirname10, join as join13 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, START_READY_TIMEOUT_MS, AUTO_STARTED_IDLE_SHUTDOWN_MS, FOREGROUND_IDLE_SHUTDOWN_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runStartCommand, runServeCommand, startAutoUpdateLoop, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep, waitForDaemonReady, detachBackgroundDaemon, nodeEntrypointArgs, writeDaemonUsage;
 var init_daemon_cli = __esm({
   "apps/cli/src/daemon-cli.ts"() {
     "use strict";
     init_src4();
     init_relay_cli();
+    init_update_cli();
     DEFAULT_HOST = "127.0.0.1";
     DEFAULT_PORT = 7777;
     STOP_POLL_INTERVAL_MS = 200;
     STOP_GRACE_MS = 5e3;
     START_READY_TIMEOUT_MS = 1e4;
-    DEFAULT_IDLE_SHUTDOWN_MS = 15 * 60 * 1e3;
-    defaultStateDir2 = () => join12(homedir6(), ".scorel");
+    AUTO_STARTED_IDLE_SHUTDOWN_MS = 15 * 60 * 1e3;
+    FOREGROUND_IDLE_SHUTDOWN_MS = 0;
+    defaultStateDir2 = () => join13(homedir6(), ".scorel");
     isLoopbackHost = (host) => host === "127.0.0.1" || host === "::1" || host === "localhost";
     formatTimestamp = (epochMs) => new Date(epochMs).toISOString();
     runCliDaemon = async (argv, options) => {
@@ -7824,7 +8068,7 @@ var init_daemon_cli = __esm({
     runStartCommand = async (argv, options) => {
       let flags;
       try {
-        flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env);
+        flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, FOREGROUND_IDLE_SHUTDOWN_MS);
       } catch (cause) {
         options.error.write(`scorel daemon start error: ${cause.message}
 `);
@@ -7837,7 +8081,7 @@ var init_daemon_cli = __esm({
 `);
         return 0;
       }
-      const cliEntrypoint = options.cliEntrypoint ?? fileURLToPath(import.meta.url).replace(/daemon-cli\.ts$/, "index.ts");
+      const cliEntrypoint = options.cliEntrypoint ?? fileURLToPath2(import.meta.url).replace(/daemon-cli\.ts$/, "index.ts");
       const child = (options.spawn ?? spawn)(process.execPath, [
         ...nodeEntrypointArgs(cliEntrypoint),
         "host",
@@ -7854,7 +8098,7 @@ var init_daemon_cli = __esm({
         ...flags.relayUrl ? ["--relay", flags.relayUrl] : ["--no-relay"],
         ...flags.replace ? ["--replace"] : []
       ], {
-        cwd: dirname9(cliEntrypoint),
+        cwd: dirname10(cliEntrypoint),
         env: { ...process.env, ...options.env ?? {} },
         detached: true,
         stdio: ["ignore", "pipe", "pipe"]
@@ -7881,7 +8125,7 @@ var init_daemon_cli = __esm({
     runServeCommand = async (argv, options) => {
       let flags;
       try {
-        flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env);
+        flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, FOREGROUND_IDLE_SHUTDOWN_MS);
       } catch (cause) {
         options.error.write(`scorel daemon serve error: ${cause.message}
 `);
@@ -7914,9 +8158,10 @@ Use --replace to stop it and start a new one.
         stopRequested = true;
         resolveStopWaiter?.();
       };
+      const sessionsDir = options.sessionsDir ?? scorelSessionsDir(homedir6());
       const daemon = new ScorelHost({
-        sessionsDir: options.sessionsDir ?? scorelSessionsDir(homedir6()),
-        projectsPath: join12(options.stateDir, "projects.json"),
+        sessionsDir,
+        projectsPath: join13(options.stateDir, "projects.json"),
         deviceId: identity.deviceId,
         deviceDisplayName: identity.displayName,
         idleShutdownMs: flags.idleShutdownMs,
@@ -7924,15 +8169,25 @@ Use --replace to stop it and start a new one.
         scorelHomeDir: options.stateDir,
         loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir, ...configScope }),
         loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir, ...configScope }),
-        createRuntime: async ({ project, selectedModel, purpose }) => createRealRuntime({
+        createRuntime: async ({ sessionId, project, selectedModel, purpose }) => createRealRuntime({
           cwd: project.workDir,
           config: await loadScorelConfig({ cwd: project.workDir, ...configScope }),
+          sessionsDir,
+          sessionId,
           modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : void 0,
           includeTools: purpose === "chat"
         })
       });
       await daemon.start();
       await daemon.registerProject(flags.cwd);
+      const autoUpdater = await startAutoUpdateLoop({
+        host: daemon,
+        requestStop,
+        output: options.output,
+        error: options.error,
+        updater: options.packageUpdater,
+        intervalMs: options.autoUpdateIntervalMs ?? AUTO_UPDATE_INTERVAL_MS
+      });
       const server = await startScorelHostWebSocketServer({
         hostService: daemon,
         host: flags.host,
@@ -7978,6 +8233,7 @@ Use --replace to stop it and start a new one.
       }
       const shutdown = async () => {
         try {
+          autoUpdater.stop();
           relayClient?.close();
           await server.close();
         } finally {
@@ -8027,6 +8283,42 @@ Use --replace to stop it and start a new one.
       options.output.write(`scorel host serve stopped reason=${signalReason}
 `);
       return 0;
+    };
+    startAutoUpdateLoop = async (options) => {
+      const updater = options.updater ?? createNpmPackageUpdater({ currentVersion: await readInstalledScorelVersion() });
+      let timer;
+      let running = false;
+      const tick = async () => {
+        if (running) return;
+        running = true;
+        try {
+          const activity = options.host.activityStatus();
+          if (!shouldRunAutoUpdate({ ...activity, now: Date.now() })) {
+            return;
+          }
+          const result = await updater.update();
+          if (result.status === "updated") {
+            options.output.write(`scorel auto-updated ${result.currentVersion} -> ${result.latestVersion}; restarting host
+`);
+            options.requestStop("auto-update");
+          }
+        } catch (cause) {
+          options.error.write(`scorel auto-update error: ${cause instanceof Error ? cause.message : String(cause)}
+`);
+        } finally {
+          running = false;
+        }
+      };
+      timer = setInterval(() => void tick(), options.intervalMs);
+      timer.unref?.();
+      return {
+        stop() {
+          if (timer) {
+            clearInterval(timer);
+            timer = void 0;
+          }
+        }
+      };
     };
     stopRunningDaemon = async (state, options) => {
       try {
@@ -8131,14 +8423,14 @@ Use --replace to stop it and start a new one.
       const stoppedAt = state.stoppedAt !== null ? formatTimestamp(state.stoppedAt) : "unknown";
       return `stopped url=${state.wsUrl} last-pid=${state.pid} stoppedAt=${stoppedAt} liveness=${liveness}`;
     };
-    parseServeFlags = (argv, defaultCwd, env) => {
+    parseServeFlags = (argv, defaultCwd, env, defaultIdleShutdownMs) => {
       let host = DEFAULT_HOST;
       let port = DEFAULT_PORT;
       let cwd = defaultCwd;
       let token;
       let relayUrl = resolveDefaultRelayUrl(env);
       let replace = false;
-      let idleShutdownMs = DEFAULT_IDLE_SHUTDOWN_MS;
+      let idleShutdownMs = defaultIdleShutdownMs;
       for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === "--host") {
@@ -8475,8 +8767,8 @@ var init_routing = __esm({
 });
 
 // apps/relay/src/store.ts
-import { mkdir as mkdir7, readFile as readFile12, writeFile as writeFile7 } from "node:fs/promises";
-import { join as join13 } from "node:path";
+import { mkdir as mkdir7, readFile as readFile13, writeFile as writeFile7 } from "node:fs/promises";
+import { join as join14 } from "node:path";
 var FileRelayStore, emptyStoreFile;
 var init_store = __esm({
   "apps/relay/src/store.ts"() {
@@ -8486,7 +8778,7 @@ var init_store = __esm({
       #now;
       #queue = Promise.resolve();
       constructor(options) {
-        this.#filePath = join13(options.dataDir, "relay-store.json");
+        this.#filePath = join14(options.dataDir, "relay-store.json");
         this.#now = options.now ?? Date.now;
       }
       async upsertDevice(record) {
@@ -8529,7 +8821,7 @@ var init_store = __esm({
         this.#queue = this.#queue.then(async () => {
           const file = await this.#read();
           mutator(file);
-          await mkdir7(join13(this.#filePath, ".."), { recursive: true });
+          await mkdir7(join14(this.#filePath, ".."), { recursive: true });
           await writeFile7(this.#filePath, `${JSON.stringify(file, null, 2)}
 `);
         });
@@ -8537,7 +8829,7 @@ var init_store = __esm({
       }
       async #read() {
         try {
-          const raw = JSON.parse(await readFile12(this.#filePath, "utf8"));
+          const raw = JSON.parse(await readFile13(this.#filePath, "utf8"));
           if (raw.version !== 1 || !Array.isArray(raw.devices) || !Array.isArray(raw.clients) || !Array.isArray(raw.bindings)) {
             return emptyStoreFile();
           }
@@ -8790,7 +9082,7 @@ var init_library = __esm({
 
 // apps/cli/src/relay-server-cli.ts
 import { homedir as homedir7 } from "node:os";
-import { join as join14 } from "node:path";
+import { join as join15 } from "node:path";
 var DEFAULT_HOST2, DEFAULT_PORT2, runCliRelay, runRelayServe, parseRelayServeFlags, waitForStop, requireValue3, writeRelayUsage;
 var init_relay_server_cli = __esm({
   "apps/cli/src/relay-server-cli.ts"() {
@@ -8842,7 +9134,7 @@ var init_relay_server_cli = __esm({
     parseRelayServeFlags = (argv) => {
       let host = DEFAULT_HOST2;
       let port = DEFAULT_PORT2;
-      let dataDir = join14(homedir7(), ".scorel", "relay");
+      let dataDir = join15(homedir7(), ".scorel", "relay");
       for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === "--host") {
@@ -8900,17 +9192,18 @@ var init_relay_server_cli = __esm({
 // apps/cli/src/up-cli.ts
 import { spawn as spawn2 } from "node:child_process";
 import { homedir as homedir8 } from "node:os";
-import { dirname as dirname10, join as join15 } from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { dirname as dirname11, join as join16 } from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 var DEFAULT_DAEMON_PORT, DEFAULT_WEBUI_PORT, DEFAULT_DAEMON_READY_TIMEOUT_MS, defaultStateDir3, defaultAttachSigint, runCliUp, parseUpFlags, requireValue4, waitForDaemonReady2, pipeWithPrefix, detachBackgroundDaemon2, nodeEntrypointArgs2, pipeStreamLines, once;
 var init_up_cli = __esm({
   "apps/cli/src/up-cli.ts"() {
     "use strict";
     init_src4();
+    init_daemon_cli();
     DEFAULT_DAEMON_PORT = 7777;
     DEFAULT_WEBUI_PORT = 3e3;
     DEFAULT_DAEMON_READY_TIMEOUT_MS = 1e4;
-    defaultStateDir3 = () => join15(homedir8(), ".scorel");
+    defaultStateDir3 = () => join16(homedir8(), ".scorel");
     defaultAttachSigint = (listener) => {
       process.on("SIGINT", listener);
       return () => process.off("SIGINT", listener);
@@ -8925,7 +9218,7 @@ var init_up_cli = __esm({
         return 1;
       }
       const stateDir = options.stateDir ?? defaultStateDir3();
-      const cliEntrypoint = options.cliEntrypoint ?? fileURLToPath2(import.meta.url).replace(/up-cli\.ts$/, "index.ts");
+      const cliEntrypoint = options.cliEntrypoint ?? fileURLToPath3(import.meta.url).replace(/up-cli\.ts$/, "index.ts");
       const spawnFn = options.spawn ?? spawn2;
       const readState = options.readState ?? ((dir) => readLocalDaemonState({ stateDir: dir }));
       const attachSigint = options.attachSigint ?? defaultAttachSigint;
@@ -8944,10 +9237,12 @@ var init_up_cli = __esm({
           String(flags.daemonPort),
           "--cwd",
           flags.cwd,
+          "--idle-timeout-ms",
+          String(AUTO_STARTED_IDLE_SHUTDOWN_MS),
           "--no-relay"
         ];
         daemonChild = spawnFn(process.execPath, daemonArgs, {
-          cwd: dirname10(cliEntrypoint),
+          cwd: dirname11(cliEntrypoint),
           env: { ...process.env },
           detached: true,
           stdio: ["ignore", "pipe", "pipe"]
@@ -8977,7 +9272,7 @@ var init_up_cli = __esm({
         String(flags.webuiPort)
       ];
       const webuiChild = spawnFn(process.execPath, webuiArgs, {
-        cwd: dirname10(cliEntrypoint),
+        cwd: dirname11(cliEntrypoint),
         env: { ...process.env },
         stdio: ["ignore", "pipe", "pipe"]
       });
@@ -9142,8 +9437,8 @@ var init_up_cli = __esm({
 // apps/cli/src/webui-cli.ts
 import { spawn as spawn3 } from "node:child_process";
 import { existsSync as existsSync4 } from "node:fs";
-import { dirname as dirname11, resolve as resolve6 } from "node:path";
-import { fileURLToPath as fileURLToPath3 } from "node:url";
+import { dirname as dirname12, resolve as resolve6 } from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
 var DEFAULT_PORT3, DEFAULT_HOST3, runCliWebUi, findWebuiAppDir, buildWebUiSpawnPlan, parseWebUiFlags, requireValue5, waitForChildExit;
 var init_webui_cli = __esm({
   "apps/cli/src/webui-cli.ts"() {
@@ -9174,7 +9469,7 @@ var init_webui_cli = __esm({
       return await waitForChildExit(child, options);
     };
     findWebuiAppDir = () => {
-      let cursor = dirname11(fileURLToPath3(import.meta.url));
+      let cursor = dirname12(fileURLToPath4(import.meta.url));
       for (let depth = 0; depth < 8; depth += 1) {
         const candidate = resolve6(cursor, "apps/webui/package.json");
         if (existsSync4(candidate)) {
@@ -9263,11 +9558,11 @@ __export(index_exports, {
   runCli: () => runCli
 });
 import { createHash as createHash3 } from "node:crypto";
-import { appendFile as appendFile4, mkdir as mkdir8, readFile as readFile13, realpath as realpath3, readdir as readdir7, writeFile as writeFile8 } from "node:fs/promises";
+import { appendFile as appendFile4, mkdir as mkdir8, readFile as readFile14, realpath as realpath3, readdir as readdir7, writeFile as writeFile8 } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { homedir as homedir9 } from "node:os";
-import { fileURLToPath as fileURLToPath4 } from "node:url";
-import { basename as basename4, dirname as dirname12, join as join16 } from "node:path";
+import { fileURLToPath as fileURLToPath5 } from "node:url";
+import { basename as basename4, dirname as dirname13, join as join17 } from "node:path";
 var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, createSigintHandler, loadOrCreateSession, parseChatOptions, requireValue6, promptIfInteractive, writeUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
 var init_index = __esm({
   async "apps/cli/src/index.ts"() {
@@ -9280,13 +9575,19 @@ var init_index = __esm({
     init_relay_server_cli();
     init_up_cli();
     init_webui_cli();
+    init_update_cli();
     cliAppName = "@scorel/app-cli";
     cliClientDependency = clientPackageName;
     cliDaemonDependency = daemonPackageName;
     defaultSessionsDir = () => scorelSessionsDir(homedir9());
-    defaultStateDir4 = () => join16(homedir9(), ".scorel");
+    defaultStateDir4 = () => join17(homedir9(), ".scorel");
     runCli = async (argv, io = { input: process.stdin, output: process.stdout, error: process.stderr }, runOptions = {}) => {
       const [command, ...rest] = argv;
+      if (command === "--version" || command === "-v" || command === "version") {
+        io.output.write(`${await readInstalledScorelVersion()}
+`);
+        return 0;
+      }
       if (!command || command === "chat") {
         if (rest.includes("--help") || rest.includes("-h")) {
           writeUsage(io.output);
@@ -9331,6 +9632,9 @@ var init_index = __esm({
           output: io.output,
           error: io.error
         });
+      }
+      if (command === "update" || command === "upgrade") {
+        return runCliUpdate(rest, { output: io.output, error: io.error });
       }
       if (command === "attach") {
         try {
@@ -9419,10 +9723,10 @@ var init_index = __esm({
       }
     };
     runLogs = async (options, io) => {
-      const filePath = options.attach ? await findAttachDiagnosticsFilePath(io.stateDir, options.sessionId, options.remoteUrl) : join16(io.sessionsDir, `${options.sessionId}.log`);
+      const filePath = options.attach ? await findAttachDiagnosticsFilePath(io.stateDir, options.sessionId, options.remoteUrl) : join17(io.sessionsDir, `${options.sessionId}.log`);
       let content;
       try {
-        content = await readFile13(filePath, "utf8");
+        content = await readFile14(filePath, "utf8");
       } catch (cause) {
         io.error.write(`scorel logs error: ${cause instanceof Error ? cause.message : String(cause)}
 `);
@@ -9576,31 +9880,31 @@ var init_index = __esm({
     };
     attachCacheFilePath = (stateDir, scope, sessionId) => {
       const scopeKey = createHash3("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
-      return join16(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
+      return join17(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
     };
     attachDiagnosticsFilePath = (stateDir, scope, sessionId) => {
       const scopeKey = createHash3("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
-      return join16(stateDir, "attach-cache", scopeKey, `${sessionId}.log`);
+      return join17(stateDir, "attach-cache", scopeKey, `${sessionId}.log`);
     };
     findAttachDiagnosticsFilePath = async (stateDir, sessionId, _remoteUrl) => {
-      const root = join16(stateDir, "attach-cache");
+      const root = join17(stateDir, "attach-cache");
       const scopes = await readdir7(root).catch(() => []);
       for (const scope of scopes) {
-        const candidate = join16(root, scope, `${sessionId}.log`);
+        const candidate = join17(root, scope, `${sessionId}.log`);
         try {
-          await readFile13(candidate, "utf8");
+          await readFile14(candidate, "utf8");
           return candidate;
         } catch {
           continue;
         }
       }
-      return join16(root, "__missing__", `${sessionId}.log`);
+      return join17(root, "__missing__", `${sessionId}.log`);
     };
     stateDirFromSessionsDir = (sessionsDir) => {
       if (!sessionsDir) {
         return defaultStateDir4();
       }
-      return basename4(sessionsDir) === "sessions" ? dirname12(sessionsDir) : sessionsDir;
+      return basename4(sessionsDir) === "sessions" ? dirname13(sessionsDir) : sessionsDir;
     };
     AttachDiagnostics = class {
       #stateDir;
@@ -9652,14 +9956,14 @@ var init_index = __esm({
         }
         const filePath = attachDiagnosticsFilePath(this.#stateDir, this.#scope, this.#sessionId);
         this.#writes.push(
-          mkdir8(dirname12(filePath), { recursive: true }).then(() => appendFile4(filePath, `${line}
+          mkdir8(dirname13(filePath), { recursive: true }).then(() => appendFile4(filePath, `${line}
 `, "utf8"))
         );
       }
     };
     readAttachCache = async (stateDir, scope, sessionId) => {
       try {
-        const raw = JSON.parse(await readFile13(attachCacheFilePath(stateDir, scope, sessionId), "utf8"));
+        const raw = JSON.parse(await readFile14(attachCacheFilePath(stateDir, scope, sessionId), "utf8"));
         if (raw.version !== 1 || raw.sessionId !== String(sessionId) || raw.scope.kind !== scope.kind || raw.scope.locator !== scope.locator || !Array.isArray(raw.events)) {
           return emptyAttachCacheSnapshot();
         }
@@ -9682,7 +9986,7 @@ var init_index = __esm({
       const filePath = attachCacheFilePath(stateDir, scope, sessionId);
       const uniqueEvents = mergePersistentEvents(snapshot.events);
       const transients = removeCompletedTransients(snapshot.transients, uniqueEvents);
-      await mkdir8(dirname12(filePath), { recursive: true });
+      await mkdir8(dirname13(filePath), { recursive: true });
       await writeFile8(
         filePath,
         `${JSON.stringify({ version: 1, scope, sessionId: String(sessionId), events: uniqueEvents, transients }, null, 2)}
@@ -9824,14 +10128,16 @@ var init_index = __esm({
       const loadProjectConfigProfile = async (project2) => options.config ?? await loadScorelConfigProfile({ cwd: project2.workDir, ...configScope });
       const daemon = new ScorelHost({
         sessionsDir: options.sessionsDir,
-        projectsPath: join16(options.stateDir, "projects.json"),
+        projectsPath: join17(options.stateDir, "projects.json"),
         deviceId: asDeviceId("device_local"),
         scorelHomeDir: options.stateDir,
         loadConfig: async ({ project: project2 }) => loadProjectConfig(project2),
         loadConfigProfile: async ({ project: project2 }) => loadProjectConfigProfile(project2),
-        createRuntime: async ({ project: project2, selectedModel, purpose }) => createRealRuntime({
+        createRuntime: async ({ sessionId, project: project2, selectedModel, purpose }) => createRealRuntime({
           cwd: project2.workDir,
           config: await loadProjectConfig(project2),
+          sessionsDir: options.sessionsDir,
+          sessionId,
           modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : void 0,
           includeTools: purpose === "chat"
         })
@@ -9971,6 +10277,9 @@ var init_index = __esm({
           "       scorel relay serve [--host <h>] [--port <p>] [--data-dir <dir>]",
           "       scorel webui [--port <p>] [--host <h>]",
           "       scorel up [--daemon-port <p>] [--webui-port <p>] [--cwd <d>]",
+          "       scorel update",
+          "       scorel upgrade",
+          "       scorel version",
           "       scorel logs [--attach] --session <id> [--remote <ws-url>] [--tail <n>]",
           "       scorel project list",
           "       scorel project add <dir>",
@@ -10102,7 +10411,7 @@ ${text}
       if (!process.argv[1]) return false;
       const [argvPath, modulePath] = await Promise.all([
         realpath3(process.argv[1]).catch(() => process.argv[1]),
-        realpath3(fileURLToPath4(import.meta.url)).catch(() => fileURLToPath4(import.meta.url))
+        realpath3(fileURLToPath5(import.meta.url)).catch(() => fileURLToPath5(import.meta.url))
       ]);
       return argvPath === modulePath;
     };

@@ -20,10 +20,35 @@ pnpm install
 pnpm scorel
 ```
 
+查看版本、手动更新 CLI：
+
+```bash
+scorel --version
+scorel update
+# alias
+scorel upgrade
+```
+
+后台 Host 会每小时检查一次 npm 上的 `@chanlerdev/scorel`。发现新版本后，只有在没有 active work，或者 active work 已经连续三小时没有进展时，才会执行同一套 npm 更新；更新成功后 Host 会短暂停止，下一次 CLI / GUI / WebUI 入口启动时使用新版本。
+
 启动桌面 GUI，本机会启动 embedded Host：
 
 ```bash
 pnpm gui
+```
+
+打包 macOS GUI：
+
+```bash
+pnpm --filter @scorel/app-gui dist:mac
+```
+
+GUI 跟随正常 release 节奏发布到同一个 GitHub Release。Release assets 包含 dmg / zip、`latest-mac.yml` 和 blockmap 文件；packaged GUI 通过 `electron-updater` 读取这些 metadata 做增量更新。
+
+当前没有 Apple Developer signing/notarization 时，macOS 首次打开下载的 app 可能被 Gatekeeper 拦截。确认来源可信后，可以移除 quarantine 标记：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Scorel.app
 ```
 
 启动本机 Host：
@@ -403,6 +428,8 @@ GUI 更偏本地桌面工作台，WebUI 更偏 hosted/remote control。二者都
 - memory settings。
 - IM settings，包括 Telegram enable、env/direct token、allowed chats、QQ App ID / App Secret、WeChat outbound webhook 和 inbound callback。
 - Relay device pairing 和 remote project 选择。
+- packaged GUI auto-update。
+- macOS menu bar status menu with Show, Settings, Check for Updates, Host status, and Quit.
 
 ## Status
 
@@ -425,6 +452,8 @@ GUI 更偏本地桌面工作台，WebUI 更偏 hosted/remote control。二者都
 - built-in QQ Bot IM extension。
 - WeChat outbound webhook 和 official-account style plaintext callback。
 - GUI IM settings。
+- CLI update/upgrade。
+- GUI release assets with incremental update metadata。
 
 计划中的方向：
 

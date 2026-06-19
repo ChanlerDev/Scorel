@@ -25,6 +25,8 @@
 ```bash
 pnpm install
 pnpm scorel       # 在当前目录进入交互式项目会话
+pnpm scorel --version
+pnpm scorel update
 ```
 
 Hosted WebUI 路径：
@@ -205,9 +207,11 @@ pnpm release patch --no-generate-notes
 - 检查 working tree
 - 执行 check
 - 执行 WebUI production build
+- 执行 GUI production build
 - 构建 public `scorel` npm package
 - 执行 `npm pack` 安装烟雾测试
 - bump 所有 package version
+- 构建 GUI macOS dmg / zip release assets，并生成 `latest-mac.yml` 与 blockmap 增量更新 metadata
 - 默认用 DeepSeek V4 Flash 从上一个 `v*` tag 之后的 commits 生成 changelog notes
 - 更新 changelog；只有显式 `--no-generate-notes` 时才写入最小版本标题
 - commit `release: vX.Y.Z`
@@ -215,11 +219,11 @@ pnpm release patch --no-generate-notes
 - publish root `scorel` package to npm
 - push branch + tag
 - create GitHub Release from the same generated changelog notes
-- upload the same-version `npm pack` tarball as the only GitHub Release asset
+- upload the same-version `npm pack` tarball and GUI macOS release assets to the GitHub Release
 
 Release notes 使用 `DEEPSEEK_API_KEY` 调用 DeepSeek 官方 API，默认 endpoint 为 `https://api.deepseek.com/v1`，默认模型为 `deepseek-v4-flash`。Dry-run 在缺少 key 或 API 失败时可打印 deterministic fallback preview；正式 release 默认要求 AI notes 成功，除非显式传入 `--no-generate-notes`。
 
-GitHub Actions 提供手动触发入口，默认执行 `patch` dry-run。正式 release 使用 `GITHUB_TOKEN` 创建 GitHub Release；正式 publish 需要仓库 secret `NPM_TOKEN`，对应 npm 账号当前为 `chanlerdev`。AI release notes 需要仓库 secret `DEEPSEEK_API_KEY`。
+GitHub Actions 提供手动触发入口，默认执行 `patch` dry-run。正式 release 使用 `GITHUB_TOKEN` 创建 GitHub Release；正式 publish 需要仓库 secret `NPM_TOKEN`，对应 npm 账号当前为 `chanlerdev`。AI release notes 需要仓库 secret `DEEPSEEK_API_KEY`。GUI macOS 产物当前以 unsigned build 发布，workflow 设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`；有 Apple Developer 账号后再补 signing/notarization。
 
 ---
 
