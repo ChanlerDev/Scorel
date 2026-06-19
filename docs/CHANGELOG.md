@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+## 0.0.5 - 2026-06-19
+
+### Highlights
+
+- New CLI commands `scorel version`, `scorel update`, and `scorel upgrade` for software lifecycle management.
+- Oversized Bash tool output is now archived to session artifacts, returning compact head/tail projections to the model.
+- GUI auto-update support with macOS DMG/ZIP packaging and incremental updates.
+
+### Changes
+
+- GUI and daemon now honor the selected chat model when sending messages.
+- GUI settings are more resilient: ignore stale device responses, error boundaries on settings sections, and fixed state reset when switching devices.
+- `scorel host serve` and `scorel host start` no longer idle-timeout by default; only convenience daemons (GUI auto-start, `scorel up`) enforce a 15-minute idle timeout.
+- GUI auto-start uses an ephemeral port to avoid conflicts with user-started daemons.
+
+### Fixes
+
+- GUI provider model selection now persists correctly across profile refreshes and session creation.
+- Daemon lifecycle hardened: foreground daemon stays alive until Ctrl+C/SIGTERM.
+
+### Verification
+
+- Unit tests for update helpers (semver comparison, npm check/install, auto-update gate).
+- Unit tests for GUI main process (electron-updater import, manual update item, tray setup).
+- Integration test for release asset collection and version lockstep.
+- Tests for oversized Bash archive and projection logic.
+- Tests for daemon idle timeout behavior.
+- Tests for GUI settings resilience (stale data, error boundary, state reset).
+- Tests for model selection fallback and normalization.
+
+### Internal
+
+- Update SHIP.md to clarify that small bug fixes may skip spec requirement; only changes affecting stable contracts or user-visible direction need a spec.
+- Oversized Bash results are written to session-scoped artifacts, excluded from diagnostics and Relay.
+
 - Add `scorel version`, `scorel update`, and `scorel upgrade`.
 - Add hourly Host auto-update checks gated by active work state.
 - Add GUI macOS release packaging and Electron updater metadata to the release path.
