@@ -184,7 +184,7 @@ export type PersistentEventBase = {
 
 export type SessionHeaderEvent = PersistentEventBase & {
   type: "session_header";
-  protocolVersion: 3;
+  protocolVersion: 4;
   meta: SessionMeta;
 };
 
@@ -277,6 +277,15 @@ export type CompactEvent = PersistentEventBase & {
   retainedEventCount: number;
 };
 
+export type ContextControlEvent = PersistentEventBase & {
+  type: "context_control";
+  operation: "hide_user_turn";
+  anchorUserEventId: EventId;
+  throughEventId: EventId;
+  actor: "agent" | "user" | "system";
+  reason?: string;
+};
+
 export type QueueName = "follow_up" | "steer";
 
 export type QueueItem = {
@@ -333,6 +342,7 @@ export type PersistentEvent =
   | InstructionSnapshotEvent
   | HarnessItemEvent
   | CompactEvent
+  | ContextControlEvent
   | QueueUpdateEvent
   | SkillIndexSnapshotEvent
   | SkillIndexDeltaEvent;

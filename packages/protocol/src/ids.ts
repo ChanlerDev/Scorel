@@ -8,7 +8,7 @@ export type ProjectId = Brand<string, "ProjectId">;
 export type RequestId = Brand<string, "RequestId">;
 export type Seq = Brand<number, "Seq">;
 
-export const protocolVersion = 3 as const;
+export const protocolVersion = 4 as const;
 
 export const asSessionId = (value: string): SessionId => value as SessionId;
 export const asEventId = (value: string): EventId => value as EventId;

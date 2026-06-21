@@ -600,6 +600,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.24 | [`S0102`](spec/ship/S0102-device-only-config.md) | Config 彻底收敛为设备级唯一配置，移除 Project config 运行时语义 | Done |
 | M9.F1.25 | [`S0103`](spec/ship/S0103-daemon-lifecycle-and-settings-resilience.md) | Daemon 生命周期按入口区分，并修复 GUI Settings remote 切换黑屏风险 | Done |
 | M9.F1.26 | [`S0105`](spec/ship/S0105-cli-update-and-gui-release.md) | CLI 命令面统一补齐、NPM 手动/自动更新、GUI release 打包和增量更新框架 | Done |
+| M9.F1.27 | [`S0106`](spec/ship/S0106-snip-context-control.md) | `context_control` 持久事件和 `snip` tool，让 agent 隐藏已完成 user turn 的未来 LLM context 投影 | Done |
 
 **Not in M9 Follow-up**:
 
@@ -779,6 +780,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0103`](spec/ship/S0103-daemon-lifecycle-and-settings-resilience.md) | Daemon lifecycle and Settings resilience | Done |
 | [`S0104`](spec/ship/S0104-tool-result-artifacts.md) | Tool result artifacts for oversized Bash output | Done |
 | [`S0105`](spec/ship/S0105-cli-update-and-gui-release.md) | CLI update and GUI release | Done |
+| [`S0106`](spec/ship/S0106-snip-context-control.md) | Snip context control | Done |
 
 ---
 

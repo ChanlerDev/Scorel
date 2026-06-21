@@ -4,6 +4,8 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
+import { Type } from "@mariozechner/pi-ai";
+
 import type { SkillIndexEntry } from "@scorel/protocol";
 
 import { defineTool, type AgentTool } from "../tools/index.js";
@@ -129,6 +131,10 @@ export const createSkillTool = (options: CreateSkillToolOptions): AgentTool =>
   defineTool({
     name: "Skill",
     description: "Load the full SKILL.md instructions for an available session-indexed skill by name.",
+    parameters: Type.Object({
+      name: Type.String(),
+      args: Type.Optional(Type.String()),
+    }),
     execute: async (_toolCallId, args) => {
       const input = parseSkillArgs(args);
       const entry = options.getEntry(input.name);

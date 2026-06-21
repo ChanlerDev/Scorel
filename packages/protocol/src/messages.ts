@@ -3,6 +3,7 @@ export type MessageRole = "system" | "user" | "assistant" | "tool_result";
 export type TextContentBlock = {
   type: "text";
   text: string;
+  visibility?: "display" | "model";
 };
 
 export type ThinkingContentBlock = {

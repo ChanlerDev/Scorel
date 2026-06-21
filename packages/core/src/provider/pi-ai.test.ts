@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
+import { Type } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
 
 import type { ScorelMessage } from "@scorel/protocol";
@@ -169,11 +170,128 @@ describe("createPiAiProvider", () => {
       await server.close();
     }
   });
+
+  it("exposes snip tool parameters to the provider", async () => {
+    const server = await startOpenAiCompletionsServer();
+    const provider = createPiAiProvider({
+      model: resolvePiAiModel({
+        type: "custom",
+        provider: "scorel-test",
+        id: "gpt-5.4-mini",
+        baseUrl: server.baseUrl,
+        api: "openai-completions",
+        apiKey: "chanleramp",
+        contextWindow: 400000,
+        maxTokens: 128000,
+        reasoning: true,
+      }),
+      apiKey: "chanleramp",
+    });
+
+    try {
+      await collectProvider(provider.streamTurn({
+        context: [user("snip obsolete context")],
+        systemPrompt: undefined,
+        tools: [snipTool],
+        signal: new AbortController().signal,
+        options: {},
+      }));
+
+      expect(server.requests[0]).toMatchObject({
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "snip",
+              parameters: {
+                type: "object",
+                properties: {
+                  userMessageId: { type: "string" },
+                  reason: { type: "string" },
+                },
+              },
+            },
+          },
+        ],
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("uses each AgentTool's own parameter schema instead of provider name switches", async () => {
+    const server = await startOpenAiCompletionsServer();
+    const provider = createPiAiProvider({
+      model: resolvePiAiModel({
+        type: "custom",
+        provider: "scorel-test",
+        id: "gpt-5.4-mini",
+        baseUrl: server.baseUrl,
+        api: "openai-completions",
+        apiKey: "chanleramp",
+        contextWindow: 400000,
+        maxTokens: 128000,
+        reasoning: true,
+      }),
+      apiKey: "chanleramp",
+    });
+
+    try {
+      await collectProvider(provider.streamTurn({
+        context: [user("use reference tool")],
+        systemPrompt: undefined,
+        tools: [customReferenceTool],
+        signal: new AbortController().signal,
+        options: {},
+      }));
+
+      expect(server.requests[0]).toMatchObject({
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "ReferenceTurn",
+              parameters: {
+                type: "object",
+                properties: {
+                  ref: { type: "string" },
+                },
+              },
+            },
+          },
+        ],
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 const readTool: AgentTool = {
   name: "Read",
   description: "Read a file",
+  parameters: Type.Object({
+    file_path: Type.String(),
+  }),
+  execute: async () => ({ content: [] }),
+};
+
+const snipTool: AgentTool = {
+  name: "snip",
+  description: "Hide a completed user turn",
+  parameters: Type.Object({
+    userMessageId: Type.String(),
+    reason: Type.Optional(Type.String()),
+  }),
+  execute: async () => ({ content: [] }),
+};
+
+const customReferenceTool: AgentTool = {
+  name: "ReferenceTurn",
+  description: "Reference a conversation turn",
+  parameters: Type.Object({
+    ref: Type.String(),
+  }),
   execute: async () => ({ content: [] }),
 };
 

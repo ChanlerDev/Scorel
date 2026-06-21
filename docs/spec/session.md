@@ -345,6 +345,17 @@ if (estimateTokens(compactCandidates) > threshold) {
 - 在 compact 点之前分叉的其他分支不受影响
 - 旧事件仍在 JSONL 中，可供历史浏览
 
+### 6.3 Snip Context Control
+
+`snip` 不删除 JSONL。它 append `context_control operation="hide_user_turn"`，让后续 `buildContext()` 在 active path 上过滤一个已完成 user turn span。
+
+安全边界：
+
+- 目标必须是当前 active path 上的 `user_message`。
+- 目标之后必须存在下一条 `user_message`，因此不能 snip 当前正在执行的 turn。
+- 隐藏范围是目标 `user_message` 到下一条 `user_message` 前一条事件，保证 tool_call / tool_result 成对隐藏，不留下孤儿工具结果。
+- 原始事件仍保留在 JSONL 中，UI 和审计可以继续查看。
+
 ---
 
 ## 7. 两层消息在本模块的落点
@@ -355,6 +366,7 @@ if (estimateTokens(compactCandidates) > threshold) {
 - buildContext 通用遍历时调用每个 event 的 handler，不 hardcode 任何类型
 - `rewind` / `branch` / `channel_inject` / `session_info` / `custom` → `skip`（不进入 LLM）
 - `compact` → `barrier`（注入 summary，停止向上）
+- `context_control` → `filter`（从未来 LLM context 排除指定 user turn span）
 - `message`（meta.source = "steer"）→ `merge_prev`（合入前一条 tool_result 的 `<system-reminder>`）
 
 换言之，应用层能玩的花样很多，LLM 始终只看到 handler 声明要暴露的内容。

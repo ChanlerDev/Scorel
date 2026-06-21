@@ -29,7 +29,7 @@ import {
 describe("@scorel/protocol", () => {
   it("has a public entrypoint", () => {
     expect(protocolPackageName).toBe("@scorel/protocol");
-    expect(protocolVersion).toBe(3);
+    expect(protocolVersion).toBe(4);
   });
 
   it("pairs request and response data by request type", () => {
@@ -95,6 +95,8 @@ describe("@scorel/protocol", () => {
           return input.item.kind;
         case "compact":
           return input.summary;
+        case "context_control":
+          return input.operation;
         case "queue_update":
           return input.queue;
         case "skill_index_snapshot":
@@ -385,7 +387,7 @@ describe("@scorel/protocol", () => {
     const meta: SessionMeta = { projectId: asProjectId("prj_repo") };
     const event: SessionHeaderEvent = {
       type: "session_header",
-      protocolVersion: 3,
+      protocolVersion: 4,
       id: asEventId("evt_header"),
       parentId: null,
       seq: asSeq(0),

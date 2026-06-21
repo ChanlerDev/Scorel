@@ -143,7 +143,22 @@ interface CompactEvent extends PersistentEventBase {
 
 构建 context 时：从 leaf 往 root 走，遇到 CompactEvent → 注入 summary，停止继续向上。旧事件仍在 JSONL 中（可查阅），但不进入 LLM context。
 
-### 4.5 `channel_inject` — 外部来源元数据
+### 4.5 `context_control` — 控制上下文投影
+
+```typescript
+interface ContextControlEvent extends PersistentEventBase {
+  type: "context_control";
+  operation: "hide_user_turn";
+  anchorUserEventId: EventId;
+  throughEventId: EventId;
+  actor: "agent" | "user" | "system";
+  reason?: string;
+}
+```
+
+`hide_user_turn` 隐藏一个已完成 user turn span：从 `anchorUserEventId` 开始，到同一路径下一条 `user_message` 前一条事件结束。它只影响未来 `buildContext()` 的 LLM 输入投影；原始 JSONL 事件仍保留并可用于 UI、审计和 resync。
+
+### 4.6 `channel_inject` — 外部来源元数据
 
 ```typescript
 interface ChannelInjectEvent extends PersistentEventBase {
@@ -340,6 +355,7 @@ type LlmAction =
 | `rewind` | `skip` | "回退到此处" 标记 |
 | `branch` | `skip` | "切换分支" 标记 |
 | `compact` | `barrier` — 注入 summary，停止向上遍历 | "已压缩" 折叠块 |
+| `context_control` | `filter` — 从未来 LLM context 中排除指定 user turn span | "已 snip" 标记 |
 | `channel_inject` | `skip` | 来源 badge "from Telegram" |
 | `session_info` | `skip` | "模型切换为 X" 通知 |
 | `custom` | `skip` | Extension 自定义 |

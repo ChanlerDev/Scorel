@@ -5,6 +5,8 @@ import { userInfo } from "node:os";
 import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { Type } from "@mariozechner/pi-ai";
+
 import type { AgentTool, ToolResult } from "./index.js";
 import { defineTool } from "./index.js";
 
@@ -163,6 +165,12 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
       name: "Read",
       description:
         "Read a text file from the workspace. Long reads are truncated by complete lines; accumulated coverage unlocks Write/Edit.",
+      parameters: Type.Object({
+        file_path: Type.String(),
+        offset: Type.Optional(Type.Number()),
+        limit: Type.Optional(Type.Number()),
+        full: Type.Optional(Type.Boolean()),
+      }),
       execute: async (_toolCallId, args) => {
         const input = parseReadArgs(args);
         if (input.full && (input.offset !== undefined || input.limit !== undefined)) {
@@ -227,6 +235,10 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
       name: "Write",
       description:
         "Create a new file or fully overwrite an existing file. Existing files require complete read coverage of the current file.",
+      parameters: Type.Object({
+        file_path: Type.String(),
+        content: Type.String(),
+      }),
       execute: async (_toolCallId, args) => {
         const input = parseWriteArgs(args);
         const path = resolveWorkspacePath(input.path);
@@ -251,6 +263,12 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
       name: "Edit",
       description:
         "Perform an exact string replacement in an existing file. Requires complete read coverage and a unique old_string unless replace_all is true.",
+      parameters: Type.Object({
+        file_path: Type.String(),
+        old_string: Type.String(),
+        new_string: Type.String(),
+        replace_all: Type.Optional(Type.Boolean()),
+      }),
       execute: async (_toolCallId, args) => {
         const input = parseEditArgs(args);
         const path = resolveWorkspacePath(input.path);
@@ -290,6 +308,13 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
     defineTool({
       name: "Bash",
       description: "Execute a shell command in the workspace with timeout and output truncation.",
+      parameters: Type.Object({
+        command: Type.String(),
+        cwd: Type.Optional(Type.String()),
+        timeout: Type.Optional(Type.Number()),
+        description: Type.Optional(Type.String()),
+        maxOutputBytes: Type.Optional(Type.Number()),
+      }),
       execute: async (toolCallId, args, signal) => {
         const input = parseBashArgs(args);
         const commandCwd = input.cwd ? resolveWorkspacePath(input.cwd) : root;
@@ -355,6 +380,12 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
     defineTool({
       name: "Glob",
       description: "Find files by glob pattern using ripgrep file discovery.",
+      parameters: Type.Object({
+        pattern: Type.String(),
+        path: Type.Optional(Type.String()),
+        head_limit: Type.Optional(Type.Number()),
+        offset: Type.Optional(Type.Number()),
+      }),
       execute: async (_toolCallId, args, signal) => {
         const input = parseGlobArgs(args);
         const limit = input.head_limit ?? DEFAULT_SEARCH_LIMIT;
@@ -377,6 +408,22 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
       name: "Grep",
       description:
         'Search file contents with ripgrep. Default output_mode is "files" for matching paths; use "content" for matching lines or "count" for match counts.',
+      parameters: Type.Object({
+        pattern: Type.String(),
+        path: Type.Optional(Type.String()),
+        glob: Type.Optional(Type.String()),
+        output_mode: Type.Optional(Type.Union([Type.Literal("files"), Type.Literal("content"), Type.Literal("count")])),
+        "-B": Type.Optional(Type.Number()),
+        "-A": Type.Optional(Type.Number()),
+        "-C": Type.Optional(Type.Number()),
+        context: Type.Optional(Type.Number()),
+        "-n": Type.Optional(Type.Boolean()),
+        "-i": Type.Optional(Type.Boolean()),
+        type: Type.Optional(Type.String()),
+        head_limit: Type.Optional(Type.Number()),
+        offset: Type.Optional(Type.Number()),
+        multiline: Type.Optional(Type.Boolean()),
+      }),
       execute: async (_toolCallId, args, signal) => {
         const input = parseGrepArgs(args);
         const mode = input.output_mode ?? "files";
@@ -434,6 +481,15 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
     defineTool({
       name: "TodoWrite",
       description: "Replace the current session todo list with a complete updated list.",
+      parameters: Type.Object({
+        todos: Type.Array(
+          Type.Object({
+            content: Type.String(),
+            status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")]),
+            activeForm: Type.Optional(Type.String()),
+          }),
+        ),
+      }),
       execute: async (_toolCallId, args) => {
         const input = parseTodoWriteArgs(args);
         const oldTodos = state.todos;

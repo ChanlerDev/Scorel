@@ -16,7 +16,13 @@ import {
   type SessionMeta,
 } from "@scorel/protocol";
 
-import { buildContext, createSession, loadSession, sessionLogFilePath, SessionStoreError } from "./index.js";
+import {
+  buildContext,
+  createSession,
+  loadSession,
+  sessionLogFilePath,
+  SessionStoreError,
+} from "./index.js";
 
 const meta: SessionMeta = {
   projectId: asProjectId("prj_test"),
@@ -131,6 +137,26 @@ const compactEvent = (
   tokensBefore: 1000,
   tokensAfter: 250,
   retainedEventCount,
+});
+
+const contextControlEvent = (
+  id: string,
+  seq: number,
+  anchorUserEventId: string,
+  throughEventId: string,
+): PersistentEvent => ({
+  type: "context_control",
+  id: asEventId(id),
+  parentId: null,
+  seq: asSeq(seq),
+  sessionId,
+  clientId,
+  ts: 1_000 + seq,
+  operation: "hide_user_turn",
+  anchorUserEventId: asEventId(anchorUserEventId),
+  throughEventId: asEventId(throughEventId),
+  actor: "agent",
+  reason: "obsolete path",
 });
 
 const harnessItemEvent = (
@@ -490,6 +516,108 @@ describe("session core", () => {
     ]);
   });
 
+  it("hides a completed user turn from future context while keeping JSONL evidence", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    await session.append(userEvent("evt_1", null, 1, "keep setup"));
+    await session.append(assistantEvent("evt_2", "evt_1", 2, "setup answer"));
+    await session.append(userEvent("evt_3", "evt_2", 3, "obsolete turn"));
+    await session.append(assistantEvent("evt_4", "evt_3", 4, "obsolete answer"));
+    await session.append(userEvent("evt_5", "evt_4", 5, "continue"));
+    await session.append(contextControlEvent("evt_snip", 6, "evt_3", "evt_4"));
+    await session.append(assistantEvent("evt_6", "evt_5", 7, "current answer"));
+
+    const context = buildContext(session.tree, asEventId("evt_6"));
+
+    expect(context.map((message) => message.content[0])).toEqual([
+      { type: "text", text: "keep setup" },
+      { type: "text", text: "setup answer" },
+      { type: "text", text: "continue" },
+      { type: "text", text: "current answer" },
+    ]);
+    const loaded = await loadSession({ sessionsDir, sessionId });
+    expect(loaded.tree.get(asEventId("evt_3"))?.event).toMatchObject({ type: "user_message" });
+    expect(loaded.tree.controlState.hiddenUserTurnSpans).toEqual([
+      { anchorUserEventId: "evt_3", throughEventId: "evt_4" },
+    ]);
+    expect(buildContext(loaded.tree, asEventId("evt_6")).map((message) => message.content[0])).toEqual([
+      { type: "text", text: "keep setup" },
+      { type: "text", text: "setup answer" },
+      { type: "text", text: "continue" },
+      { type: "text", text: "current answer" },
+    ]);
+  });
+
+  it("hides a full tool-using user turn without leaving orphan tool results", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    await session.append(userEvent("evt_1", null, 1, "keep"));
+    await session.append(assistantEvent("evt_2", "evt_1", 2, "kept answer"));
+    await session.append(userEvent("evt_3", "evt_2", 3, "read obsolete file"));
+    await session.append(assistantToolCallEvent("evt_4", "evt_3", 4, "call_obsolete"));
+    await session.append(toolResultEvent("evt_5", "evt_4", 5, "obsolete result", "call_obsolete"));
+    await session.append(assistantEvent("evt_6", "evt_5", 6, "obsolete final"));
+    await session.append(userEvent("evt_7", "evt_6", 7, "continue"));
+    await session.append(contextControlEvent("evt_snip", 8, "evt_3", "evt_6"));
+    await session.append(assistantEvent("evt_8", "evt_7", 9, "current answer"));
+
+    const context = buildContext(session.tree, asEventId("evt_8"));
+
+    expect(context.map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(JSON.stringify(context)).not.toContain("call_obsolete");
+    expect(JSON.stringify(context)).not.toContain("obsolete result");
+  });
+
+  it("keeps snipped turns hidden when compact retains recent events", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    await session.append(userEvent("evt_1", null, 1, "keep"));
+    await session.append(assistantEvent("evt_2", "evt_1", 2, "kept answer"));
+    await session.append(userEvent("evt_3", "evt_2", 3, "obsolete before compact"));
+    await session.append(assistantEvent("evt_4", "evt_3", 4, "obsolete compact-retained answer"));
+    await session.append(userEvent("evt_5", "evt_4", 5, "continue"));
+    await session.append(contextControlEvent("evt_snip", 6, "evt_3", "evt_4"));
+    await session.append(compactEvent("evt_6", "evt_5", 7, "evt_5", "Summary.", 4));
+    await session.append(userEvent("evt_7", "evt_6", 8, "after compact"));
+
+    const context = buildContext(session.tree, asEventId("evt_7"));
+
+    expect(JSON.stringify(context)).toContain("Summary.");
+    expect(JSON.stringify(context)).toContain("continue");
+    expect(JSON.stringify(context)).not.toContain("obsolete before compact");
+    expect(JSON.stringify(context)).not.toContain("obsolete compact-retained answer");
+  });
+
   it("replays queue updates as control state outside the conversation tree", async () => {
     const sessionsDir = await tempRoot();
     const session = await createSession({
@@ -640,7 +768,7 @@ describe("session core", () => {
     await expect(
       session.append({
         type: "session_header",
-        protocolVersion: 3,
+        protocolVersion: 4,
         id: asEventId("evt_header"),
         parentId: asEventId("evt_1"),
         seq: asSeq(2),

@@ -1,3 +1,5 @@
+import { Type } from "@mariozechner/pi-ai";
+
 import { defineTool, type AgentTool } from "../tools/index.js";
 
 export type SendChannelMessageInput = {
@@ -23,6 +25,18 @@ export const createSendChannelMessageTool = (options: CreateSendChannelMessageTo
   defineTool({
     name: "SendChannelMessage",
     description: "Send a text reply to the current IM channel conversation. Do not provide raw platform user ids or group ids.",
+    parameters: Type.Object({
+      text: Type.Optional(Type.String()),
+      attachments: Type.Optional(Type.Array(Type.Object({
+        type: Type.Union([Type.Literal("image"), Type.Literal("file")]),
+        path: Type.Optional(Type.String()),
+        url: Type.Optional(Type.String()),
+        mimeType: Type.Optional(Type.String()),
+        caption: Type.Optional(Type.String()),
+      }))),
+      channel: Type.Optional(Type.String()),
+      target: Type.Optional(Type.Literal("current")),
+    }),
     execute: async (_toolCallId, args) => {
       const input = parseSendChannelMessageInput(args);
       const result = await options.sendCurrent(input);

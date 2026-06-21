@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -22,11 +23,20 @@ type MessagePersistentEvent = Extract<PersistentEvent, { message: ScorelMessage 
 type CompactPersistentEvent = Extract<PersistentEvent, { type: "compact" }>;
 type ConversationPersistentEvent = MessagePersistentEvent | HarnessItemEvent | CompactPersistentEvent;
 
+export const snipUserMessageAlias = (eventId: EventId): string =>
+  `u_${createHash("sha256").update(eventId).digest("hex").slice(0, 8)}`;
+
+export type HiddenUserTurnSpan = {
+  anchorUserEventId: EventId;
+  throughEventId: EventId;
+};
+
 export type SessionControlState = {
   instructionSnapshot?: InstructionSnapshot;
   queues: Record<QueueName, QueueItem[]>;
   skillIndexInitialized: boolean;
   skillIndex: Record<string, SkillIndexEntry>;
+  hiddenUserTurnSpans: HiddenUserTurnSpan[];
 };
 
 export type SessionHeader = {
@@ -88,6 +98,7 @@ export class SessionTree implements Iterable<PersistentEvent> {
     },
     skillIndexInitialized: false,
     skillIndex: {},
+    hiddenUserTurnSpans: [],
   };
 
   get rootId(): EventId | null {
@@ -228,6 +239,16 @@ export class SessionTree implements Iterable<PersistentEvent> {
         delete next[removed.name];
       }
       this.controlState.skillIndex = next;
+    } else if (event.type === "context_control") {
+      this.controlState.hiddenUserTurnSpans = [
+        ...this.controlState.hiddenUserTurnSpans.filter(
+          (span) => span.anchorUserEventId !== event.anchorUserEventId,
+        ),
+        {
+          anchorUserEventId: event.anchorUserEventId,
+          throughEventId: event.throughEventId,
+        },
+      ];
     }
   }
 }
@@ -328,7 +349,11 @@ export const loadSession = async (options: LoadSessionOptions): Promise<JsonlSes
 
 export const buildContext = (tree: SessionTree, leafId: EventId): ScorelMessage[] => {
   const path = tree.getPath(leafId);
+  const hiddenIds = hiddenContextEventIds(tree, path, leafId);
   return path.reduce<ScorelMessage[]>((messages, id, index) => {
+    if (hiddenIds.has(id)) {
+      return messages;
+    }
     const event = tree.get(id)?.event;
     if (!event) {
       return messages;
@@ -341,7 +366,7 @@ export const buildContext = (tree: SessionTree, leafId: EventId): ScorelMessage[
       appendHarnessItemToContext(messages, event);
     }
     if (event.type === "compact") {
-      const retained = retainedMessagesBeforeCompact(tree, path.slice(0, index), event.retainedEventCount);
+      const retained = retainedMessagesBeforeCompact(tree, path.slice(0, index), event.retainedEventCount, hiddenIds);
       messages.length = 0;
       messages.push(compactSummaryMessage(event));
       messages.push(...retained);
@@ -350,10 +375,34 @@ export const buildContext = (tree: SessionTree, leafId: EventId): ScorelMessage[
   }, []);
 };
 
+const hiddenContextEventIds = (tree: SessionTree, path: EventId[], leafId: EventId): Set<EventId> => {
+  const leaf = tree.get(leafId)?.event;
+  if (!leaf) {
+    return new Set();
+  }
+  const pathIndexes = new Map(path.map((id, index) => [id, index]));
+  const hidden = new Set<EventId>();
+  for (const event of tree) {
+    if (event.type !== "context_control" || Number(event.seq) > Number(leaf.seq)) {
+      continue;
+    }
+    const start = pathIndexes.get(event.anchorUserEventId);
+    const end = pathIndexes.get(event.throughEventId);
+    if (start === undefined || end === undefined || end < start) {
+      continue;
+    }
+    for (const id of path.slice(start, end + 1)) {
+      hidden.add(id);
+    }
+  }
+  return hidden;
+};
+
 const retainedMessagesBeforeCompact = (
   tree: SessionTree,
   pathBeforeCompact: EventId[],
   retainedEventCount: number,
+  hiddenIds = new Set<EventId>(),
 ): ScorelMessage[] => {
   if (retainedEventCount <= 0) {
     return [];
@@ -369,6 +418,9 @@ const retainedMessagesBeforeCompact = (
   }
   const retained: ScorelMessage[] = [];
   for (const id of pathBeforeCompact.slice(start)) {
+    if (hiddenIds.has(id)) {
+      continue;
+    }
     const event = tree.get(id)?.event;
     if (!event) {
       continue;
@@ -447,6 +499,7 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
     value.type !== "instruction_snapshot" &&
     value.type !== "harness_item" &&
     value.type !== "compact" &&
+    value.type !== "context_control" &&
     value.type !== "queue_update" &&
     value.type !== "skill_index_snapshot" &&
     value.type !== "skill_index_delta"
@@ -479,6 +532,9 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
   }
   if (value.type === "compact" && !isCompactEvent(value)) {
     throw new SessionStoreError("invalid_event", "compact is missing summary payload");
+  }
+  if (value.type === "context_control" && !isContextControlEvent(value)) {
+    throw new SessionStoreError("invalid_event", "context_control is missing hide_user_turn payload");
   }
   if (value.type === "queue_update" && !isQueueUpdate(value)) {
     throw new SessionStoreError("invalid_event", "queue_update is missing queue payload");
@@ -524,6 +580,13 @@ const isCompactEvent = (value: Record<string, unknown>): boolean =>
   typeof value.tokensBefore === "number" &&
   typeof value.tokensAfter === "number" &&
   typeof value.retainedEventCount === "number";
+
+const isContextControlEvent = (value: Record<string, unknown>): boolean =>
+  value.operation === "hide_user_turn" &&
+  typeof value.anchorUserEventId === "string" &&
+  typeof value.throughEventId === "string" &&
+  (value.actor === "agent" || value.actor === "user" || value.actor === "system") &&
+  (value.reason === undefined || typeof value.reason === "string");
 
 const isQueueUpdate = (value: Record<string, unknown>): boolean =>
   (value.queue === "follow_up" || value.queue === "steer") &&

@@ -237,6 +237,19 @@ describe("projector", () => {
     expect(s.turns[0]?.parts[0]).toEqual({ kind: "text", text: "hello" });
   });
 
+  it("hides model-only text blocks from displayed user turns", () => {
+    reset();
+    const event = userMessage("evt_user_1", "hello") as Extract<ScorelEvent, { type: "user_message" }>;
+    event.message.content.push({
+      type: "text",
+      text: "<system-reminder>\nsnip.userMessageId: u_hidden\n</system-reminder>",
+      visibility: "model",
+    });
+    const s = projectEvent(emptyProjectorState(), event);
+
+    expect(s.turns[0]?.parts).toEqual([{ kind: "text", text: "hello" }]);
+  });
+
   it("merges streaming text deltas into the in-flight assistant turn", () => {
     reset();
     let s = emptyProjectorState();
@@ -452,7 +465,7 @@ describe("projector", () => {
       sessionId: SESSION_ID,
       clientId: CLIENT_ID,
       ts: 0,
-      protocolVersion: 3,
+      protocolVersion: 4,
       meta: { projectId: asProjectId("prj_test") },
     });
     expect(s.turns).toEqual([]);

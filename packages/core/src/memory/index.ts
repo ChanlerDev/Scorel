@@ -2,6 +2,8 @@ import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { Type } from "@mariozechner/pi-ai";
+
 import { defineTool, type AgentTool } from "../tools/index.js";
 
 export type MemoryPaths = {
@@ -181,6 +183,14 @@ export const createAppendDailyTool = (options: CreateAppendDailyToolOptions): Ag
       "Use this once near the end of a completed user turn when there is progress, a decision, or a follow-up worth preserving.",
       "Do not include secrets, raw logs, speculation, or facts that should be re-read from the repository.",
     ].join(" "),
+    parameters: Type.Object({
+      summary: Type.String(),
+      completed: Type.Optional(Type.Array(Type.String())),
+      decisions: Type.Optional(Type.Array(Type.String())),
+      followUps: Type.Optional(Type.Array(Type.String())),
+      memoryCandidates: Type.Optional(Type.Array(Type.String())),
+      evidence: Type.Optional(Type.Array(Type.String())),
+    }),
     execute: async (_toolCallId, args) => {
       const input = parseAppendDailyInput(args);
       validateAppendDailyInput(input);

@@ -209,10 +209,11 @@ Session 是 append-only JSONL。Host 是唯一 writer，Entry 不直接写会话
 - `assistant_message`：模型输出。
 - `tool_result`：工具执行结果。
 - `compact`：旧上下文的压缩摘要，作为后续 `buildContext()` 的 replay barrier。
+- `context_control`：上下文投影控制，例如 `snip` 隐藏某个已完成 user turn，使它不再进入未来 LLM context。
 - `queue_update`：follow-up / steer 队列状态。
 - `skill_index_snapshot` / `skill_index_delta`：Skill 路由表。
 
-JSONL 是恢复会话的事实来源。`buildContext()` 从事件树构造下一轮 LLM messages；遇到 `compact` 时，会用 compact summary 替换更早上下文，并最多保留最近 8 条从 `user_message`、`compact` 或带 `tool_call` 的 `assistant_message` 边界开始的原始 conversation events。UI 则从同一条事件流投影 transcript、工具块、运行状态和队列状态。
+JSONL 是恢复会话的事实来源。`buildContext()` 从事件树构造下一轮 LLM messages；遇到 `compact` 时，会用 compact summary 替换更早上下文，并最多保留最近 8 条从 `user_message`、`compact` 或带 `tool_call` 的 `assistant_message` 边界开始的原始 conversation events；遇到 `context_control operation="hide_user_turn"` 时，会从未来模型上下文中过滤对应 user turn span。UI 则从同一条事件流投影 transcript、工具块、运行状态和队列状态。
 
 这个设计的重点不是“保存聊天记录”，而是让 Agent 的输入、输出、工具调用、控制事件和恢复状态都落在同一条可检查的链路里。
 
@@ -254,6 +255,8 @@ Memory 的链路分三段：
 当前规则是：一个 session 只注入一次 memory harness。Daily 和 dream 更新是给未来 session 用的，不刷新当前 session 的上下文。
 
 Auto compact 是当前 session 的上下文管理，不是长期 memory。Host 在每轮新用户消息写入前估算 context，默认达到模型窗口 80% 时追加 `compact` 事件。`compact` 优先使用后台维护的 session memory；如果 session memory 不存在或关闭，会降级到 foreground compact。后台 session memory 正在更新时，Host 最多等待 5 秒，然后继续执行，不让用户 turn 无限等待。
+
+`snip` 是另一种当前 session 的上下文管理：Host 创建每条 `user_message` 时会持久写入一个 model-only 的短 `snip.userMessageId`，UI 不展示，但模型能用它通过 Host 注册的 `snip` 工具请求隐藏其中一个已完成 user turn。因为这个 id 随消息创建时固定下来，后续 `buildContext()` replay 不会动态改写历史 user message，也不会破坏 prompt cache 前缀。Host 会校验目标 `user_message` 在当前 active path 上，并 append `context_control` 事件；原始 JSONL 不删除、不重写，只是后续 `buildContext()` 不再把该 span 放进模型输入。
 
 Session memory 写在：
 
@@ -446,6 +449,7 @@ GUI 更偏本地桌面工作台，WebUI 更偏 hosted/remote control。二者都
 - AGENTS.md instruction snapshot。
 - Skill index + Skill tool。
 - memory harness + AppendDaily + idle dream。
+- context control + `snip` tool。
 - provider/model profile 和 auxiliary model。
 - extension manifest + IM channel bridge。
 - built-in Telegram IM extension。

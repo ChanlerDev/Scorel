@@ -21,6 +21,7 @@ import {
   createCodingTools,
   createSendChannelMessageTool,
   createSkillTool,
+  createSnipTool,
   diffSkillIndex,
   createPiAiProvider,
   createSession,
@@ -47,6 +48,7 @@ import {
   scanSkillIndex,
   sessionArtifactsDirPath,
   sessionLogFilePath,
+  snipUserMessageAlias,
   scorelSessionsDir,
   scorelMemoryPaths,
   writeMemoryDreamState,
@@ -543,6 +545,7 @@ type SessionLane = {
   appendQueue: Promise<void>;
   followUpWaiters: Map<string, { connection: Connection; request: ClientRequest<"send_message"> }>;
   channelContext?: RuntimeChannelContext;
+  snipClientId?: ClientId;
 };
 
 type RuntimeChannelContext = ChannelContext & {
@@ -587,6 +590,7 @@ type PersistentEventInput =
   | Omit<Extract<PersistentEvent, { type: "instruction_snapshot" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "harness_item" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "compact" }>, "seq">
+  | Omit<Extract<PersistentEvent, { type: "context_control" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "queue_update" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "skill_index_snapshot" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "skill_index_delta" }>, "seq">;
@@ -1125,7 +1129,7 @@ export class ScorelHost {
       ts: this.#now(),
       message: {
         role: "user",
-        content: input.content,
+        content: [...input.content, snipUserMessageIdBlock(userEventId)],
         ...(input.source === "follow_up"
           ? { meta: { source: "follow_up", queueItemId: input.queueItemId } }
           : {}),
@@ -1148,6 +1152,7 @@ export class ScorelHost {
     };
 
     lane.channelContext = input.channelContext;
+    lane.snipClientId = clientId;
     try {
       for await (const rawEvent of lane.runtime.executeTurn(
         buildContext(lane.session.tree, userEvent.id),
@@ -1163,6 +1168,7 @@ export class ScorelHost {
       }
     } finally {
       lane.channelContext = undefined;
+      lane.snipClientId = undefined;
       lane.runtime.unregisterTool("SendChannelMessage");
     }
 
@@ -2548,6 +2554,86 @@ export class ScorelHost {
         listNames: () => Object.keys(lane.session.tree.controlState.skillIndex).sort(),
       }),
     );
+    lane.runtime.registerTool(
+      createSnipTool({
+        snip: async (input) => this.#snipUserTurn(lane, input.userMessageId, input.reason),
+      }),
+    );
+  }
+
+  async #snipUserTurn(
+    lane: SessionLane,
+    userMessageId: string,
+    reason: string | undefined,
+  ): Promise<{ anchorUserEventId: EventId; throughEventId: EventId; hiddenEventCount: number }> {
+    const leafId = lane.session.activeLeafId;
+    if (!leafId) {
+      throw new Error("snip requires an active conversation");
+    }
+    const path = lane.session.tree.getPath(leafId);
+    const anchorUserEventId = this.#resolveSnipUserMessageId(lane, path, userMessageId);
+    const anchorIndex = path.findIndex((id) => id === anchorUserEventId);
+    if (anchorIndex < 0) {
+      throw new Error(`snip target is not on the active conversation path: ${anchorUserEventId}`);
+    }
+    const anchor = lane.session.tree.get(anchorUserEventId)?.event;
+    if (anchor?.type !== "user_message") {
+      throw new Error(`snip target must be a user_message: ${anchorUserEventId}`);
+    }
+    const nextUserIndex = path.findIndex((id, index) =>
+      index > anchorIndex && lane.session.tree.get(id)?.event.type === "user_message"
+    );
+    if (nextUserIndex < 0) {
+      throw new Error("snip cannot hide the current user turn before the next user message exists");
+    }
+    const throughEventId = path[nextUserIndex - 1];
+    if (!throughEventId || throughEventId === anchorUserEventId) {
+      throw new Error(`snip target has no completed turn content: ${anchorUserEventId}`);
+    }
+    const clientId = lane.snipClientId;
+    if (!clientId) {
+      throw new Error("snip is only available while a user turn is running");
+    }
+    await this.#appendPersistent(lane, {
+      type: "context_control",
+      id: asEventId(this.#createId()),
+      parentId: null,
+      sessionId: lane.session.header.sessionId,
+      clientId,
+      ts: this.#now(),
+      operation: "hide_user_turn",
+      anchorUserEventId,
+      throughEventId,
+      actor: "agent",
+      ...(reason ? { reason } : {}),
+    });
+    await this.#appendDiagnostic(lane.session.header.sessionId, "context_snipped", {
+      anchorUserEventId,
+      throughEventId,
+      hiddenEventCount: nextUserIndex - anchorIndex,
+    });
+    return {
+      anchorUserEventId,
+      throughEventId,
+      hiddenEventCount: nextUserIndex - anchorIndex,
+    };
+  }
+
+  #resolveSnipUserMessageId(lane: SessionLane, path: EventId[], userMessageId: string): EventId {
+    if (path.includes(userMessageId as EventId)) {
+      return userMessageId as EventId;
+    }
+    const matches = path.filter((id) => {
+      const event = lane.session.tree.get(id)?.event;
+      return event?.type === "user_message" && snipUserMessageAlias(id) === userMessageId;
+    });
+    if (matches.length === 1) {
+      return matches[0];
+    }
+    if (matches.length > 1) {
+      throw new Error(`snip target short id is ambiguous: ${userMessageId}`);
+    }
+    return asEventId(userMessageId);
   }
 
   async #selectChatRuntime(lane: SessionLane, modelSelection: ModelSelectionInput | undefined): Promise<void> {
@@ -3407,10 +3493,15 @@ const countContentBlocks = (message: ScorelMessage, type: string): number =>
 const normalizeContent = (content: string | ScorelMessage["content"]): ScorelMessage["content"] =>
   typeof content === "string" ? [{ type: "text", text: content }] : content;
 
+const snipUserMessageIdBlock = (userEventId: EventId): ScorelMessage["content"][number] => ({
+  type: "text",
+  text: `<system-reminder>\nsnip.userMessageId: ${snipUserMessageAlias(userEventId)}\n</system-reminder>`,
+  visibility: "model",
+});
+
 const inputText = (message: ScorelMessage): string =>
   message.content
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
+    .flatMap((block) => block.type === "text" && block.visibility !== "model" ? [block.text] : [])
     .join("\n")
     .trim();
 

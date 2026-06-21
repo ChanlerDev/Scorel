@@ -1,10 +1,45 @@
 import { describe, expect, it } from "vitest";
 
-import { asClientId, asEventId, asSeq, asSessionId, type ScorelEvent } from "@scorel/protocol";
+import { asClientId, asEventId, asSeq, asSessionId, type ContentBlock, type ScorelEvent } from "@scorel/protocol";
 
 import { emptyProjectorState, projectEvents } from "./projector.js";
 
 describe("chatbox projector", () => {
+  it("hides model-only text blocks from displayed user turns", () => {
+    const events: ScorelEvent[] = [
+      {
+        type: "user_message",
+        seq: asSeq(1),
+        sessionId: asSessionId("ses_1"),
+        clientId: asClientId("cli_1"),
+        ts: 1,
+        id: asEventId("evt_user"),
+        parentId: null,
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "hello" },
+            {
+              type: "text",
+              text: "<system-reminder>\nsnip.userMessageId: u_hidden\n</system-reminder>",
+              visibility: "model",
+            },
+          ] satisfies ContentBlock[],
+        },
+      },
+    ];
+
+    const state = projectEvents(emptyProjectorState(), events);
+
+    expect(state.turns).toEqual([
+      {
+        id: "evt_user",
+        kind: "user",
+        parts: [{ kind: "text", text: "hello" }],
+      },
+    ]);
+  });
+
   it("streams thinking deltas into the active assistant turn", () => {
     const events: ScorelEvent[] = [
       {

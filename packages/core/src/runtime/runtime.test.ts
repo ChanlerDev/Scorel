@@ -1,3 +1,4 @@
+import { Type } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
 
 import type { ScorelMessage } from "@scorel/protocol";
@@ -187,6 +188,9 @@ describe("ScorelRuntime", () => {
       defineTool({
         name: "echo",
         description: "Echo text",
+        parameters: Type.Object({
+          text: Type.String(),
+        }),
         execute: async (_toolCallId, args) => ({
           content: [{ type: "text", text: String((args as { text: string }).text) }],
         }),
@@ -239,6 +243,7 @@ describe("ScorelRuntime", () => {
       defineTool({
         name: "echo",
         description: "Echo text",
+        parameters: Type.Object({}),
         execute: async () => ({
           content: [{ type: "text", text: "ok" }],
           details: { command: "rtk echo ok", rtk: { applied: true } },
@@ -289,6 +294,7 @@ describe("ScorelRuntime", () => {
       defineTool({
         name: "echo",
         description: "Echo text",
+        parameters: Type.Object({}),
         execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
       }),
     );

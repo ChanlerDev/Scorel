@@ -3,6 +3,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Type } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
 
 import { ScorelRuntime, defineTool, loadScorelConfig, loadScorelConfigProfile, type RuntimeProvider, type RuntimeProviderTurn, type ScorelConfig } from "@scorel/core";
@@ -220,6 +221,7 @@ describe("ScorelHost + embedded transport", () => {
           defineTool({
             name: "SavingsTool",
             description: "Return RTK savings details",
+            parameters: Type.Object({}),
             execute: async () => ({
               content: [{ type: "text", text: "saved" }],
               details: {
@@ -393,6 +395,147 @@ describe("ScorelHost + embedded transport", () => {
     expect(sessionFile).toContain('"type":"harness_item"');
     expect(sessionFile).toContain('"kind":"memory"');
     expect(sessionFile).toContain('"toolName":"AppendDaily"');
+  });
+
+  it("lets the agent snip a completed user turn from the next provider context", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-snip-tool-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    const providerTurns: RuntimeProviderTurn[] = [];
+    const snipProvider: RuntimeProvider = {
+      streamTurn: async function* (turn) {
+        providerTurns.push(turn);
+        const text = JSON.stringify(turn.context);
+        const obsoleteUserShortId = /snip\.userMessageId: (u_[a-f0-9]+)/.exec(text)?.[1];
+        const hasSnipResult = turn.context.some((message) =>
+          message.role === "tool_result" &&
+          message.content.some((block) => block.type === "tool_result" && block.toolName === "snip"),
+        );
+        if (
+          obsoleteUserShortId &&
+          text.includes("snip the obsolete turn") &&
+          !hasSnipResult &&
+          turn.tools.some((tool) => tool.name === "snip")
+        ) {
+          return {
+            role: "assistant",
+            content: [{
+              type: "tool_call",
+              toolCallId: "call_snip",
+              toolName: "snip",
+              args: {
+                userMessageId: obsoleteUserShortId,
+                reason: "obsolete context",
+              },
+            }],
+            stopReason: "tool_call",
+          };
+        }
+        return assistantMessage("ok");
+      },
+    };
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () => new ScorelRuntime({ provider: snipProvider }),
+      now: () => 1_000,
+    });
+    await host.start();
+    const repo = join(root, "repo-snip");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    const sessionId = asSessionId("ses_snip");
+    await transport.connect({ clientId: asClientId("client_snip") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_snip_create"),
+      sessionId,
+      meta: { projectId: project.projectId },
+    });
+
+    const firstResponse = waitForResponse(transport, "req_snip_first");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_snip_first"),
+      sessionId,
+      content: "obsolete request",
+    });
+    const firstResolved = await firstResponse;
+    if (firstResolved.type !== "response" || firstResolved.requestType !== "send_message") {
+      throw new Error("expected first send response");
+    }
+
+    const secondResponse = waitForResponse(transport, "req_snip_second");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_snip_second"),
+      sessionId,
+      content: "snip the obsolete turn",
+    });
+    await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const sessionFile = await readFile(join(sessionsDir, "ses_snip.jsonl"), "utf8");
+    expect(sessionFile).toContain('"type":"context_control"');
+    expect(sessionFile).toContain('"operation":"hide_user_turn"');
+    expect(sessionFile).toContain('"toolName":"snip"');
+    expect(sessionFile).toContain("obsolete request");
+
+    const finalProviderContext = JSON.stringify(providerTurns.at(-1)?.context);
+    expect(finalProviderContext).toContain("snip the obsolete turn");
+    expect(finalProviderContext).not.toContain("obsolete request");
+  });
+
+  it("keeps persisted user message snip ids stable across later turns for prompt cache", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-snip-cache-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    const providerTurns: RuntimeProviderTurn[] = [];
+    const provider: RuntimeProvider = {
+      streamTurn: async function* (turn) {
+        providerTurns.push(turn);
+        return assistantMessage("ok");
+      },
+    };
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () => new ScorelRuntime({ provider }),
+      now: () => 1_000,
+    });
+    await host.start();
+    const repo = join(root, "repo-snip-cache");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    const sessionId = asSessionId("ses_snip_cache");
+    await transport.connect({ clientId: asClientId("client_snip_cache") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_snip_cache_create"),
+      sessionId,
+      meta: { projectId: project.projectId },
+    });
+
+    for (const [index, content] of ["first", "second", "third"].entries()) {
+      const requestId = asRequestId(`req_snip_cache_${index}`);
+      const response = waitForResponse(transport, requestId);
+      await transport.send({ type: "send_message", requestId, sessionId, content });
+      await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    }
+
+    const secondTurnSecondUser = providerTurns[1]?.context.find((message) =>
+      message.role === "user" && JSON.stringify(message.content).includes("second")
+    );
+    const thirdTurnSecondUser = providerTurns[2]?.context.find((message) =>
+      message.role === "user" && JSON.stringify(message.content).includes("second")
+    );
+    expect(JSON.stringify(secondTurnSecondUser?.content)).toContain("snip.userMessageId: u_");
+    expect(thirdTurnSecondUser?.content).toEqual(secondTurnSecondUser?.content);
   });
 
   it("injects memory context only once for a session even across days", async () => {
