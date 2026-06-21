@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createLocalDaemonState,
@@ -59,6 +59,10 @@ const makeChild = (): FakeChild => {
 };
 
 describe("scorel daemon CLI", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("start launches the Host daemon in the background and returns after readiness", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "scorel-daemon-start-"));
     const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-start-cwd-"));
@@ -101,6 +105,46 @@ describe("scorel daemon CLI", () => {
     expect(spawnCalls[0]!.argv).toEqual(expect.arrayContaining(["host", "serve", "--cwd", cwd, "--no-relay"]));
     expect(spawnCalls[0]!.argv).toEqual(expect.arrayContaining(["--idle-timeout-ms", "0"]));
     expect(child.unrefCalled).toBe(true);
+    expect(child.killSignals).toEqual([]);
+    expect(out.toString()).toContain("scorel host started url=ws://127.0.0.1:7777");
+    expect(err.toString()).toBe("");
+  });
+
+  it("start allows slow development Host startup before timing out", async () => {
+    vi.useFakeTimers();
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-daemon-start-slow-"));
+    const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-start-slow-cwd-"));
+    const child = makeChild();
+    const out = new StringWritable();
+    const err = new StringWritable();
+    let readCalls = 0;
+
+    const started = runCliDaemon(["start", "--port", "0", "--cwd", cwd, "--no-relay"], {
+      stateDir,
+      output: out,
+      error: err,
+      cliEntrypoint: "/cli/index.ts",
+      spawn: () => child as never,
+      readState: async () => {
+        readCalls += 1;
+        return readCalls > 1
+          ? {
+              host: "127.0.0.1",
+              port: 7777,
+              wsUrl: "ws://127.0.0.1:7777",
+              token: "tok",
+              pid: process.pid,
+              startedAt: 1,
+              stoppedAt: null,
+            }
+          : null;
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(12_000);
+    child.stdout!.push("scorel host serving url=ws://127.0.0.1:7777\n");
+
+    await expect(started).resolves.toBe(0);
     expect(child.killSignals).toEqual([]);
     expect(out.toString()).toContain("scorel host started url=ws://127.0.0.1:7777");
     expect(err.toString()).toBe("");

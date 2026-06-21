@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { SpawnOptions } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runCliUp } from "./up-cli.js";
 
@@ -51,6 +51,10 @@ const makeChild = (): FakeChild => {
 };
 
 describe("scorel up orchestrator", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("spawns daemon, waits for the ready line, then spawns webui and prints the unified header", async () => {
     const daemon = makeChild();
     const webui = makeChild();
@@ -115,6 +119,55 @@ describe("scorel up orchestrator", () => {
     webui.exit(0);
     await expect(upPromise).resolves.toBe(0);
     expect(out.toString()).toContain("scorel up stopped");
+  });
+
+  it("allows slow development daemon startup before timing out", async () => {
+    vi.useFakeTimers();
+    const daemon = makeChild();
+    const webui = makeChild();
+    let spawnCalls = 0;
+    const spawnFn = (_command: string, argv: string[]) => {
+      spawnCalls += 1;
+      return (argv.includes("daemon") ? daemon : webui) as unknown as ReturnType<typeof import("node:child_process").spawn>;
+    };
+    const out = new StringWritable();
+    const err = new StringWritable();
+    let sigintHandler: (() => void) | undefined;
+
+    const upPromise = runCliUp([], {
+      output: out,
+      error: err,
+      stateDir: "/state",
+      spawn: spawnFn,
+      cliEntrypoint: "/cli/index.ts",
+      readState: async () =>
+        spawnCalls === 0
+          ? null
+          : {
+              host: "127.0.0.1",
+              port: 7777,
+              wsUrl: "ws://127.0.0.1:7777",
+              token: "tok",
+              pid: 99,
+              startedAt: 1,
+              stoppedAt: null,
+            },
+      attachSigint: (handler) => {
+        sigintHandler = handler;
+        return () => undefined;
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(12_000);
+    daemon.stdout!.push("scorel daemon serving url=ws://127.0.0.1:7777\n");
+    await vi.waitFor(() => expect(out.toString()).toContain("scorel up\n"));
+    expect(sigintHandler).toBeDefined();
+    sigintHandler!();
+    webui.exit(0);
+
+    await expect(upPromise).resolves.toBe(0);
+    expect(daemon.killSignals).toEqual([]);
+    expect(err.toString()).toBe("");
   });
 
   it("does not stop the singleton daemon when webui dies unexpectedly", async () => {

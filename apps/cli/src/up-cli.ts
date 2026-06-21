@@ -51,7 +51,7 @@ type UpFlags = {
 
 const DEFAULT_DAEMON_PORT = 7777;
 const DEFAULT_WEBUI_PORT = 3000;
-const DEFAULT_DAEMON_READY_TIMEOUT_MS = 10_000;
+const DEFAULT_DAEMON_READY_TIMEOUT_MS = 30_000;
 
 const defaultStateDir = (): string => join(homedir(), ".scorel");
 
