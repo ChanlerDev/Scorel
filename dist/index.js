@@ -1746,6 +1746,7 @@ import { mkdir as mkdir2, readFile as readFile4, rename as rename2, rm, stat as 
 import { userInfo } from "node:os";
 import { basename as basename2, dirname as dirname3, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
+import { Type } from "@mariozechner/pi-ai";
 var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, bashResult, renderFullBashResult, writeBashArtifact, safeArtifactSegment, projectBashStreams, projectOutputStream, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord3, shellQuote, shellCommandArgs, userShell, truncate, sliceBytes, textResult, byteLength, isTimeoutError, isExecError, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
 var init_coding_tools = __esm({
   "packages/core/src/tools/coding-tools.ts"() {
@@ -1799,6 +1800,12 @@ var init_coding_tools = __esm({
         defineTool({
           name: "Read",
           description: "Read a text file from the workspace. Long reads are truncated by complete lines; accumulated coverage unlocks Write/Edit.",
+          parameters: Type.Object({
+            file_path: Type.String(),
+            offset: Type.Optional(Type.Number()),
+            limit: Type.Optional(Type.Number()),
+            full: Type.Optional(Type.Boolean())
+          }),
           execute: async (_toolCallId, args) => {
             const input = parseReadArgs(args);
             if (input.full && (input.offset !== void 0 || input.limit !== void 0)) {
@@ -1858,6 +1865,10 @@ var init_coding_tools = __esm({
         defineTool({
           name: "Write",
           description: "Create a new file or fully overwrite an existing file. Existing files require complete read coverage of the current file.",
+          parameters: Type.Object({
+            file_path: Type.String(),
+            content: Type.String()
+          }),
           execute: async (_toolCallId, args) => {
             const input = parseWriteArgs(args);
             const path = resolveWorkspacePath(input.path);
@@ -1879,6 +1890,12 @@ var init_coding_tools = __esm({
         defineTool({
           name: "Edit",
           description: "Perform an exact string replacement in an existing file. Requires complete read coverage and a unique old_string unless replace_all is true.",
+          parameters: Type.Object({
+            file_path: Type.String(),
+            old_string: Type.String(),
+            new_string: Type.String(),
+            replace_all: Type.Optional(Type.Boolean())
+          }),
           execute: async (_toolCallId, args) => {
             const input = parseEditArgs(args);
             const path = resolveWorkspacePath(input.path);
@@ -1914,6 +1931,13 @@ String: ${input.old_string}`
         defineTool({
           name: "Bash",
           description: "Execute a shell command in the workspace with timeout and output truncation.",
+          parameters: Type.Object({
+            command: Type.String(),
+            cwd: Type.Optional(Type.String()),
+            timeout: Type.Optional(Type.Number()),
+            description: Type.Optional(Type.String()),
+            maxOutputBytes: Type.Optional(Type.Number())
+          }),
           execute: async (toolCallId, args, signal) => {
             const input = parseBashArgs(args);
             const commandCwd = input.cwd ? resolveWorkspacePath(input.cwd) : root;
@@ -1978,6 +2002,12 @@ String: ${input.old_string}`
         defineTool({
           name: "Glob",
           description: "Find files by glob pattern using ripgrep file discovery.",
+          parameters: Type.Object({
+            pattern: Type.String(),
+            path: Type.Optional(Type.String()),
+            head_limit: Type.Optional(Type.Number()),
+            offset: Type.Optional(Type.Number())
+          }),
           execute: async (_toolCallId, args, signal) => {
             const input = parseGlobArgs(args);
             const limit = input.head_limit ?? DEFAULT_SEARCH_LIMIT;
@@ -1998,6 +2028,22 @@ String: ${input.old_string}`
         defineTool({
           name: "Grep",
           description: 'Search file contents with ripgrep. Default output_mode is "files" for matching paths; use "content" for matching lines or "count" for match counts.',
+          parameters: Type.Object({
+            pattern: Type.String(),
+            path: Type.Optional(Type.String()),
+            glob: Type.Optional(Type.String()),
+            output_mode: Type.Optional(Type.Union([Type.Literal("files"), Type.Literal("content"), Type.Literal("count")])),
+            "-B": Type.Optional(Type.Number()),
+            "-A": Type.Optional(Type.Number()),
+            "-C": Type.Optional(Type.Number()),
+            context: Type.Optional(Type.Number()),
+            "-n": Type.Optional(Type.Boolean()),
+            "-i": Type.Optional(Type.Boolean()),
+            type: Type.Optional(Type.String()),
+            head_limit: Type.Optional(Type.Number()),
+            offset: Type.Optional(Type.Number()),
+            multiline: Type.Optional(Type.Boolean())
+          }),
           execute: async (_toolCallId, args, signal) => {
             const input = parseGrepArgs(args);
             const mode = input.output_mode ?? "files";
@@ -2051,6 +2097,15 @@ ${filenames.join("\n")}`,
         defineTool({
           name: "TodoWrite",
           description: "Replace the current session todo list with a complete updated list.",
+          parameters: Type.Object({
+            todos: Type.Array(
+              Type.Object({
+                content: Type.String(),
+                status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")]),
+                activeForm: Type.Optional(Type.String())
+              })
+            )
+          }),
           execute: async (_toolCallId, args) => {
             const input = parseTodoWriteArgs(args);
             const oldTodos = state.todos;
@@ -2682,17 +2737,58 @@ ${value}` };
 });
 
 // packages/core/src/tools/index.ts
-var defineTool;
+import { Type as Type2 } from "@mariozechner/pi-ai";
+var defineTool, createSnipTool, parseSnipToolInput, isRecord4;
 var init_tools = __esm({
   "packages/core/src/tools/index.ts"() {
     "use strict";
     init_coding_tools();
     defineTool = (tool) => tool;
+    createSnipTool = (options) => defineTool({
+      name: "snip",
+      description: [
+        "Hide a completed user turn from future model context.",
+        "Use only when an earlier user turn is obsolete or noisy.",
+        "The session JSONL evidence is preserved; the hidden turn disappears from the next context build.",
+        "Input: { userMessageId: string, reason?: string }."
+      ].join(" "),
+      parameters: Type2.Object({
+        userMessageId: Type2.String(),
+        reason: Type2.Optional(Type2.String())
+      }),
+      execute: async (_toolCallId, args) => {
+        const input = parseSnipToolInput(args);
+        const result = await options.snip(input);
+        return {
+          content: [{
+            type: "text",
+            text: [
+              `Snipped user turn ${result.anchorUserEventId}.`,
+              `Hidden through ${result.throughEventId}.`,
+              `${result.hiddenEventCount} event(s) will be omitted from future model context.`,
+              "Original session JSONL remains unchanged."
+            ].join(" ")
+          }],
+          details: result
+        };
+      }
+    });
+    parseSnipToolInput = (args) => {
+      if (!isRecord4(args) || typeof args.userMessageId !== "string") {
+        throw new Error("snip requires { userMessageId: string }");
+      }
+      return {
+        userMessageId: args.userMessageId,
+        ...typeof args.reason === "string" && args.reason.trim() ? { reason: args.reason.trim() } : {}
+      };
+    };
+    isRecord4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
 // packages/core/src/channel/index.ts
-var createSendChannelMessageTool, parseSendChannelMessageInput, parseAttachments, optionalString2, isRecord4;
+import { Type as Type3 } from "@mariozechner/pi-ai";
+var createSendChannelMessageTool, parseSendChannelMessageInput, parseAttachments, optionalString2, isRecord5;
 var init_channel = __esm({
   "packages/core/src/channel/index.ts"() {
     "use strict";
@@ -2700,6 +2796,18 @@ var init_channel = __esm({
     createSendChannelMessageTool = (options) => defineTool({
       name: "SendChannelMessage",
       description: "Send a text reply to the current IM channel conversation. Do not provide raw platform user ids or group ids.",
+      parameters: Type3.Object({
+        text: Type3.Optional(Type3.String()),
+        attachments: Type3.Optional(Type3.Array(Type3.Object({
+          type: Type3.Union([Type3.Literal("image"), Type3.Literal("file")]),
+          path: Type3.Optional(Type3.String()),
+          url: Type3.Optional(Type3.String()),
+          mimeType: Type3.Optional(Type3.String()),
+          caption: Type3.Optional(Type3.String())
+        }))),
+        channel: Type3.Optional(Type3.String()),
+        target: Type3.Optional(Type3.Literal("current"))
+      }),
       execute: async (_toolCallId, args) => {
         const input = parseSendChannelMessageInput(args);
         const result = await options.sendCurrent(input);
@@ -2710,7 +2818,7 @@ var init_channel = __esm({
       }
     });
     parseSendChannelMessageInput = (value) => {
-      if (!isRecord4(value)) {
+      if (!isRecord5(value)) {
         throw new Error("SendChannelMessage args must be an object");
       }
       const text = typeof value.text === "string" && value.text.trim().length > 0 ? value.text : void 0;
@@ -2739,7 +2847,7 @@ var init_channel = __esm({
         throw new Error("SendChannelMessage.attachments must be an array");
       }
       return value.map((item, index) => {
-        if (!isRecord4(item)) {
+        if (!isRecord5(item)) {
           throw new Error(`SendChannelMessage.attachments.${index} must be an object`);
         }
         if (item.type !== "image" && item.type !== "file") {
@@ -2768,14 +2876,14 @@ var init_channel = __esm({
       }
       return value;
     };
-    isRecord4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord5 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
 // packages/core/src/extensions/index.ts
 import { readFile as readFile5 } from "node:fs/promises";
 import { dirname as dirname4, resolve as resolve2 } from "node:path";
-var loadExtensionManifest, parseExtensionManifest, requireString2, requireIdentifier2, requireKind, requireRelativePath, optionalRelativePaths, isRecord5;
+var loadExtensionManifest, parseExtensionManifest, requireString2, requireIdentifier2, requireKind, requireRelativePath, optionalRelativePaths, isRecord6;
 var init_extensions = __esm({
   "packages/core/src/extensions/index.ts"() {
     "use strict";
@@ -2788,7 +2896,7 @@ var init_extensions = __esm({
         const message = cause instanceof Error ? cause.message : String(cause);
         throw new Error(`Invalid extension manifest JSON at ${manifestPath}: ${message}`);
       }
-      if (!isRecord5(value)) {
+      if (!isRecord6(value)) {
         throw new Error(`Extension manifest at ${manifestPath} must be an object`);
       }
       const rootDir = dirname4(resolve2(manifestPath));
@@ -2844,7 +2952,7 @@ var init_extensions = __esm({
       }
       return value.map((item, index) => requireRelativePath(item, `${name}.${index}`, manifestPath));
     };
-    isRecord5 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord6 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
@@ -2988,7 +3096,8 @@ var init_instructions = __esm({
 import { appendFile, mkdir as mkdir3, readFile as readFile7, writeFile as writeFile3 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { join as join6 } from "node:path";
-var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord6, safeProjectId, isNodeErrorCode3;
+import { Type as Type4 } from "@mariozechner/pi-ai";
+var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord7, safeProjectId, isNodeErrorCode3;
 var init_memory = __esm({
   "packages/core/src/memory/index.ts"() {
     "use strict";
@@ -3077,6 +3186,14 @@ var init_memory = __esm({
         "Use this once near the end of a completed user turn when there is progress, a decision, or a follow-up worth preserving.",
         "Do not include secrets, raw logs, speculation, or facts that should be re-read from the repository."
       ].join(" "),
+      parameters: Type4.Object({
+        summary: Type4.String(),
+        completed: Type4.Optional(Type4.Array(Type4.String())),
+        decisions: Type4.Optional(Type4.Array(Type4.String())),
+        followUps: Type4.Optional(Type4.Array(Type4.String())),
+        memoryCandidates: Type4.Optional(Type4.Array(Type4.String())),
+        evidence: Type4.Optional(Type4.Array(Type4.String()))
+      }),
       execute: async (_toolCallId, args) => {
         const input = parseAppendDailyInput(args);
         validateAppendDailyInput(input);
@@ -3220,7 +3337,7 @@ var init_memory = __esm({
     normalizeMarkdownFile = (value) => `${value.trimEnd()}
 `;
     parseAppendDailyInput = (value) => {
-      if (!isRecord6(value)) {
+      if (!isRecord7(value)) {
         throw new Error("AppendDaily args must be an object");
       }
       const summary = requireString3(value.summary, "summary");
@@ -3286,12 +3403,12 @@ var init_memory = __esm({
     optionalNumber2 = (value) => typeof value === "number" && Number.isFinite(value) ? value : void 0;
     optionalString3 = (value) => typeof value === "string" && value.trim() ? value : void 0;
     parseLastFailure = (value) => {
-      if (!isRecord6(value)) return void 0;
+      if (!isRecord7(value)) return void 0;
       const at = optionalNumber2(value.at);
       const message = optionalString3(value.message);
       return at !== void 0 && message ? { at, message } : void 0;
     };
-    isRecord6 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord7 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
     safeProjectId = (projectId) => {
       if (!/^[A-Za-z0-9_-]+$/.test(projectId)) {
         throw new Error("projectId must contain only letters, numbers, underscores, or hyphens");
@@ -3304,11 +3421,10 @@ var init_memory = __esm({
 
 // packages/core/src/provider/pi-ai.ts
 import {
-  Type,
   getModels,
   streamSimple
 } from "@mariozechner/pi-ai";
-var DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW, DEFAULT_CUSTOM_MODEL_MAX_TOKENS, createPiAiProvider, resolvePiAiModel, toPiContext, toPiMessage, toPiAssistantBlock, fromPiAssistant, fromPiContentBlock, toPiTool, toolParameters, textContent, toolResultText, stringMeta, toPiStopReason, fromPiStopReason, fromPiUsage;
+var DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW, DEFAULT_CUSTOM_MODEL_MAX_TOKENS, createPiAiProvider, resolvePiAiModel, toPiContext, toPiMessage, toPiAssistantBlock, fromPiAssistant, fromPiContentBlock, toPiTool, textContent, toolResultText, stringMeta, toPiStopReason, fromPiStopReason, fromPiUsage;
 var init_pi_ai = __esm({
   "packages/core/src/provider/pi-ai.ts"() {
     "use strict";
@@ -3446,89 +3562,8 @@ var init_pi_ai = __esm({
     toPiTool = (tool) => ({
       name: tool.name,
       description: tool.description,
-      parameters: toolParameters(tool.name)
+      parameters: tool.parameters
     });
-    toolParameters = (name) => {
-      switch (name) {
-        case "Read":
-          return Type.Object({
-            file_path: Type.String(),
-            offset: Type.Optional(Type.Number()),
-            limit: Type.Optional(Type.Number()),
-            full: Type.Optional(Type.Boolean())
-          });
-        case "Write":
-          return Type.Object({
-            file_path: Type.String(),
-            content: Type.String()
-          });
-        case "Edit":
-          return Type.Object({
-            file_path: Type.String(),
-            old_string: Type.String(),
-            new_string: Type.String(),
-            replace_all: Type.Optional(Type.Boolean())
-          });
-        case "Bash":
-          return Type.Object({
-            command: Type.String(),
-            cwd: Type.Optional(Type.String()),
-            timeout: Type.Optional(Type.Number()),
-            description: Type.Optional(Type.String()),
-            maxOutputBytes: Type.Optional(Type.Number())
-          });
-        case "Glob":
-          return Type.Object({
-            pattern: Type.String(),
-            path: Type.Optional(Type.String()),
-            head_limit: Type.Optional(Type.Number()),
-            offset: Type.Optional(Type.Number())
-          });
-        case "Grep":
-          return Type.Object({
-            pattern: Type.String(),
-            path: Type.Optional(Type.String()),
-            glob: Type.Optional(Type.String()),
-            output_mode: Type.Optional(Type.Union([Type.Literal("files"), Type.Literal("content"), Type.Literal("count")])),
-            "-B": Type.Optional(Type.Number()),
-            "-A": Type.Optional(Type.Number()),
-            "-C": Type.Optional(Type.Number()),
-            context: Type.Optional(Type.Number()),
-            "-n": Type.Optional(Type.Boolean()),
-            "-i": Type.Optional(Type.Boolean()),
-            type: Type.Optional(Type.String()),
-            head_limit: Type.Optional(Type.Number()),
-            offset: Type.Optional(Type.Number()),
-            multiline: Type.Optional(Type.Boolean())
-          });
-        case "TodoWrite":
-          return Type.Object({
-            todos: Type.Array(
-              Type.Object({
-                content: Type.String(),
-                status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")]),
-                activeForm: Type.Optional(Type.String())
-              })
-            )
-          });
-        case "AppendDaily":
-          return Type.Object({
-            summary: Type.String(),
-            completed: Type.Optional(Type.Array(Type.String())),
-            decisions: Type.Optional(Type.Array(Type.String())),
-            followUps: Type.Optional(Type.Array(Type.String())),
-            memoryCandidates: Type.Optional(Type.Array(Type.String())),
-            evidence: Type.Optional(Type.Array(Type.String()))
-          });
-        case "Skill":
-          return Type.Object({
-            name: Type.String(),
-            args: Type.Optional(Type.String())
-          });
-        default:
-          return Type.Object({});
-      }
-    };
     textContent = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
     toolResultText = (result) => {
       if (typeof result === "object" && result !== null && "content" in result) {
@@ -3776,22 +3811,23 @@ var init_runtime = __esm({
 });
 
 // packages/core/src/session/index.ts
+import { createHash as createHash2 } from "node:crypto";
 import { appendFile as appendFile2, mkdir as mkdir4, readFile as readFile8, writeFile as writeFile4 } from "node:fs/promises";
 import { dirname as dirname6, join as join7 } from "node:path";
 function assertTreeEvent(value) {
-  if (!isRecord7(value)) {
+  if (!isRecord8(value)) {
     throw new SessionStoreError("invalid_event", "Event must be an object");
   }
   if (value.type === "session_header") {
     throw new SessionStoreError("invalid_event", "Session header must be stored as the JSONL header line");
   }
-  if (value.type !== "user_message" && value.type !== "assistant_message" && value.type !== "tool_result" && value.type !== "session_title_updated" && value.type !== "instruction_snapshot" && value.type !== "harness_item" && value.type !== "compact" && value.type !== "queue_update" && value.type !== "skill_index_snapshot" && value.type !== "skill_index_delta") {
+  if (value.type !== "user_message" && value.type !== "assistant_message" && value.type !== "tool_result" && value.type !== "session_title_updated" && value.type !== "instruction_snapshot" && value.type !== "harness_item" && value.type !== "compact" && value.type !== "context_control" && value.type !== "queue_update" && value.type !== "skill_index_snapshot" && value.type !== "skill_index_delta") {
     throw new SessionStoreError("invalid_event", "Unsupported session event type");
   }
   if (typeof value.id !== "string" || value.parentId !== null && typeof value.parentId !== "string" || typeof value.seq !== "number" || typeof value.clientId !== "string" || typeof value.ts !== "number") {
     throw new SessionStoreError("invalid_event", "Event is missing required base fields");
   }
-  if ((value.type === "user_message" || value.type === "assistant_message" || value.type === "tool_result") && !isRecord7(value.message)) {
+  if ((value.type === "user_message" || value.type === "assistant_message" || value.type === "tool_result") && !isRecord8(value.message)) {
     throw new SessionStoreError("invalid_event", "Message event is missing message payload");
   }
   if (value.type === "session_title_updated" && !isSessionTitleUpdated(value)) {
@@ -3806,6 +3842,9 @@ function assertTreeEvent(value) {
   if (value.type === "compact" && !isCompactEvent(value)) {
     throw new SessionStoreError("invalid_event", "compact is missing summary payload");
   }
+  if (value.type === "context_control" && !isContextControlEvent(value)) {
+    throw new SessionStoreError("invalid_event", "context_control is missing hide_user_turn payload");
+  }
   if (value.type === "queue_update" && !isQueueUpdate(value)) {
     throw new SessionStoreError("invalid_event", "queue_update is missing queue payload");
   }
@@ -3816,11 +3855,12 @@ function assertTreeEvent(value) {
     throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
   }
 }
-var SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, createSession, loadSession, buildContext, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, compactSummaryMessage, cloneMessage, isRecord7;
+var snipUserMessageAlias, SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, createSession, loadSession, buildContext, hiddenContextEventIds, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isContextControlEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, compactSummaryMessage, cloneMessage, isRecord8;
 var init_session = __esm({
   "packages/core/src/session/index.ts"() {
     "use strict";
     init_src();
+    snipUserMessageAlias = (eventId) => `u_${createHash2("sha256").update(eventId).digest("hex").slice(0, 8)}`;
     SessionStoreError = class extends Error {
       code;
       line;
@@ -3844,7 +3884,8 @@ var init_session = __esm({
           steer: []
         },
         skillIndexInitialized: false,
-        skillIndex: {}
+        skillIndex: {},
+        hiddenUserTurnSpans: []
       };
       get rootId() {
         return this.#rootId;
@@ -3964,6 +4005,16 @@ var init_session = __esm({
             delete next[removed.name];
           }
           this.controlState.skillIndex = next;
+        } else if (event.type === "context_control") {
+          this.controlState.hiddenUserTurnSpans = [
+            ...this.controlState.hiddenUserTurnSpans.filter(
+              (span) => span.anchorUserEventId !== event.anchorUserEventId
+            ),
+            {
+              anchorUserEventId: event.anchorUserEventId,
+              throughEventId: event.throughEventId
+            }
+          ];
         }
       }
     };
@@ -4025,7 +4076,11 @@ var init_session = __esm({
     };
     buildContext = (tree, leafId) => {
       const path = tree.getPath(leafId);
+      const hiddenIds = hiddenContextEventIds(tree, path, leafId);
       return path.reduce((messages, id, index) => {
+        if (hiddenIds.has(id)) {
+          return messages;
+        }
         const event = tree.get(id)?.event;
         if (!event) {
           return messages;
@@ -4038,7 +4093,7 @@ var init_session = __esm({
           appendHarnessItemToContext(messages, event);
         }
         if (event.type === "compact") {
-          const retained = retainedMessagesBeforeCompact(tree, path.slice(0, index), event.retainedEventCount);
+          const retained = retainedMessagesBeforeCompact(tree, path.slice(0, index), event.retainedEventCount, hiddenIds);
           messages.length = 0;
           messages.push(compactSummaryMessage(event));
           messages.push(...retained);
@@ -4046,7 +4101,29 @@ var init_session = __esm({
         return messages;
       }, []);
     };
-    retainedMessagesBeforeCompact = (tree, pathBeforeCompact, retainedEventCount) => {
+    hiddenContextEventIds = (tree, path, leafId) => {
+      const leaf = tree.get(leafId)?.event;
+      if (!leaf) {
+        return /* @__PURE__ */ new Set();
+      }
+      const pathIndexes = new Map(path.map((id, index) => [id, index]));
+      const hidden = /* @__PURE__ */ new Set();
+      for (const event of tree) {
+        if (event.type !== "context_control" || Number(event.seq) > Number(leaf.seq)) {
+          continue;
+        }
+        const start = pathIndexes.get(event.anchorUserEventId);
+        const end = pathIndexes.get(event.throughEventId);
+        if (start === void 0 || end === void 0 || end < start) {
+          continue;
+        }
+        for (const id of path.slice(start, end + 1)) {
+          hidden.add(id);
+        }
+      }
+      return hidden;
+    };
+    retainedMessagesBeforeCompact = (tree, pathBeforeCompact, retainedEventCount, hiddenIds = /* @__PURE__ */ new Set()) => {
       if (retainedEventCount <= 0) {
         return [];
       }
@@ -4061,6 +4138,9 @@ var init_session = __esm({
       }
       const retained = [];
       for (const id of pathBeforeCompact.slice(start)) {
+        if (hiddenIds.has(id)) {
+          continue;
+        }
         const event = tree.get(id)?.event;
         if (!event) {
           continue;
@@ -4085,13 +4165,13 @@ var init_session = __esm({
       }
     };
     parseHeader = (value) => {
-      if (!isRecord7(value)) {
+      if (!isRecord8(value)) {
         throw new SessionStoreError("invalid_header", "Session header must be an object");
       }
       if (value.version !== 1 || typeof value.sessionId !== "string" || typeof value.deviceId !== "string") {
         throw new SessionStoreError("invalid_header", "Session header is missing required identity fields");
       }
-      if (typeof value.createdAt !== "number" || !isRecord7(value.meta)) {
+      if (typeof value.createdAt !== "number" || !isRecord8(value.meta)) {
         throw new SessionStoreError("invalid_header", "Session header is missing createdAt or meta");
       }
       if (typeof value.meta.projectId !== "string" || value.meta.projectId.length === 0) {
@@ -4105,7 +4185,7 @@ var init_session = __esm({
       return value;
     };
     validateSessionMatch = (header, value) => {
-      if (!isRecord7(value) || typeof value.sessionId !== "string") {
+      if (!isRecord8(value) || typeof value.sessionId !== "string") {
         throw new SessionStoreError("invalid_header", "Event must be an object with a sessionId");
       }
       if (value.sessionId !== header.sessionId) {
@@ -4114,24 +4194,25 @@ var init_session = __esm({
     };
     isConversationEvent = (event) => event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result" || event.type === "harness_item" || event.type === "compact";
     isInstructionSnapshot = (value) => {
-      if (!isRecord7(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
+      if (!isRecord8(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
         return false;
       }
       return value.sections.every(
-        (section2) => isRecord7(section2) && typeof section2.kind === "string" && typeof section2.frozenAt === "number" && typeof section2.renderedBlock === "string"
+        (section2) => isRecord8(section2) && typeof section2.kind === "string" && typeof section2.frozenAt === "number" && typeof section2.renderedBlock === "string"
       );
     };
-    isHarnessItem = (value) => isRecord7(value) && typeof value.kind === "string" && typeof value.origin === "string" && typeof value.content === "string" && (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
+    isHarnessItem = (value) => isRecord8(value) && typeof value.kind === "string" && typeof value.origin === "string" && typeof value.content === "string" && (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
     isCompactEvent = (value) => typeof value.summary === "string" && typeof value.compactedThrough === "string" && typeof value.tokensBefore === "number" && typeof value.tokensAfter === "number" && typeof value.retainedEventCount === "number";
+    isContextControlEvent = (value) => value.operation === "hide_user_turn" && typeof value.anchorUserEventId === "string" && typeof value.throughEventId === "string" && (value.actor === "agent" || value.actor === "user" || value.actor === "system") && (value.reason === void 0 || typeof value.reason === "string");
     isQueueUpdate = (value) => (value.queue === "follow_up" || value.queue === "steer") && value.operation === "rewrite" && Array.isArray(value.items) && (value.anchorEventId === null || typeof value.anchorEventId === "string") && value.items.every(
-      (item) => isRecord7(item) && typeof item.id === "string" && Array.isArray(item.content) && typeof item.createdAt === "number" && typeof item.updatedAt === "number" && typeof item.clientId === "string"
+      (item) => isRecord8(item) && typeof item.id === "string" && Array.isArray(item.content) && typeof item.createdAt === "number" && typeof item.updatedAt === "number" && typeof item.clientId === "string"
     );
-    isSessionTitleUpdated = (value) => typeof value.title === "string" && value.title.length > 0 && (value.source === "model" || value.source === "user") && (value.derivedFrom === void 0 || isRecord7(value.derivedFrom) && typeof value.derivedFrom.eventId === "string" && typeof value.derivedFrom.seq === "number");
+    isSessionTitleUpdated = (value) => typeof value.title === "string" && value.title.length > 0 && (value.source === "model" || value.source === "user") && (value.derivedFrom === void 0 || isRecord8(value.derivedFrom) && typeof value.derivedFrom.eventId === "string" && typeof value.derivedFrom.seq === "number");
     isSkillIndexSnapshot = (value) => (value.anchorEventId === null || typeof value.anchorEventId === "string") && Array.isArray(value.entries) && value.entries.every(isSkillIndexEntry);
     isSkillIndexDelta = (value) => (value.anchorEventId === null || typeof value.anchorEventId === "string") && Array.isArray(value.added) && Array.isArray(value.changed) && Array.isArray(value.removed) && value.added.every(isSkillIndexEntry) && value.changed.every(isSkillIndexEntry) && value.removed.every(
-      (item) => isRecord7(item) && typeof item.name === "string" && typeof item.previousPath === "string"
+      (item) => isRecord8(item) && typeof item.name === "string" && typeof item.previousPath === "string"
     );
-    isSkillIndexEntry = (value) => isRecord7(value) && typeof value.name === "string" && typeof value.path === "string" && (value.scope === "user" || value.scope === "project" || value.scope === "extension") && typeof value.description === "string" && typeof value.mtimeMs === "number" && typeof value.size === "number" && typeof value.contentHash === "string" && typeof value.priority === "number";
+    isSkillIndexEntry = (value) => isRecord8(value) && typeof value.name === "string" && typeof value.path === "string" && (value.scope === "user" || value.scope === "project" || value.scope === "extension") && typeof value.description === "string" && typeof value.mtimeMs === "number" && typeof value.size === "number" && typeof value.contentHash === "string" && typeof value.priority === "number";
     appendHarnessItemToContext = (messages, event) => {
       const reminder = renderSystemReminder(event.item.content);
       const last = messages.at(-1);
@@ -4168,7 +4249,7 @@ ${reminder}` }]
       }
       return false;
     };
-    isToolResultWithContent = (value) => isRecord7(value) && Array.isArray(value.content);
+    isToolResultWithContent = (value) => isRecord8(value) && Array.isArray(value.content);
     renderSystemReminder = (content) => `<system-reminder>
 ${content}
 </system-reminder>`;
@@ -4192,10 +4273,10 @@ ${content}
     cloneMessage = (message) => ({
       ...message,
       content: message.content.map((block) => {
-        if (block.type !== "tool_result" || !isRecord7(block.result)) {
+        if (block.type !== "tool_result" || !isRecord8(block.result)) {
           return { ...block };
         }
-        const content = Array.isArray(block.result.content) ? { content: block.result.content.map((item) => isRecord7(item) ? { ...item } : item) } : {};
+        const content = Array.isArray(block.result.content) ? { content: block.result.content.map((item) => isRecord8(item) ? { ...item } : item) } : {};
         return {
           ...block,
           result: {
@@ -4205,16 +4286,17 @@ ${content}
       }),
       ...message.meta ? { meta: { ...message.meta } } : {}
     });
-    isRecord7 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord8 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
 // packages/core/src/skills/index.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 import { existsSync as existsSync2 } from "node:fs";
 import { readdir as readdir5, readFile as readFile9, stat as stat4 } from "node:fs/promises";
 import { homedir as homedir4 } from "node:os";
 import { dirname as dirname7, join as join8, resolve as resolve4 } from "node:path";
+import { Type as Type5 } from "@mariozechner/pi-ai";
 var scanSkillIndex, diffSkillIndex, hasSkillIndexDelta, renderSkillListing, renderSkillDelta, createSkillTool, projectSkillRoots, readSkillEntry, parseSkillMetadata, firstParagraph, parseSkillArgs, findGitRoot2, isNodeErrorCode4;
 var init_skills = __esm({
   "packages/core/src/skills/index.ts"() {
@@ -4305,6 +4387,10 @@ var init_skills = __esm({
     createSkillTool = (options) => defineTool({
       name: "Skill",
       description: "Load the full SKILL.md instructions for an available session-indexed skill by name.",
+      parameters: Type5.Object({
+        name: Type5.String(),
+        args: Type5.Optional(Type5.String())
+      }),
       execute: async (_toolCallId, args) => {
         const input = parseSkillArgs(args);
         const entry = options.getEntry(input.name);
@@ -4369,7 +4455,7 @@ var init_skills = __esm({
         ...parsed.displayName ? { displayName: parsed.displayName } : {},
         mtimeMs: fileStat.mtimeMs,
         size: fileStat.size,
-        contentHash: createHash2("sha256").update(content).digest("hex"),
+        contentHash: createHash3("sha256").update(content).digest("hex"),
         priority: options.priority
       };
     };
@@ -4785,7 +4871,7 @@ import { basename as basename3, dirname as dirname8, join as join10, resolve as 
 import { pathToFileURL } from "node:url";
 import { promisify as promisify2 } from "node:util";
 import { WebSocketServer } from "ws";
-var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger2, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord8, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
+var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, snipUserMessageIdBlock, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger2, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord9, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
 var init_src4 = __esm({
   "packages/daemon/src/index.ts"() {
     "use strict";
@@ -5502,7 +5588,7 @@ var init_src4 = __esm({
           ts: this.#now(),
           message: {
             role: "user",
-            content: input.content,
+            content: [...input.content, snipUserMessageIdBlock(userEventId)],
             ...input.source === "follow_up" ? { meta: { source: "follow_up", queueItemId: input.queueItemId } } : {}
           }
         });
@@ -5522,6 +5608,7 @@ var init_src4 = __esm({
           finalAssistantEventId: firstAssistantEventId
         };
         lane.channelContext = input.channelContext;
+        lane.snipClientId = clientId;
         try {
           for await (const rawEvent of lane.runtime.executeTurn(
             buildContext(lane.session.tree, userEvent.id),
@@ -5537,6 +5624,7 @@ var init_src4 = __esm({
           }
         } finally {
           lane.channelContext = void 0;
+          lane.snipClientId = void 0;
           lane.runtime.unregisterTool("SendChannelMessage");
         }
         const result = { userEventId, assistantEventId: state.finalAssistantEventId };
@@ -6786,6 +6874,80 @@ var init_src4 = __esm({
             listNames: () => Object.keys(lane.session.tree.controlState.skillIndex).sort()
           })
         );
+        lane.runtime.registerTool(
+          createSnipTool({
+            snip: async (input) => this.#snipUserTurn(lane, input.userMessageId, input.reason)
+          })
+        );
+      }
+      async #snipUserTurn(lane, userMessageId, reason) {
+        const leafId = lane.session.activeLeafId;
+        if (!leafId) {
+          throw new Error("snip requires an active conversation");
+        }
+        const path = lane.session.tree.getPath(leafId);
+        const anchorUserEventId = this.#resolveSnipUserMessageId(lane, path, userMessageId);
+        const anchorIndex = path.findIndex((id) => id === anchorUserEventId);
+        if (anchorIndex < 0) {
+          throw new Error(`snip target is not on the active conversation path: ${anchorUserEventId}`);
+        }
+        const anchor = lane.session.tree.get(anchorUserEventId)?.event;
+        if (anchor?.type !== "user_message") {
+          throw new Error(`snip target must be a user_message: ${anchorUserEventId}`);
+        }
+        const nextUserIndex = path.findIndex(
+          (id, index) => index > anchorIndex && lane.session.tree.get(id)?.event.type === "user_message"
+        );
+        if (nextUserIndex < 0) {
+          throw new Error("snip cannot hide the current user turn before the next user message exists");
+        }
+        const throughEventId = path[nextUserIndex - 1];
+        if (!throughEventId || throughEventId === anchorUserEventId) {
+          throw new Error(`snip target has no completed turn content: ${anchorUserEventId}`);
+        }
+        const clientId = lane.snipClientId;
+        if (!clientId) {
+          throw new Error("snip is only available while a user turn is running");
+        }
+        await this.#appendPersistent(lane, {
+          type: "context_control",
+          id: asEventId(this.#createId()),
+          parentId: null,
+          sessionId: lane.session.header.sessionId,
+          clientId,
+          ts: this.#now(),
+          operation: "hide_user_turn",
+          anchorUserEventId,
+          throughEventId,
+          actor: "agent",
+          ...reason ? { reason } : {}
+        });
+        await this.#appendDiagnostic(lane.session.header.sessionId, "context_snipped", {
+          anchorUserEventId,
+          throughEventId,
+          hiddenEventCount: nextUserIndex - anchorIndex
+        });
+        return {
+          anchorUserEventId,
+          throughEventId,
+          hiddenEventCount: nextUserIndex - anchorIndex
+        };
+      }
+      #resolveSnipUserMessageId(lane, path, userMessageId) {
+        if (path.includes(userMessageId)) {
+          return userMessageId;
+        }
+        const matches = path.filter((id) => {
+          const event = lane.session.tree.get(id)?.event;
+          return event?.type === "user_message" && snipUserMessageAlias(id) === userMessageId;
+        });
+        if (matches.length === 1) {
+          return matches[0];
+        }
+        if (matches.length > 1) {
+          throw new Error(`snip target short id is ambiguous: ${userMessageId}`);
+        }
+        return asEventId(userMessageId);
       }
       async #selectChatRuntime(lane, modelSelection) {
         if (!modelSelection) {
@@ -7548,7 +7710,14 @@ var init_src4 = __esm({
     };
     countContentBlocks = (message, type) => message.content.filter((block) => block.type === type).length;
     normalizeContent = (content) => typeof content === "string" ? [{ type: "text", text: content }] : content;
-    inputText = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
+    snipUserMessageIdBlock = (userEventId) => ({
+      type: "text",
+      text: `<system-reminder>
+snip.userMessageId: ${snipUserMessageAlias(userEventId)}
+</system-reminder>`,
+      visibility: "model"
+    });
+    inputText = (message) => message.content.flatMap((block) => block.type === "text" && block.visibility !== "model" ? [block.text] : []).join("\n").trim();
     assistantText = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
     messageText = (message) => {
       const text = message.content.map((block) => {
@@ -7577,7 +7746,7 @@ var init_src4 = __esm({
         return void 0;
       }
       const parsed = JSON.parse(text);
-      if (!isRecord8(parsed)) {
+      if (!isRecord9(parsed)) {
         return void 0;
       }
       return {
@@ -7665,7 +7834,7 @@ var init_src4 = __esm({
       }
     };
     parseRuntimeStats = (value) => {
-      if (!isRecord8(value) || !isRecord8(value.rtk)) {
+      if (!isRecord9(value) || !isRecord9(value.rtk)) {
         return emptyRuntimeStats();
       }
       return {
@@ -7679,13 +7848,13 @@ var init_src4 = __esm({
       };
     };
     parseRuntimeStatsBuckets = (value) => {
-      if (!isRecord8(value)) {
+      if (!isRecord9(value)) {
         return {};
       }
       return Object.fromEntries(
         Object.entries(value).map(([key, bucket]) => [
           key,
-          isRecord8(bucket) ? {
+          isRecord9(bucket) ? {
             outputTokens: nonNegativeInteger2(bucket.outputTokens),
             savedTokens: nonNegativeInteger2(bucket.savedTokens)
           } : { outputTokens: 0, savedTokens: 0 }
@@ -7703,11 +7872,11 @@ var init_src4 = __esm({
       return bucket;
     };
     rtkSavingsFromToolResult = (result) => {
-      if (!isRecord8(result) || !isRecord8(result.details)) {
+      if (!isRecord9(result) || !isRecord9(result.details)) {
         return void 0;
       }
       const rtk = result.details.rtk;
-      if (!isRecord8(rtk) || rtk.applied !== true) {
+      if (!isRecord9(rtk) || rtk.applied !== true) {
         return void 0;
       }
       const outputTokens = nonNegativeInteger2(rtk.estimatedOutputTokens);
@@ -7752,7 +7921,7 @@ var init_src4 = __esm({
       ...context.data ? { data: context.data } : {}
     });
     parseQueuedChannelContext = (value) => {
-      if (!isRecord8(value)) {
+      if (!isRecord9(value)) {
         return void 0;
       }
       if (typeof value.channel !== "string" || typeof value.externalConversationId !== "string") {
@@ -7764,11 +7933,11 @@ var init_src4 = __esm({
         ...typeof value.conversationType === "string" ? { conversationType: value.conversationType } : {},
         ...typeof value.senderDisplayName === "string" ? { senderDisplayName: value.senderDisplayName } : {},
         ...typeof value.mentionedBot === "boolean" ? { mentionedBot: value.mentionedBot } : {},
-        ...isRecord8(value.data) ? { data: value.data } : {}
+        ...isRecord9(value.data) ? { data: value.data } : {}
       });
     };
     parseQueuedModelSelection = (value) => {
-      if (!isRecord8(value)) {
+      if (!isRecord9(value)) {
         return void 0;
       }
       const selection = {};
@@ -7810,7 +7979,7 @@ var init_src4 = __esm({
     };
     isSteerMessage = (text) => /^\/(?:steer|interrupt)\b/i.test(text.trim());
     stripImCommandPrefix = (text) => text.trim().replace(/^\/(?:steer|interrupt)\s*/i, "").trim() || text;
-    isRecord8 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord9 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
     parseMemoryUpdate = (raw) => {
       const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
       if (!text) {
@@ -8036,7 +8205,7 @@ var init_daemon_cli = __esm({
     DEFAULT_PORT = 7777;
     STOP_POLL_INTERVAL_MS = 200;
     STOP_GRACE_MS = 5e3;
-    START_READY_TIMEOUT_MS = 1e4;
+    START_READY_TIMEOUT_MS = 3e4;
     AUTO_STARTED_IDLE_SHUTDOWN_MS = 15 * 60 * 1e3;
     FOREGROUND_IDLE_SHUTDOWN_MS = 0;
     defaultStateDir2 = () => join13(homedir6(), ".scorel");
@@ -9202,7 +9371,7 @@ var init_up_cli = __esm({
     init_daemon_cli();
     DEFAULT_DAEMON_PORT = 7777;
     DEFAULT_WEBUI_PORT = 3e3;
-    DEFAULT_DAEMON_READY_TIMEOUT_MS = 1e4;
+    DEFAULT_DAEMON_READY_TIMEOUT_MS = 3e4;
     defaultStateDir3 = () => join16(homedir8(), ".scorel");
     defaultAttachSigint = (listener) => {
       process.on("SIGINT", listener);
@@ -9557,7 +9726,7 @@ __export(index_exports, {
   runChat: () => runChat,
   runCli: () => runCli
 });
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 import { appendFile as appendFile4, mkdir as mkdir8, readFile as readFile14, realpath as realpath3, readdir as readdir7, writeFile as writeFile8 } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { homedir as homedir9 } from "node:os";
@@ -9879,11 +10048,11 @@ var init_index = __esm({
       };
     };
     attachCacheFilePath = (stateDir, scope, sessionId) => {
-      const scopeKey = createHash3("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
+      const scopeKey = createHash4("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
       return join17(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
     };
     attachDiagnosticsFilePath = (stateDir, scope, sessionId) => {
-      const scopeKey = createHash3("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
+      const scopeKey = createHash4("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
       return join17(stateDir, "attach-cache", scopeKey, `${sessionId}.log`);
     };
     findAttachDiagnosticsFilePath = async (stateDir, sessionId, _remoteUrl) => {

@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+## 0.0.6 - 2026-06-23
+
+### Highlights
+
+- Packed GUI now bundles its own CLI runtime, enabling fully self-contained local Host startup without Node.js or global CLI.
+- Agents can now use the `snip` tool to hide completed user turns from future context — reducing token waste and keeping conversations focused.
+
+### Changes
+
+- GUI now bundles its own CLI runtime for fully self-contained Host startup (no Node.js or global CLI required).
+- Added `snip` tool that agents can call to mark a completed user turn as hidden from future LLM context.
+- Protocol version incremented to 4 with new `context_control` event and `hide_user_turn` operation.
+- UI (GUI and WebUI) now hides model-only text blocks (like `snip` reminders) from the visible transcript.
+- Provider adapters now pass each tool's own parameter schema instead of hardcoding tool-specific parameters.
+
+### Fixes
+
+- Increased Host startup timeout from 10s to 30s to prevent timeouts in slower development environments.
+
+### Breaking Changes
+
+- Protocol version incremented from 3 to 4; requires protocol-version-aware clients.
+- Packaged GUI no longer accepts `SCOREL_CLI_ENTRYPOINT` or `SCOREL_NODE_PATH` environment variables.
+
+### Verification
+
+- Unit and release tests verify bundled CLI usage in packaged GUI, snip tool end-to-end behavior, hidden spans in context builds, protocol version bump, and UI projector rendering.
+
+### Internal
+
+- Added planned spec S0107 for system reminder unification (documentation only).
+
 ## 0.0.5 - 2026-06-19
 
 ### Highlights
