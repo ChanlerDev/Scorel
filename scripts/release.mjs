@@ -309,6 +309,7 @@ export const runReleaseCli = async (argv = process.argv.slice(2)) => {
   run("pnpm", ["--filter", "@scorel/app-webui", "build"]);
   run("pnpm", ["--filter", "@scorel/app-gui", "build"]);
   run("pnpm", ["build:package"]);
+  run("pnpm", ["--filter", "@scorel/app-gui", "build:runtime"]);
   run("pnpm", ["pack:smoke"]);
 
   if (dryRun) {

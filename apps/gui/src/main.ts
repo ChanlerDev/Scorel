@@ -3,9 +3,10 @@ import { autoUpdater } from "electron-updater";
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 import { createGuiStore, type GuiRelayDevice, type GuiStore, type GuiVisibleRemoteProject } from "./main/gui-store.js";
+import { buildHostStartInvocation, resolveHostLauncher } from "./main/host-launcher.js";
 import { createGuiLocalHostService, type GuiLocalHostService } from "./main/local-host.js";
 import { createGuiRelayService, type GuiRelayService } from "./main/relay-service.js";
 import {
@@ -39,29 +40,21 @@ const guiStorePath = (): string => join(scorelHomeDir(), "gui-store.json");
 const AUTO_STARTED_IDLE_SHUTDOWN_MS = 15 * 60 * 1000;
 const GUI_AUTO_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 
-const repoRoot = (): string => join(here, "..", "..", "..");
-const cliEntrypoint = (): string => process.env.SCOREL_CLI_ENTRYPOINT ?? join(repoRoot(), "apps", "cli", "src", "index.ts");
-const nodeEntrypointArgs = (entrypoint: string): string[] =>
-  entrypoint.endsWith(".ts") ? ["--import", "tsx", entrypoint] : [entrypoint];
-
 const ensureLocalDaemon = async (stateDir: string): Promise<void> => {
   const bootstrapProject = join(stateDir, "workspace");
   await mkdir(bootstrapProject, { recursive: true });
   await new Promise<void>((resolve, reject) => {
-    const entrypoint = cliEntrypoint();
-    const child = spawn(process.env.SCOREL_NODE_PATH ?? process.env.npm_node_execpath ?? "node", [
-      ...nodeEntrypointArgs(entrypoint),
-      "host",
-      "start",
-      "--port",
-      "0",
-      "--cwd",
+    const invocation = buildHostStartInvocation({
+      launcher: resolveHostLauncher({
+        isPackaged: app.isPackaged,
+        resourcesPath: process.resourcesPath,
+        appDistDir: here,
+      }),
       bootstrapProject,
-      "--idle-timeout-ms",
-      String(AUTO_STARTED_IDLE_SHUTDOWN_MS),
-      "--no-relay",
-    ], {
-      cwd: dirname(entrypoint),
+      idleTimeoutMs: AUTO_STARTED_IDLE_SHUTDOWN_MS,
+    });
+    const child = spawn(invocation.command, invocation.args, {
+      cwd: invocation.cwd,
       env: { ...process.env },
       stdio: ["ignore", "ignore", "pipe"],
     });

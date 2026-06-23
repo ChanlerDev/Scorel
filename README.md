@@ -45,6 +45,8 @@ pnpm --filter @scorel/app-gui dist:mac
 
 GUI 跟随正常 release 节奏发布到同一个 GitHub Release。Release assets 包含 dmg / zip、`latest-mac.yml` 和 blockmap 文件；packaged GUI 通过 `electron-updater` 读取这些 metadata 做增量更新。
 
+Packaged GUI 自带同版本 CLI runtime：`Scorel.app/Contents/Resources/scorel` 会通过 app 自己的 Electron executable 以 Node mode 运行 `scorel.js`，再启动本机 Host。它不依赖用户全局安装的 `node`、`scorel`、nvm PATH 或源码仓库路径。
+
 当前没有 Apple Developer signing/notarization 时，macOS 首次打开下载的 app 可能被 Gatekeeper 拦截。确认来源可信后，可以移除 quarantine 标记：
 
 ```bash
@@ -458,6 +460,7 @@ GUI 更偏本地桌面工作台，WebUI 更偏 hosted/remote control。二者都
 - GUI IM settings。
 - CLI update/upgrade。
 - GUI release assets with incremental update metadata。
+- packaged GUI bundled CLI runtime for local Host startup。
 
 计划中的方向：
 

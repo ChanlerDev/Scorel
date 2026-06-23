@@ -209,6 +209,7 @@ pnpm release patch --no-generate-notes
 - 执行 WebUI production build
 - 执行 GUI production build
 - 构建 public `scorel` npm package
+- 将同版本 public `scorel` CLI runtime vendored 进 GUI app bundle，供 packaged GUI 用 bundle 内绝对路径启动本机 Host
 - 执行 `npm pack` 安装烟雾测试
 - bump 所有 package version
 - 构建 GUI macOS dmg / zip release assets，并生成 `latest-mac.yml` 与 blockmap 增量更新 metadata

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { collectGuiReleaseAssets, guiReleaseAssetPaths, packagePaths } from "./release.mjs";
@@ -18,6 +18,19 @@ test("release asset contract includes npm tarball plus GUI incremental metadata"
     "apps/gui/release/*.zip",
     "apps/gui/release/*.zip.blockmap",
   ]);
+});
+
+test("GUI package vendors the built CLI as a bundled scorel runtime", async () => {
+  const guiPackage = JSON.parse(await readFile(join(process.cwd(), "apps/gui/package.json"), "utf8"));
+
+  assert.deepEqual(guiPackage.build.extraResources, [
+    {
+      from: ".runtime",
+      to: ".",
+    },
+  ]);
+  assert.match(guiPackage.scripts["dist:mac"], /\bbuild:package\b/);
+  assert.match(guiPackage.scripts["dist:mac"], /\bbuild:runtime\b/);
 });
 
 test("collectGuiReleaseAssets keeps only mac installer and blockmap metadata", async () => {

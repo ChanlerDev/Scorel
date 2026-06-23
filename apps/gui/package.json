@@ -6,7 +6,8 @@
   "main": "./.dist/main.cjs",
   "scripts": {
     "build": "node ./scripts/build.mjs",
-    "dist:mac": "pnpm build && pnpm dlx electron-builder@26.15.3 --mac --publish never",
+    "build:runtime": "node ./scripts/build-runtime.mjs",
+    "dist:mac": "pnpm --dir ../.. build:package && pnpm build && pnpm build:runtime && pnpm dlx electron-builder@26.15.3 --mac --publish never",
     "dev": "pnpm build && electron .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -20,6 +21,12 @@
     "files": [
       ".dist/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".runtime",
+        "to": "."
+      }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",

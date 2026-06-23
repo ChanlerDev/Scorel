@@ -602,6 +602,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.26 | [`S0105`](spec/ship/S0105-cli-update-and-gui-release.md) | CLI 命令面统一补齐、NPM 手动/自动更新、GUI release 打包和增量更新框架 | Done |
 | M9.F1.27 | [`S0106`](spec/ship/S0106-snip-context-control.md) | `context_control` 持久事件和 `snip` tool，让 agent 隐藏已完成 user turn 的未来 LLM context 投影 | Done |
 | M9.F1.28 | [`S0107`](spec/ship/S0107-system-reminder-unification.md) | 统一 system reminder 的持久化、构造、LLM 投影和 UI visibility 语义 | Planned |
+| M9.F1.29 | [`S0108`](spec/ship/S0108-gui-bundled-cli-runtime.md) | GUI release 内置同版本 CLI runtime，packaged GUI 用 bundle 内可执行文件启动本地 Host | Active |
 
 **Not in M9 Follow-up**:
 
@@ -783,6 +784,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0105`](spec/ship/S0105-cli-update-and-gui-release.md) | CLI update and GUI release | Done |
 | [`S0106`](spec/ship/S0106-snip-context-control.md) | Snip context control | Done |
 | [`S0107`](spec/ship/S0107-system-reminder-unification.md) | System reminder unification | Planned |
+| [`S0108`](spec/ship/S0108-gui-bundled-cli-runtime.md) | GUI bundled CLI runtime | Active |
 
 ---
 
