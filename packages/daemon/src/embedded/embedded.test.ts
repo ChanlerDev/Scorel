@@ -486,6 +486,9 @@ describe("ScorelHost + embedded transport", () => {
     const finalProviderContext = JSON.stringify(providerTurns.at(-1)?.context);
     expect(finalProviderContext).toContain("snip the obsolete turn");
     expect(finalProviderContext).not.toContain("obsolete request");
+    expect(finalProviderContext).not.toContain("Hidden through");
+    expect(finalProviderContext).not.toContain("event(s) will be omitted");
+    expect(finalProviderContext).not.toContain("Original session JSONL remains unchanged");
   });
 
   it("keeps persisted user message snip ids stable across later turns for prompt cache", async () => {

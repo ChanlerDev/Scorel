@@ -53,12 +53,7 @@ export const createSnipTool = (options: {
       return {
         content: [{
           type: "text",
-          text: [
-            `Snipped user turn ${result.anchorUserEventId}.`,
-            `Hidden through ${result.throughEventId}.`,
-            `${result.hiddenEventCount} event(s) will be omitted from future model context.`,
-            "Original session JSONL remains unchanged.",
-          ].join(" "),
+          text: "Snipped the selected user turn. It will be omitted from future model context.",
         }],
         details: result,
       };

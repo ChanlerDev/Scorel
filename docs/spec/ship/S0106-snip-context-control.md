@@ -56,7 +56,7 @@ Expose a lazily available `Snip` runtime tool that lets the agent request hiding
 { "userMessageId": "u_...", "reason": "optional short reason" }
 ```
 
-The Host validates the request, resolves the model-visible short alias to a target span, appends a `context_control` event, and returns a tool result describing what changed. The tool result is still part of the current turn; the hidden span disappears on the next context build.
+The Host validates the request, resolves the model-visible short alias to a target span, appends a `context_control` event, and returns a brief model-visible confirmation. Internal span details such as `anchorUserEventId`, `throughEventId`, and hidden event count may remain in structured tool result details for diagnostics, but provider context must only receive the concise confirmation. The tool result is still part of the current turn; the hidden span disappears on the next context build.
 
 The tool is session-context control, not a generic coding tool. It must be registered by the Host with access to the current lane, not by `createCodingTools()`.
 

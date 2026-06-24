@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Protocol version incremented to 5 with structured `system_reminder` content blocks.
+- Snip tool results now return a concise model-visible confirmation while keeping internal span details out of provider context.
 
 ## 0.0.6 - 2026-06-23
 
