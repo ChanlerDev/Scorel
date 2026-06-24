@@ -119,6 +119,15 @@ export function projectEvents(initial: ProjectorState, events: ScorelEvent[]): P
 
 type ContentBlock =
   | { type: "text"; text: string; visibility?: "display" | "model" }
+  | {
+      type: "system_reminder";
+      kind: string;
+      origin: string;
+      text: string;
+      visibility: "model" | "display" | "compact";
+      scope: string;
+      data?: Record<string, unknown>;
+    }
   | { type: "thinking"; text: string }
   | { type: "tool_call"; toolCallId: string; toolName: string; args: unknown }
   | {
@@ -133,6 +142,9 @@ function blocksToParts(blocks: ContentBlock[]): TurnPart[] {
   const parts: TurnPart[] = [];
   for (const block of blocks) {
     if (block.type === "text") {
+      if (block.visibility === "model") continue;
+      parts.push({ kind: "text", text: block.text });
+    } else if (block.type === "system_reminder") {
       if (block.visibility === "model") continue;
       parts.push({ kind: "text", text: block.text });
     } else if (block.type === "thinking") {

@@ -12,6 +12,7 @@ import {
   protocolPackageName,
   protocolVersion,
   type ClientRequest,
+  type ContentBlock,
   type CreateSessionMeta,
   type DaemonMessage,
   type DirectoryListing,
@@ -29,7 +30,7 @@ import {
 describe("@scorel/protocol", () => {
   it("has a public entrypoint", () => {
     expect(protocolPackageName).toBe("@scorel/protocol");
-    expect(protocolVersion).toBe(4);
+    expect(protocolVersion).toBe(5);
   });
 
   it("pairs request and response data by request type", () => {
@@ -64,6 +65,27 @@ describe("@scorel/protocol", () => {
 
     // @ts-expect-error list_sessions must not return send_message response data.
     okResponse(request, { userEventId: asEventId("evt_user"), assistantEventId: asEventId("evt_assistant") });
+  });
+
+  it("supports structured system reminder content blocks", () => {
+    const blocks = [
+      { type: "text", text: "hello" },
+      {
+        type: "system_reminder",
+        kind: "message_ref",
+        origin: "system",
+        text: "snip.userMessageId: u_12345678",
+        visibility: "model",
+        scope: "message",
+        data: { userMessageId: "u_12345678" },
+      },
+    ] satisfies ContentBlock[];
+
+    expect(blocks[1]).toMatchObject({
+      type: "system_reminder",
+      kind: "message_ref",
+      visibility: "model",
+    });
   });
 
   it("supports exhaustive event handling", () => {
@@ -387,7 +409,7 @@ describe("@scorel/protocol", () => {
     const meta: SessionMeta = { projectId: asProjectId("prj_repo") };
     const event: SessionHeaderEvent = {
       type: "session_header",
-      protocolVersion: 4,
+      protocolVersion: 5,
       id: asEventId("evt_header"),
       parentId: null,
       seq: asSeq(0),

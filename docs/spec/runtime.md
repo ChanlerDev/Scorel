@@ -174,15 +174,15 @@ Steer message persist 为**独立 PersistentEvent**（role = "user"，`meta.sour
 
 | 前面有 tool_result | 行为 |
 |---|---|
-| ✅ 有 | `merge_prev` — 合入前一条 tool_result content 末尾，用 `<system-reminder>` 包裹 |
+| ✅ 有 | `merge_prev` — 合入前一条 tool_result content 末尾，内容为结构化 `system_reminder` block |
 | ❌ 没有（idle 状态） | `include` — 作为独立 user message |
 
-LLM 最终看到的（工具循环中）：
+Provider lowering 后 LLM 最终看到的（工具循环中）：
 ```
 tool_result: "文件内容...\n\n<system-reminder>\n别改了，直接跑测试\n</system-reminder>"
 ```
 
-LLM 最终看到的（idle 时）：
+Provider lowering 后 LLM 最终看到的（idle 时）：
 ```
 user: "别改了，直接跑测试"
 ```

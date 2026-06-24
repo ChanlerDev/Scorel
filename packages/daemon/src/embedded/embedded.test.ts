@@ -2348,8 +2348,12 @@ apiKey = "secret"
     ]);
     expect(events.find((event) => event.type === "harness_item")?.item?.kind).toBe("skill_listing");
     expect(providerTurns[0]?.context[0]?.content[0]).toEqual({
-      type: "text",
-      text: "<system-reminder>\nThe following skills are available for use with the Skill tool:\n\n- verify: verify repo\n</system-reminder>",
+      type: "system_reminder",
+      kind: "skill_listing",
+      origin: "system",
+      text: "The following skills are available for use with the Skill tool:\n\n- verify: verify repo",
+      visibility: "model",
+      scope: "session",
     });
     expect(providerTurns[0]?.tools.map((tool) => tool.name)).toContain("Skill");
   });

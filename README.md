@@ -206,7 +206,7 @@ Session 是 append-only JSONL。Host 是唯一 writer，Entry 不直接写会话
 一次会话里会写入这些事件：
 
 - `instruction_snapshot`：Session 初始化时冻结的系统提示词来源。
-- `harness_item`：系统注入给模型的上下文，例如 memory、skill listing、steer。
+- `harness_item`：运行中或 session 级注入给模型的上下文，例如 memory、skill listing、steer；进入模型前会转成结构化 `system_reminder` block。
 - `user_message`：用户输入。
 - `assistant_message`：模型输出。
 - `tool_result`：工具执行结果。
@@ -215,7 +215,9 @@ Session 是 append-only JSONL。Host 是唯一 writer，Entry 不直接写会话
 - `queue_update`：follow-up / steer 队列状态。
 - `skill_index_snapshot` / `skill_index_delta`：Skill 路由表。
 
-JSONL 是恢复会话的事实来源。`buildContext()` 从事件树构造下一轮 LLM messages；遇到 `compact` 时，会用 compact summary 替换更早上下文，并最多保留最近 8 条从 `user_message`、`compact` 或带 `tool_call` 的 `assistant_message` 边界开始的原始 conversation events；遇到 `context_control operation="hide_user_turn"` 时，会从未来模型上下文中过滤对应 user turn span。UI 则从同一条事件流投影 transcript、工具块、运行状态和队列状态。
+JSONL 是恢复会话的事实来源。`buildContext()` 从事件树构造下一轮 canonical LLM messages；遇到 `compact` 时，会用 `system_reminder kind="compact_summary"` 替换更早上下文，并最多保留最近 8 条从 `user_message`、`compact` 或带 `tool_call` 的 `assistant_message` 边界开始的原始 conversation events；遇到 `context_control operation="hide_user_turn"` 时，会从未来模型上下文中过滤对应 user turn span。UI 则从同一条事件流投影 transcript、工具块、运行状态和队列状态。
+
+`system_reminder` 是结构化 content block，不是 JSONL 事件类型，也不是 provider-level system prompt。它可以作为 user message 的 model-only sidecar（例如当前 turn 信息、`snip.userMessageId`、用户引用），也可以由 `harness_item` / `compact` 在 `buildContext()` 时产生。Provider adapter 最后才把它 lower 成 `<system-reminder>...</system-reminder>` 文本；GUI / WebUI / CLI 只按 block type 和 `visibility` 决定展示，不解析 XML。
 
 这个设计的重点不是“保存聊天记录”，而是让 Agent 的输入、输出、工具调用、控制事件和恢复状态都落在同一条可检查的链路里。
 
@@ -258,7 +260,7 @@ Memory 的链路分三段：
 
 Auto compact 是当前 session 的上下文管理，不是长期 memory。Host 在每轮新用户消息写入前估算 context，默认达到模型窗口 80% 时追加 `compact` 事件。`compact` 优先使用后台维护的 session memory；如果 session memory 不存在或关闭，会降级到 foreground compact。后台 session memory 正在更新时，Host 最多等待 5 秒，然后继续执行，不让用户 turn 无限等待。
 
-`snip` 是另一种当前 session 的上下文管理：Host 创建每条 `user_message` 时会持久写入一个 model-only 的短 `snip.userMessageId`，UI 不展示，但模型能用它通过 Host 注册的 `snip` 工具请求隐藏其中一个已完成 user turn。因为这个 id 随消息创建时固定下来，后续 `buildContext()` replay 不会动态改写历史 user message，也不会破坏 prompt cache 前缀。Host 会校验目标 `user_message` 在当前 active path 上，并 append `context_control` 事件；原始 JSONL 不删除、不重写，只是后续 `buildContext()` 不再把该 span 放进模型输入。
+`snip` 是另一种当前 session 的上下文管理：Host 创建每条 `user_message` 时会持久写入一个 model-only 的 `system_reminder kind="message_ref"`，内容包含短 `snip.userMessageId`。UI 不展示，但模型能用它通过 Host 注册的 `snip` 工具请求隐藏其中一个已完成 user turn。因为这个 id 随消息创建时固定下来，后续 `buildContext()` replay 不会动态改写历史 user message，也不会破坏 prompt cache 前缀。Host 会校验目标 `user_message` 在当前 active path 上，并 append `context_control` 事件；原始 JSONL 不删除、不重写，只是后续 `buildContext()` 不再把该 span 放进模型输入。
 
 Session memory 写在：
 

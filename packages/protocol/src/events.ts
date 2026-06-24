@@ -184,7 +184,7 @@ export type PersistentEventBase = {
 
 export type SessionHeaderEvent = PersistentEventBase & {
   type: "session_header";
-  protocolVersion: 4;
+  protocolVersion: 5;
   meta: SessionMeta;
 };
 

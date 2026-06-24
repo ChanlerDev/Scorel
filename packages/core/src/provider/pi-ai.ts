@@ -17,6 +17,7 @@ import type {
   ContentBlock,
   ScorelMessage,
   StopReason,
+  SystemReminderContentBlock,
   ToolCallContentBlock,
   ToolResultContentBlock,
   Usage,
@@ -24,6 +25,7 @@ import type {
 
 import type { BuiltinPiAiModelConfig, CustomPiAiApi, CustomPiAiModelConfig } from "../config/index.js";
 import type { RuntimeProvider } from "../runtime/index.js";
+import { renderSystemReminder } from "../reminders/index.js";
 import type { AgentTool } from "../tools/index.js";
 
 export type PiAiProviderOptions = {
@@ -142,6 +144,9 @@ const toPiAssistantBlock = (block: ContentBlock): Array<TextContent | ThinkingCo
   if (block.type === "text") {
     return [{ type: "text", text: block.text }];
   }
+  if (block.type === "system_reminder") {
+    return [{ type: "text", text: renderSystemReminder(block) }];
+  }
   if (block.type === "thinking") {
     return [{ type: "thinking", thinking: block.text }];
   }
@@ -185,20 +190,41 @@ const toPiTool = (tool: AgentTool): Tool => ({
 });
 
 const textContent = (message: ScorelMessage): string =>
-  message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+  message.content.flatMap((block) => {
+    if (block.type === "text") {
+      return [block.text];
+    }
+    if (block.type === "system_reminder") {
+      return [renderSystemReminder(block)];
+    }
+    return [];
+  }).join("\n");
 
 const toolResultText = (result: ToolResultContentBlock["result"]): string => {
   if (typeof result === "object" && result !== null && "content" in result) {
     const content = (result as { content?: unknown }).content;
     if (Array.isArray(content)) {
       return content
-        .filter((block): block is { type: "text"; text: string } => block?.type === "text" && typeof block.text === "string")
-        .map((block) => block.text)
+        .flatMap((block): string[] => {
+          if (block?.type === "text" && typeof block.text === "string") {
+            return [block.text];
+          }
+          if (isSystemReminderContentBlock(block)) {
+            return [renderSystemReminder(block)];
+          }
+          return [];
+        })
         .join("\n");
     }
   }
   return JSON.stringify(result);
 };
+
+const isSystemReminderContentBlock = (value: unknown): value is SystemReminderContentBlock =>
+  typeof value === "object" &&
+  value !== null &&
+  (value as { type?: unknown }).type === "system_reminder" &&
+  typeof (value as { text?: unknown }).text === "string";
 
 const stringMeta = (message: ScorelMessage, key: string): string | undefined => {
   const value = message.meta?.[key];

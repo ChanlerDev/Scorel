@@ -171,6 +171,58 @@ describe("createPiAiProvider", () => {
     }
   });
 
+  it("lowers structured system reminder blocks to provider text", async () => {
+    const server = await startOpenAiCompletionsServer();
+    const provider = createPiAiProvider({
+      model: resolvePiAiModel({
+        type: "custom",
+        provider: "scorel-test",
+        id: "gpt-5.4-mini",
+        baseUrl: server.baseUrl,
+        api: "openai-completions",
+        apiKey: "chanleramp",
+        contextWindow: 400000,
+        maxTokens: 128000,
+        reasoning: true,
+      }),
+      apiKey: "chanleramp",
+    });
+
+    try {
+      await collectProvider(provider.streamTurn({
+        context: [{
+          role: "user",
+          content: [
+            { type: "text", text: "read README" },
+            {
+              type: "system_reminder",
+              kind: "message_ref",
+              origin: "system",
+              text: "snip.userMessageId: u_12345678",
+              visibility: "model",
+              scope: "message",
+            },
+          ],
+        }],
+        systemPrompt: undefined,
+        tools: [readTool],
+        signal: new AbortController().signal,
+        options: {},
+      }));
+
+      expect(server.requests[0]).toMatchObject({
+        messages: [
+          {
+            role: "user",
+            content: "read README\n<system-reminder>\nsnip.userMessageId: u_12345678\n</system-reminder>",
+          },
+        ],
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
   it("exposes snip tool parameters to the provider", async () => {
     const server = await startOpenAiCompletionsServer();
     const provider = createPiAiProvider({

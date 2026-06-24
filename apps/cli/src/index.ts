@@ -1052,8 +1052,18 @@ class AttachEventRenderer {
 
 const blocksToText = (blocks: ContentBlock[]): string =>
   blocks
-    .filter((block): block is Extract<ContentBlock, { type: "text" }> => block.type === "text")
-    .map((block) => block.text)
+    .flatMap((block): string[] => {
+      if (block.type === "text") {
+        if (block.visibility === "model") {
+          return [];
+        }
+        return [block.text];
+      }
+      if (block.type === "system_reminder" && block.visibility !== "model") {
+        return [block.text];
+      }
+      return [];
+    })
     .join("");
 
 const isCliEntrypoint = async (): Promise<boolean> => {

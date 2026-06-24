@@ -340,7 +340,7 @@ interface EventTypeHandler<T extends PersistentEvent> {
 ```typescript
 type LlmAction =
   | { action: "include"; message: ScorelMessage }       // 正常包含为一条消息
-  | { action: "merge_prev"; content: string }           // 合入前一条消息（<system-reminder> 包裹）
+  | { action: "merge_prev"; reminder: SystemReminderContentBlock } // 合入前一条 tool_result
   | { action: "skip" }                                  // 不包含在 LLM context 中
   | { action: "barrier"; summary: ScorelMessage }       // 替换上方所有消息，注入 summary，停止遍历
 ```
@@ -350,7 +350,7 @@ type LlmAction =
 | Event 类型 | convertToLlm | convertToDisplay |
 |---|---|---|
 | `message`（user/assistant/tool_result） | `include` — 原样包含 | 正常气泡 |
-| `message`（meta.source = "steer"） | `merge_prev` — 合入前一条 tool_result 的 `<system-reminder>`；无 tool_result 则 `include` 作为独立 user msg | 内联小字提示 |
+| `harness_item`（steer / runtime guidance） | `merge_prev` — 合入前一条 tool_result 的 `system_reminder` block；无 tool_result 则作为独立 user msg | 内联小字提示 |
 | `message`（meta.source = "followUp"） | 同 steer | 内联 "追加任务" 标记 |
 | `rewind` | `skip` | "回退到此处" 标记 |
 | `branch` | `skip` | "切换分支" 标记 |
@@ -397,23 +397,40 @@ function buildContext(tree: SessionTree, leafId: EventId): ScorelMessage[] {
 
 ---
 
-## 7. `<system-reminder>` 通用 Harness 注入机制
+## 7. `system_reminder` 通用 Harness 注入机制
 
 ### 7.1 用途
 
-`<system-reminder>` 是 Scorel harness 向 LLM 传递旁路信息的统一格式。所有非用户直接输入、但需要 LLM 看到的系统级内容都用此标签包裹。
+`system_reminder` 是 Scorel harness 向 LLM 传递旁路信息的结构化 content block。所有非用户直接输入、但需要 LLM 看到的系统级内容都先表达成结构化 block；`<system-reminder>` 只是 provider adapter 最后生成的传输 envelope。
 
 ### 7.2 使用场景
 
 | 场景 | 注入内容 | 注入位置 |
 |------|---------|---------|
 | Steer（用户中途插话） | 用户的引导文字 | merge 进前一条 tool_result |
-| Hook 上下文（UserPromptSubmit 等） | hook 产出 | user message / tool_result 末尾 |
+| User message sidecar | 当前 turn 时间、用户输入引用、`snip.userMessageId` | 同一条 user message 的 `content` |
+| Hook 上下文（UserPromptSubmit 等） | hook 产出 | user message / tool_result |
 | Memory 召回 | 记忆内容 | tool_result 末尾 |
 | 系统提醒（超时、配额等） | 通知文本 | tool_result 末尾 |
 | Channel 来源标注 | 来自哪个群/频道 | user message 内 |
 
-### 7.3 格式
+### 7.3 Canonical 格式
+
+```typescript
+interface SystemReminderContentBlock {
+  type: "system_reminder";
+  kind: SystemReminderKind;
+  origin: "system" | "user" | "tool" | "skill";
+  text: string;
+  visibility: "model" | "display" | "compact";
+  scope: "message" | "turn" | "next_model_call" | "session";
+  data?: Record<string, unknown>;
+}
+```
+
+### 7.4 Provider lowering
+
+Provider adapter 把 canonical block lower 成当前模型输入格式。默认 text envelope 是：
 
 ```xml
 <system-reminder>
@@ -421,12 +438,13 @@ function buildContext(tree: SessionTree, leafId: EventId): ScorelMessage[] {
 </system-reminder>
 ```
 
-### 7.4 注入规则
+### 7.5 注入规则
 
-- **工具循环中**：merge 进最近一条 tool_result 的 content 末尾
-- **无 tool_result 时（idle / turn 结束后）**：作为独立 user message（或附加到 user message 内）
+- **跟随 user message**：作为同一条 `user_message.content` 的 sidecar block，创建时固定，保持 prompt-cache 稳定。
+- **工具循环中**：merge 进最近一条 tool_result 的 content 末尾；provider 不支持时 fallback 为紧邻 tool result batch 的 user message。
+- **无 tool_result 时（idle / turn 结束后）**：作为独立 user message。
 
-### 7.5 LLM System Prompt 声明
+### 7.6 LLM System Prompt 声明
 
 LLM 在 system prompt 中被告知：
 

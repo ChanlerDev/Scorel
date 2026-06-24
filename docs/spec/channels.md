@@ -94,7 +94,7 @@ running default  -> follow_up queue
 
 ## 6. Source Reminder
 
-每个 IM turn 会在用户消息前注入 hidden channel reminder：
+每个 IM turn 会在用户消息前注入 hidden `harness_item kind="channel_context"`。`buildContext()` 会把它转成 `system_reminder` block，provider adapter 最后 lower 成类似下面的模型输入文本：
 
 ```xml
 <system-reminder>

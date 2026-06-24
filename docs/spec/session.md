@@ -198,8 +198,8 @@ function buildContext(tree: SessionTree, leafId: EventId): ScorelMessage[] {
         messages.unshift(result.message);
         break;
       case "merge_prev":
-        // 合入 messages 中最后一条 tool_result 的 content 末尾（<system-reminder> 包裹）
-        mergeIntoPrevToolResult(messages, result.content);
+        // 合入 messages 中最后一条 tool_result 的 content 末尾（system_reminder block）
+        mergeIntoPrevToolResult(messages, result.reminder);
         break;
       case "skip":
         break;
@@ -216,7 +216,7 @@ function buildContext(tree: SessionTree, leafId: EventId): ScorelMessage[] {
 
 各事件类型的 LlmAction：
 - `message`（普通）→ `include`
-- `message`（meta.source = "steer"/"followUp"）→ `merge_prev`（前面有 tool_result 时）或 `include`（没有时）
+- `harness_item` / runtime guidance → `merge_prev`（前面有 tool_result 时）或独立 user message，内容为结构化 `system_reminder` block
 - `compact` → `barrier`（注入 summary，停止遍历）
 - `rewind` / `branch` / `channel_inject` / `session_info` / `custom` → `skip`
 - `custom_message` → `include`
@@ -367,7 +367,7 @@ if (estimateTokens(compactCandidates) > threshold) {
 - `rewind` / `branch` / `channel_inject` / `session_info` / `custom` → `skip`（不进入 LLM）
 - `compact` → `barrier`（注入 summary，停止向上）
 - `context_control` → `filter`（从未来 LLM context 排除指定 user turn span）
-- `message`（meta.source = "steer"）→ `merge_prev`（合入前一条 tool_result 的 `<system-reminder>`）
+- `harness_item` / runtime guidance → `merge_prev` 或独立 user message，内容为结构化 `system_reminder` block
 
 换言之，应用层能玩的花样很多，LLM 始终只看到 handler 声明要暴露的内容。
 

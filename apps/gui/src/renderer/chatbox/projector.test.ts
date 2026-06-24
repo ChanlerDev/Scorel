@@ -20,9 +20,12 @@ describe("chatbox projector", () => {
           content: [
             { type: "text", text: "hello" },
             {
-              type: "text",
-              text: "<system-reminder>\nsnip.userMessageId: u_hidden\n</system-reminder>",
+              type: "system_reminder",
+              kind: "message_ref",
+              origin: "system",
+              text: "snip.userMessageId: u_hidden",
               visibility: "model",
+              scope: "message",
             },
           ] satisfies ContentBlock[],
         },

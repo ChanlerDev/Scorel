@@ -12,12 +12,21 @@ import {
   type QueueItem,
   type QueueName,
   type ScorelMessage,
+  type SystemReminderKind,
+  type SystemReminderScope,
+  type SystemReminderVisibility,
   type SkillIndexEntry,
-  type ToolResultContentBlock,
   type Seq,
   type SessionId,
   type SessionMeta,
 } from "@scorel/protocol";
+
+import {
+  appendSystemReminderToToolResult,
+  cloneSystemReminderBlock,
+  createSystemReminderBlock,
+  systemReminderMessage,
+} from "../reminders/index.js";
 
 type MessagePersistentEvent = Extract<PersistentEvent, { message: ScorelMessage }>;
 type CompactPersistentEvent = Extract<PersistentEvent, { type: "compact" }>;
@@ -640,68 +649,89 @@ const isSkillIndexEntry = (value: unknown): value is SkillIndexEntry =>
   typeof value.priority === "number";
 
 const appendHarnessItemToContext = (messages: ScorelMessage[], event: HarnessItemEvent): void => {
-  const reminder = renderSystemReminder(event.item.content);
+  const reminder = createSystemReminderBlock({
+    kind: reminderKindFromHarness(event.item.kind),
+    origin: event.item.origin,
+    text: event.item.content,
+    visibility: reminderVisibilityFromHarness(event.item.visibility),
+    scope: reminderScopeFromHarness(event.item.kind),
+    ...(event.item.data ? { data: event.item.data } : {}),
+  });
   const last = messages.at(-1);
-  if (last?.role === "tool_result" && appendReminderToToolResult(last, reminder)) {
+  if (last?.role === "tool_result" && appendSystemReminderToToolResult(last, reminder)) {
     return;
   }
-  messages.push({
-    role: "user",
-    content: [{ type: "text", text: reminder }],
-    meta: {
-      source: "harness_item",
-      harnessKind: event.item.kind,
-      harnessOrigin: event.item.origin,
-    },
-  });
+  messages.push(systemReminderMessage(reminder, {
+    source: "harness_item",
+    harnessKind: event.item.kind,
+    harnessOrigin: event.item.origin,
+  }));
 };
-
-const appendReminderToToolResult = (message: ScorelMessage, reminder: string): boolean => {
-  for (let i = message.content.length - 1; i >= 0; i -= 1) {
-    const block = message.content[i];
-    if (block?.type !== "tool_result" || !isToolResultWithContent(block.result)) {
-      continue;
-    }
-    const mergedResult = {
-      ...block.result,
-      content: [...block.result.content, { type: "text" as const, text: `\n\n${reminder}` }],
-    };
-    message.content[i] = {
-      ...block,
-      result: mergedResult,
-    } satisfies ToolResultContentBlock;
-    return true;
-  }
-  return false;
-};
-
-const isToolResultWithContent = (value: unknown): value is { content: unknown[] } =>
-  isRecord(value) && Array.isArray(value.content);
-
-const renderSystemReminder = (content: string): string =>
-  `<system-reminder>\n${content}\n</system-reminder>`;
 
 const compactSummaryMessage = (event: CompactPersistentEvent): ScorelMessage => ({
   role: "user",
-  content: [{
-    type: "text",
-    text: renderSystemReminder([
+  content: [createSystemReminderBlock({
+    kind: "compact_summary",
+    origin: "system",
+    text: [
       "Earlier session context has been compacted.",
       "",
       event.summary.trim(),
       "",
       "Use this summary as continuity context. Verify current repository facts before acting.",
-    ].join("\n")),
-  }],
+    ].join("\n"),
+    visibility: "model",
+    scope: "session",
+  })],
   meta: {
     source: "compact",
     compactedThrough: event.compactedThrough,
   },
 });
 
+const reminderKindFromHarness = (kind: HarnessItemEvent["item"]["kind"]): SystemReminderKind => {
+  if (
+    kind === "attachment" ||
+    kind === "skill_listing" ||
+    kind === "skill_delta" ||
+    kind === "memory" ||
+    kind === "channel_context" ||
+    kind === "steer" ||
+    kind === "runtime_notice"
+  ) {
+    return kind;
+  }
+  if (kind === "date_change") {
+    return "time";
+  }
+  return "runtime_notice";
+};
+
+const reminderVisibilityFromHarness = (
+  visibility: HarnessItemEvent["item"]["visibility"],
+): SystemReminderVisibility => {
+  if (visibility === "hidden") {
+    return "model";
+  }
+  return visibility;
+};
+
+const reminderScopeFromHarness = (kind: HarnessItemEvent["item"]["kind"]): SystemReminderScope => {
+  if (kind === "steer" || kind === "skill_delta" || kind === "runtime_notice") {
+    return "next_model_call";
+  }
+  if (kind === "channel_context" || kind === "attachment" || kind === "date_change") {
+    return "turn";
+  }
+  return "session";
+};
+
 const cloneMessage = (message: ScorelMessage): ScorelMessage => ({
   ...message,
   content: message.content.map((block) => {
+    if (block.type === "system_reminder") {
+      return cloneSystemReminderBlock(block);
+    }
     if (block.type !== "tool_result" || !isRecord(block.result)) {
       return { ...block };
     }

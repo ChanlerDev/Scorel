@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Protocol version incremented to 5 with structured `system_reminder` content blocks.
+
 ## 0.0.6 - 2026-06-23
 
 ### Highlights

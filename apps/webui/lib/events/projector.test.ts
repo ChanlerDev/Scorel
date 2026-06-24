@@ -241,9 +241,12 @@ describe("projector", () => {
     reset();
     const event = userMessage("evt_user_1", "hello") as Extract<ScorelEvent, { type: "user_message" }>;
     event.message.content.push({
-      type: "text",
-      text: "<system-reminder>\nsnip.userMessageId: u_hidden\n</system-reminder>",
+      type: "system_reminder",
+      kind: "message_ref",
+      origin: "system",
+      text: "snip.userMessageId: u_hidden",
       visibility: "model",
+      scope: "message",
     });
     const s = projectEvent(emptyProjectorState(), event);
 
@@ -465,7 +468,7 @@ describe("projector", () => {
       sessionId: SESSION_ID,
       clientId: CLIENT_ID,
       ts: 0,
-      protocolVersion: 4,
+      protocolVersion: 5,
       meta: { projectId: asProjectId("prj_test") },
     });
     expect(s.turns).toEqual([]);

@@ -26,11 +26,41 @@ export type ToolResultContentBlock = {
   isError?: boolean;
 };
 
+export type SystemReminderKind =
+  | "attachment"
+  | "time"
+  | "message_ref"
+  | "skill_listing"
+  | "skill_delta"
+  | "memory"
+  | "channel_context"
+  | "steer"
+  | "todo_nudge"
+  | "runtime_notice"
+  | "compact_summary";
+
+export type SystemReminderOrigin = "system" | "user" | "tool" | "skill";
+
+export type SystemReminderVisibility = "model" | "display" | "compact";
+
+export type SystemReminderScope = "message" | "turn" | "next_model_call" | "session";
+
+export type SystemReminderContentBlock = {
+  type: "system_reminder";
+  kind: SystemReminderKind;
+  origin: SystemReminderOrigin;
+  text: string;
+  visibility: SystemReminderVisibility;
+  scope: SystemReminderScope;
+  data?: Record<string, unknown>;
+};
+
 export type ContentBlock =
   | TextContentBlock
   | ThinkingContentBlock
   | ToolCallContentBlock
-  | ToolResultContentBlock;
+  | ToolResultContentBlock
+  | SystemReminderContentBlock;
 
 export type Usage = {
   inputTokens?: number;

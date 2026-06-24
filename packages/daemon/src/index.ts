@@ -22,6 +22,7 @@ import {
   createSendChannelMessageTool,
   createSkillTool,
   createSnipTool,
+  createSystemReminderBlock,
   diffSkillIndex,
   createPiAiProvider,
   createSession,
@@ -3494,9 +3495,14 @@ const normalizeContent = (content: string | ScorelMessage["content"]): ScorelMes
   typeof content === "string" ? [{ type: "text", text: content }] : content;
 
 const snipUserMessageIdBlock = (userEventId: EventId): ScorelMessage["content"][number] => ({
-  type: "text",
-  text: `<system-reminder>\nsnip.userMessageId: ${snipUserMessageAlias(userEventId)}\n</system-reminder>`,
-  visibility: "model",
+  ...createSystemReminderBlock({
+    kind: "message_ref",
+    origin: "system",
+    text: `snip.userMessageId: ${snipUserMessageAlias(userEventId)}`,
+    visibility: "model",
+    scope: "message",
+    data: { userMessageId: snipUserMessageAlias(userEventId) },
+  }),
 });
 
 const inputText = (message: ScorelMessage): string =>
@@ -3526,6 +3532,9 @@ const messageText = (message: ScorelMessage): string => {
       }
       if (block.type === "tool_result") {
         return `[tool_result:${block.toolName}] ${JSON.stringify(block.result)}`;
+      }
+      if (block.type === "system_reminder") {
+        return `[system_reminder:${block.kind}] ${block.text}`;
       }
       return "";
     })

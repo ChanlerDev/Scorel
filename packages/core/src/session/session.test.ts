@@ -316,7 +316,14 @@ describe("session core", () => {
       { role: "user", content: [{ type: "text", text: "hello" }] },
       {
         role: "user",
-        content: [{ type: "text", text: "<system-reminder>\nfocus on tests\n</system-reminder>" }],
+        content: [{
+          type: "system_reminder",
+          kind: "steer",
+          origin: "user",
+          text: "focus on tests",
+          visibility: "display",
+          scope: "next_model_call",
+        }],
         meta: {
           source: "harness_item",
           harnessKind: "steer",
@@ -353,7 +360,14 @@ describe("session core", () => {
     expect(toolResult.result).toEqual({
       content: [
         { type: "text", text: "file content" },
-        { type: "text", text: "\n\n<system-reminder>\ndo not edit yet\n</system-reminder>" },
+        {
+          type: "system_reminder",
+          kind: "steer",
+          origin: "user",
+          text: "do not edit yet",
+          visibility: "display",
+          scope: "next_model_call",
+        },
       ],
     });
     const original = session.tree.get(asEventId("evt_2"))?.event;
@@ -415,8 +429,12 @@ describe("session core", () => {
       {
         role: "user",
         content: [{
-          type: "text",
-          text: "<system-reminder>\nEarlier session context has been compacted.\n\nSummary of old context.\n\nUse this summary as continuity context. Verify current repository facts before acting.\n</system-reminder>",
+          type: "system_reminder",
+          kind: "compact_summary",
+          origin: "system",
+          text: "Earlier session context has been compacted.\n\nSummary of old context.\n\nUse this summary as continuity context. Verify current repository facts before acting.",
+          visibility: "model",
+          scope: "session",
         }],
         meta: {
           source: "compact",
@@ -432,6 +450,63 @@ describe("session core", () => {
     const loaded = await loadSession({ sessionsDir, sessionId });
     expect(loaded.tree.getPath(asEventId("evt_5"))).toEqual(["evt_1", "evt_2", "evt_3", "evt_4", "evt_5"]);
     expect(buildContext(loaded.tree, asEventId("evt_5"))).toHaveLength(5);
+  });
+
+  it("keeps message-attached system reminders with their user message", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta,
+      },
+    });
+
+    await session.append({
+      type: "user_message",
+      id: asEventId("evt_1"),
+      parentId: null,
+      seq: asSeq(1),
+      sessionId,
+      clientId,
+      ts: 1_001,
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "hello" },
+          {
+            type: "system_reminder",
+            kind: "message_ref",
+            origin: "system",
+            text: "snip.userMessageId: u_12345678",
+            visibility: "model",
+            scope: "message",
+            data: { userMessageId: "u_12345678" },
+          },
+        ],
+      },
+    });
+
+    expect(buildContext(session.tree, asEventId("evt_1"))).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "hello" },
+          {
+            type: "system_reminder",
+            kind: "message_ref",
+            origin: "system",
+            text: "snip.userMessageId: u_12345678",
+            visibility: "model",
+            scope: "message",
+            data: { userMessageId: "u_12345678" },
+          },
+        ],
+      },
+    ]);
   });
 
   it("retains recent events from a safe boundary before the compact barrier", async () => {
@@ -467,7 +542,11 @@ describe("session core", () => {
       "user",
     ]);
     expect(context.map((message) => message.content[0])).toEqual([
-      expect.objectContaining({ type: "text", text: expect.stringContaining("Summary of older context.") }),
+      expect.objectContaining({
+        type: "system_reminder",
+        kind: "compact_summary",
+        text: expect.stringContaining("Summary of older context."),
+      }),
       { type: "text", text: "latest user before compact" },
       { type: "text", text: "latest assistant before compact" },
       expect.objectContaining({ type: "tool_result" }),
@@ -508,7 +587,11 @@ describe("session core", () => {
       "user",
     ]);
     expect(context.map((message) => message.content[0])).toEqual([
-      expect.objectContaining({ type: "text", text: expect.stringContaining("Summary of long task.") }),
+      expect.objectContaining({
+        type: "system_reminder",
+        kind: "compact_summary",
+        text: expect.stringContaining("Summary of long task."),
+      }),
       expect.objectContaining({ type: "tool_call", toolCallId: "call_2" }),
       expect.objectContaining({ type: "tool_result" }),
       { type: "text", text: "final answer after tool loop" },
@@ -768,7 +851,7 @@ describe("session core", () => {
     await expect(
       session.append({
         type: "session_header",
-        protocolVersion: 4,
+        protocolVersion: 5,
         id: asEventId("evt_header"),
         parentId: asEventId("evt_1"),
         seq: asSeq(2),
