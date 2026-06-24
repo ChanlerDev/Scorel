@@ -1,6 +1,6 @@
 {
   "name": "@chanlerdev/scorel",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "Replayable, recoverable, remotely controllable AI Agent workspace.",
   "type": "module",
   "packageManager": "pnpm@11.1.2",

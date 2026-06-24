@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 0.0.7 - 2026-06-24
+
+### Highlights
+
+- Introduce structured system_reminder content blocks across CLI, GUI, WebUI, and daemon, replacing ad-hoc XML strings.
+- Bundle GUI runtime dependencies for self-contained execution.
+
+### Changes
+
+- System reminders now use structured `system_reminder` content blocks with origin, visibility, and scope, enabling consistent handling across all interfaces.
+- GUI's CLI runtime is now bundled with all dependencies, eliminating the need for node_modules.
+
+### Fixes
+
+- Snip tool result no longer exposes internal span IDs or event counts to the model, keeping output concise.
+
+### Breaking Changes
+
+- Protocol version incremented from 4 to 5; session headers must now carry version 5.
+
+### Verification
+
+- All existing tests pass, with new tests covering system_reminder lowering, message-attached reminders, projector filtering, and bundled runtime integrity.
+
 - Protocol version incremented to 5 with structured `system_reminder` content blocks.
 - Snip tool results now return a concise model-visible confirmation while keeping internal span details out of provider context.
 

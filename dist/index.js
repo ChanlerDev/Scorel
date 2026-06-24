@@ -2762,12 +2762,7 @@ var init_tools = __esm({
         return {
           content: [{
             type: "text",
-            text: [
-              `Snipped user turn ${result.anchorUserEventId}.`,
-              `Hidden through ${result.throughEventId}.`,
-              `${result.hiddenEventCount} event(s) will be omitted from future model context.`,
-              "Original session JSONL remains unchanged."
-            ].join(" ")
+            text: "Snipped the selected user turn. It will be omitted from future model context."
           }],
           details: result
         };
@@ -3419,15 +3414,65 @@ var init_memory = __esm({
   }
 });
 
+// packages/core/src/reminders/index.ts
+var createSystemReminderBlock, renderSystemReminderText, renderSystemReminder, systemReminderMessage, appendSystemReminderToToolResult, cloneSystemReminderBlock, isToolResultWithContent;
+var init_reminders = __esm({
+  "packages/core/src/reminders/index.ts"() {
+    "use strict";
+    createSystemReminderBlock = (input) => ({
+      type: "system_reminder",
+      kind: input.kind,
+      origin: input.origin,
+      text: input.text,
+      visibility: input.visibility,
+      scope: input.scope,
+      ...input.data ? { data: { ...input.data } } : {}
+    });
+    renderSystemReminderText = (text) => `<system-reminder>
+${text}
+</system-reminder>`;
+    renderSystemReminder = (input) => renderSystemReminderText(typeof input === "string" ? input : input.text);
+    systemReminderMessage = (block, meta) => ({
+      role: "user",
+      content: [cloneSystemReminderBlock(block)],
+      ...meta ? { meta: { ...meta } } : {}
+    });
+    appendSystemReminderToToolResult = (message, block) => {
+      for (let i = message.content.length - 1; i >= 0; i -= 1) {
+        const candidate = message.content[i];
+        if (candidate?.type !== "tool_result" || !isToolResultWithContent(candidate.result)) {
+          continue;
+        }
+        const mergedResult = {
+          ...candidate.result,
+          content: [...candidate.result.content, cloneSystemReminderBlock(block)]
+        };
+        message.content[i] = {
+          ...candidate,
+          result: mergedResult
+        };
+        return true;
+      }
+      return false;
+    };
+    cloneSystemReminderBlock = (block) => ({
+      ...block,
+      ...block.data ? { data: { ...block.data } } : {}
+    });
+    isToolResultWithContent = (value) => typeof value === "object" && value !== null && "content" in value && Array.isArray(value.content);
+  }
+});
+
 // packages/core/src/provider/pi-ai.ts
 import {
   getModels,
   streamSimple
 } from "@mariozechner/pi-ai";
-var DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW, DEFAULT_CUSTOM_MODEL_MAX_TOKENS, createPiAiProvider, resolvePiAiModel, toPiContext, toPiMessage, toPiAssistantBlock, fromPiAssistant, fromPiContentBlock, toPiTool, textContent, toolResultText, stringMeta, toPiStopReason, fromPiStopReason, fromPiUsage;
+var DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW, DEFAULT_CUSTOM_MODEL_MAX_TOKENS, createPiAiProvider, resolvePiAiModel, toPiContext, toPiMessage, toPiAssistantBlock, fromPiAssistant, fromPiContentBlock, toPiTool, textContent, toolResultText, isSystemReminderContentBlock, stringMeta, toPiStopReason, fromPiStopReason, fromPiUsage;
 var init_pi_ai = __esm({
   "packages/core/src/provider/pi-ai.ts"() {
     "use strict";
+    init_reminders();
     DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW = 2e5;
     DEFAULT_CUSTOM_MODEL_MAX_TOKENS = 64e3;
     createPiAiProvider = (options) => ({
@@ -3526,6 +3571,9 @@ var init_pi_ai = __esm({
       if (block.type === "text") {
         return [{ type: "text", text: block.text }];
       }
+      if (block.type === "system_reminder") {
+        return [{ type: "text", text: renderSystemReminder(block) }];
+      }
       if (block.type === "thinking") {
         return [{ type: "thinking", thinking: block.text }];
       }
@@ -3564,16 +3612,33 @@ var init_pi_ai = __esm({
       description: tool.description,
       parameters: tool.parameters
     });
-    textContent = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n");
+    textContent = (message) => message.content.flatMap((block) => {
+      if (block.type === "text") {
+        return [block.text];
+      }
+      if (block.type === "system_reminder") {
+        return [renderSystemReminder(block)];
+      }
+      return [];
+    }).join("\n");
     toolResultText = (result) => {
       if (typeof result === "object" && result !== null && "content" in result) {
         const content = result.content;
         if (Array.isArray(content)) {
-          return content.filter((block) => block?.type === "text" && typeof block.text === "string").map((block) => block.text).join("\n");
+          return content.flatMap((block) => {
+            if (block?.type === "text" && typeof block.text === "string") {
+              return [block.text];
+            }
+            if (isSystemReminderContentBlock(block)) {
+              return [renderSystemReminder(block)];
+            }
+            return [];
+          }).join("\n");
         }
       }
       return JSON.stringify(result);
     };
+    isSystemReminderContentBlock = (value) => typeof value === "object" && value !== null && value.type === "system_reminder" && typeof value.text === "string";
     stringMeta = (message, key) => {
       const value = message.meta?.[key];
       return typeof value === "string" ? value : void 0;
@@ -3855,11 +3920,12 @@ function assertTreeEvent(value) {
     throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
   }
 }
-var snipUserMessageAlias, SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, createSession, loadSession, buildContext, hiddenContextEventIds, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isContextControlEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, appendReminderToToolResult, isToolResultWithContent, renderSystemReminder, compactSummaryMessage, cloneMessage, isRecord8;
+var snipUserMessageAlias, SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, createSession, loadSession, buildContext, hiddenContextEventIds, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isContextControlEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, compactSummaryMessage, reminderKindFromHarness, reminderVisibilityFromHarness, reminderScopeFromHarness, cloneMessage, isRecord8;
 var init_session = __esm({
   "packages/core/src/session/index.ts"() {
     "use strict";
     init_src();
+    init_reminders();
     snipUserMessageAlias = (eventId) => `u_${createHash2("sha256").update(eventId).digest("hex").slice(0, 8)}`;
     SessionStoreError = class extends Error {
       code;
@@ -4214,65 +4280,74 @@ var init_session = __esm({
     );
     isSkillIndexEntry = (value) => isRecord8(value) && typeof value.name === "string" && typeof value.path === "string" && (value.scope === "user" || value.scope === "project" || value.scope === "extension") && typeof value.description === "string" && typeof value.mtimeMs === "number" && typeof value.size === "number" && typeof value.contentHash === "string" && typeof value.priority === "number";
     appendHarnessItemToContext = (messages, event) => {
-      const reminder = renderSystemReminder(event.item.content);
+      const reminder = createSystemReminderBlock({
+        kind: reminderKindFromHarness(event.item.kind),
+        origin: event.item.origin,
+        text: event.item.content,
+        visibility: reminderVisibilityFromHarness(event.item.visibility),
+        scope: reminderScopeFromHarness(event.item.kind),
+        ...event.item.data ? { data: event.item.data } : {}
+      });
       const last = messages.at(-1);
-      if (last?.role === "tool_result" && appendReminderToToolResult(last, reminder)) {
+      if (last?.role === "tool_result" && appendSystemReminderToToolResult(last, reminder)) {
         return;
       }
-      messages.push({
-        role: "user",
-        content: [{ type: "text", text: reminder }],
-        meta: {
-          source: "harness_item",
-          harnessKind: event.item.kind,
-          harnessOrigin: event.item.origin
-        }
-      });
+      messages.push(systemReminderMessage(reminder, {
+        source: "harness_item",
+        harnessKind: event.item.kind,
+        harnessOrigin: event.item.origin
+      }));
     };
-    appendReminderToToolResult = (message, reminder) => {
-      for (let i = message.content.length - 1; i >= 0; i -= 1) {
-        const block = message.content[i];
-        if (block?.type !== "tool_result" || !isToolResultWithContent(block.result)) {
-          continue;
-        }
-        const mergedResult = {
-          ...block.result,
-          content: [...block.result.content, { type: "text", text: `
-
-${reminder}` }]
-        };
-        message.content[i] = {
-          ...block,
-          result: mergedResult
-        };
-        return true;
-      }
-      return false;
-    };
-    isToolResultWithContent = (value) => isRecord8(value) && Array.isArray(value.content);
-    renderSystemReminder = (content) => `<system-reminder>
-${content}
-</system-reminder>`;
     compactSummaryMessage = (event) => ({
       role: "user",
-      content: [{
-        type: "text",
-        text: renderSystemReminder([
+      content: [createSystemReminderBlock({
+        kind: "compact_summary",
+        origin: "system",
+        text: [
           "Earlier session context has been compacted.",
           "",
           event.summary.trim(),
           "",
           "Use this summary as continuity context. Verify current repository facts before acting."
-        ].join("\n"))
-      }],
+        ].join("\n"),
+        visibility: "model",
+        scope: "session"
+      })],
       meta: {
         source: "compact",
         compactedThrough: event.compactedThrough
       }
     });
+    reminderKindFromHarness = (kind) => {
+      if (kind === "attachment" || kind === "skill_listing" || kind === "skill_delta" || kind === "memory" || kind === "channel_context" || kind === "steer" || kind === "runtime_notice") {
+        return kind;
+      }
+      if (kind === "date_change") {
+        return "time";
+      }
+      return "runtime_notice";
+    };
+    reminderVisibilityFromHarness = (visibility) => {
+      if (visibility === "hidden") {
+        return "model";
+      }
+      return visibility;
+    };
+    reminderScopeFromHarness = (kind) => {
+      if (kind === "steer" || kind === "skill_delta" || kind === "runtime_notice") {
+        return "next_model_call";
+      }
+      if (kind === "channel_context" || kind === "attachment" || kind === "date_change") {
+        return "turn";
+      }
+      return "session";
+    };
     cloneMessage = (message) => ({
       ...message,
       content: message.content.map((block) => {
+        if (block.type === "system_reminder") {
+          return cloneSystemReminderBlock(block);
+        }
         if (block.type !== "tool_result" || !isRecord8(block.result)) {
           return { ...block };
         }
@@ -4532,6 +4607,7 @@ var init_src3 = __esm({
     init_instructions();
     init_memory();
     init_pi_ai();
+    init_reminders();
     init_runtime();
     init_session();
     init_skills();
@@ -7711,11 +7787,14 @@ var init_src4 = __esm({
     countContentBlocks = (message, type) => message.content.filter((block) => block.type === type).length;
     normalizeContent = (content) => typeof content === "string" ? [{ type: "text", text: content }] : content;
     snipUserMessageIdBlock = (userEventId) => ({
-      type: "text",
-      text: `<system-reminder>
-snip.userMessageId: ${snipUserMessageAlias(userEventId)}
-</system-reminder>`,
-      visibility: "model"
+      ...createSystemReminderBlock({
+        kind: "message_ref",
+        origin: "system",
+        text: `snip.userMessageId: ${snipUserMessageAlias(userEventId)}`,
+        visibility: "model",
+        scope: "message",
+        data: { userMessageId: snipUserMessageAlias(userEventId) }
+      })
     });
     inputText = (message) => message.content.flatMap((block) => block.type === "text" && block.visibility !== "model" ? [block.text] : []).join("\n").trim();
     assistantText = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
@@ -7732,6 +7811,9 @@ snip.userMessageId: ${snipUserMessageAlias(userEventId)}
         }
         if (block.type === "tool_result") {
           return `[tool_result:${block.toolName}] ${JSON.stringify(block.result)}`;
+        }
+        if (block.type === "system_reminder") {
+          return `[system_reminder:${block.kind}] ${block.text}`;
         }
         return "";
       }).filter(Boolean).join("\n").trim();
@@ -10575,7 +10657,18 @@ ${text}
         this.#atLineStart = text.endsWith("\n");
       }
     };
-    blocksToText = (blocks) => blocks.filter((block) => block.type === "text").map((block) => block.text).join("");
+    blocksToText = (blocks) => blocks.flatMap((block) => {
+      if (block.type === "text") {
+        if (block.visibility === "model") {
+          return [];
+        }
+        return [block.text];
+      }
+      if (block.type === "system_reminder" && block.visibility !== "model") {
+        return [block.text];
+      }
+      return [];
+    }).join("");
     isCliEntrypoint = async () => {
       if (!process.argv[1]) return false;
       const [argvPath, modulePath] = await Promise.all([
