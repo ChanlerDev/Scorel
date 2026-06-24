@@ -1,14 +1,17 @@
-import { chmod, cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { build } from "esbuild";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const workspaceRoot = resolve(root, "..", "..");
 const defaultOutDir = join(root, ".runtime");
-const defaultCliEntryPath = join(workspaceRoot, "dist", "index.js");
+const defaultCliEntryPoint = join(workspaceRoot, "apps", "cli", "src", "bin.ts");
 
 export const buildGuiRuntime = async ({
-  cliEntryPath = defaultCliEntryPath,
+  cliEntryPath,
+  cliEntryPoint = defaultCliEntryPoint,
   outDir = defaultOutDir,
   appExecutableRelativePath = "../MacOS/Scorel",
 } = {}) => {
@@ -16,7 +19,25 @@ export const buildGuiRuntime = async ({
   await mkdir(outDir, { recursive: true });
 
   const cliTarget = join(outDir, "scorel.js");
-  await cp(cliEntryPath, cliTarget);
+  if (cliEntryPath) {
+    await cp(cliEntryPath, cliTarget);
+  } else {
+    await build({
+      entryPoints: [cliEntryPoint],
+      outfile: cliTarget,
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node22",
+      banner: {
+        js: 'import { createRequire as __scorelCreateRequire } from "node:module";\nconst require = __scorelCreateRequire(import.meta.url);',
+      },
+      sourcemap: false,
+      logLevel: "silent",
+    });
+    const built = await readFile(cliTarget, "utf8");
+    await writeFile(cliTarget, built.replace(/^#!.*\n/, ""));
+  }
   await chmod(cliTarget, 0o755);
 
   const launcherPath = join(outDir, "scorel");

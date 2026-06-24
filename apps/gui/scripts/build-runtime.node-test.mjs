@@ -41,6 +41,48 @@ test("buildGuiRuntime creates a relocatable bundled scorel launcher", async () =
   }
 });
 
+test("buildGuiRuntime creates a self-contained CLI bundle for packaged GUI", async () => {
+  const root = await mkdtemp(join(tmpdir(), "scorel-gui-runtime-self-contained-"));
+  try {
+    const srcDir = join(root, "src");
+    await mkdir(srcDir, { recursive: true });
+    await writeFile(join(srcDir, "dep.js"), "export const value = 'bundled';\n");
+    await writeFile(join(srcDir, "entry.js"), "import { value } from './dep.js';\nconsole.log(value);\n");
+
+    const outDir = join(root, "runtime");
+    await buildGuiRuntime({
+      cliEntryPoint: join(srcDir, "entry.js"),
+      outDir,
+      appExecutableRelativePath: "../MacOS/Scorel",
+    });
+
+    const bundled = await readFile(join(outDir, "scorel.js"), "utf8");
+    assert.match(bundled, /bundled/);
+    assert.match(bundled, /createRequire/);
+    assert.doesNotMatch(bundled, /from\s+["']\.\/dep\.js["']/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("default GUI runtime bundle does not leave package-only bare imports", async () => {
+  const root = await mkdtemp(join(tmpdir(), "scorel-gui-runtime-real-"));
+  try {
+    await buildGuiRuntime({
+      outDir: join(root, "runtime"),
+      appExecutableRelativePath: "../MacOS/Scorel",
+    });
+
+    const bundled = await readFile(join(root, "runtime", "scorel.js"), "utf8");
+    assert.doesNotMatch(bundled, /from\s+["']@mariozechner\/pi-ai["']/);
+    assert.doesNotMatch(bundled, /require\(["']@mariozechner\/pi-ai["']\)/);
+    assert.doesNotMatch(bundled, /from\s+["']ws["']/);
+    assert.doesNotMatch(bundled, /require\(["']ws["']\)/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function expectExecutable(path) {
   const mode = (await stat(path)).mode;
   assert.equal((mode & 0o111) !== 0, true, `${path} is not executable`);

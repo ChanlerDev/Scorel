@@ -105,4 +105,4 @@ pnpm release patch --dry-run
 
 ## Status
 
-Active.
+Done.
