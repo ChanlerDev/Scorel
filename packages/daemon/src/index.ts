@@ -1015,20 +1015,22 @@ export class ScorelHost {
 
   async #handleLoadSession(connection: Connection, request: ClientRequest<"load_session">): Promise<void> {
     try {
-      const lane = await this.#getLane(request.sessionId);
+      const lane = this.#sessions.get(request.sessionId);
+      const session = lane?.session ?? await loadSession({ sessionsDir: this.#sessionsDir, sessionId: request.sessionId });
       await this.#appendDiagnostic(request.sessionId, "session_loaded", { clientId: connection.clientId });
       connection.sessionId = request.sessionId;
-      const persistentEvents = [...lane.session.tree];
+      const persistentEvents = [...session.tree];
       const sessionEvents = this.#events.get(request.sessionId) ?? [];
       if (sessionEvents.length === 0 && persistentEvents.length > 0) {
         this.#events.set(request.sessionId, persistentEvents);
       }
+      this.#seqs.set(request.sessionId, Number(session.currentSeq));
       this.#respond(connection, request, {
         sessionId: request.sessionId,
-        activeLeafId: lane.session.activeLeafId,
-        currentSeq: lane.session.currentSeq,
+        activeLeafId: session.activeLeafId,
+        currentSeq: session.currentSeq,
         events: persistentEvents,
-        meta: lane.session.header.meta,
+        meta: session.header.meta,
       });
     } catch (cause) {
       connection.emit({

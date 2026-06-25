@@ -421,7 +421,6 @@ export function ProviderSection({
                       onChange={(event) => {
                         const next = { ...providerForm, credentialMode: event.currentTarget.value as ProviderForm["credentialMode"] };
                         setProviderForm(next);
-                        autoSaveProvider(next);
                       }}
                     >
                       <option value="direct">直接填写</option>

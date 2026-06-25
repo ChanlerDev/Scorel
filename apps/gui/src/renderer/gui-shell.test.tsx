@@ -23,6 +23,11 @@ const noop = (): void => {};
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
+const setInputValue = (input: HTMLInputElement, value: string): void => {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  setter?.call(input, value);
+};
+
 afterEach(() => {
   if (root) {
     act(() => {
@@ -644,6 +649,72 @@ describe("GUI shell rendering contract", () => {
       (dialog()!.querySelector('[aria-label="Close"]') as HTMLButtonElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     expect(dialog()).toBeNull();
+  });
+
+  it("lets provider credentials switch to direct mode before saving the entered key", async () => {
+    const upsertModelProfile = vi.fn(async () => ({
+      ...modelProfile,
+      providers: modelProfile.providers.map((provider) => ({
+        ...provider,
+        apiKeyEnv: undefined,
+        credentialSource: "direct" as const,
+      })),
+    }));
+    Object.defineProperty(window, "scorel", {
+      configurable: true,
+      value: {
+        upsertModelProfile,
+      },
+    });
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root!.render(
+        <ProviderSection
+          device={{ source: "local" }}
+          modelProfile={modelProfile}
+          busy={false}
+          setBusy={noop}
+          setError={noop}
+          onModelProfileChange={noop}
+        />,
+      );
+    });
+
+    const credentialMode = Array.from(container.querySelectorAll("select")).find((select) =>
+      Array.from(select.options).some((option) => option.value === "direct"),
+    ) as HTMLSelectElement;
+
+    await act(async () => {
+      credentialMode.value = "direct";
+      credentialMode.dispatchEvent(new Event("change", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(upsertModelProfile).not.toHaveBeenCalled();
+    const apiKeyInput = container.querySelector('input[type="password"]') as HTMLInputElement;
+    expect(apiKeyInput).not.toBeNull();
+
+    await act(async () => {
+      setInputValue(apiKeyInput, "direct-secret");
+      apiKeyInput.dispatchEvent(new Event("input", { bubbles: true }));
+      apiKeyInput.dispatchEvent(new Event("change", { bubbles: true }));
+      apiKeyInput.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(upsertModelProfile).toHaveBeenCalledWith(
+      { source: "local" },
+      expect.objectContaining({
+        providerId: "test",
+        apiKey: "direct-secret",
+      }),
+    );
+    const savedInput = (upsertModelProfile.mock.calls[0] as unknown[] | undefined)?.[1];
+    expect(savedInput).not.toHaveProperty("apiKeyEnv");
   });
 
   it("normalizes composer model selections before creating sessions", () => {

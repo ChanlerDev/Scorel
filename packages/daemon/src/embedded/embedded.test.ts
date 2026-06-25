@@ -1820,7 +1820,16 @@ apiKey = "secret"
       displayName: "Aux Model",
     });
     expect(runtimeSelections).toEqual(["aux"]);
-    expect(restoredSelections).toEqual(["aux"]);
+    expect(restoredSelections).toEqual([]);
+    const sendResponse = waitForResponse(restoredTransport, "req_send");
+    await restoredTransport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send"),
+      sessionId: asSessionId("ses_model_restore"),
+      content: "hello",
+    });
+    await expect(sendResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    expect(restoredSelections).toEqual(["aux", "aux"]);
   });
 
   it("falls back to the current standard model when a restored session references a removed model", async () => {
@@ -1876,7 +1885,62 @@ apiKey = "secret"
 
     await expect(response).resolves.toMatchObject({ type: "response", requestType: "load_session" });
     expect(runtimeSelections).toEqual(["aux"]);
-    expect(restoredSelections).toEqual(["main"]);
+    expect(restoredSelections).toEqual([]);
+    const sendResponse = waitForResponse(restoredTransport, "req_send");
+    await restoredTransport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send"),
+      sessionId: asSessionId("ses_model_stale"),
+      content: "hello",
+    });
+    await expect(sendResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    expect(restoredSelections).toEqual(["main", "main"]);
+  });
+
+  it("loads persisted session events without creating a chat runtime", async () => {
+    const { root, sessionsDir, projectsPath, host } = await fixtureWithModelProfile();
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_seed") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_attach_without_provider"),
+      meta: { projectId: project.projectId },
+    });
+    await host.shutdown();
+
+    let runtimeCreated = false;
+    const restored = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      modelProfile,
+      memoryHomeDir: root,
+      createRuntime: async () => {
+        runtimeCreated = true;
+        throw new Error("Provider API key is not configured");
+      },
+    });
+    await restored.start();
+    const restoredTransport = createEmbeddedTransport(restored);
+    await restoredTransport.connect({ clientId: asClientId("client_restored") });
+    const response = waitForResponse(restoredTransport, "req_load");
+    await restoredTransport.send({
+      type: "load_session",
+      requestId: asRequestId("req_load"),
+      sessionId: asSessionId("ses_attach_without_provider"),
+    });
+
+    await expect(response).resolves.toMatchObject({
+      type: "response",
+      requestType: "load_session",
+      data: { sessionId: "ses_attach_without_provider" },
+    });
+    expect(runtimeCreated).toBe(false);
+    await restored.shutdown();
   });
 
   it("uses explicit send-message model selection for the next chat turn", async () => {
@@ -2024,6 +2088,15 @@ apiKey = "secret"
       sessionId: asSessionId("ses_restart"),
     });
 
+    expect(restoredProjects).toEqual([]);
+    const response = waitForResponse(restoredTransport, "req_send");
+    await restoredTransport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send"),
+      sessionId: asSessionId("ses_restart"),
+      content: "hello",
+    });
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
     expect(restoredProjects).toEqual([project]);
     const header = JSON.parse((await readFile(join(sessionsDir, "ses_restart.jsonl"), "utf8")).split("\n")[0]!);
     expect(header.meta).toEqual({ projectId: project.projectId });
