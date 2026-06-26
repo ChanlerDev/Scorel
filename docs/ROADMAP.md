@@ -785,6 +785,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0106`](spec/ship/S0106-snip-context-control.md) | Snip context control | Done |
 | [`S0107`](spec/ship/S0107-system-reminder-unification.md) | System reminder unification | Done |
 | [`S0108`](spec/ship/S0108-gui-bundled-cli-runtime.md) | GUI bundled CLI runtime | Done |
+| [`S0109`](spec/ship/S0109-scorel-run-headless-task-runner.md) | `scorel run` headless task runner | Active |
 
 ---
 

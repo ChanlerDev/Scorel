@@ -215,6 +215,221 @@ describe("@scorel/app-cli", () => {
     }
   });
 
+  it("runs a non-interactive prompt and writes summary json", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-"));
+    const sessionsDir = join(stateDir, "sessions");
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-run-workspace-"));
+    const summaryPath = join(stateDir, "scorel-summary.json");
+    const server = await startChatServer([{ content: "Run command response.", tool_calls: [] }]);
+
+    try {
+      const result = await runCliWithInput(
+        [
+          "run",
+          "--prompt",
+          "complete one task",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_run_test",
+          "--output-format",
+          "json",
+          "--summary",
+          summaryPath,
+        ],
+        "",
+        testConfig(server.baseURL),
+        sessionsDir,
+      );
+
+      expect(result.code, result.stderr).toBe(0);
+      const stdout = JSON.parse(result.stdout) as { status: string; result: string; sessionJsonl: string };
+      expect(stdout).toMatchObject({
+        status: "completed",
+        result: "Run command response.",
+        sessionJsonl: join(sessionsDir, "ses_run_test.jsonl"),
+      });
+      const summary = JSON.parse(await readFile(summaryPath, "utf8")) as { status: string; sessionId: string; cwd: string; sessionJsonl: string };
+      expect(summary).toMatchObject({
+        status: "completed",
+        sessionId: "ses_run_test",
+        cwd: workspaceDir,
+        sessionJsonl: join(sessionsDir, "ses_run_test.jsonl"),
+      });
+      const jsonl = await readFile(join(sessionsDir, "ses_run_test.jsonl"), "utf8");
+      expect(jsonl).toContain("complete one task");
+      expect(jsonl).toContain("Run command response.");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("runs with prompt file and output-format none", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-file-"));
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-run-file-workspace-"));
+    const promptPath = join(stateDir, "instruction.txt");
+    await writeFile(promptPath, "read from file\n");
+    const server = await startChatServer([{ content: "File response.", tool_calls: [] }]);
+
+    try {
+      const result = await runCliWithInput(
+        [
+          "run",
+          "--prompt-file",
+          promptPath,
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_run_file",
+          "--output-format",
+          "none",
+        ],
+        "",
+        testConfig(server.baseURL),
+        join(stateDir, "sessions"),
+      );
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toBe("");
+      const jsonl = await readFile(join(stateDir, "sessions", "ses_run_file.jsonl"), "utf8");
+      expect(jsonl).toContain("read from file");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("runs with stdin prompt and stream-json output", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-stdin-"));
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-run-stdin-workspace-"));
+    const server = await startChatServer([{ content: "Stdin response.", tool_calls: [] }]);
+
+    try {
+      const result = await runCliWithInput(
+        [
+          "run",
+          "--stdin",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_run_stdin",
+          "--output-format",
+          "stream-json",
+        ],
+        "stdin instruction\n",
+        testConfig(server.baseURL),
+        join(stateDir, "sessions"),
+      );
+
+      expect(result.code, result.stderr).toBe(0);
+      const lines = result.stdout.trim().split("\n").map((line) => JSON.parse(line) as { type: string; result?: string });
+      expect(lines.some((line) => line.type === "event")).toBe(true);
+      expect(lines.at(-1)).toMatchObject({ type: "result", result: "Stdin response." });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("runs with provider settings supplied directly on the command", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-provider-"));
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-run-provider-workspace-"));
+    const server = await startChatServer([{ content: "Provider override response.", tool_calls: [] }]);
+
+    try {
+      const result = await runCliWithInput(
+        [
+          "run",
+          "--prompt",
+          "use direct provider",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_run_provider",
+          "--api",
+          "openai-completions",
+          "--baseurl",
+          server.baseURL,
+          "--apikey",
+          "direct-secret",
+          "--model",
+          "gpt-direct",
+          "--output-format",
+          "json",
+        ],
+        "",
+        undefined,
+        join(stateDir, "sessions"),
+      );
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({ status: "completed", result: "Provider override response." });
+      expect(server.requests[0]).toMatchObject({ model: "gpt-direct" });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("rejects conflicting run prompt sources as usage errors", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-conflict-"));
+    const result = await runCliWithInput(
+      ["run", "positional prompt", "--prompt", "flag prompt"],
+      "",
+      testConfig("http://127.0.0.1:1"),
+      join(stateDir, "sessions"),
+    );
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("requires exactly one prompt source");
+  });
+
+  it("times out a non-interactive run and writes timeout summary", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-timeout-"));
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-run-timeout-workspace-"));
+    const summaryPath = join(stateDir, "summary.json");
+    const server = await startSlowChatServer(100);
+
+    try {
+      const result = await runCliWithInput(
+        [
+          "run",
+          "--prompt",
+          "wait too long",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_run_timeout",
+          "--timeout-ms",
+          "1",
+          "--output-format",
+          "json",
+          "--summary",
+          summaryPath,
+        ],
+        "",
+        testConfig(server.baseURL),
+        join(stateDir, "sessions"),
+      );
+
+      expect(result.code).toBe(124);
+      const stdout = JSON.parse(result.stdout) as { status: string; exitReason: string };
+      expect(stdout).toMatchObject({ status: "timeout", exitReason: "timeout" });
+      const summary = JSON.parse(await readFile(summaryPath, "utf8")) as { status: string; exitReason: string; error?: { message?: string } };
+      expect(summary).toMatchObject({ status: "timeout", exitReason: "timeout" });
+      expect(summary.error?.message).toContain("timed out");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("attaches to a remote daemon WebSocket endpoint with an explicit token", async () => {
     const messages: string[] = [];
     const server = await startRemoteDaemonWebSocketServer({
@@ -1143,7 +1358,7 @@ describe("@scorel/app-cli", () => {
 const runCliWithInput = async (
   argv: string[],
   input: string,
-  config: ScorelConfig,
+  config: ScorelConfig | undefined,
   sessionsDir: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> => {
   const stdout = new StringWritable();
@@ -1159,7 +1374,7 @@ const runCliWithInput = async (
 const runCliWithCwd = async (
   argv: string[],
   input: string,
-  config: ScorelConfig,
+  config: ScorelConfig | undefined,
   sessionsDir: string,
   cwd: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> => {
@@ -1294,6 +1509,33 @@ const startChatServer = async (
     baseURL: `http://127.0.0.1:${address.port}`,
     requests,
     close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
+};
+
+const startSlowChatServer = async (delayMs: number) => {
+  const server = createServer(async (request, response) => {
+    if (request.method !== "POST" || request.url !== "/chat/completions") {
+      response.writeHead(404).end();
+      return;
+    }
+    await readJson(request);
+    setTimeout(() => {
+      if (!response.destroyed) {
+        writeSse(response, toSseChunks({ content: "late response", tool_calls: [] }));
+      }
+    }, delayMs);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("missing server address");
+  }
+  return {
+    baseURL: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise<void>((resolve, reject) => {
+      server.closeAllConnections();
+      server.close((error) => (error ? reject(error) : resolve()));
+    }),
   };
 };
 

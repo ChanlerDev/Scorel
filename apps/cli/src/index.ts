@@ -28,8 +28,12 @@ import {
   type ContentBlock,
   type DeviceId,
   type ErrorEvent,
+  type ModelRole,
+  type ModelSelectionInput,
   type PersistentEvent,
+  type ProjectId,
   type ScorelEvent,
+  type SessionId,
 } from "@scorel/protocol";
 
 import { runCliDaemon } from "./daemon-cli.js";
@@ -57,9 +61,52 @@ export type CliRunOptions = {
 type ChatOptions = {
   sessionsDir: string;
   stateDir: string;
-  sessionId: ReturnType<typeof asSessionId>;
+  sessionId: SessionId;
   cwd: string;
   config?: ScorelConfig;
+};
+
+type RunOutputFormat = "text" | "json" | "stream-json" | "none";
+type RunProviderApi = "openai-completions" | "openai-responses" | "google-generative-ai" | "anthropic-messages";
+
+type RunProviderOverride = {
+  provider?: string;
+  api?: RunProviderApi;
+  baseUrl?: string;
+  apiKey?: string;
+};
+
+type RunOptions = {
+  promptSource: "argument" | "prompt" | "prompt-file" | "stdin";
+  prompt?: string;
+  promptFile?: string;
+  sessionsDir: string;
+  stateDir: string;
+  sessionId: SessionId;
+  cwd: string;
+  timeoutMs?: number;
+  outputFormat: RunOutputFormat;
+  summaryPath?: string;
+  quiet: boolean;
+  modelSelection?: ModelSelectionInput;
+  providerOverride?: RunProviderOverride;
+  config?: ScorelConfig;
+};
+
+type RunSummary = {
+  status: "completed" | "error" | "timeout";
+  sessionId: string;
+  projectId?: string;
+  cwd: string;
+  stateDir: string;
+  sessionsDir: string;
+  sessionJsonl: string;
+  outputFormat: RunOutputFormat;
+  elapsedMs: number;
+  exitReason: "completed" | "error" | "timeout";
+  assistantEventId?: string;
+  userEventId?: string;
+  error?: { message: string };
 };
 
 const defaultSessionsDir = (): string => scorelSessionsDir(homedir());
@@ -84,6 +131,18 @@ export const runCli = async (
     const chatOptions = parseChatOptions(rest);
     const sessionsDir = runOptions.sessionsDir ?? chatOptions.sessionsDir;
     return runChat({ ...chatOptions, config: runOptions.config, sessionsDir, stateDir: stateDirFromSessionsDir(sessionsDir) }, io);
+  }
+  if (command === "run") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      writeRunUsage(io.output);
+      return 0;
+    }
+    try {
+      return runHeadless(parseRunOptions(rest, runOptions), io);
+    } catch (cause) {
+      io.error.write(`scorel run error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+      return 2;
+    }
   }
   if (command === "daemon") {
     return runCliDaemon(rest, {
@@ -757,7 +816,7 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
   process.on("SIGINT", sigintHandler);
   try {
     await client.connect(options.sessionId);
-    const resumed = await loadOrCreateSession(client, options, project.projectId);
+    const resumed = await loadOrCreateSession(client, options.sessionId, project.projectId);
     io.error.write(`scorel chat ${resumed ? "resumed" : "created"} session ${options.sessionId}\n`);
 
     const rl = createInterface({ input: io.input as Readable, crlfDelay: Infinity });
@@ -806,6 +865,268 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
   }
 };
 
+const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
+  const startedAt = Date.now();
+  let projectId: ProjectId | undefined;
+  const textParts: string[] = [];
+  const prompt = await readRunPrompt(options, io);
+  const runConfig = resolveRunConfig(options);
+  const configScope = { scorelHomeDir: options.stateDir };
+  const loadProjectConfig = async (project: { workDir: string }) =>
+    runConfig ?? options.config ?? (await loadScorelConfig({ cwd: project.workDir, ...configScope }));
+  const loadProjectConfigProfile = async (project: { workDir: string }) =>
+    runConfig ?? options.config ?? (await loadScorelConfigProfile({ cwd: project.workDir, ...configScope }));
+  const daemon = new ScorelHost({
+    sessionsDir: options.sessionsDir,
+    projectsPath: join(options.stateDir, "projects.json"),
+    deviceId: asDeviceId("device_local"),
+    scorelHomeDir: options.stateDir,
+    loadConfig: async ({ project }) => loadProjectConfig(project),
+    loadConfigProfile: async ({ project }) => loadProjectConfigProfile(project),
+    createRuntime: async ({ sessionId, project, selectedModel, purpose }) => createRealRuntime({
+      cwd: project.workDir,
+      config: await loadProjectConfig(project),
+      sessionsDir: options.sessionsDir,
+      sessionId,
+      modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
+      includeTools: purpose === "chat",
+    }),
+  });
+  const client = new DaemonClient(createEmbeddedTransport(daemon), {
+    clientId: asClientId("client_cli_run"),
+  });
+  let unsubscribe: (() => void) | undefined;
+
+  try {
+    await daemon.start();
+    const project = await daemon.registerProject(options.cwd);
+    projectId = project.projectId;
+    await client.connect(options.sessionId);
+    await loadOrCreateSession(client, options.sessionId, project.projectId, options.modelSelection);
+    unsubscribe = client.subscribe((event) => {
+      if (event.type === "text_delta") {
+        textParts.push(event.delta);
+      }
+      renderRunEvent(options, io, event);
+    });
+    const send = client.sendMessage(prompt, options.modelSelection ? { modelSelection: options.modelSelection } : undefined);
+    const result = options.timeoutMs === undefined
+      ? await send
+      : await withRunTimeout(send, options.timeoutMs, async () => {
+        await client.cancel().catch(() => undefined);
+      });
+    const summary = makeRunSummary({
+      options,
+      startedAt,
+      projectId,
+      status: "completed",
+      exitReason: "completed",
+      userEventId: String(result.userEventId),
+      assistantEventId: String(result.assistantEventId),
+    });
+    await writeRunSummary(options.summaryPath, summary);
+    renderRunFinal(options, io, summary, textParts.join(""));
+    return 0;
+  } catch (cause) {
+    const isTimeout = cause instanceof RunTimeoutError;
+    const summary = makeRunSummary({
+      options,
+      startedAt,
+      projectId,
+      status: isTimeout ? "timeout" : "error",
+      exitReason: isTimeout ? "timeout" : "error",
+      error: cause instanceof Error ? cause : new Error(String(cause)),
+    });
+    await writeRunSummary(options.summaryPath, summary).catch(() => undefined);
+    renderRunFinal(options, io, summary, textParts.join(""));
+    if (!options.quiet && options.outputFormat === "text") {
+      io.error.write(`scorel run error: ${summary.error?.message ?? "unknown error"}\n`);
+    }
+    return isTimeout ? 124 : 1;
+  } finally {
+    unsubscribe?.();
+    client.disconnect();
+    await daemon.shutdown();
+  }
+};
+
+const renderRunEvent = (options: RunOptions, io: CliIo, event: ScorelEvent): void => {
+  if (options.outputFormat === "none" || options.outputFormat === "json") {
+    return;
+  }
+  if (options.outputFormat === "stream-json") {
+    writeJsonLine(io.output, { type: "event", event });
+    return;
+  }
+  if (event.type === "text_delta") {
+    io.output.write(event.delta);
+  }
+  if (event.type === "tool_result") {
+    writeToolResult(io.output, event);
+  }
+  if (event.type === "error") {
+    writeEventError(io.error, event);
+  }
+};
+
+const renderRunFinal = (options: RunOptions, io: CliIo, summary: RunSummary, text: string): void => {
+  if (options.outputFormat === "none") {
+    return;
+  }
+  if (options.outputFormat === "json") {
+    io.output.write(`${JSON.stringify({ ...summary, result: text })}\n`);
+    return;
+  }
+  if (options.outputFormat === "stream-json") {
+    writeJsonLine(io.output, { type: "result", summary, result: text });
+    return;
+  }
+  if (!text.endsWith("\n")) {
+    io.output.write("\n");
+  }
+};
+
+const writeJsonLine = (output: NodeJS.WritableStream, value: unknown): void => {
+  output.write(`${JSON.stringify(value)}\n`);
+};
+
+class RunTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`run timed out after ${timeoutMs}ms`);
+    this.name = "RunTimeoutError";
+  }
+}
+
+const withRunTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, onTimeout: () => Promise<void>): Promise<T> => {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          void onTimeout().finally(() => reject(new RunTimeoutError(timeoutMs)));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+};
+
+const makeRunSummary = (input: {
+  options: RunOptions;
+  startedAt: number;
+  projectId?: ProjectId;
+  status: RunSummary["status"];
+  exitReason: RunSummary["exitReason"];
+  userEventId?: string;
+  assistantEventId?: string;
+  error?: Error;
+}): RunSummary => ({
+  status: input.status,
+  sessionId: String(input.options.sessionId),
+  ...(input.projectId ? { projectId: String(input.projectId) } : {}),
+  cwd: input.options.cwd,
+  stateDir: input.options.stateDir,
+  sessionsDir: input.options.sessionsDir,
+  sessionJsonl: join(input.options.sessionsDir, `${input.options.sessionId}.jsonl`),
+  outputFormat: input.options.outputFormat,
+  elapsedMs: Date.now() - input.startedAt,
+  exitReason: input.exitReason,
+  ...(input.userEventId ? { userEventId: input.userEventId } : {}),
+  ...(input.assistantEventId ? { assistantEventId: input.assistantEventId } : {}),
+  ...(input.error ? { error: { message: input.error.message } } : {}),
+});
+
+const writeRunSummary = async (path: string | undefined, summary: RunSummary): Promise<void> => {
+  if (!path) {
+    return;
+  }
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(summary, null, 2)}\n`);
+};
+
+const readRunPrompt = async (options: RunOptions, io: CliIo): Promise<string> => {
+  if (options.promptSource === "prompt-file") {
+    return (await readFile(options.promptFile!, "utf8")).trim();
+  }
+  if (options.promptSource === "stdin") {
+    const chunks: Buffer[] = [];
+    for await (const chunk of io.input) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    }
+    return Buffer.concat(chunks).toString("utf8").trim();
+  }
+  return (options.prompt ?? "").trim();
+};
+
+const resolveRunConfig = (options: RunOptions): ScorelConfig | undefined => {
+  const override = options.providerOverride;
+  if (!override || (!override.provider && !override.api && !override.baseUrl && !override.apiKey)) {
+    return undefined;
+  }
+  if (!override.baseUrl) {
+    throw new Error("--base-url is required when overriding the run provider");
+  }
+  if (!override.apiKey) {
+    throw new Error("--api-key is required when overriding the run provider");
+  }
+  if (!options.modelSelection?.modelId) {
+    throw new Error("--model <model-id> is required when overriding the run provider");
+  }
+  const providerId = "run";
+  const providerModelId = "run_model";
+  const availableModelId = options.modelSelection.modelId;
+  return {
+    providers: {
+      [providerId]: {
+        type: "custom",
+        api: override.api ?? "openai-completions",
+        provider: override.provider ?? "openai",
+        baseUrl: stripTrailingSlashes(override.baseUrl),
+        apiKey: override.apiKey,
+      },
+    },
+    providerModels: {
+      [providerModelId]: {
+        provider: providerId,
+        id: availableModelId,
+        displayName: availableModelId,
+      },
+    },
+    models: {
+      [availableModelId]: {
+        model: providerModelId,
+        displayName: availableModelId,
+      },
+    },
+    modelProfile: {
+      roles: {
+        primary: availableModelId,
+        standard: availableModelId,
+        auxiliary: availableModelId,
+      },
+    },
+    memory: {
+      enabled: false,
+      daily: false,
+      sessionMemory: false,
+      autoDream: false,
+      promoteRoot: false,
+      dreamIdleMinutes: 60,
+      autoCompactThreshold: 0.8,
+    },
+    runtime: {
+      tokenSavingRtk: false,
+    },
+    extensions: {},
+  };
+};
+
+const stripTrailingSlashes = (value: string): string => value.replace(/\/+$/, "");
+
 export type SigintHandlerOptions = {
   /** Returns true when a chat turn is mid-flight; daemon should be cancelled. */
   isInFlight: () => boolean;
@@ -835,16 +1156,17 @@ export const createSigintHandler = (options: SigintHandlerOptions): () => void =
 
 const loadOrCreateSession = async (
   client: DaemonClient,
-  options: ChatOptions,
+  sessionId: SessionId,
   projectId: ReturnType<typeof asProjectId>,
+  modelSelection?: ModelSelectionInput,
 ): Promise<boolean> => {
   try {
-    await client.loadSession(options.sessionId);
+    await client.loadSession(sessionId);
     return true;
   } catch {
     await client.createSession({
-      sessionId: options.sessionId,
-      meta: { projectId },
+      sessionId,
+      meta: { projectId, ...(modelSelection ? { modelSelection } : {}) },
     });
     return false;
   }
@@ -873,6 +1195,165 @@ const parseChatOptions = (argv: string[]): ChatOptions => {
   return { sessionId, sessionsDir, stateDir: stateDirFromSessionsDir(sessionsDir), cwd };
 };
 
+const parseRunOptions = (argv: string[], runOptions: CliRunOptions): RunOptions => {
+  const promptSources: Array<Pick<RunOptions, "promptSource" | "prompt" | "promptFile">> = [];
+  let sessionId = asSessionId(`ses_run_${Date.now().toString(36)}`);
+  let cwd = process.cwd();
+  let stateDir: string | undefined;
+  let sessionsDir: string | undefined = runOptions.sessionsDir;
+  let timeoutMs: number | undefined;
+  let outputFormat: RunOutputFormat = "text";
+  let summaryPath: string | undefined;
+  let quiet = false;
+  let modelSelection: ModelSelectionInput | undefined;
+  const providerOverride: RunProviderOverride = {};
+  const positional: string[] = [];
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--prompt") {
+      promptSources.push({ promptSource: "prompt", prompt: requireValue(argv, index, "--prompt") });
+      index += 1;
+      continue;
+    }
+    if (arg === "--prompt-file") {
+      promptSources.push({ promptSource: "prompt-file", promptFile: requireValue(argv, index, "--prompt-file") });
+      index += 1;
+      continue;
+    }
+    if (arg === "--stdin") {
+      promptSources.push({ promptSource: "stdin" });
+      continue;
+    }
+    if (arg === "--session") {
+      sessionId = asSessionId(requireValue(argv, index, "--session"));
+      index += 1;
+      continue;
+    }
+    if (arg === "--cwd") {
+      cwd = requireValue(argv, index, "--cwd");
+      index += 1;
+      continue;
+    }
+    if (arg === "--state-dir") {
+      stateDir = requireValue(argv, index, "--state-dir");
+      index += 1;
+      continue;
+    }
+    if (arg === "--sessions-dir") {
+      sessionsDir = requireValue(argv, index, "--sessions-dir");
+      index += 1;
+      continue;
+    }
+    if (arg === "--timeout-ms") {
+      timeoutMs = parsePositiveInteger(requireValue(argv, index, "--timeout-ms"), "--timeout-ms");
+      index += 1;
+      continue;
+    }
+    if (arg === "--output-format") {
+      outputFormat = parseRunOutputFormat(requireValue(argv, index, "--output-format"));
+      index += 1;
+      continue;
+    }
+    if (arg === "--summary") {
+      summaryPath = requireValue(argv, index, "--summary");
+      index += 1;
+      continue;
+    }
+    if (arg === "--quiet") {
+      quiet = true;
+      continue;
+    }
+    if (arg === "--model") {
+      modelSelection = parseModelSelection(requireValue(argv, index, "--model"));
+      index += 1;
+      continue;
+    }
+    if (arg === "--provider") {
+      providerOverride.provider = requireValue(argv, index, "--provider");
+      index += 1;
+      continue;
+    }
+    if (arg === "--api" || arg === "--protocol") {
+      providerOverride.api = parseRunProviderApi(requireValue(argv, index, arg));
+      index += 1;
+      continue;
+    }
+    if (arg === "--base-url" || arg === "--baseurl") {
+      providerOverride.baseUrl = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+    if (arg === "--api-key" || arg === "--apikey") {
+      providerOverride.apiKey = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      throw new Error(`Unknown run option: ${arg}`);
+    }
+    positional.push(arg);
+  }
+
+  if (positional.length > 0) {
+    promptSources.unshift({ promptSource: "argument", prompt: positional.join(" ") });
+  }
+  if (promptSources.length !== 1) {
+    throw new Error("scorel run requires exactly one prompt source");
+  }
+
+  const resolvedStateDir = stateDir ?? stateDirFromSessionsDir(sessionsDir);
+  const resolvedSessionsDir = sessionsDir ?? join(resolvedStateDir, "sessions");
+  return {
+    ...promptSources[0],
+    sessionId,
+    cwd,
+    stateDir: resolvedStateDir,
+    sessionsDir: resolvedSessionsDir,
+    timeoutMs,
+    outputFormat,
+    summaryPath,
+    quiet,
+    modelSelection,
+    providerOverride,
+    config: runOptions.config,
+  };
+};
+
+const parseRunOutputFormat = (value: string): RunOutputFormat => {
+  if (value === "text" || value === "json" || value === "stream-json" || value === "none") {
+    return value;
+  }
+  throw new Error("--output-format must be text, json, stream-json, or none");
+};
+
+const parsePositiveInteger = (value: string, flag: string): number => {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${flag} must be a positive integer`);
+  }
+  return parsed;
+};
+
+const parseModelSelection = (value: string): ModelSelectionInput => {
+  if (value === "primary" || value === "standard" || value === "auxiliary") {
+    return { role: value as ModelRole };
+  }
+  return { modelId: value };
+};
+
+const parseRunProviderApi = (value: string): RunProviderApi => {
+  if (
+    value === "openai-completions" ||
+    value === "openai-responses" ||
+    value === "google-generative-ai" ||
+    value === "anthropic-messages"
+  ) {
+    return value;
+  }
+  throw new Error("--api must be openai-completions, openai-responses, google-generative-ai, or anthropic-messages");
+};
+
 const requireValue = (argv: string[], index: number, flag: string): string => {
   const value = argv[index + 1];
   if (!value) {
@@ -892,6 +1373,12 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
     [
       "Usage: scorel chat [--session <id>] [--cwd <dir>]",
       "       scorel [--session <id>] [--cwd <dir>]",
+      "       scorel run [prompt] [--prompt <text> | --prompt-file <path> | --stdin]",
+      "                 [--cwd <dir>] [--state-dir <dir>] [--sessions-dir <dir>]",
+      "                 [--session <id>] [--timeout-ms <ms>]",
+      "                 [--output-format text|json|stream-json|none] [--summary <path>]",
+      "                 [--provider <name>] [--api|--protocol <protocol>]",
+      "                 [--base-url|--baseurl <url>] [--api-key|--apikey <key>] [--model <id>]",
       "       scorel attach --session <id> --remote <ws-url> --token <token>",
       "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
       "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
@@ -911,6 +1398,38 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
       "       scorel project list",
       "       scorel project add <dir>",
       "       scorel project remove <project-id>",
+    ].join("\n") + "\n",
+  );
+};
+
+const writeRunUsage = (output: NodeJS.WritableStream): void => {
+  output.write(
+    [
+      "Usage: scorel run [prompt]",
+      "       scorel run --prompt <text>",
+      "       scorel run --prompt-file <path>",
+      "       scorel run --stdin",
+      "",
+      "Options:",
+      "  --cwd <dir>",
+      "  --state-dir <dir>",
+      "  --sessions-dir <dir>",
+      "  --session <id>",
+      "  --timeout-ms <ms>",
+      "  --output-format text|json|stream-json|none",
+      "  --summary <path>",
+      "  --quiet",
+      "  --model <primary|standard|auxiliary|model-id>",
+      "  --provider <name>",
+      "  --api, --protocol <openai-completions|openai-responses|google-generative-ai|anthropic-messages>",
+      "  --base-url, --baseurl <url>",
+      "  --api-key, --apikey <key>",
+      "",
+      "Examples:",
+      '  scorel run --prompt "Summarize this project" --output-format json',
+      "  scorel run --prompt-file /tmp/instruction.txt --cwd /workspace --state-dir /tmp/scorel-state \\",
+      "    --api openai-completions --baseurl http://127.0.0.1:4000/v1 --apikey \"$API_KEY\" \\",
+      "    --model gpt-5.4-mini --output-format none --summary /logs/agent/scorel-summary.json",
     ].join("\n") + "\n",
   );
 };
