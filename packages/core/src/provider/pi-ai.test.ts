@@ -317,6 +317,51 @@ describe("createPiAiProvider", () => {
       await server.close();
     }
   });
+
+  it("preserves provider error messages on error assistant turns", async () => {
+    const server = await startOpenAiCompletionsServer([
+      {
+        id: "chatcmpl-scorel-test",
+        object: "chat.completion.chunk",
+        choices: [{ index: 0, delta: {}, finish_reason: "content_filter" }],
+      },
+    ]);
+    const provider = createPiAiProvider({
+      model: resolvePiAiModel({
+        type: "custom",
+        provider: "scorel-test",
+        id: "gpt-5.4-mini",
+        baseUrl: server.baseUrl,
+        api: "openai-completions",
+        apiKey: "chanleramp",
+        contextWindow: 400000,
+        maxTokens: 128000,
+        reasoning: true,
+      }),
+      apiKey: "chanleramp",
+    });
+
+    try {
+      const result = await collectProvider(provider.streamTurn({
+        context: [user("trigger filter")],
+        systemPrompt: undefined,
+        tools: [],
+        signal: new AbortController().signal,
+        options: {},
+      }));
+
+      expect(result).toMatchObject({
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        meta: {
+          errorMessage: "Provider finish_reason: content_filter",
+        },
+      });
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 const readTool: AgentTool = {
@@ -453,7 +498,7 @@ const collectProvider = async (stream: AsyncGenerator<unknown, ScorelMessage | v
   }
 };
 
-const startOpenAiCompletionsServer = async () => {
+const startOpenAiCompletionsServer = async (chunks?: unknown[]) => {
   const requests: unknown[] = [];
   const server = createServer(async (request, response) => {
     if (request.method !== "POST" || request.url !== "/chat/completions") {
@@ -461,7 +506,7 @@ const startOpenAiCompletionsServer = async () => {
       return;
     }
     requests.push(await readJson(request));
-    writeSse(response, [
+    writeSse(response, chunks ?? [
       {
         id: "chatcmpl-scorel-test",
         object: "chat.completion.chunk",

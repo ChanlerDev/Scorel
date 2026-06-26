@@ -30,7 +30,7 @@ The command must run through Scorel's existing embedded Host, daemon/client, run
   - `--api-key <key>` / `--apikey <key>`
 - Reuse the same product path as `scorel chat`: embedded `ScorelHost`, `DaemonClient`, project registration, real runtime, and append-only session JSONL.
 - Return only after the submitted user turn finishes, errors, or times out.
-- Write an optional summary JSON containing status, session id, project id, cwd, state/sessions paths, session JSONL path, elapsed time, output format, and error details.
+- Write an optional summary JSON containing status, session id, project id, cwd, state/sessions paths, session JSONL path, elapsed time, output format, error details, and the full Scorel events observed by the headless client during the run.
 
 ## Product Boundary
 
@@ -121,11 +121,11 @@ Output formats:
 
 - `scorel run --prompt ...` creates or resumes a session and submits exactly one user message.
 - `scorel run --base-url ... --api-key ... --api ... --model ...` uses a run-local provider config without writing Scorel config files.
-- The command exits after `DaemonClient.sendMessage()` resolves.
+- The command exits after `DaemonClient.sendMessage()` resolves, unless the completed turn produced a runtime/provider error event or an assistant message with `stopReason: "error"`, in which case it returns exit code `1`.
 - `--cwd` controls the registered project workdir and runtime tool cwd.
 - `--state-dir` isolates project registry and Scorel home.
 - `--sessions-dir` controls where `{sessionId}.jsonl` is written.
-- `--summary` writes deterministic JSON on success, runtime error, and timeout.
+- `--summary` writes deterministic JSON on success, runtime error, and timeout, including the full event list captured by the headless client.
 - `--output-format none` produces no normal stdout on success.
 - `--output-format json` produces parseable final JSON.
 - `--output-format stream-json` emits parseable JSONL progress/final events.

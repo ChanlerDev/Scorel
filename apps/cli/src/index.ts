@@ -107,6 +107,7 @@ type RunSummary = {
   assistantEventId?: string;
   userEventId?: string;
   error?: { message: string };
+  events?: ScorelEvent[];
 };
 
 const defaultSessionsDir = (): string => scorelSessionsDir(homedir());
@@ -869,6 +870,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
   const startedAt = Date.now();
   let projectId: ProjectId | undefined;
   const textParts: string[] = [];
+  const events: ScorelEvent[] = [];
   const prompt = await readRunPrompt(options, io);
   const runConfig = resolveRunConfig(options);
   const configScope = { scorelHomeDir: options.stateDir };
@@ -904,6 +906,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
     await client.connect(options.sessionId);
     await loadOrCreateSession(client, options.sessionId, project.projectId, options.modelSelection);
     unsubscribe = client.subscribe((event) => {
+      events.push(event);
       if (event.type === "text_delta") {
         textParts.push(event.delta);
       }
@@ -915,18 +918,21 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
       : await withRunTimeout(send, options.timeoutMs, async () => {
         await client.cancel().catch(() => undefined);
       });
+    const runtimeError = runErrorFromEvents(events);
     const summary = makeRunSummary({
       options,
       startedAt,
       projectId,
-      status: "completed",
-      exitReason: "completed",
+      status: runtimeError ? "error" : "completed",
+      exitReason: runtimeError ? "error" : "completed",
       userEventId: String(result.userEventId),
       assistantEventId: String(result.assistantEventId),
+      ...(runtimeError ? { error: runtimeError } : {}),
+      events,
     });
     await writeRunSummary(options.summaryPath, summary);
     renderRunFinal(options, io, summary, textParts.join(""));
-    return 0;
+    return runtimeError ? 1 : 0;
   } catch (cause) {
     const isTimeout = cause instanceof RunTimeoutError;
     const summary = makeRunSummary({
@@ -936,6 +942,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
       status: isTimeout ? "timeout" : "error",
       exitReason: isTimeout ? "timeout" : "error",
       error: cause instanceof Error ? cause : new Error(String(cause)),
+      events,
     });
     await writeRunSummary(options.summaryPath, summary).catch(() => undefined);
     renderRunFinal(options, io, summary, textParts.join(""));
@@ -1024,6 +1031,7 @@ const makeRunSummary = (input: {
   userEventId?: string;
   assistantEventId?: string;
   error?: Error;
+  events?: ScorelEvent[];
 }): RunSummary => ({
   status: input.status,
   sessionId: String(input.options.sessionId),
@@ -1038,7 +1046,27 @@ const makeRunSummary = (input: {
   ...(input.userEventId ? { userEventId: input.userEventId } : {}),
   ...(input.assistantEventId ? { assistantEventId: input.assistantEventId } : {}),
   ...(input.error ? { error: { message: input.error.message } } : {}),
+  ...(input.events ? { events: input.events } : {}),
 });
+
+const runErrorFromEvents = (events: ScorelEvent[]): Error | undefined => {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type === "error") {
+      return new Error((event as ErrorEvent).message);
+    }
+  }
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.type !== "assistant_message" || event.message.stopReason !== "error") {
+      continue;
+    }
+    const failedAssistant = event as Extract<PersistentEvent, { type: "assistant_message" }>;
+    const metaMessage = failedAssistant.message.meta?.errorMessage;
+    return new Error(typeof metaMessage === "string" && metaMessage.length > 0 ? metaMessage : "assistant stopped with error");
+  }
+  return undefined;
+};
 
 const writeRunSummary = async (path: string | undefined, summary: RunSummary): Promise<void> => {
   if (!path) {

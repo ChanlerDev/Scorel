@@ -1547,6 +1547,7 @@ export class ScorelHost {
           thinkingBlocks: countContentBlocks(rawEvent.message, "thinking"),
           textBlocks: countContentBlocks(rawEvent.message, "text"),
           toolCalls: countContentBlocks(rawEvent.message, "tool_call"),
+          ...(typeof rawEvent.message.meta?.errorMessage === "string" ? { errorMessage: rawEvent.message.meta.errorMessage } : {}),
           inputTokens: rawEvent.message.usage?.inputTokens,
           outputTokens: rawEvent.message.usage?.outputTokens,
           totalTokens: rawEvent.message.usage?.totalTokens,

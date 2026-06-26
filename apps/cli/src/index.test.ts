@@ -376,6 +376,54 @@ describe("@scorel/app-cli", () => {
     }
   });
 
+  it("returns a runtime error and writes full events when the provider stops with error", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-provider-error-"));
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-run-provider-error-workspace-"));
+    const summaryPath = join(stateDir, "summary.json");
+    const server = await startErrorChatServer("content_filter");
+
+    try {
+      const result = await runCliWithInput(
+        [
+          "run",
+          "--prompt",
+          "trigger provider error",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_run_provider_error",
+          "--output-format",
+          "json",
+          "--summary",
+          summaryPath,
+        ],
+        "",
+        testConfig(server.baseURL),
+        join(stateDir, "sessions"),
+      );
+
+      expect(result.code).toBe(1);
+      const stdout = JSON.parse(result.stdout) as { status: string; error?: { message?: string }; events?: Array<{ type: string }> };
+      expect(stdout).toMatchObject({
+        status: "error",
+        error: { message: "Provider finish_reason: content_filter" },
+      });
+      expect(stdout.events?.some((event) => event.type === "assistant_message")).toBe(true);
+      const summary = JSON.parse(await readFile(summaryPath, "utf8")) as { status: string; error?: { message?: string }; events?: Array<{ type: string }> };
+      expect(summary).toMatchObject({
+        status: "error",
+        error: { message: "Provider finish_reason: content_filter" },
+      });
+      expect(summary.events?.some((event) => event.type === "assistant_message")).toBe(true);
+      const log = await readFile(join(stateDir, "sessions", "ses_run_provider_error.log"), "utf8");
+      expect(log).toContain("errorMessage=\"Provider finish_reason: content_filter\"");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("rejects conflicting run prompt sources as usage errors", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-conflict-"));
     const result = await runCliWithInput(
@@ -1536,6 +1584,32 @@ const startSlowChatServer = async (delayMs: number) => {
       server.closeAllConnections();
       server.close((error) => (error ? reject(error) : resolve()));
     }),
+  };
+};
+
+const startErrorChatServer = async (finishReason: string) => {
+  const server = createServer(async (request, response) => {
+    if (request.method !== "POST" || request.url !== "/chat/completions") {
+      response.writeHead(404).end();
+      return;
+    }
+    await readJson(request);
+    writeSse(response, [
+      {
+        id: "chatcmpl-scorel-cli-test",
+        object: "chat.completion.chunk",
+        choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
+      },
+    ]);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("missing server address");
+  }
+  return {
+    baseURL: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
   };
 };
 

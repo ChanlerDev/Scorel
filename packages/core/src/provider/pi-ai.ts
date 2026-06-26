@@ -165,6 +165,8 @@ const fromPiAssistant = (message: Extract<Message, { role: "assistant" }>): Scor
     api: message.api,
     provider: message.provider,
     model: message.model,
+    ...(message.errorMessage ? { errorMessage: message.errorMessage } : {}),
+    ...(message.diagnostics ? { diagnostics: message.diagnostics } : {}),
   },
 });
 
