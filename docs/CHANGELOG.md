@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## 0.0.8 - 2026-06-26
+
+### Highlights
+
+- New `scorel run` command for headless, non-interactive task execution
+- GUI now correctly loads memory status for the selected project on session preload
+- Sessions can be attached even when provider credentials are missing
+
+### Changes
+
+- Added `scorel run` command with multiple prompt sources, execution options, provider overrides, and machine-readable summary output
+- GUI now fetches and displays memory status for the selected project during app initialization
+- Provider settings UI no longer autosaves on credential mode change, preventing incomplete data saves
+- Daemon session loading no longer requires a runtime; sessions can be attached without provider API keys configured
+
+### Fixes
+
+- Fixed GUI not loading memory status for the selected project on session preload
+- Fixed provider attach failure when provider config is incomplete (e.g., missing API key)
+
+### Verification
+
+- Tests cover `scorel run` prompt sources, output formats, summary, timeout exit code, and provider overrides
+- Unit test confirms memory status is fetched for correct project on app mount
+- Tests verify sessions can be loaded and messages sent even when provider credentials are missing
+
 ## 0.0.7 - 2026-06-24
 
 ### Highlights

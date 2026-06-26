@@ -5566,20 +5566,22 @@ var init_src4 = __esm({
       }
       async #handleLoadSession(connection, request) {
         try {
-          const lane = await this.#getLane(request.sessionId);
+          const lane = this.#sessions.get(request.sessionId);
+          const session = lane?.session ?? await loadSession({ sessionsDir: this.#sessionsDir, sessionId: request.sessionId });
           await this.#appendDiagnostic(request.sessionId, "session_loaded", { clientId: connection.clientId });
           connection.sessionId = request.sessionId;
-          const persistentEvents = [...lane.session.tree];
+          const persistentEvents = [...session.tree];
           const sessionEvents = this.#events.get(request.sessionId) ?? [];
           if (sessionEvents.length === 0 && persistentEvents.length > 0) {
             this.#events.set(request.sessionId, persistentEvents);
           }
+          this.#seqs.set(request.sessionId, Number(session.currentSeq));
           this.#respond(connection, request, {
             sessionId: request.sessionId,
-            activeLeafId: lane.session.activeLeafId,
-            currentSeq: lane.session.currentSeq,
+            activeLeafId: session.activeLeafId,
+            currentSeq: session.currentSeq,
             events: persistentEvents,
-            meta: lane.session.header.meta
+            meta: session.header.meta
           });
         } catch (cause) {
           connection.emit({
@@ -9814,7 +9816,7 @@ import { createInterface } from "node:readline/promises";
 import { homedir as homedir9 } from "node:os";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
 import { basename as basename4, dirname as dirname13, join as join17 } from "node:path";
-var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, createSigintHandler, loadOrCreateSession, parseChatOptions, requireValue6, promptIfInteractive, writeUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
+var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, runHeadless, renderRunEvent, renderRunFinal, writeJsonLine, RunTimeoutError, withRunTimeout, makeRunSummary, writeRunSummary, readRunPrompt, resolveRunConfig, stripTrailingSlashes2, createSigintHandler, loadOrCreateSession, parseChatOptions, parseRunOptions, parseRunOutputFormat, parsePositiveInteger, parseModelSelection, parseRunProviderApi, requireValue6, promptIfInteractive, writeUsage, writeRunUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
 var init_index = __esm({
   async "apps/cli/src/index.ts"() {
     "use strict";
@@ -9847,6 +9849,19 @@ var init_index = __esm({
         const chatOptions = parseChatOptions(rest);
         const sessionsDir = runOptions.sessionsDir ?? chatOptions.sessionsDir;
         return runChat({ ...chatOptions, config: runOptions.config, sessionsDir, stateDir: stateDirFromSessionsDir(sessionsDir) }, io);
+      }
+      if (command === "run") {
+        if (rest.includes("--help") || rest.includes("-h")) {
+          writeRunUsage(io.output);
+          return 0;
+        }
+        try {
+          return runHeadless(parseRunOptions(rest, runOptions), io);
+        } catch (cause) {
+          io.error.write(`scorel run error: ${cause instanceof Error ? cause.message : String(cause)}
+`);
+          return 2;
+        }
       }
       if (command === "daemon") {
         return runCliDaemon(rest, {
@@ -10409,7 +10424,7 @@ var init_index = __esm({
       process.on("SIGINT", sigintHandler);
       try {
         await client.connect(options.sessionId);
-        const resumed = await loadOrCreateSession(client, options, project.projectId);
+        const resumed = await loadOrCreateSession(client, options.sessionId, project.projectId);
         io.error.write(`scorel chat ${resumed ? "resumed" : "created"} session ${options.sessionId}
 `);
         const rl = createInterface({ input: io.input, crlfDelay: Infinity });
@@ -10457,6 +10472,247 @@ var init_index = __esm({
         await daemon.shutdown();
       }
     };
+    runHeadless = async (options, io) => {
+      const startedAt = Date.now();
+      let projectId;
+      const textParts = [];
+      const prompt = await readRunPrompt(options, io);
+      const runConfig = resolveRunConfig(options);
+      const configScope = { scorelHomeDir: options.stateDir };
+      const loadProjectConfig = async (project) => runConfig ?? options.config ?? await loadScorelConfig({ cwd: project.workDir, ...configScope });
+      const loadProjectConfigProfile = async (project) => runConfig ?? options.config ?? await loadScorelConfigProfile({ cwd: project.workDir, ...configScope });
+      const daemon = new ScorelHost({
+        sessionsDir: options.sessionsDir,
+        projectsPath: join17(options.stateDir, "projects.json"),
+        deviceId: asDeviceId("device_local"),
+        scorelHomeDir: options.stateDir,
+        loadConfig: async ({ project }) => loadProjectConfig(project),
+        loadConfigProfile: async ({ project }) => loadProjectConfigProfile(project),
+        createRuntime: async ({ sessionId, project, selectedModel, purpose }) => createRealRuntime({
+          cwd: project.workDir,
+          config: await loadProjectConfig(project),
+          sessionsDir: options.sessionsDir,
+          sessionId,
+          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : void 0,
+          includeTools: purpose === "chat"
+        })
+      });
+      const client = new DaemonClient(createEmbeddedTransport(daemon), {
+        clientId: asClientId("client_cli_run")
+      });
+      let unsubscribe;
+      try {
+        await daemon.start();
+        const project = await daemon.registerProject(options.cwd);
+        projectId = project.projectId;
+        await client.connect(options.sessionId);
+        await loadOrCreateSession(client, options.sessionId, project.projectId, options.modelSelection);
+        unsubscribe = client.subscribe((event) => {
+          if (event.type === "text_delta") {
+            textParts.push(event.delta);
+          }
+          renderRunEvent(options, io, event);
+        });
+        const send = client.sendMessage(prompt, options.modelSelection ? { modelSelection: options.modelSelection } : void 0);
+        const result = options.timeoutMs === void 0 ? await send : await withRunTimeout(send, options.timeoutMs, async () => {
+          await client.cancel().catch(() => void 0);
+        });
+        const summary = makeRunSummary({
+          options,
+          startedAt,
+          projectId,
+          status: "completed",
+          exitReason: "completed",
+          userEventId: String(result.userEventId),
+          assistantEventId: String(result.assistantEventId)
+        });
+        await writeRunSummary(options.summaryPath, summary);
+        renderRunFinal(options, io, summary, textParts.join(""));
+        return 0;
+      } catch (cause) {
+        const isTimeout = cause instanceof RunTimeoutError;
+        const summary = makeRunSummary({
+          options,
+          startedAt,
+          projectId,
+          status: isTimeout ? "timeout" : "error",
+          exitReason: isTimeout ? "timeout" : "error",
+          error: cause instanceof Error ? cause : new Error(String(cause))
+        });
+        await writeRunSummary(options.summaryPath, summary).catch(() => void 0);
+        renderRunFinal(options, io, summary, textParts.join(""));
+        if (!options.quiet && options.outputFormat === "text") {
+          io.error.write(`scorel run error: ${summary.error?.message ?? "unknown error"}
+`);
+        }
+        return isTimeout ? 124 : 1;
+      } finally {
+        unsubscribe?.();
+        client.disconnect();
+        await daemon.shutdown();
+      }
+    };
+    renderRunEvent = (options, io, event) => {
+      if (options.outputFormat === "none" || options.outputFormat === "json") {
+        return;
+      }
+      if (options.outputFormat === "stream-json") {
+        writeJsonLine(io.output, { type: "event", event });
+        return;
+      }
+      if (event.type === "text_delta") {
+        io.output.write(event.delta);
+      }
+      if (event.type === "tool_result") {
+        writeToolResult(io.output, event);
+      }
+      if (event.type === "error") {
+        writeEventError(io.error, event);
+      }
+    };
+    renderRunFinal = (options, io, summary, text) => {
+      if (options.outputFormat === "none") {
+        return;
+      }
+      if (options.outputFormat === "json") {
+        io.output.write(`${JSON.stringify({ ...summary, result: text })}
+`);
+        return;
+      }
+      if (options.outputFormat === "stream-json") {
+        writeJsonLine(io.output, { type: "result", summary, result: text });
+        return;
+      }
+      if (!text.endsWith("\n")) {
+        io.output.write("\n");
+      }
+    };
+    writeJsonLine = (output, value) => {
+      output.write(`${JSON.stringify(value)}
+`);
+    };
+    RunTimeoutError = class extends Error {
+      constructor(timeoutMs) {
+        super(`run timed out after ${timeoutMs}ms`);
+        this.name = "RunTimeoutError";
+      }
+    };
+    withRunTimeout = async (promise, timeoutMs, onTimeout) => {
+      let timeout;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise((_resolve, reject) => {
+            timeout = setTimeout(() => {
+              void onTimeout().finally(() => reject(new RunTimeoutError(timeoutMs)));
+            }, timeoutMs);
+          })
+        ]);
+      } finally {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+      }
+    };
+    makeRunSummary = (input) => ({
+      status: input.status,
+      sessionId: String(input.options.sessionId),
+      ...input.projectId ? { projectId: String(input.projectId) } : {},
+      cwd: input.options.cwd,
+      stateDir: input.options.stateDir,
+      sessionsDir: input.options.sessionsDir,
+      sessionJsonl: join17(input.options.sessionsDir, `${input.options.sessionId}.jsonl`),
+      outputFormat: input.options.outputFormat,
+      elapsedMs: Date.now() - input.startedAt,
+      exitReason: input.exitReason,
+      ...input.userEventId ? { userEventId: input.userEventId } : {},
+      ...input.assistantEventId ? { assistantEventId: input.assistantEventId } : {},
+      ...input.error ? { error: { message: input.error.message } } : {}
+    });
+    writeRunSummary = async (path, summary) => {
+      if (!path) {
+        return;
+      }
+      await mkdir8(dirname13(path), { recursive: true });
+      await writeFile8(path, `${JSON.stringify(summary, null, 2)}
+`);
+    };
+    readRunPrompt = async (options, io) => {
+      if (options.promptSource === "prompt-file") {
+        return (await readFile14(options.promptFile, "utf8")).trim();
+      }
+      if (options.promptSource === "stdin") {
+        const chunks = [];
+        for await (const chunk of io.input) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+        }
+        return Buffer.concat(chunks).toString("utf8").trim();
+      }
+      return (options.prompt ?? "").trim();
+    };
+    resolveRunConfig = (options) => {
+      const override = options.providerOverride;
+      if (!override || !override.provider && !override.api && !override.baseUrl && !override.apiKey) {
+        return void 0;
+      }
+      if (!override.baseUrl) {
+        throw new Error("--base-url is required when overriding the run provider");
+      }
+      if (!override.apiKey) {
+        throw new Error("--api-key is required when overriding the run provider");
+      }
+      if (!options.modelSelection?.modelId) {
+        throw new Error("--model <model-id> is required when overriding the run provider");
+      }
+      const providerId = "run";
+      const providerModelId = "run_model";
+      const availableModelId = options.modelSelection.modelId;
+      return {
+        providers: {
+          [providerId]: {
+            type: "custom",
+            api: override.api ?? "openai-completions",
+            provider: override.provider ?? "openai",
+            baseUrl: stripTrailingSlashes2(override.baseUrl),
+            apiKey: override.apiKey
+          }
+        },
+        providerModels: {
+          [providerModelId]: {
+            provider: providerId,
+            id: availableModelId,
+            displayName: availableModelId
+          }
+        },
+        models: {
+          [availableModelId]: {
+            model: providerModelId,
+            displayName: availableModelId
+          }
+        },
+        modelProfile: {
+          roles: {
+            primary: availableModelId,
+            standard: availableModelId,
+            auxiliary: availableModelId
+          }
+        },
+        memory: {
+          enabled: false,
+          daily: false,
+          sessionMemory: false,
+          autoDream: false,
+          promoteRoot: false,
+          dreamIdleMinutes: 60,
+          autoCompactThreshold: 0.8
+        },
+        runtime: {
+          tokenSavingRtk: false
+        },
+        extensions: {}
+      };
+    };
+    stripTrailingSlashes2 = (value) => value.replace(/\/+$/, "");
     createSigintHandler = (options) => {
       return () => {
         if (options.isInFlight()) {
@@ -10467,14 +10723,14 @@ var init_index = __esm({
         options.exit();
       };
     };
-    loadOrCreateSession = async (client, options, projectId) => {
+    loadOrCreateSession = async (client, sessionId, projectId, modelSelection) => {
       try {
-        await client.loadSession(options.sessionId);
+        await client.loadSession(sessionId);
         return true;
       } catch {
         await client.createSession({
-          sessionId: options.sessionId,
-          meta: { projectId }
+          sessionId,
+          meta: { projectId, ...modelSelection ? { modelSelection } : {} }
         });
         return false;
       }
@@ -10499,6 +10755,152 @@ var init_index = __esm({
       const sessionsDir = defaultSessionsDir();
       return { sessionId, sessionsDir, stateDir: stateDirFromSessionsDir(sessionsDir), cwd };
     };
+    parseRunOptions = (argv, runOptions) => {
+      const promptSources = [];
+      let sessionId = asSessionId(`ses_run_${Date.now().toString(36)}`);
+      let cwd = process.cwd();
+      let stateDir;
+      let sessionsDir = runOptions.sessionsDir;
+      let timeoutMs;
+      let outputFormat = "text";
+      let summaryPath;
+      let quiet = false;
+      let modelSelection;
+      const providerOverride = {};
+      const positional = [];
+      for (let index = 0; index < argv.length; index += 1) {
+        const arg = argv[index];
+        if (arg === "--prompt") {
+          promptSources.push({ promptSource: "prompt", prompt: requireValue6(argv, index, "--prompt") });
+          index += 1;
+          continue;
+        }
+        if (arg === "--prompt-file") {
+          promptSources.push({ promptSource: "prompt-file", promptFile: requireValue6(argv, index, "--prompt-file") });
+          index += 1;
+          continue;
+        }
+        if (arg === "--stdin") {
+          promptSources.push({ promptSource: "stdin" });
+          continue;
+        }
+        if (arg === "--session") {
+          sessionId = asSessionId(requireValue6(argv, index, "--session"));
+          index += 1;
+          continue;
+        }
+        if (arg === "--cwd") {
+          cwd = requireValue6(argv, index, "--cwd");
+          index += 1;
+          continue;
+        }
+        if (arg === "--state-dir") {
+          stateDir = requireValue6(argv, index, "--state-dir");
+          index += 1;
+          continue;
+        }
+        if (arg === "--sessions-dir") {
+          sessionsDir = requireValue6(argv, index, "--sessions-dir");
+          index += 1;
+          continue;
+        }
+        if (arg === "--timeout-ms") {
+          timeoutMs = parsePositiveInteger(requireValue6(argv, index, "--timeout-ms"), "--timeout-ms");
+          index += 1;
+          continue;
+        }
+        if (arg === "--output-format") {
+          outputFormat = parseRunOutputFormat(requireValue6(argv, index, "--output-format"));
+          index += 1;
+          continue;
+        }
+        if (arg === "--summary") {
+          summaryPath = requireValue6(argv, index, "--summary");
+          index += 1;
+          continue;
+        }
+        if (arg === "--quiet") {
+          quiet = true;
+          continue;
+        }
+        if (arg === "--model") {
+          modelSelection = parseModelSelection(requireValue6(argv, index, "--model"));
+          index += 1;
+          continue;
+        }
+        if (arg === "--provider") {
+          providerOverride.provider = requireValue6(argv, index, "--provider");
+          index += 1;
+          continue;
+        }
+        if (arg === "--api" || arg === "--protocol") {
+          providerOverride.api = parseRunProviderApi(requireValue6(argv, index, arg));
+          index += 1;
+          continue;
+        }
+        if (arg === "--base-url" || arg === "--baseurl") {
+          providerOverride.baseUrl = requireValue6(argv, index, arg);
+          index += 1;
+          continue;
+        }
+        if (arg === "--api-key" || arg === "--apikey") {
+          providerOverride.apiKey = requireValue6(argv, index, arg);
+          index += 1;
+          continue;
+        }
+        if (arg.startsWith("-")) {
+          throw new Error(`Unknown run option: ${arg}`);
+        }
+        positional.push(arg);
+      }
+      if (positional.length > 0) {
+        promptSources.unshift({ promptSource: "argument", prompt: positional.join(" ") });
+      }
+      if (promptSources.length !== 1) {
+        throw new Error("scorel run requires exactly one prompt source");
+      }
+      const resolvedStateDir = stateDir ?? stateDirFromSessionsDir(sessionsDir);
+      const resolvedSessionsDir = sessionsDir ?? join17(resolvedStateDir, "sessions");
+      return {
+        ...promptSources[0],
+        sessionId,
+        cwd,
+        stateDir: resolvedStateDir,
+        sessionsDir: resolvedSessionsDir,
+        timeoutMs,
+        outputFormat,
+        summaryPath,
+        quiet,
+        modelSelection,
+        providerOverride,
+        config: runOptions.config
+      };
+    };
+    parseRunOutputFormat = (value) => {
+      if (value === "text" || value === "json" || value === "stream-json" || value === "none") {
+        return value;
+      }
+      throw new Error("--output-format must be text, json, stream-json, or none");
+    };
+    parsePositiveInteger = (value, flag) => {
+      const parsed = Number(value);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new Error(`${flag} must be a positive integer`);
+      }
+      return parsed;
+    };
+    parseModelSelection = (value) => {
+      if (value === "primary" || value === "standard" || value === "auxiliary") {
+        return { role: value };
+      }
+      return { modelId: value };
+    };
+    parseRunProviderApi = (value) => {
+      if (value === "openai-completions" || value === "openai-responses" || value === "google-generative-ai" || value === "anthropic-messages") {
+        return value;
+      }
+      throw new Error("--api must be openai-completions, openai-responses, google-generative-ai, or anthropic-messages");
+    };
     requireValue6 = (argv, index, flag) => {
       const value = argv[index + 1];
       if (!value) {
@@ -10516,6 +10918,12 @@ var init_index = __esm({
         [
           "Usage: scorel chat [--session <id>] [--cwd <dir>]",
           "       scorel [--session <id>] [--cwd <dir>]",
+          "       scorel run [prompt] [--prompt <text> | --prompt-file <path> | --stdin]",
+          "                 [--cwd <dir>] [--state-dir <dir>] [--sessions-dir <dir>]",
+          "                 [--session <id>] [--timeout-ms <ms>]",
+          "                 [--output-format text|json|stream-json|none] [--summary <path>]",
+          "                 [--provider <name>] [--api|--protocol <protocol>]",
+          "                 [--base-url|--baseurl <url>] [--api-key|--apikey <key>] [--model <id>]",
           "       scorel attach --session <id> --remote <ws-url> --token <token>",
           "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
           "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
@@ -10535,6 +10943,37 @@ var init_index = __esm({
           "       scorel project list",
           "       scorel project add <dir>",
           "       scorel project remove <project-id>"
+        ].join("\n") + "\n"
+      );
+    };
+    writeRunUsage = (output) => {
+      output.write(
+        [
+          "Usage: scorel run [prompt]",
+          "       scorel run --prompt <text>",
+          "       scorel run --prompt-file <path>",
+          "       scorel run --stdin",
+          "",
+          "Options:",
+          "  --cwd <dir>",
+          "  --state-dir <dir>",
+          "  --sessions-dir <dir>",
+          "  --session <id>",
+          "  --timeout-ms <ms>",
+          "  --output-format text|json|stream-json|none",
+          "  --summary <path>",
+          "  --quiet",
+          "  --model <primary|standard|auxiliary|model-id>",
+          "  --provider <name>",
+          "  --api, --protocol <openai-completions|openai-responses|google-generative-ai|anthropic-messages>",
+          "  --base-url, --baseurl <url>",
+          "  --api-key, --apikey <key>",
+          "",
+          "Examples:",
+          '  scorel run --prompt "Summarize this project" --output-format json',
+          "  scorel run --prompt-file /tmp/instruction.txt --cwd /workspace --state-dir /tmp/scorel-state \\",
+          '    --api openai-completions --baseurl http://127.0.0.1:4000/v1 --apikey "$API_KEY" \\',
+          "    --model gpt-5.4-mini --output-format none --summary /logs/agent/scorel-summary.json"
         ].join("\n") + "\n"
       );
     };
