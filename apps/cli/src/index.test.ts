@@ -266,6 +266,113 @@ describe("@scorel/app-cli", () => {
     }
   });
 
+  it("writes run reporting usage, cost, metadata, events, and trajectory without leaking api keys", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-reporting-"));
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-run-reporting-workspace-"));
+    const reportDir = join(stateDir, "report");
+    const summaryPath = join(stateDir, "custom-summary.json");
+    const server = await startChatServer([
+      {
+        content: "Reporting response.",
+        tool_calls: [],
+        usage: { prompt_tokens: 1200, completion_tokens: 800, total_tokens: 2000 },
+      },
+    ]);
+
+    try {
+      const result = await runCliWithInput(
+        [
+          "run",
+          "--prompt",
+          "collect reporting",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_run_reporting",
+          "--api",
+          "openai-completions",
+          "--base-url",
+          server.baseURL,
+          "--api-key",
+          "direct-secret-reporting",
+          "--model",
+          "gpt-4o-mini",
+          "--output-format",
+          "none",
+          "--summary",
+          summaryPath,
+          "--report-dir",
+          reportDir,
+        ],
+        "",
+        undefined,
+        join(stateDir, "sessions"),
+      );
+
+      expect(result.code, result.stderr).toBe(0);
+      expect(result.stdout).toBe("");
+      const summaryText = await readFile(summaryPath, "utf8");
+      const reportSummaryText = await readFile(join(reportDir, "scorel-summary.json"), "utf8");
+      const eventsText = await readFile(join(reportDir, "scorel-events.jsonl"), "utf8");
+      const metadataText = await readFile(join(reportDir, "scorel-metadata.json"), "utf8");
+      const trajectoryText = await readFile(join(reportDir, "scorel-trajectory.json"), "utf8");
+      const combinedReportText = [summaryText, reportSummaryText, eventsText, metadataText, trajectoryText].join("\n");
+      expect(combinedReportText).not.toContain("direct-secret-reporting");
+
+      const summary = JSON.parse(summaryText) as {
+        usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+        model?: { modelId?: string; providerModelId?: string; provider?: string; api?: string };
+        cost?: {
+          known?: boolean;
+          input?: number;
+          output?: number;
+          total?: number;
+          currency?: string;
+          pricingSource?: string;
+          pricingModelId?: string;
+        };
+        reports?: Record<string, string>;
+      };
+      expect(summary.usage).toEqual({ inputTokens: 1200, outputTokens: 800, totalTokens: 2000 });
+      expect(summary.model).toMatchObject({
+        modelId: "gpt-4o-mini",
+        providerModelId: "gpt-4o-mini",
+        provider: "openai",
+        api: "openai-completions",
+      });
+      expect(summary.cost).toMatchObject({
+        known: true,
+        currency: "USD",
+        pricingSource: "models.dev-api-2026-06-27",
+        pricingModelId: "gpt-4o-mini",
+      });
+      expect(summary.cost?.total).toBeGreaterThan(0);
+      expect(summary.reports).toMatchObject({
+        summary: join(reportDir, "scorel-summary.json"),
+        events: join(reportDir, "scorel-events.jsonl"),
+        trajectory: join(reportDir, "scorel-trajectory.json"),
+        metadata: join(reportDir, "scorel-metadata.json"),
+        sessionJsonl: join(stateDir, "sessions", "ses_run_reporting.jsonl"),
+        sessionSummary: join(stateDir, "sessions", "ses_run_reporting.summary.json"),
+        diagnosticsLog: join(stateDir, "sessions", "ses_run_reporting.log"),
+        sessionFilesDir: join(stateDir, "sessions", "ses_run_reporting.artifacts"),
+      });
+      expect(eventsText.trim().split("\n").some((line) => JSON.parse(line).type === "assistant_message")).toBe(true);
+      expect(JSON.parse(metadataText)).toMatchObject({
+        usage: { inputTokens: 1200, outputTokens: 800, totalTokens: 2000 },
+        cost: { known: true },
+      });
+      expect(JSON.parse(trajectoryText)).toMatchObject({
+        format: "scorel-run-trajectory-v1",
+        sessionId: "ses_run_reporting",
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
   it("runs with prompt file and output-format none", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-file-"));
     const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-run-file-workspace-"));
@@ -1524,6 +1631,7 @@ class StringWritable extends Writable {
 type AssistantResponse = {
   content: string | null;
   tool_calls: Array<ReturnType<typeof toolCall>>;
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
 };
 
 const startChatServer = async (
@@ -1740,6 +1848,7 @@ const toSseChunks = (item: AssistantResponse): unknown[] => {
     id: "chatcmpl-scorel-cli-test",
     object: "chat.completion.chunk",
     choices: [{ index: 0, delta: {}, finish_reason: item.tool_calls.length > 0 ? "tool_calls" : "stop" }],
+    ...(item.usage ? { usage: item.usage } : {}),
   });
   return chunks;
 };

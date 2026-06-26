@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -20,6 +20,8 @@ import {
   buildContext,
   createSession,
   loadSession,
+  readSessionObservationSummary,
+  sessionObservationSummaryFilePath,
   sessionLogFilePath,
   SessionStoreError,
 } from "./index.js";
@@ -58,6 +60,37 @@ const assistantEvent = (id: string, parentId: string, seq: number, content: stri
   message: {
     role: "assistant",
     content: [{ type: "text", text: content }],
+  },
+});
+
+const assistantUsageEvent = (
+  id: string,
+  parentId: string,
+  seq: number,
+  inputTokens: number,
+  outputTokens: number,
+  model: string,
+): PersistentEvent => ({
+  type: "assistant_message",
+  id: asEventId(id),
+  parentId: asEventId(parentId),
+  seq: asSeq(seq),
+  sessionId,
+  clientId,
+  ts: 1_000 + seq,
+  message: {
+    role: "assistant",
+    content: [{ type: "text", text: "ok" }],
+    usage: {
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+    },
+    meta: {
+      model,
+      provider: "OpenAI",
+      api: "openai-completions",
+    },
   },
 });
 
@@ -223,6 +256,67 @@ describe("session core", () => {
     const sessionsDir = await tempRoot();
 
     expect(sessionLogFilePath(sessionsDir, sessionId)).toBe(join(sessionsDir, "ses_test.log"));
+  });
+
+  it("maintains a session-level observation summary beside the session JSONL", async () => {
+    const sessionsDir = await tempRoot();
+    const session = await createSession({
+      sessionsDir,
+      header: {
+        version: 1,
+        sessionId,
+        deviceId,
+        createdAt: 1_000,
+        meta: {
+          ...meta,
+          selectedModel: {
+            modelId: "gpt-5.4-mini",
+            id: "gpt-5.4-mini",
+            providerId: "openai",
+            provider: "OpenAI",
+            displayName: "GPT-5.4 mini",
+          },
+        },
+      },
+    });
+
+    const emptySummary = await readSessionObservationSummary(sessionsDir, sessionId);
+    expect(emptySummary).toMatchObject({
+      format: "scorel-session-observation-v1",
+      sessionId,
+      deviceId,
+      projectId: meta.projectId,
+      eventCount: 0,
+      usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      cost: { known: true, total: 0, pricingModelId: "gpt-5.4-mini" },
+    });
+
+    await session.append(userEvent("evt_1", null, 1, "hello"));
+    await session.append(assistantUsageEvent("evt_2", "evt_1", 2, 1000, 500, "gpt-5.4-mini"));
+    await session.append(assistantUsageEvent("evt_3", "evt_2", 3, 200, 300, "gpt-5.4-mini"));
+
+    const summary = await readSessionObservationSummary(sessionsDir, sessionId);
+    expect(summary).toMatchObject({
+      sourceSessionJsonl: session.filePath,
+      eventCount: 3,
+      usage: { inputTokens: 1200, outputTokens: 800, totalTokens: 2000 },
+      model: {
+        modelId: "gpt-5.4-mini",
+        providerModelId: "gpt-5.4-mini",
+        provider: "OpenAI",
+      },
+      cost: { known: true, pricingModelId: "gpt-5.4-mini" },
+    });
+    expect(summary.cost.total).toBeGreaterThan(0);
+
+    await writeFile(sessionObservationSummaryFilePath(sessionsDir, sessionId), "{}\n");
+    await loadSession({ sessionsDir, sessionId });
+    const rebuilt = JSON.parse(await readFile(sessionObservationSummaryFilePath(sessionsDir, sessionId), "utf8")) as {
+      eventCount?: number;
+      usage?: { totalTokens?: number };
+    };
+    expect(rebuilt.eventCount).toBe(3);
+    expect(rebuilt.usage?.totalTokens).toBe(2000);
   });
 
   it("creates, appends, closes, reloads, and replays the same session tree", async () => {

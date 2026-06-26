@@ -39,6 +39,9 @@ importers:
       '@scorel/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@scorel/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@scorel/daemon':
         specifier: workspace:*
         version: link:../../packages/daemon

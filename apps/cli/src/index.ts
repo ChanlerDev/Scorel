@@ -9,6 +9,16 @@ import { basename, dirname, join } from "node:path";
 
 import { DaemonClient, WsTransport, clientPackageName } from "@scorel/client";
 import {
+  buildRunObservation,
+  resolveModelSelection,
+  resolvePiAiModel,
+  sessionArtifactsDirPath,
+  sessionObservationSummaryFilePath,
+  sessionLogFilePath,
+  type RunCostEstimate,
+  type RunReportingModel,
+} from "@scorel/core";
+import {
   ScorelHost,
   createEmbeddedTransport,
   createRealRuntime,
@@ -87,6 +97,7 @@ type RunOptions = {
   timeoutMs?: number;
   outputFormat: RunOutputFormat;
   summaryPath?: string;
+  reportDir?: string;
   quiet: boolean;
   modelSelection?: ModelSelectionInput;
   providerOverride?: RunProviderOverride;
@@ -108,6 +119,14 @@ type RunSummary = {
   userEventId?: string;
   error?: { message: string };
   events?: ScorelEvent[];
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
+  model?: RunReportingModel;
+  cost: RunCostEstimate;
+  reports: Record<string, string>;
 };
 
 const defaultSessionsDir = (): string => scorelSessionsDir(homedir());
@@ -873,6 +892,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
   const events: ScorelEvent[] = [];
   const prompt = await readRunPrompt(options, io);
   const runConfig = resolveRunConfig(options);
+  let reportingModel: RunReportingModel | undefined;
   const configScope = { scorelHomeDir: options.stateDir };
   const loadProjectConfig = async (project: { workDir: string }) =>
     runConfig ?? options.config ?? (await loadScorelConfig({ cwd: project.workDir, ...configScope }));
@@ -903,6 +923,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
     await daemon.start();
     const project = await daemon.registerProject(options.cwd);
     projectId = project.projectId;
+    reportingModel = runReportingModel(await loadProjectConfig(project), options.modelSelection);
     await client.connect(options.sessionId);
     await loadOrCreateSession(client, options.sessionId, project.projectId, options.modelSelection);
     unsubscribe = client.subscribe((event) => {
@@ -923,6 +944,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
       options,
       startedAt,
       projectId,
+      reportingModel,
       status: runtimeError ? "error" : "completed",
       exitReason: runtimeError ? "error" : "completed",
       userEventId: String(result.userEventId),
@@ -931,6 +953,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
       events,
     });
     await writeRunSummary(options.summaryPath, summary);
+    await writeRunReports(options.reportDir, summary);
     renderRunFinal(options, io, summary, textParts.join(""));
     return runtimeError ? 1 : 0;
   } catch (cause) {
@@ -939,12 +962,14 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
       options,
       startedAt,
       projectId,
+      reportingModel,
       status: isTimeout ? "timeout" : "error",
       exitReason: isTimeout ? "timeout" : "error",
       error: cause instanceof Error ? cause : new Error(String(cause)),
       events,
     });
     await writeRunSummary(options.summaryPath, summary).catch(() => undefined);
+    await writeRunReports(options.reportDir, summary).catch(() => undefined);
     renderRunFinal(options, io, summary, textParts.join(""));
     if (!options.quiet && options.outputFormat === "text") {
       io.error.write(`scorel run error: ${summary.error?.message ?? "unknown error"}\n`);
@@ -1026,28 +1051,38 @@ const makeRunSummary = (input: {
   options: RunOptions;
   startedAt: number;
   projectId?: ProjectId;
+  reportingModel?: RunReportingModel;
   status: RunSummary["status"];
   exitReason: RunSummary["exitReason"];
   userEventId?: string;
   assistantEventId?: string;
   error?: Error;
   events?: ScorelEvent[];
-}): RunSummary => ({
-  status: input.status,
-  sessionId: String(input.options.sessionId),
-  ...(input.projectId ? { projectId: String(input.projectId) } : {}),
-  cwd: input.options.cwd,
-  stateDir: input.options.stateDir,
-  sessionsDir: input.options.sessionsDir,
-  sessionJsonl: join(input.options.sessionsDir, `${input.options.sessionId}.jsonl`),
-  outputFormat: input.options.outputFormat,
-  elapsedMs: Date.now() - input.startedAt,
-  exitReason: input.exitReason,
-  ...(input.userEventId ? { userEventId: input.userEventId } : {}),
-  ...(input.assistantEventId ? { assistantEventId: input.assistantEventId } : {}),
-  ...(input.error ? { error: { message: input.error.message } } : {}),
-  ...(input.events ? { events: input.events } : {}),
-});
+}): RunSummary => {
+  const events = input.events ?? [];
+  const observation = buildRunObservation({ events, selectedModel: input.reportingModel });
+  const reports = runReportPaths(input.options);
+  return {
+    status: input.status,
+    sessionId: String(input.options.sessionId),
+    ...(input.projectId ? { projectId: String(input.projectId) } : {}),
+    cwd: input.options.cwd,
+    stateDir: input.options.stateDir,
+    sessionsDir: input.options.sessionsDir,
+    sessionJsonl: join(input.options.sessionsDir, `${input.options.sessionId}.jsonl`),
+    outputFormat: input.options.outputFormat,
+    elapsedMs: Date.now() - input.startedAt,
+    exitReason: input.exitReason,
+    ...(input.userEventId ? { userEventId: input.userEventId } : {}),
+    ...(input.assistantEventId ? { assistantEventId: input.assistantEventId } : {}),
+    ...(input.error ? { error: { message: input.error.message } } : {}),
+    ...(input.events ? { events: input.events } : {}),
+    usage: observation.usage,
+    ...(observation.model ? { model: observation.model } : {}),
+    cost: observation.cost,
+    reports,
+  };
+};
 
 const runErrorFromEvents = (events: ScorelEvent[]): Error | undefined => {
   for (let index = events.length - 1; index >= 0; index -= 1) {
@@ -1074,6 +1109,74 @@ const writeRunSummary = async (path: string | undefined, summary: RunSummary): P
   }
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(summary, null, 2)}\n`);
+};
+
+const writeRunReports = async (reportDir: string | undefined, summary: RunSummary): Promise<void> => {
+  if (!reportDir) {
+    return;
+  }
+  await mkdir(reportDir, { recursive: true });
+  await writeFile(join(reportDir, "scorel-summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
+  await writeFile(join(reportDir, "scorel-events.jsonl"), summary.events?.map((event) => JSON.stringify(event)).join("\n").concat("\n") ?? "");
+  await writeFile(join(reportDir, "scorel-metadata.json"), `${JSON.stringify(runMetadata(summary), null, 2)}\n`);
+  await writeFile(join(reportDir, "scorel-trajectory.json"), `${JSON.stringify(runTrajectory(summary), null, 2)}\n`);
+};
+
+const runReportPaths = (options: RunOptions): Record<string, string> => {
+  const reports: Record<string, string> = {
+    sessionJsonl: join(options.sessionsDir, `${options.sessionId}.jsonl`),
+    sessionSummary: sessionObservationSummaryFilePath(options.sessionsDir, options.sessionId),
+    diagnosticsLog: sessionLogFilePath(options.sessionsDir, options.sessionId),
+    sessionFilesDir: sessionArtifactsDirPath(options.sessionsDir, options.sessionId),
+  };
+  if (options.reportDir) {
+    reports.summary = join(options.reportDir, "scorel-summary.json");
+    reports.events = join(options.reportDir, "scorel-events.jsonl");
+    reports.trajectory = join(options.reportDir, "scorel-trajectory.json");
+    reports.metadata = join(options.reportDir, "scorel-metadata.json");
+  }
+  return reports;
+};
+
+const runMetadata = (summary: RunSummary): Record<string, unknown> => ({
+  format: "scorel-run-metadata-v1",
+  status: summary.status,
+  exitReason: summary.exitReason,
+  sessionId: summary.sessionId,
+  projectId: summary.projectId,
+  cwd: summary.cwd,
+  elapsedMs: summary.elapsedMs,
+  usage: summary.usage,
+  model: summary.model,
+  cost: summary.cost,
+  reports: summary.reports,
+});
+
+const runTrajectory = (summary: RunSummary): Record<string, unknown> => ({
+  format: "scorel-run-trajectory-v1",
+  sessionId: summary.sessionId,
+  projectId: summary.projectId,
+  status: summary.status,
+  usage: summary.usage,
+  model: summary.model,
+  cost: summary.cost,
+  events: summary.events ?? [],
+});
+
+const runReportingModel = (config: ScorelConfig, modelSelection: ModelSelectionInput | undefined): RunReportingModel | undefined => {
+  try {
+    const selection = resolveModelSelection(config, modelSelection);
+    const model = resolvePiAiModel(selection.config);
+    return {
+      modelId: selection.modelId,
+      providerModelId: model.id,
+      provider: model.provider,
+      api: model.api,
+      displayName: selection.displayName,
+    };
+  } catch {
+    return modelSelection?.modelId ? { modelId: modelSelection.modelId } : undefined;
+  }
 };
 
 const readRunPrompt = async (options: RunOptions, io: CliIo): Promise<string> => {
@@ -1232,6 +1335,7 @@ const parseRunOptions = (argv: string[], runOptions: CliRunOptions): RunOptions 
   let timeoutMs: number | undefined;
   let outputFormat: RunOutputFormat = "text";
   let summaryPath: string | undefined;
+  let reportDir: string | undefined;
   let quiet = false;
   let modelSelection: ModelSelectionInput | undefined;
   const providerOverride: RunProviderOverride = {};
@@ -1288,6 +1392,11 @@ const parseRunOptions = (argv: string[], runOptions: CliRunOptions): RunOptions 
       index += 1;
       continue;
     }
+    if (arg === "--report-dir") {
+      reportDir = requireValue(argv, index, "--report-dir");
+      index += 1;
+      continue;
+    }
     if (arg === "--quiet") {
       quiet = true;
       continue;
@@ -1341,6 +1450,7 @@ const parseRunOptions = (argv: string[], runOptions: CliRunOptions): RunOptions 
     timeoutMs,
     outputFormat,
     summaryPath,
+    reportDir,
     quiet,
     modelSelection,
     providerOverride,
@@ -1446,6 +1556,7 @@ const writeRunUsage = (output: NodeJS.WritableStream): void => {
       "  --timeout-ms <ms>",
       "  --output-format text|json|stream-json|none",
       "  --summary <path>",
+      "  --report-dir <path>",
       "  --quiet",
       "  --model <primary|standard|auxiliary|model-id>",
       "  --provider <name>",

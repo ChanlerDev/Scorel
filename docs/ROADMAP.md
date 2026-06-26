@@ -651,6 +651,27 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 
 ---
 
+## Future: Eval Reporting And Observability
+
+**Goal**: 让 `scorel run` 和外部 benchmark harness 能读取稳定的本地观测数据，而不是解析人类 stdout。
+
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| Eval.1 | [`S0110`](spec/ship/S0110-scorel-eval-reporting-compatibility.md) | `scorel run` 输出 token usage、model/provider、estimated cost、events 和 report metadata，供 Harbor / Terminal-Bench job 收集展示。 | Done |
+| Eval.2 | [`S0111`](spec/ship/S0111-scorel-observability-baseline.md) | 为每个 session 维护 `<sessionId>.summary.json` 派生观测缓存，让 CLI / GUI / run / harness 读取同一份 usage、model、cost summary。 | Done |
+
+**Not in Eval.1**:
+
+- Harbor leaderboard upload。
+- 网络 tracing backend。
+- budget/cost enforcement。
+
+**Status**: Planned
+
+---
+
 ## M12: Ecosystem
 
 **Goal**: Scorel 可以通过 MCP、extensions、channels 接入外部工作流。
@@ -786,6 +807,8 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0107`](spec/ship/S0107-system-reminder-unification.md) | System reminder unification | Done |
 | [`S0108`](spec/ship/S0108-gui-bundled-cli-runtime.md) | GUI bundled CLI runtime | Done |
 | [`S0109`](spec/ship/S0109-scorel-run-headless-task-runner.md) | `scorel run` headless task runner | Active |
+| [`S0110`](spec/ship/S0110-scorel-eval-reporting-compatibility.md) | Scorel eval reporting compatibility for usage/cost/reports | Done |
+| [`S0111`](spec/ship/S0111-scorel-observability-baseline.md) | Scorel session observability summary cache | Done |
 
 ---
 

@@ -22,6 +22,11 @@ import {
 } from "@scorel/protocol";
 
 import {
+  buildObservation,
+  type RunCostEstimate,
+  type RunReportingModel,
+} from "../reporting/index.js";
+import {
   appendSystemReminderToToolResult,
   cloneSystemReminderBlock,
   createSystemReminderBlock,
@@ -59,6 +64,24 @@ export type SessionHeader = {
     eventId: EventId;
   };
   meta: SessionMeta;
+};
+
+export type SessionObservationSummary = {
+  format: "scorel-session-observation-v1";
+  sessionId: string;
+  deviceId: string;
+  projectId: string;
+  createdAt: number;
+  updatedAt: number;
+  sourceSessionJsonl: string;
+  eventCount: number;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  };
+  model?: RunReportingModel;
+  cost: RunCostEstimate;
 };
 
 export type SessionStoreErrorCode =
@@ -304,6 +327,7 @@ export class JsonlSession {
     this.tree.assertCanAppend(event);
     await appendFile(this.filePath, `${JSON.stringify(event)}\n`, "utf8");
     this.tree.append(event);
+    await writeSessionObservationSummary(this).catch(() => undefined);
     return event;
   }
 
@@ -321,12 +345,17 @@ export const sessionLogFilePath = (sessionsDir: string, sessionId: SessionId): s
 export const sessionArtifactsDirPath = (sessionsDir: string, sessionId: SessionId): string =>
   join(sessionsDir, `${sessionId}.artifacts`);
 
+export const sessionObservationSummaryFilePath = (sessionsDir: string, sessionId: SessionId): string =>
+  join(sessionsDir, `${sessionId}.summary.json`);
+
 export const createSession = async ({ sessionsDir, header }: CreateSessionOptions): Promise<JsonlSession> => {
   const validHeader = parseHeader(header);
   await mkdir(sessionsDir, { recursive: true });
   const filePath = sessionFilePath(sessionsDir, validHeader.sessionId);
   await writeFile(filePath, `${JSON.stringify(validHeader)}\n`, { encoding: "utf8", flag: "wx" });
-  return new JsonlSession(filePath, validHeader);
+  const session = new JsonlSession(filePath, validHeader);
+  await writeSessionObservationSummary(session).catch(() => undefined);
+  return session;
 };
 
 export const loadSession = async (options: LoadSessionOptions): Promise<JsonlSession> => {
@@ -353,8 +382,66 @@ export const loadSession = async (options: LoadSessionOptions): Promise<JsonlSes
   }
 
   await mkdir(dirname(filePath), { recursive: true });
-  return new JsonlSession(filePath, header, tree);
+  const session = new JsonlSession(filePath, header, tree);
+  await writeSessionObservationSummary(session).catch(() => undefined);
+  return session;
 };
+
+export const buildSessionObservationSummary = (session: JsonlSession): SessionObservationSummary => {
+  const events = [...session.tree];
+  const observation = buildObservation({
+    events,
+    selectedModel: reportingModelFromSessionMeta(session.header.meta),
+  });
+  return {
+    format: "scorel-session-observation-v1",
+    sessionId: String(session.header.sessionId),
+    deviceId: String(session.header.deviceId),
+    projectId: String(session.header.meta.projectId),
+    createdAt: session.header.createdAt,
+    updatedAt: latestSessionTimestamp(session.header, events),
+    sourceSessionJsonl: session.filePath,
+    eventCount: events.length,
+    usage: observation.usage,
+    ...(observation.model ? { model: observation.model } : {}),
+    cost: observation.cost,
+  };
+};
+
+export const writeSessionObservationSummary = async (session: JsonlSession): Promise<SessionObservationSummary> => {
+  const summary = buildSessionObservationSummary(session);
+  const summaryPath = sessionObservationSummaryFilePath(dirname(session.filePath), session.header.sessionId);
+  await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+  return summary;
+};
+
+export const readSessionObservationSummary = async (
+  sessionsDir: string,
+  sessionId: SessionId,
+): Promise<SessionObservationSummary> => {
+  const content = await readFile(sessionObservationSummaryFilePath(sessionsDir, sessionId), "utf8");
+  const value = JSON.parse(content) as SessionObservationSummary;
+  return value;
+};
+
+const reportingModelFromSessionMeta = (meta: SessionMeta): RunReportingModel | undefined => {
+  const selected = meta.selectedModel;
+  const model = {
+    ...(stringValue(selected?.id ?? meta.model ?? selected?.modelId)
+      ? { modelId: stringValue(selected?.id ?? meta.model ?? selected?.modelId) }
+      : {}),
+    ...(stringValue(selected?.modelId) ? { providerModelId: stringValue(selected?.modelId) } : {}),
+    ...(stringValue(selected?.provider) ? { provider: stringValue(selected?.provider) } : {}),
+    ...(stringValue(selected?.displayName) ? { displayName: stringValue(selected?.displayName) } : {}),
+  };
+  return Object.values(model).some((value) => value !== undefined) ? model : undefined;
+};
+
+const latestSessionTimestamp = (header: SessionHeader, events: PersistentEvent[]): number =>
+  events.reduce((latest, event) => Math.max(latest, event.ts), header.meta.updatedAt ?? header.createdAt);
+
+const stringValue = (value: unknown): string | undefined =>
+  typeof value === "string" && value.length > 0 ? value : undefined;
 
 export const buildContext = (tree: SessionTree, leafId: EventId): ScorelMessage[] => {
   const path = tree.getPath(leafId);

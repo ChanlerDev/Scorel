@@ -29,6 +29,18 @@ scorel update
 scorel upgrade
 ```
 
+非交互式 benchmark / harness 入口使用 `scorel run`。`--summary` 写单个机器可读 JSON；`--report-dir` 额外写 `scorel-summary.json`、`scorel-events.jsonl`、`scorel-trajectory.json` 和 `scorel-metadata.json`，用于 Harbor / Terminal-Bench 这类 job 收集本地观测数据：
+
+```bash
+scorel run --prompt-file /tmp/instruction.txt \
+  --cwd /workspace \
+  --state-dir /tmp/scorel-state \
+  --summary /logs/agent/scorel-summary.json \
+  --report-dir /logs/artifacts/scorel
+```
+
+summary/report 文件包含 status、session 路径、captured events、token usage、model/provider、estimated cost 和 report references。每个 session 还会在同目录维护 `<sessionId>.summary.json` 作为 session 级观测缓存，交互式 CLI、GUI、`scorel run` 和外部 harness 可以读取同一份 usage/model/cost summary；append-only session JSONL 仍是 source of truth。Cost 来自 Scorel 内置的 models.dev 官方 provider 价格快照，单位是 USD / 1M tokens；未知或非官方 model id 会标记为 unknown，不会伪造费用。Scorel 只产出本地文件，不直接执行 Harbor upload。
+
 后台 Host 会每小时检查一次 npm 上的 `@chanlerdev/scorel`。发现新版本后，只有在没有 active work，或者 active work 已经连续三小时没有进展时，才会执行同一套 npm 更新；更新成功后 Host 会短暂停止，下一次 CLI / GUI / WebUI 入口启动时使用新版本。
 
 启动桌面 GUI，本机会启动 embedded Host：

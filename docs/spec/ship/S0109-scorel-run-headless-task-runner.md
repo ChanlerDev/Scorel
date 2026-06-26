@@ -22,6 +22,7 @@ The command must run through Scorel's existing embedded Host, daemon/client, run
   - `--timeout-ms <ms>`
   - `--output-format text|json|stream-json|none`
   - `--summary <path>`
+  - `--report-dir <path>` (added by S0110 for benchmark-friendly reporting artifacts)
   - `--quiet`
   - `--model <role-or-id>`
   - `--provider <name>`
