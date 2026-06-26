@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## 0.0.9 - 2026-06-26
+
+### Highlights
+
+- Run summary includes token usage, model info, cost estimates, and report files for benchmark compatibility.
+- Provider errors (e.g., content_filter) now cause exit code 1 and include full event traces in summary.
+
+### Changes
+
+- `scorel run` now outputs usage (input/output/total tokens), model details, cost estimates, and paths to session JSONL, diagnostics, and artifacts via `--report-dir` flag.
+- Session-level observation summaries (`<sessionId>.summary.json`) are maintained for consistent observability across CLI, GUI, and external harnesses.
+- Summary JSON now includes a full `events` array of all Scorel events observed during the run.
+
+### Fixes
+
+- Headless runs with provider errors (e.g., content_filter cancellation) now exit with code 1 instead of 0, and include status 'error' and error message in the summary.
+
+### Verification
+
+- Integration and unit tests validate usage aggregation, known/unknown model cost, report file creation, API key redaction, provider error detection, and session summary creation/update.
+
+### Internal
+
+- Cost estimation uses a built-in price table from models.dev (snapshot models.dev-api-2026-06-27).
+- Provider errors are preserved through pipeline: pi-ai provider, daemon, and CLI.
+
 ## 0.0.8 - 2026-06-26
 
 ### Highlights

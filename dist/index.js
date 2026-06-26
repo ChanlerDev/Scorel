@@ -508,313 +508,9 @@ var init_src2 = __esm({
   }
 });
 
-// packages/daemon/src/projects/registry.ts
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
-var ProjectRegistryError, ProjectRegistry, canonicalDirectory, sessionReferencesProject, sortProjects, isRegistryFile, isRecord, isNodeError, errorMessage;
-var init_registry = __esm({
-  "packages/daemon/src/projects/registry.ts"() {
-    "use strict";
-    init_src();
-    ProjectRegistryError = class extends Error {
-      code;
-      constructor(code, message) {
-        super(message);
-        this.name = "ProjectRegistryError";
-        this.code = code;
-      }
-    };
-    ProjectRegistry = class {
-      #projectsPath;
-      #sessionsDir;
-      #createId;
-      #now;
-      #mutation = Promise.resolve();
-      constructor(options) {
-        this.#projectsPath = options.projectsPath;
-        this.#sessionsDir = options.sessionsDir;
-        this.#createId = options.createId ?? randomUUID;
-        this.#now = options.now ?? Date.now;
-      }
-      async list() {
-        const file = await this.#read();
-        return sortProjects(file.projects);
-      }
-      async get(projectId) {
-        return (await this.list()).find((project) => project.projectId === projectId);
-      }
-      async require(projectId) {
-        const project = await this.get(projectId);
-        if (!project) {
-          throw new ProjectRegistryError("project_not_found", `Unknown project: ${projectId}`);
-        }
-        return project;
-      }
-      async register(workDir) {
-        return this.#mutate(async (file) => {
-          const canonical = await canonicalDirectory(workDir);
-          const existing = file.projects.find((project2) => project2.workDir === canonical);
-          if (existing) {
-            return { result: existing, changed: false };
-          }
-          const now = this.#now();
-          const project = {
-            projectId: asProjectId(`prj_${this.#createId()}`),
-            displayName: basename(canonical) || canonical,
-            workDir: canonical,
-            createdAt: now,
-            updatedAt: now
-          };
-          file.projects.push(project);
-          return { result: project, changed: true };
-        });
-      }
-      async remove(projectId) {
-        return this.#mutate(async (file) => {
-          const index = file.projects.findIndex((project) => project.projectId === projectId);
-          if (index < 0) {
-            throw new ProjectRegistryError("project_not_found", `Unknown project: ${projectId}`);
-          }
-          if (await sessionReferencesProject(this.#sessionsDir, projectId)) {
-            throw new ProjectRegistryError("project_has_sessions", `Project still has sessions: ${projectId}`);
-          }
-          file.projects.splice(index, 1);
-          return { result: true, changed: true };
-        });
-      }
-      async #mutate(mutation) {
-        const operation = this.#mutation.then(async () => {
-          const file = await this.#read();
-          const { result, changed } = await mutation(file);
-          if (changed) {
-            await this.#write({ version: 1, projects: sortProjects(file.projects) });
-          }
-          return result;
-        });
-        this.#mutation = operation.then(
-          () => void 0,
-          () => void 0
-        );
-        return operation;
-      }
-      async #read() {
-        try {
-          const parsed = JSON.parse(await readFile(this.#projectsPath, "utf8"));
-          if (!isRegistryFile(parsed)) {
-            throw new ProjectRegistryError("filesystem_error", `Invalid project registry: ${this.#projectsPath}`);
-          }
-          return { version: 1, projects: parsed.projects.map((project) => ({ ...project })) };
-        } catch (cause) {
-          if (isNodeError(cause, "ENOENT")) {
-            return { version: 1, projects: [] };
-          }
-          if (cause instanceof ProjectRegistryError) {
-            throw cause;
-          }
-          throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
-        }
-      }
-      async #write(file) {
-        await mkdir(dirname(this.#projectsPath), { recursive: true });
-        const temporaryPath = `${this.#projectsPath}.${process.pid}.${randomUUID()}.tmp`;
-        try {
-          await writeFile(temporaryPath, `${JSON.stringify(file, null, 2)}
-`, "utf8");
-          await rename(temporaryPath, this.#projectsPath);
-        } catch (cause) {
-          throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
-        }
-      }
-    };
-    canonicalDirectory = async (workDir) => {
-      try {
-        const canonical = await realpath(workDir);
-        if (!(await stat(canonical)).isDirectory()) {
-          throw new ProjectRegistryError("filesystem_error", `Project path is not a directory: ${workDir}`);
-        }
-        return canonical;
-      } catch (cause) {
-        if (cause instanceof ProjectRegistryError) {
-          throw cause;
-        }
-        throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
-      }
-    };
-    sessionReferencesProject = async (sessionsDir, projectId) => {
-      let names;
-      try {
-        names = await readdir(sessionsDir);
-      } catch (cause) {
-        if (isNodeError(cause, "ENOENT")) {
-          return false;
-        }
-        throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
-      }
-      for (const name of names) {
-        if (!name.endsWith(".jsonl") || name.startsWith(".")) {
-          continue;
-        }
-        try {
-          const firstLine = (await readFile(join(sessionsDir, name), "utf8")).split(/\r?\n/, 1)[0];
-          const parsed = firstLine ? JSON.parse(firstLine) : void 0;
-          if (isRecord(parsed) && isRecord(parsed.meta) && parsed.meta.projectId === projectId) {
-            return true;
-          }
-        } catch (cause) {
-          if (!isNodeError(cause, "ENOENT")) {
-            throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
-          }
-        }
-      }
-      return false;
-    };
-    sortProjects = (projects) => [...projects].sort((left, right) => String(left.projectId).localeCompare(String(right.projectId)));
-    isRegistryFile = (value) => isRecord(value) && value.version === 1 && Array.isArray(value.projects) && value.projects.every(
-      (project) => isRecord(project) && typeof project.projectId === "string" && typeof project.displayName === "string" && typeof project.workDir === "string" && typeof project.createdAt === "number" && typeof project.updatedAt === "number"
-    );
-    isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-    isNodeError = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
-    errorMessage = (cause) => cause instanceof Error ? cause.message : String(cause);
-  }
-});
-
-// packages/daemon/src/projects/directories.ts
-import { homedir } from "node:os";
-import { dirname as dirname2, join as join2 } from "node:path";
-import { readdir as readdir2, realpath as realpath2, stat as stat2 } from "node:fs/promises";
-var listDirectories, directoryEntries, errorMessage2;
-var init_directories = __esm({
-  "packages/daemon/src/projects/directories.ts"() {
-    "use strict";
-    init_registry();
-    listDirectories = async (path = homedir()) => {
-      try {
-        const canonical = await realpath2(path);
-        if (!(await stat2(canonical)).isDirectory()) {
-          throw new ProjectRegistryError("filesystem_error", `Path is not a directory: ${path}`);
-        }
-        const entries = await directoryEntries(canonical);
-        const parent = dirname2(canonical);
-        return {
-          path: canonical,
-          parentPath: parent === canonical ? void 0 : parent,
-          entries
-        };
-      } catch (cause) {
-        if (cause instanceof ProjectRegistryError) {
-          throw cause;
-        }
-        throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
-      }
-    };
-    directoryEntries = async (path) => {
-      const entries = await readdir2(path, { withFileTypes: true });
-      const directories = await Promise.all(
-        entries.map(async (entry) => {
-          const candidate = join2(path, entry.name);
-          if (!entry.isDirectory() && !entry.isSymbolicLink()) {
-            return void 0;
-          }
-          try {
-            const canonical = await realpath2(candidate);
-            return (await stat2(canonical)).isDirectory() ? { name: entry.name, path: canonical, kind: "directory" } : void 0;
-          } catch {
-            return void 0;
-          }
-        })
-      );
-      return directories.filter((entry) => entry !== void 0).sort((left, right) => left.name.localeCompare(right.name) || left.path.localeCompare(right.path));
-    };
-    errorMessage2 = (cause) => cause instanceof Error ? cause.message : String(cause);
-  }
-});
-
-// packages/daemon/src/projects/sessions.ts
-import { readFile as readFile2, readdir as readdir3 } from "node:fs/promises";
-import { join as join3 } from "node:path";
-var listSessionSummaries, readSummary, tailSeq, latestTitle, clampLimit, parseRecord, isRecord2, isNodeError2;
-var init_sessions = __esm({
-  "packages/daemon/src/projects/sessions.ts"() {
-    "use strict";
-    init_src();
-    listSessionSummaries = async (sessionsDir, filter = {}, overrides) => {
-      let names;
-      try {
-        names = await readdir3(sessionsDir);
-      } catch (cause) {
-        if (isNodeError2(cause, "ENOENT")) {
-          return [];
-        }
-        throw cause;
-      }
-      const sessions = (await Promise.all(
-        names.filter((name) => name.endsWith(".jsonl") && !name.startsWith(".")).map((name) => readSummary(join3(sessionsDir, name), overrides))
-      )).filter((session) => session !== void 0).filter((session) => filter.projectId === void 0 || session.projectId === filter.projectId).sort((left, right) => right.updatedAt - left.updatedAt || String(left.sessionId).localeCompare(String(right.sessionId)));
-      return sessions.slice(0, clampLimit(filter.limit));
-    };
-    readSummary = async (filePath, overrides) => {
-      let content;
-      try {
-        content = await readFile2(filePath, "utf8");
-      } catch (cause) {
-        if (isNodeError2(cause, "ENOENT")) {
-          return void 0;
-        }
-        throw cause;
-      }
-      const lines = content.split(/\r?\n/).filter(Boolean);
-      const header = parseRecord(lines[0]);
-      if (header?.version !== 1 || typeof header.sessionId !== "string" || typeof header.createdAt !== "number" || !isRecord2(header.meta) || typeof header.meta.projectId !== "string") {
-        return void 0;
-      }
-      const override = overrides?.get(header.sessionId);
-      const title = latestTitle(lines.slice(1)) ?? (typeof header.meta.title === "string" ? header.meta.title : void 0);
-      return {
-        sessionId: asSessionId(header.sessionId),
-        projectId: asProjectId(header.meta.projectId),
-        title,
-        model: typeof header.meta.model === "string" ? header.meta.model : void 0,
-        updatedAt: override?.updatedAt ?? (typeof header.meta.updatedAt === "number" ? header.meta.updatedAt : header.createdAt),
-        currentSeq: asSeq(override?.currentSeq ?? tailSeq(lines.slice(1)))
-      };
-    };
-    tailSeq = (lines) => {
-      for (let index = lines.length - 1; index >= 0; index -= 1) {
-        const event = parseRecord(lines[index]);
-        if (typeof event?.seq === "number") {
-          return event.seq;
-        }
-      }
-      return 0;
-    };
-    latestTitle = (lines) => {
-      let title;
-      for (const line of lines) {
-        const event = parseRecord(line);
-        if (event?.type === "session_title_updated" && typeof event.title === "string" && event.title.trim()) {
-          title = event.title.trim();
-        }
-      }
-      return title;
-    };
-    clampLimit = (limit) => limit === void 0 || !Number.isFinite(limit) || limit <= 0 ? 200 : Math.min(Math.floor(limit), 1e3);
-    parseRecord = (line) => {
-      try {
-        const value = line === void 0 ? void 0 : JSON.parse(line);
-        return isRecord2(value) ? value : void 0;
-      } catch {
-        return void 0;
-      }
-    };
-    isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-    isNodeError2 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
-  }
-});
-
 // packages/core/src/config/index.ts
-import { readFile as readFile3 } from "node:fs/promises";
-import { join as join4 } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, removeProvider, renderMemoryConfig, renderRuntimeConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, DEFAULT_RUNTIME_CONFIG, loadMemory, loadRuntime, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, configPathForDevice, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireCompactThreshold, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, isNodeErrorCode, requireModelRole, modelRoles;
 var init_config = __esm({
   "packages/core/src/config/index.ts"() {
@@ -855,9 +551,9 @@ var init_config = __esm({
         }
       }
     };
-    scorelUserRoot = (homeDir) => join4(homeDir, ".scorel");
-    scorelUserConfigPath = (homeDir) => join4(scorelUserRoot(homeDir), "config.toml");
-    scorelSessionsDir = (homeDir) => join4(scorelUserRoot(homeDir), "sessions");
+    scorelUserRoot = (homeDir) => join(homeDir, ".scorel");
+    scorelUserConfigPath = (homeDir) => join(scorelUserRoot(homeDir), "config.toml");
+    scorelSessionsDir = (homeDir) => join(scorelUserRoot(homeDir), "sessions");
     loadScorelConfig = async (options) => {
       const env = options.env ?? process.env;
       const raw = parseToml(await readConfigText(options));
@@ -1363,7 +1059,7 @@ var init_config = __esm({
     readConfigText = async (options) => {
       const userPath = configPathForDevice(options);
       try {
-        return await readFile3(userPath, "utf8");
+        return await readFile(userPath, "utf8");
       } catch (cause) {
         if (isNodeErrorCode(cause, "ENOENT")) {
           throw new Error(`Scorel config not found: ${userPath}`);
@@ -1373,7 +1069,7 @@ var init_config = __esm({
     };
     configPathForDevice = (options) => {
       if (options.scorelHomeDir) {
-        return join4(options.scorelHomeDir, "config.toml");
+        return join(options.scorelHomeDir, "config.toml");
       }
       const home = options.homeDir ?? process.env.HOME;
       if (!home) {
@@ -1740,14 +1436,14 @@ var init_config = __esm({
 });
 
 // packages/core/src/tools/coding-tools.ts
-import { createHash, randomUUID as randomUUID2 } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir as mkdir2, readFile as readFile4, rename as rename2, rm, stat as stat3, writeFile as writeFile2 } from "node:fs/promises";
+import { mkdir, readFile as readFile2, rename, rm, stat, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
-import { basename as basename2, dirname as dirname3, extname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Type } from "@mariozechner/pi-ai";
-var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, bashResult, renderFullBashResult, writeBashArtifact, safeArtifactSegment, projectBashStreams, projectOutputStream, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord3, shellQuote, shellCommandArgs, userShell, truncate, sliceBytes, textResult, byteLength, isTimeoutError, isExecError, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
+var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, bashResult, renderFullBashResult, writeBashArtifact, safeArtifactSegment, projectBashStreams, projectOutputStream, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord, shellQuote, shellCommandArgs, userShell, truncate, sliceBytes, textResult, byteLength, isTimeoutError, isExecError, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
 var init_coding_tools = __esm({
   "packages/core/src/tools/coding-tools.ts"() {
     "use strict";
@@ -1813,11 +1509,11 @@ var init_coding_tools = __esm({
             }
             const path = resolveWorkspacePath(input.path);
             assertReadableFileKind(path);
-            const fileStat = await stat3(path);
+            const fileStat = await stat(path);
             if (fileStat.isDirectory()) {
               throw new Error(`Read cannot read a directory: ${input.path}. Use Glob to find files.`);
             }
-            const buffer = await readFile4(path);
+            const buffer = await readFile2(path);
             assertTextBuffer(buffer, input.path);
             const content = buffer.toString("utf8");
             const lines = linesOf(content);
@@ -1873,7 +1569,7 @@ var init_coding_tools = __esm({
             const input = parseWriteArgs(args);
             const path = resolveWorkspacePath(input.path);
             const previous = await exists(path) ? await assertFreshReadableCoverage(path, "Write") : void 0;
-            await mkdir2(dirname3(path), { recursive: true });
+            await mkdir(dirname(path), { recursive: true });
             await atomicWriteFile(path, input.content);
             state.reads.set(path, await snapshotFile(path, input.content, completeRanges(linesOf(input.content).length)));
             const type = previous ? "update" : "create";
@@ -1903,7 +1599,7 @@ var init_coding_tools = __esm({
             if (input.old_string === input.new_string) {
               throw new Error("old_string and new_string must differ");
             }
-            const content = await readFile4(path, "utf8");
+            const content = await readFile2(path, "utf8");
             const count = countOccurrences(content, input.old_string);
             if (count === 0) {
               throw new Error(`String to replace not found in file.
@@ -2245,7 +1941,7 @@ ${filenames.join("\n")}`,
       return value;
     };
     snapshotFile = async (path, content, ranges) => {
-      const [fileStat, fileContent] = await Promise.all([stat3(path), content ?? readFile4(path, "utf8")]);
+      const [fileStat, fileContent] = await Promise.all([stat(path), content ?? readFile2(path, "utf8")]);
       const totalLines = linesOf(fileContent).length;
       return {
         content: fileContent,
@@ -2259,7 +1955,7 @@ ${filenames.join("\n")}`,
     sameSnapshot = (left, right) => left.hash === right.hash && left.size === right.size && left.mtimeMs === right.mtimeMs;
     exists = async (path) => {
       try {
-        await stat3(path);
+        await stat(path);
         return true;
       } catch {
         return false;
@@ -2379,10 +2075,10 @@ ${filenames.join("\n")}`,
       }
     };
     atomicWriteFile = async (path, content) => {
-      const temp = resolve(dirname3(path), `.${randomUUID2()}.tmp`);
+      const temp = resolve(dirname(path), `.${randomUUID()}.tmp`);
       try {
-        await writeFile2(temp, content, "utf8");
-        await rename2(temp, path);
+        await writeFile(temp, content, "utf8");
+        await rename(temp, path);
       } catch (cause) {
         await rm(temp, { force: true }).catch(() => void 0);
         throw cause;
@@ -2442,9 +2138,9 @@ stderr:
 ${input.stderr}`;
     writeBashArtifact = async (artifactDir, toolCallId, content) => {
       const directory = resolve(artifactDir, safeArtifactSegment(toolCallId));
-      await mkdir2(directory, { recursive: true });
+      await mkdir(directory, { recursive: true });
       const path = resolve(directory, "result.txt");
-      await writeFile2(path, content, { encoding: "utf8", mode: 384 });
+      await writeFile(path, content, { encoding: "utf8", mode: 384 });
       return path;
     };
     safeArtifactSegment = (value) => value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120) || "tool_call";
@@ -2519,7 +2215,7 @@ ${value}` };
           maxBuffer: 5e6
         });
         const parsed = JSON.parse(stdout);
-        if (!isRecord3(parsed) || !isRecord3(parsed.summary)) {
+        if (!isRecord(parsed) || !isRecord(parsed.summary)) {
           return void 0;
         }
         return { savedTokens: nonNegativeInteger(parsed.summary.total_saved) };
@@ -2547,10 +2243,10 @@ ${value}` };
       }
       return Math.floor(value);
     };
-    isRecord3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
     shellQuote = (value) => `'${value.replace(/'/g, "'\\''")}'`;
     shellCommandArgs = (shell, command) => {
-      const name = basename2(shell).toLowerCase();
+      const name = basename(shell).toLowerCase();
       if (name === "csh" || name === "tcsh" || name === "fish") {
         return ["-c", command];
       }
@@ -2688,7 +2384,7 @@ ${value}` };
       const entries = await Promise.all(
         paths.map(async (path) => {
           try {
-            const info = await stat3(isAbsolute(path) ? path : resolve(root, path));
+            const info = await stat(isAbsolute(path) ? path : resolve(root, path));
             return { path, mtimeMs: info.mtimeMs };
           } catch {
             return { path, mtimeMs: 0 };
@@ -2738,7 +2434,7 @@ ${value}` };
 
 // packages/core/src/tools/index.ts
 import { Type as Type2 } from "@mariozechner/pi-ai";
-var defineTool, createSnipTool, parseSnipToolInput, isRecord4;
+var defineTool, createSnipTool, parseSnipToolInput, isRecord2;
 var init_tools = __esm({
   "packages/core/src/tools/index.ts"() {
     "use strict";
@@ -2769,7 +2465,7 @@ var init_tools = __esm({
       }
     });
     parseSnipToolInput = (args) => {
-      if (!isRecord4(args) || typeof args.userMessageId !== "string") {
+      if (!isRecord2(args) || typeof args.userMessageId !== "string") {
         throw new Error("snip requires { userMessageId: string }");
       }
       return {
@@ -2777,13 +2473,13 @@ var init_tools = __esm({
         ...typeof args.reason === "string" && args.reason.trim() ? { reason: args.reason.trim() } : {}
       };
     };
-    isRecord4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord2 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
 // packages/core/src/channel/index.ts
 import { Type as Type3 } from "@mariozechner/pi-ai";
-var createSendChannelMessageTool, parseSendChannelMessageInput, parseAttachments, optionalString2, isRecord5;
+var createSendChannelMessageTool, parseSendChannelMessageInput, parseAttachments, optionalString2, isRecord3;
 var init_channel = __esm({
   "packages/core/src/channel/index.ts"() {
     "use strict";
@@ -2813,7 +2509,7 @@ var init_channel = __esm({
       }
     });
     parseSendChannelMessageInput = (value) => {
-      if (!isRecord5(value)) {
+      if (!isRecord3(value)) {
         throw new Error("SendChannelMessage args must be an object");
       }
       const text = typeof value.text === "string" && value.text.trim().length > 0 ? value.text : void 0;
@@ -2842,7 +2538,7 @@ var init_channel = __esm({
         throw new Error("SendChannelMessage.attachments must be an array");
       }
       return value.map((item, index) => {
-        if (!isRecord5(item)) {
+        if (!isRecord3(item)) {
           throw new Error(`SendChannelMessage.attachments.${index} must be an object`);
         }
         if (item.type !== "image" && item.type !== "file") {
@@ -2871,18 +2567,18 @@ var init_channel = __esm({
       }
       return value;
     };
-    isRecord5 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord3 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
 // packages/core/src/extensions/index.ts
-import { readFile as readFile5 } from "node:fs/promises";
-import { dirname as dirname4, resolve as resolve2 } from "node:path";
-var loadExtensionManifest, parseExtensionManifest, requireString2, requireIdentifier2, requireKind, requireRelativePath, optionalRelativePaths, isRecord6;
+import { readFile as readFile3 } from "node:fs/promises";
+import { dirname as dirname2, resolve as resolve2 } from "node:path";
+var loadExtensionManifest, parseExtensionManifest, requireString2, requireIdentifier2, requireKind, requireRelativePath, optionalRelativePaths, isRecord4;
 var init_extensions = __esm({
   "packages/core/src/extensions/index.ts"() {
     "use strict";
-    loadExtensionManifest = async (manifestPath) => parseExtensionManifest(await readFile5(manifestPath, "utf8"), manifestPath);
+    loadExtensionManifest = async (manifestPath) => parseExtensionManifest(await readFile3(manifestPath, "utf8"), manifestPath);
     parseExtensionManifest = (text, manifestPath = "scorel.extension.json") => {
       let value;
       try {
@@ -2891,10 +2587,10 @@ var init_extensions = __esm({
         const message = cause instanceof Error ? cause.message : String(cause);
         throw new Error(`Invalid extension manifest JSON at ${manifestPath}: ${message}`);
       }
-      if (!isRecord6(value)) {
+      if (!isRecord4(value)) {
         throw new Error(`Extension manifest at ${manifestPath} must be an object`);
       }
-      const rootDir = dirname4(resolve2(manifestPath));
+      const rootDir = dirname2(resolve2(manifestPath));
       const id = requireIdentifier2(value.id, "id", manifestPath);
       const kind = requireKind(value.kind, manifestPath);
       const displayName = requireString2(value.displayName, "displayName", manifestPath);
@@ -2947,15 +2643,15 @@ var init_extensions = __esm({
       }
       return value.map((item, index) => requireRelativePath(item, `${name}.${index}`, manifestPath));
     };
-    isRecord6 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord4 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
 // packages/core/src/instructions/index.ts
 import { existsSync } from "node:fs";
-import { readdir as readdir4, readFile as readFile6 } from "node:fs/promises";
-import { homedir as homedir2, platform, release } from "node:os";
-import { dirname as dirname5, join as join5, resolve as resolve3 } from "node:path";
+import { readdir, readFile as readFile4 } from "node:fs/promises";
+import { homedir, platform, release } from "node:os";
+import { dirname as dirname3, join as join2, resolve as resolve3 } from "node:path";
 var BASELINE_PROMPT, buildInstructionSnapshot, renderSystemPrompt, section, discoverAgentsSources, projectAgentsPaths, findGitRoot, renderAgentsBlock, renderWorkspaceBlock, renderEnvironmentBlock, renderTimeBlock, isNodeErrorCode2;
 var init_instructions = __esm({
   "packages/core/src/instructions/index.ts"() {
@@ -2970,7 +2666,7 @@ var init_instructions = __esm({
       const cwd = resolve3(options.cwd);
       const now = options.now ?? Date.now;
       const frozenAt = now();
-      const homeDir = resolve3(options.homeDir ?? homedir2());
+      const homeDir = resolve3(options.homeDir ?? homedir());
       const agentsSources = await discoverAgentsSources({ cwd, homeDir });
       const repoRoot = findGitRoot(cwd);
       return {
@@ -3006,12 +2702,12 @@ var init_instructions = __esm({
     });
     discoverAgentsSources = async (options) => {
       const projectFiles = projectAgentsPaths(options.cwd, options.homeDir);
-      const globalPath = join5(options.homeDir, ".scorel", "AGENTS.md");
+      const globalPath = join2(options.homeDir, ".scorel", "AGENTS.md");
       const candidates = [...projectFiles.map((path) => ({ path, scope: "project" })), { path: globalPath, scope: "global_user" }];
       const sources = [];
       for (const candidate of candidates) {
         try {
-          const content = await readFile6(candidate.path, "utf8");
+          const content = await readFile4(candidate.path, "utf8");
           sources.push({
             sourceType: "agents_md",
             path: candidate.path,
@@ -3034,12 +2730,12 @@ var init_instructions = __esm({
       let current = cwd;
       while (true) {
         if (current !== homeDir) {
-          paths.push(join5(current, "AGENTS.md"));
+          paths.push(join2(current, "AGENTS.md"));
         }
-        if (current === stopAt || current === dirname5(current)) {
+        if (current === stopAt || current === dirname3(current)) {
           break;
         }
-        const next = dirname5(current);
+        const next = dirname3(current);
         if (!gitRoot && next === homeDir) {
           break;
         }
@@ -3050,10 +2746,10 @@ var init_instructions = __esm({
     findGitRoot = (cwd) => {
       let current = cwd;
       while (true) {
-        if (existsSync(join5(current, ".git"))) {
+        if (existsSync(join2(current, ".git"))) {
           return current;
         }
-        const next = dirname5(current);
+        const next = dirname3(current);
         if (next === current) {
           return void 0;
         }
@@ -3075,7 +2771,7 @@ var init_instructions = __esm({
       const root = repoRoot ?? cwd;
       let entries = [];
       try {
-        entries = (await readdir4(root, { withFileTypes: true })).filter((entry) => !entry.name.startsWith(".")).slice(0, 20).map((entry) => `${entry.isDirectory() ? "dir" : "file"}:${entry.name}`);
+        entries = (await readdir(root, { withFileTypes: true })).filter((entry) => !entry.name.startsWith(".")).slice(0, 20).map((entry) => `${entry.isDirectory() ? "dir" : "file"}:${entry.name}`);
       } catch {
         entries = [];
       }
@@ -3088,43 +2784,43 @@ var init_instructions = __esm({
 });
 
 // packages/core/src/memory/index.ts
-import { appendFile, mkdir as mkdir3, readFile as readFile7, writeFile as writeFile3 } from "node:fs/promises";
-import { homedir as homedir3 } from "node:os";
-import { join as join6 } from "node:path";
+import { appendFile, mkdir as mkdir2, readFile as readFile5, writeFile as writeFile2 } from "node:fs/promises";
+import { homedir as homedir2 } from "node:os";
+import { join as join3 } from "node:path";
 import { Type as Type4 } from "@mariozechner/pi-ai";
-var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord7, safeProjectId, isNodeErrorCode3;
+var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord5, safeProjectId, isNodeErrorCode3;
 var init_memory = __esm({
   "packages/core/src/memory/index.ts"() {
     "use strict";
     init_tools();
     memoryDate = (timestamp) => new Date(timestamp).toISOString().slice(0, 10);
     scorelMemoryPaths = (options) => {
-      const home = options.homeDir ?? homedir3();
+      const home = options.homeDir ?? homedir2();
       const now = options.now ?? Date.now;
       const today = memoryDate(now());
       const yesterday = memoryDate(now() - 24 * 60 * 60 * 1e3);
-      const rootDir = join6(home, ".scorel", "memory");
-      const projectDir = join6(rootDir, "projects", safeProjectId(options.projectId));
-      const dailyDir = join6(projectDir, "daily");
+      const rootDir = join3(home, ".scorel", "memory");
+      const projectDir = join3(rootDir, "projects", safeProjectId(options.projectId));
+      const dailyDir = join3(projectDir, "daily");
       return {
         rootDir,
-        rootMemoryPath: join6(rootDir, "MEMORY.md"),
+        rootMemoryPath: join3(rootDir, "MEMORY.md"),
         projectDir,
-        projectMemoryPath: join6(projectDir, "MEMORY.md"),
+        projectMemoryPath: join3(projectDir, "MEMORY.md"),
         dailyDir,
-        todayDailyPath: join6(dailyDir, `${today}.md`),
-        yesterdayDailyPath: join6(dailyDir, `${yesterday}.md`),
-        dreamStatePath: join6(projectDir, "dream-state.json"),
+        todayDailyPath: join3(dailyDir, `${today}.md`),
+        yesterdayDailyPath: join3(dailyDir, `${yesterday}.md`),
+        dreamStatePath: join3(projectDir, "dream-state.json"),
         today,
         yesterday
       };
     };
     scorelSessionMemoryPaths = (options) => {
-      const home = options.homeDir ?? homedir3();
-      const sessionsDir = join6(home, ".scorel", "context", "session-memory", safeProjectId(options.projectId));
+      const home = options.homeDir ?? homedir2();
+      const sessionsDir = join3(home, ".scorel", "context", "session-memory", safeProjectId(options.projectId));
       return {
         sessionsDir,
-        sessionMemoryPath: join6(sessionsDir, `${safeProjectId(options.sessionId)}.md`)
+        sessionMemoryPath: join3(sessionsDir, `${safeProjectId(options.sessionId)}.md`)
       };
     };
     buildMemoryContext = async (options) => {
@@ -3251,9 +2947,9 @@ var init_memory = __esm({
     };
     writeMemoryDreamState = async (options) => {
       const paths = scorelMemoryPaths(options);
-      await mkdir3(paths.projectDir, { recursive: true, mode: 448 });
+      await mkdir2(paths.projectDir, { recursive: true, mode: 448 });
       const state = { ...options.state, projectId: options.projectId };
-      await writeFile3(paths.dreamStatePath, `${JSON.stringify(state, null, 2)}
+      await writeFile2(paths.dreamStatePath, `${JSON.stringify(state, null, 2)}
 `, { encoding: "utf8", mode: 384 });
       return state;
     };
@@ -3263,9 +2959,9 @@ var init_memory = __esm({
     };
     writeSessionMemory = async (input) => {
       const paths = scorelSessionMemoryPaths(input);
-      await mkdir3(paths.sessionsDir, { recursive: true, mode: 448 });
+      await mkdir2(paths.sessionsDir, { recursive: true, mode: 448 });
       const content = renderSessionMemory(input);
-      await writeFile3(paths.sessionMemoryPath, content, { encoding: "utf8", mode: 384 });
+      await writeFile2(paths.sessionMemoryPath, content, { encoding: "utf8", mode: 384 });
       return { path: paths.sessionMemoryPath, content };
     };
     renderSessionMemory = (input) => {
@@ -3289,9 +2985,9 @@ var init_memory = __esm({
       ].join("\n"));
     };
     ensureMemoryFiles = async (paths) => {
-      await mkdir3(paths.rootDir, { recursive: true, mode: 448 });
-      await mkdir3(paths.projectDir, { recursive: true, mode: 448 });
-      await mkdir3(paths.dailyDir, { recursive: true, mode: 448 });
+      await mkdir2(paths.rootDir, { recursive: true, mode: 448 });
+      await mkdir2(paths.projectDir, { recursive: true, mode: 448 });
+      await mkdir2(paths.dailyDir, { recursive: true, mode: 448 });
       await ensureFile(paths.rootMemoryPath, "# Memory\n");
       await ensureFile(paths.projectMemoryPath, "# Project Memory\n");
       await ensureFile(paths.todayDailyPath, `# ${paths.today}
@@ -3300,7 +2996,7 @@ var init_memory = __esm({
     };
     ensureFile = async (path, content) => {
       try {
-        await writeFile3(path, content, { encoding: "utf8", flag: "wx", mode: 384 });
+        await writeFile2(path, content, { encoding: "utf8", flag: "wx", mode: 384 });
       } catch (cause) {
         if (!isNodeErrorCode3(cause, "EEXIST")) {
           throw cause;
@@ -3309,7 +3005,7 @@ var init_memory = __esm({
     };
     readOptional = async (path) => {
       try {
-        return await readFile7(path, "utf8");
+        return await readFile5(path, "utf8");
       } catch (cause) {
         if (isNodeErrorCode3(cause, "ENOENT")) {
           return "";
@@ -3332,7 +3028,7 @@ var init_memory = __esm({
     normalizeMarkdownFile = (value) => `${value.trimEnd()}
 `;
     parseAppendDailyInput = (value) => {
-      if (!isRecord7(value)) {
+      if (!isRecord5(value)) {
         throw new Error("AppendDaily args must be an object");
       }
       const summary = requireString3(value.summary, "summary");
@@ -3398,12 +3094,12 @@ var init_memory = __esm({
     optionalNumber2 = (value) => typeof value === "number" && Number.isFinite(value) ? value : void 0;
     optionalString3 = (value) => typeof value === "string" && value.trim() ? value : void 0;
     parseLastFailure = (value) => {
-      if (!isRecord7(value)) return void 0;
+      if (!isRecord5(value)) return void 0;
       const at = optionalNumber2(value.at);
       const message = optionalString3(value.message);
       return at !== void 0 && message ? { at, message } : void 0;
     };
-    isRecord7 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord5 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
     safeProjectId = (projectId) => {
       if (!/^[A-Za-z0-9_-]+$/.test(projectId)) {
         throw new Error("projectId must contain only letters, numbers, underscores, or hyphens");
@@ -3590,7 +3286,9 @@ var init_pi_ai = __esm({
       meta: {
         api: message.api,
         provider: message.provider,
-        model: message.model
+        model: message.model,
+        ...message.errorMessage ? { errorMessage: message.errorMessage } : {},
+        ...message.diagnostics ? { diagnostics: message.diagnostics } : {}
       }
     });
     fromPiContentBlock = (block) => {
@@ -3682,6 +3380,196 @@ var init_pi_ai = __esm({
         outputTokens: usage.output,
         totalTokens: usage.totalTokens
       };
+    };
+  }
+});
+
+// packages/core/src/reporting/index.ts
+function modelPrices(prices) {
+  const entries = {};
+  for (const [modelId, [inputUsdPerMillionTokens, outputUsdPerMillionTokens]] of Object.entries(prices)) {
+    entries[modelId] = { inputUsdPerMillionTokens, outputUsdPerMillionTokens, pricingModelId: modelId };
+  }
+  return entries;
+}
+var SCOREL_PRICING_SOURCE, MODEL_PRICES, buildObservation, buildRunObservation, aggregateUsage, estimateRunCost, modelPrice, modelFromEvents, mergeModel, stringValue, nonNegativeInteger2;
+var init_reporting = __esm({
+  "packages/core/src/reporting/index.ts"() {
+    "use strict";
+    SCOREL_PRICING_SOURCE = "models.dev-api-2026-06-27";
+    MODEL_PRICES = {
+      ...modelPrices({
+        "gpt-4o-mini": [0.15, 0.6],
+        "gpt-4o": [2.5, 10],
+        "gpt-5": [1.25, 10],
+        "gpt-5-chat-latest": [1.25, 10],
+        "gpt-5-codex": [1.25, 10],
+        "gpt-5-mini": [0.25, 2],
+        "gpt-5-nano": [0.05, 0.4],
+        "gpt-5-pro": [15, 120],
+        "gpt-5.1": [1.25, 10],
+        "gpt-5.1-chat-latest": [1.25, 10],
+        "gpt-5.1-codex": [1.25, 10],
+        "gpt-5.1-codex-max": [1.25, 10],
+        "gpt-5.1-codex-mini": [0.25, 2],
+        "gpt-5.2": [1.75, 14],
+        "gpt-5.2-chat-latest": [1.75, 14],
+        "gpt-5.2-codex": [1.75, 14],
+        "gpt-5.2-pro": [21, 168],
+        "gpt-5.3-chat-latest": [1.75, 14],
+        "gpt-5.3-codex": [1.75, 14],
+        "gpt-5.3-codex-spark": [1.75, 14],
+        "gpt-5.4": [2.5, 15],
+        "gpt-5.4-mini": [0.75, 4.5],
+        "gpt-5.4-nano": [0.2, 1.25],
+        "gpt-5.4-pro": [30, 180],
+        "gpt-5.5": [5, 30],
+        "gpt-5.5-pro": [30, 180]
+      }),
+      ...modelPrices({
+        "claude-haiku-4-5": [1, 5],
+        "claude-haiku-4-5-20251001": [1, 5],
+        "claude-sonnet-4-0": [3, 15],
+        "claude-sonnet-4-20250514": [3, 15],
+        "claude-sonnet-4-5": [3, 15],
+        "claude-sonnet-4-5-20250929": [3, 15],
+        "claude-sonnet-4-6": [3, 15],
+        "claude-opus-4-0": [15, 75],
+        "claude-opus-4-20250514": [15, 75],
+        "claude-opus-4-1": [15, 75],
+        "claude-opus-4-1-20250805": [15, 75],
+        "claude-opus-4-5": [5, 25],
+        "claude-opus-4-5-20251101": [5, 25],
+        "claude-opus-4-6": [5, 25],
+        "claude-opus-4-7": [5, 25],
+        "claude-opus-4-8": [5, 25]
+      }),
+      ...modelPrices({
+        "deepseek-v4-flash": [0.14, 0.28],
+        "deepseek-v4-pro": [0.435, 0.87]
+      }),
+      ...modelPrices({
+        "gemini-3-pro-preview": [2, 12],
+        "gemini-3-flash-preview": [0.5, 3],
+        "gemini-3.1-pro-preview": [2, 12],
+        "gemini-3.1-pro-preview-customtools": [2, 12],
+        "gemini-3.1-flash-lite": [0.25, 1.5],
+        "gemini-3.1-flash-lite-preview": [0.25, 1.5],
+        "gemini-3.5-flash": [1.5, 9]
+      }),
+      ...modelPrices({
+        "glm-4.5": [0.6, 2.2],
+        "glm-4.5-air": [0.2, 1.1],
+        "glm-4.5-flash": [0, 0],
+        "glm-4.5v": [0.6, 1.8],
+        "glm-4.6": [0.6, 2.2],
+        "glm-4.6v": [0.3, 0.9],
+        "glm-4.7": [0.6, 2.2],
+        "glm-4.7-flash": [0, 0],
+        "glm-4.7-flashx": [0.07, 0.4],
+        "glm-5": [1, 3.2],
+        "glm-5.1": [1.4, 4.4],
+        "glm-5.2": [1.4, 4.4],
+        "glm-5-turbo": [1.2, 4],
+        "glm-5v-turbo": [1.2, 4]
+      })
+    };
+    buildObservation = (input) => {
+      const usage = aggregateUsage(input.events);
+      const model = mergeModel(input.selectedModel, modelFromEvents(input.events));
+      return {
+        usage,
+        ...model ? { model } : {},
+        cost: estimateRunCost(usage, model)
+      };
+    };
+    buildRunObservation = buildObservation;
+    aggregateUsage = (events) => {
+      const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+      for (const event of events) {
+        const messageUsage = event.type === "assistant_message" ? event.message.usage : event.type === "message_end" ? event.usage : void 0;
+        if (!messageUsage) {
+          continue;
+        }
+        usage.inputTokens += nonNegativeInteger2(messageUsage.inputTokens);
+        usage.outputTokens += nonNegativeInteger2(messageUsage.outputTokens);
+        usage.totalTokens += nonNegativeInteger2(messageUsage.totalTokens);
+      }
+      if (usage.totalTokens === 0 && (usage.inputTokens > 0 || usage.outputTokens > 0)) {
+        usage.totalTokens = usage.inputTokens + usage.outputTokens;
+      }
+      return usage;
+    };
+    estimateRunCost = (usage, model) => {
+      const price = modelPrice(model);
+      if (!price) {
+        return {
+          known: false,
+          currency: "USD",
+          input: 0,
+          output: 0,
+          total: 0,
+          pricingSource: SCOREL_PRICING_SOURCE,
+          reason: "unknown_model_price"
+        };
+      }
+      const input = usage.inputTokens / 1e6 * price.inputUsdPerMillionTokens;
+      const output = usage.outputTokens / 1e6 * price.outputUsdPerMillionTokens;
+      return {
+        known: true,
+        currency: "USD",
+        input,
+        output,
+        total: input + output,
+        pricingSource: SCOREL_PRICING_SOURCE,
+        pricingModelId: price.pricingModelId
+      };
+    };
+    modelPrice = (model) => {
+      for (const id of [model?.providerModelId, model?.modelId]) {
+        if (!id) {
+          continue;
+        }
+        const price = MODEL_PRICES[id];
+        if (price) {
+          return price;
+        }
+      }
+      return void 0;
+    };
+    modelFromEvents = (events) => {
+      for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index];
+        if (event.type !== "assistant_message") {
+          continue;
+        }
+        const meta = event.message.meta;
+        const providerModelId = stringValue(meta?.model);
+        const model = {
+          ...providerModelId ? { providerModelId } : {},
+          ...stringValue(meta?.provider) ? { provider: stringValue(meta?.provider) } : {},
+          ...stringValue(meta?.api) ? { api: stringValue(meta?.api) } : {}
+        };
+        return Object.keys(model).length > 0 ? model : void 0;
+      }
+      return void 0;
+    };
+    mergeModel = (selected, observed) => {
+      const merged = {
+        ...observed,
+        ...selected,
+        providerModelId: selected?.providerModelId ?? observed?.providerModelId ?? selected?.modelId,
+        provider: selected?.provider ?? observed?.provider,
+        api: selected?.api ?? observed?.api
+      };
+      return Object.values(merged).some((value) => value !== void 0) ? merged : void 0;
+    };
+    stringValue = (value) => typeof value === "string" && value.length > 0 ? value : void 0;
+    nonNegativeInteger2 = (value) => {
+      if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+        return 0;
+      }
+      return Math.trunc(value);
     };
   }
 });
@@ -3877,10 +3765,10 @@ var init_runtime = __esm({
 
 // packages/core/src/session/index.ts
 import { createHash as createHash2 } from "node:crypto";
-import { appendFile as appendFile2, mkdir as mkdir4, readFile as readFile8, writeFile as writeFile4 } from "node:fs/promises";
-import { dirname as dirname6, join as join7 } from "node:path";
+import { appendFile as appendFile2, mkdir as mkdir3, readFile as readFile6, writeFile as writeFile3 } from "node:fs/promises";
+import { dirname as dirname4, join as join4 } from "node:path";
 function assertTreeEvent(value) {
-  if (!isRecord8(value)) {
+  if (!isRecord6(value)) {
     throw new SessionStoreError("invalid_event", "Event must be an object");
   }
   if (value.type === "session_header") {
@@ -3892,7 +3780,7 @@ function assertTreeEvent(value) {
   if (typeof value.id !== "string" || value.parentId !== null && typeof value.parentId !== "string" || typeof value.seq !== "number" || typeof value.clientId !== "string" || typeof value.ts !== "number") {
     throw new SessionStoreError("invalid_event", "Event is missing required base fields");
   }
-  if ((value.type === "user_message" || value.type === "assistant_message" || value.type === "tool_result") && !isRecord8(value.message)) {
+  if ((value.type === "user_message" || value.type === "assistant_message" || value.type === "tool_result") && !isRecord6(value.message)) {
     throw new SessionStoreError("invalid_event", "Message event is missing message payload");
   }
   if (value.type === "session_title_updated" && !isSessionTitleUpdated(value)) {
@@ -3920,11 +3808,12 @@ function assertTreeEvent(value) {
     throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
   }
 }
-var snipUserMessageAlias, SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, createSession, loadSession, buildContext, hiddenContextEventIds, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isContextControlEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, compactSummaryMessage, reminderKindFromHarness, reminderVisibilityFromHarness, reminderScopeFromHarness, cloneMessage, isRecord8;
+var snipUserMessageAlias, SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, sessionObservationSummaryFilePath, createSession, loadSession, buildSessionObservationSummary, writeSessionObservationSummary, reportingModelFromSessionMeta, latestSessionTimestamp, stringValue2, buildContext, hiddenContextEventIds, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isContextControlEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, compactSummaryMessage, reminderKindFromHarness, reminderVisibilityFromHarness, reminderScopeFromHarness, cloneMessage, isRecord6;
 var init_session = __esm({
   "packages/core/src/session/index.ts"() {
     "use strict";
     init_src();
+    init_reporting();
     init_reminders();
     snipUserMessageAlias = (eventId) => `u_${createHash2("sha256").update(eventId).digest("hex").slice(0, 8)}`;
     SessionStoreError = class extends Error {
@@ -4106,26 +3995,30 @@ var init_session = __esm({
         await appendFile2(this.filePath, `${JSON.stringify(event)}
 `, "utf8");
         this.tree.append(event);
+        await writeSessionObservationSummary(this).catch(() => void 0);
         return event;
       }
       async close() {
         return Promise.resolve();
       }
     };
-    sessionFilePath = (sessionsDir, sessionId) => join7(sessionsDir, `${sessionId}.jsonl`);
-    sessionLogFilePath = (sessionsDir, sessionId) => join7(sessionsDir, `${sessionId}.log`);
-    sessionArtifactsDirPath = (sessionsDir, sessionId) => join7(sessionsDir, `${sessionId}.artifacts`);
+    sessionFilePath = (sessionsDir, sessionId) => join4(sessionsDir, `${sessionId}.jsonl`);
+    sessionLogFilePath = (sessionsDir, sessionId) => join4(sessionsDir, `${sessionId}.log`);
+    sessionArtifactsDirPath = (sessionsDir, sessionId) => join4(sessionsDir, `${sessionId}.artifacts`);
+    sessionObservationSummaryFilePath = (sessionsDir, sessionId) => join4(sessionsDir, `${sessionId}.summary.json`);
     createSession = async ({ sessionsDir, header }) => {
       const validHeader = parseHeader(header);
-      await mkdir4(sessionsDir, { recursive: true });
+      await mkdir3(sessionsDir, { recursive: true });
       const filePath = sessionFilePath(sessionsDir, validHeader.sessionId);
-      await writeFile4(filePath, `${JSON.stringify(validHeader)}
+      await writeFile3(filePath, `${JSON.stringify(validHeader)}
 `, { encoding: "utf8", flag: "wx" });
-      return new JsonlSession(filePath, validHeader);
+      const session = new JsonlSession(filePath, validHeader);
+      await writeSessionObservationSummary(session).catch(() => void 0);
+      return session;
     };
     loadSession = async (options) => {
       const filePath = options.filePath !== void 0 ? options.filePath : sessionFilePath(options.sessionsDir, options.sessionId);
-      const content = await readFile8(filePath, "utf8");
+      const content = await readFile6(filePath, "utf8");
       const lines = content.split(/\r?\n/);
       const headerLine = lines[0];
       if (!headerLine) {
@@ -4137,9 +4030,50 @@ var init_session = __esm({
       for (const event of parsedLines.slice(1)) {
         tree.append(parseSessionEvent(header, event));
       }
-      await mkdir4(dirname6(filePath), { recursive: true });
-      return new JsonlSession(filePath, header, tree);
+      await mkdir3(dirname4(filePath), { recursive: true });
+      const session = new JsonlSession(filePath, header, tree);
+      await writeSessionObservationSummary(session).catch(() => void 0);
+      return session;
     };
+    buildSessionObservationSummary = (session) => {
+      const events = [...session.tree];
+      const observation = buildObservation({
+        events,
+        selectedModel: reportingModelFromSessionMeta(session.header.meta)
+      });
+      return {
+        format: "scorel-session-observation-v1",
+        sessionId: String(session.header.sessionId),
+        deviceId: String(session.header.deviceId),
+        projectId: String(session.header.meta.projectId),
+        createdAt: session.header.createdAt,
+        updatedAt: latestSessionTimestamp(session.header, events),
+        sourceSessionJsonl: session.filePath,
+        eventCount: events.length,
+        usage: observation.usage,
+        ...observation.model ? { model: observation.model } : {},
+        cost: observation.cost
+      };
+    };
+    writeSessionObservationSummary = async (session) => {
+      const summary = buildSessionObservationSummary(session);
+      const summaryPath = sessionObservationSummaryFilePath(dirname4(session.filePath), session.header.sessionId);
+      await writeFile3(summaryPath, `${JSON.stringify(summary, null, 2)}
+`, "utf8");
+      return summary;
+    };
+    reportingModelFromSessionMeta = (meta) => {
+      const selected = meta.selectedModel;
+      const model = {
+        ...stringValue2(selected?.id ?? meta.model ?? selected?.modelId) ? { modelId: stringValue2(selected?.id ?? meta.model ?? selected?.modelId) } : {},
+        ...stringValue2(selected?.modelId) ? { providerModelId: stringValue2(selected?.modelId) } : {},
+        ...stringValue2(selected?.provider) ? { provider: stringValue2(selected?.provider) } : {},
+        ...stringValue2(selected?.displayName) ? { displayName: stringValue2(selected?.displayName) } : {}
+      };
+      return Object.values(model).some((value) => value !== void 0) ? model : void 0;
+    };
+    latestSessionTimestamp = (header, events) => events.reduce((latest, event) => Math.max(latest, event.ts), header.meta.updatedAt ?? header.createdAt);
+    stringValue2 = (value) => typeof value === "string" && value.length > 0 ? value : void 0;
     buildContext = (tree, leafId) => {
       const path = tree.getPath(leafId);
       const hiddenIds = hiddenContextEventIds(tree, path, leafId);
@@ -4231,13 +4165,13 @@ var init_session = __esm({
       }
     };
     parseHeader = (value) => {
-      if (!isRecord8(value)) {
+      if (!isRecord6(value)) {
         throw new SessionStoreError("invalid_header", "Session header must be an object");
       }
       if (value.version !== 1 || typeof value.sessionId !== "string" || typeof value.deviceId !== "string") {
         throw new SessionStoreError("invalid_header", "Session header is missing required identity fields");
       }
-      if (typeof value.createdAt !== "number" || !isRecord8(value.meta)) {
+      if (typeof value.createdAt !== "number" || !isRecord6(value.meta)) {
         throw new SessionStoreError("invalid_header", "Session header is missing createdAt or meta");
       }
       if (typeof value.meta.projectId !== "string" || value.meta.projectId.length === 0) {
@@ -4251,7 +4185,7 @@ var init_session = __esm({
       return value;
     };
     validateSessionMatch = (header, value) => {
-      if (!isRecord8(value) || typeof value.sessionId !== "string") {
+      if (!isRecord6(value) || typeof value.sessionId !== "string") {
         throw new SessionStoreError("invalid_header", "Event must be an object with a sessionId");
       }
       if (value.sessionId !== header.sessionId) {
@@ -4260,25 +4194,25 @@ var init_session = __esm({
     };
     isConversationEvent = (event) => event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result" || event.type === "harness_item" || event.type === "compact";
     isInstructionSnapshot = (value) => {
-      if (!isRecord8(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
+      if (!isRecord6(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
         return false;
       }
       return value.sections.every(
-        (section2) => isRecord8(section2) && typeof section2.kind === "string" && typeof section2.frozenAt === "number" && typeof section2.renderedBlock === "string"
+        (section2) => isRecord6(section2) && typeof section2.kind === "string" && typeof section2.frozenAt === "number" && typeof section2.renderedBlock === "string"
       );
     };
-    isHarnessItem = (value) => isRecord8(value) && typeof value.kind === "string" && typeof value.origin === "string" && typeof value.content === "string" && (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
+    isHarnessItem = (value) => isRecord6(value) && typeof value.kind === "string" && typeof value.origin === "string" && typeof value.content === "string" && (value.visibility === "display" || value.visibility === "hidden" || value.visibility === "compact");
     isCompactEvent = (value) => typeof value.summary === "string" && typeof value.compactedThrough === "string" && typeof value.tokensBefore === "number" && typeof value.tokensAfter === "number" && typeof value.retainedEventCount === "number";
     isContextControlEvent = (value) => value.operation === "hide_user_turn" && typeof value.anchorUserEventId === "string" && typeof value.throughEventId === "string" && (value.actor === "agent" || value.actor === "user" || value.actor === "system") && (value.reason === void 0 || typeof value.reason === "string");
     isQueueUpdate = (value) => (value.queue === "follow_up" || value.queue === "steer") && value.operation === "rewrite" && Array.isArray(value.items) && (value.anchorEventId === null || typeof value.anchorEventId === "string") && value.items.every(
-      (item) => isRecord8(item) && typeof item.id === "string" && Array.isArray(item.content) && typeof item.createdAt === "number" && typeof item.updatedAt === "number" && typeof item.clientId === "string"
+      (item) => isRecord6(item) && typeof item.id === "string" && Array.isArray(item.content) && typeof item.createdAt === "number" && typeof item.updatedAt === "number" && typeof item.clientId === "string"
     );
-    isSessionTitleUpdated = (value) => typeof value.title === "string" && value.title.length > 0 && (value.source === "model" || value.source === "user") && (value.derivedFrom === void 0 || isRecord8(value.derivedFrom) && typeof value.derivedFrom.eventId === "string" && typeof value.derivedFrom.seq === "number");
+    isSessionTitleUpdated = (value) => typeof value.title === "string" && value.title.length > 0 && (value.source === "model" || value.source === "user") && (value.derivedFrom === void 0 || isRecord6(value.derivedFrom) && typeof value.derivedFrom.eventId === "string" && typeof value.derivedFrom.seq === "number");
     isSkillIndexSnapshot = (value) => (value.anchorEventId === null || typeof value.anchorEventId === "string") && Array.isArray(value.entries) && value.entries.every(isSkillIndexEntry);
     isSkillIndexDelta = (value) => (value.anchorEventId === null || typeof value.anchorEventId === "string") && Array.isArray(value.added) && Array.isArray(value.changed) && Array.isArray(value.removed) && value.added.every(isSkillIndexEntry) && value.changed.every(isSkillIndexEntry) && value.removed.every(
-      (item) => isRecord8(item) && typeof item.name === "string" && typeof item.previousPath === "string"
+      (item) => isRecord6(item) && typeof item.name === "string" && typeof item.previousPath === "string"
     );
-    isSkillIndexEntry = (value) => isRecord8(value) && typeof value.name === "string" && typeof value.path === "string" && (value.scope === "user" || value.scope === "project" || value.scope === "extension") && typeof value.description === "string" && typeof value.mtimeMs === "number" && typeof value.size === "number" && typeof value.contentHash === "string" && typeof value.priority === "number";
+    isSkillIndexEntry = (value) => isRecord6(value) && typeof value.name === "string" && typeof value.path === "string" && (value.scope === "user" || value.scope === "project" || value.scope === "extension") && typeof value.description === "string" && typeof value.mtimeMs === "number" && typeof value.size === "number" && typeof value.contentHash === "string" && typeof value.priority === "number";
     appendHarnessItemToContext = (messages, event) => {
       const reminder = createSystemReminderBlock({
         kind: reminderKindFromHarness(event.item.kind),
@@ -4348,10 +4282,10 @@ var init_session = __esm({
         if (block.type === "system_reminder") {
           return cloneSystemReminderBlock(block);
         }
-        if (block.type !== "tool_result" || !isRecord8(block.result)) {
+        if (block.type !== "tool_result" || !isRecord6(block.result)) {
           return { ...block };
         }
-        const content = Array.isArray(block.result.content) ? { content: block.result.content.map((item) => isRecord8(item) ? { ...item } : item) } : {};
+        const content = Array.isArray(block.result.content) ? { content: block.result.content.map((item) => isRecord6(item) ? { ...item } : item) } : {};
         return {
           ...block,
           result: {
@@ -4361,16 +4295,16 @@ var init_session = __esm({
       }),
       ...message.meta ? { meta: { ...message.meta } } : {}
     });
-    isRecord8 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isRecord6 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
   }
 });
 
 // packages/core/src/skills/index.ts
 import { createHash as createHash3 } from "node:crypto";
 import { existsSync as existsSync2 } from "node:fs";
-import { readdir as readdir5, readFile as readFile9, stat as stat4 } from "node:fs/promises";
-import { homedir as homedir4 } from "node:os";
-import { dirname as dirname7, join as join8, resolve as resolve4 } from "node:path";
+import { readdir as readdir2, readFile as readFile7, stat as stat2 } from "node:fs/promises";
+import { homedir as homedir3 } from "node:os";
+import { dirname as dirname5, join as join5, resolve as resolve4 } from "node:path";
 import { Type as Type5 } from "@mariozechner/pi-ai";
 var scanSkillIndex, diffSkillIndex, hasSkillIndexDelta, renderSkillListing, renderSkillDelta, createSkillTool, projectSkillRoots, readSkillEntry, parseSkillMetadata, firstParagraph, parseSkillArgs, findGitRoot2, isNodeErrorCode4;
 var init_skills = __esm({
@@ -4379,10 +4313,10 @@ var init_skills = __esm({
     init_tools();
     scanSkillIndex = async (options) => {
       const cwd = resolve4(options.cwd);
-      const homeDir = resolve4(options.homeDir ?? homedir4());
+      const homeDir = resolve4(options.homeDir ?? homedir3());
       const roots = [
         ...projectSkillRoots(cwd, homeDir),
-        { path: join8(homeDir, ".scorel", "skills"), scope: "user", priority: 0 },
+        { path: join5(homeDir, ".scorel", "skills"), scope: "user", priority: 0 },
         ...(options.extensionSkillRoots ?? []).map((root, index) => ({
           path: root.path,
           scope: "extension",
@@ -4393,7 +4327,7 @@ var init_skills = __esm({
       for (const root of roots) {
         let children;
         try {
-          children = await readdir5(root.path);
+          children = await readdir2(root.path);
         } catch (cause) {
           if (isNodeErrorCode4(cause, "ENOENT") || isNodeErrorCode4(cause, "ENOTDIR")) {
             continue;
@@ -4403,7 +4337,7 @@ var init_skills = __esm({
         for (const child of children.sort()) {
           const entry = await readSkillEntry({
             name: child,
-            skillPath: join8(root.path, child, "SKILL.md"),
+            skillPath: join5(root.path, child, "SKILL.md"),
             scope: root.scope,
             priority: root.priority
           });
@@ -4472,7 +4406,7 @@ var init_skills = __esm({
         if (!entry) {
           throw new Error(`Unknown skill: ${input.name}. Available skills: ${options.listNames().join(", ") || "none"}`);
         }
-        const content = await readFile9(entry.path, "utf8");
+        const content = await readFile7(entry.path, "utf8");
         return {
           content: [{ type: "text", text: content }],
           details: {
@@ -4493,12 +4427,12 @@ var init_skills = __esm({
       let current = cwd;
       while (true) {
         if (current !== homeDir) {
-          roots.push(join8(current, ".scorel", "skills"));
+          roots.push(join5(current, ".scorel", "skills"));
         }
-        if (current === stopAt || current === dirname7(current)) {
+        if (current === stopAt || current === dirname5(current)) {
           break;
         }
-        const next = dirname7(current);
+        const next = dirname5(current);
         if (!gitRoot && next === homeDir) {
           break;
         }
@@ -4510,7 +4444,7 @@ var init_skills = __esm({
       let fileStat;
       let content;
       try {
-        [fileStat, content] = await Promise.all([stat4(options.skillPath), readFile9(options.skillPath, "utf8")]);
+        [fileStat, content] = await Promise.all([stat2(options.skillPath), readFile7(options.skillPath, "utf8")]);
       } catch (cause) {
         if (isNodeErrorCode4(cause, "ENOENT") || isNodeErrorCode4(cause, "ENOTDIR")) {
           return void 0;
@@ -4582,10 +4516,10 @@ var init_skills = __esm({
     findGitRoot2 = (cwd) => {
       let current = cwd;
       while (true) {
-        if (existsSync2(join8(current, ".git"))) {
+        if (existsSync2(join5(current, ".git"))) {
           return current;
         }
-        const next = dirname7(current);
+        const next = dirname5(current);
         if (next === current) {
           return void 0;
         }
@@ -4608,10 +4542,315 @@ var init_src3 = __esm({
     init_memory();
     init_pi_ai();
     init_reminders();
+    init_reporting();
     init_runtime();
     init_session();
     init_skills();
     init_tools();
+  }
+});
+
+// packages/daemon/src/projects/registry.ts
+import { randomUUID as randomUUID2 } from "node:crypto";
+import { mkdir as mkdir4, readFile as readFile8, readdir as readdir3, realpath, rename as rename2, stat as stat3, writeFile as writeFile4 } from "node:fs/promises";
+import { basename as basename2, dirname as dirname6, join as join6 } from "node:path";
+var ProjectRegistryError, ProjectRegistry, canonicalDirectory, sessionReferencesProject, sortProjects, isRegistryFile, isRecord7, isNodeError, errorMessage;
+var init_registry = __esm({
+  "packages/daemon/src/projects/registry.ts"() {
+    "use strict";
+    init_src();
+    ProjectRegistryError = class extends Error {
+      code;
+      constructor(code, message) {
+        super(message);
+        this.name = "ProjectRegistryError";
+        this.code = code;
+      }
+    };
+    ProjectRegistry = class {
+      #projectsPath;
+      #sessionsDir;
+      #createId;
+      #now;
+      #mutation = Promise.resolve();
+      constructor(options) {
+        this.#projectsPath = options.projectsPath;
+        this.#sessionsDir = options.sessionsDir;
+        this.#createId = options.createId ?? randomUUID2;
+        this.#now = options.now ?? Date.now;
+      }
+      async list() {
+        const file = await this.#read();
+        return sortProjects(file.projects);
+      }
+      async get(projectId) {
+        return (await this.list()).find((project) => project.projectId === projectId);
+      }
+      async require(projectId) {
+        const project = await this.get(projectId);
+        if (!project) {
+          throw new ProjectRegistryError("project_not_found", `Unknown project: ${projectId}`);
+        }
+        return project;
+      }
+      async register(workDir) {
+        return this.#mutate(async (file) => {
+          const canonical = await canonicalDirectory(workDir);
+          const existing = file.projects.find((project2) => project2.workDir === canonical);
+          if (existing) {
+            return { result: existing, changed: false };
+          }
+          const now = this.#now();
+          const project = {
+            projectId: asProjectId(`prj_${this.#createId()}`),
+            displayName: basename2(canonical) || canonical,
+            workDir: canonical,
+            createdAt: now,
+            updatedAt: now
+          };
+          file.projects.push(project);
+          return { result: project, changed: true };
+        });
+      }
+      async remove(projectId) {
+        return this.#mutate(async (file) => {
+          const index = file.projects.findIndex((project) => project.projectId === projectId);
+          if (index < 0) {
+            throw new ProjectRegistryError("project_not_found", `Unknown project: ${projectId}`);
+          }
+          if (await sessionReferencesProject(this.#sessionsDir, projectId)) {
+            throw new ProjectRegistryError("project_has_sessions", `Project still has sessions: ${projectId}`);
+          }
+          file.projects.splice(index, 1);
+          return { result: true, changed: true };
+        });
+      }
+      async #mutate(mutation) {
+        const operation = this.#mutation.then(async () => {
+          const file = await this.#read();
+          const { result, changed } = await mutation(file);
+          if (changed) {
+            await this.#write({ version: 1, projects: sortProjects(file.projects) });
+          }
+          return result;
+        });
+        this.#mutation = operation.then(
+          () => void 0,
+          () => void 0
+        );
+        return operation;
+      }
+      async #read() {
+        try {
+          const parsed = JSON.parse(await readFile8(this.#projectsPath, "utf8"));
+          if (!isRegistryFile(parsed)) {
+            throw new ProjectRegistryError("filesystem_error", `Invalid project registry: ${this.#projectsPath}`);
+          }
+          return { version: 1, projects: parsed.projects.map((project) => ({ ...project })) };
+        } catch (cause) {
+          if (isNodeError(cause, "ENOENT")) {
+            return { version: 1, projects: [] };
+          }
+          if (cause instanceof ProjectRegistryError) {
+            throw cause;
+          }
+          throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+        }
+      }
+      async #write(file) {
+        await mkdir4(dirname6(this.#projectsPath), { recursive: true });
+        const temporaryPath = `${this.#projectsPath}.${process.pid}.${randomUUID2()}.tmp`;
+        try {
+          await writeFile4(temporaryPath, `${JSON.stringify(file, null, 2)}
+`, "utf8");
+          await rename2(temporaryPath, this.#projectsPath);
+        } catch (cause) {
+          throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+        }
+      }
+    };
+    canonicalDirectory = async (workDir) => {
+      try {
+        const canonical = await realpath(workDir);
+        if (!(await stat3(canonical)).isDirectory()) {
+          throw new ProjectRegistryError("filesystem_error", `Project path is not a directory: ${workDir}`);
+        }
+        return canonical;
+      } catch (cause) {
+        if (cause instanceof ProjectRegistryError) {
+          throw cause;
+        }
+        throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+      }
+    };
+    sessionReferencesProject = async (sessionsDir, projectId) => {
+      let names;
+      try {
+        names = await readdir3(sessionsDir);
+      } catch (cause) {
+        if (isNodeError(cause, "ENOENT")) {
+          return false;
+        }
+        throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+      }
+      for (const name of names) {
+        if (!name.endsWith(".jsonl") || name.startsWith(".")) {
+          continue;
+        }
+        try {
+          const firstLine = (await readFile8(join6(sessionsDir, name), "utf8")).split(/\r?\n/, 1)[0];
+          const parsed = firstLine ? JSON.parse(firstLine) : void 0;
+          if (isRecord7(parsed) && isRecord7(parsed.meta) && parsed.meta.projectId === projectId) {
+            return true;
+          }
+        } catch (cause) {
+          if (!isNodeError(cause, "ENOENT")) {
+            throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+          }
+        }
+      }
+      return false;
+    };
+    sortProjects = (projects) => [...projects].sort((left, right) => String(left.projectId).localeCompare(String(right.projectId)));
+    isRegistryFile = (value) => isRecord7(value) && value.version === 1 && Array.isArray(value.projects) && value.projects.every(
+      (project) => isRecord7(project) && typeof project.projectId === "string" && typeof project.displayName === "string" && typeof project.workDir === "string" && typeof project.createdAt === "number" && typeof project.updatedAt === "number"
+    );
+    isRecord7 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isNodeError = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
+    errorMessage = (cause) => cause instanceof Error ? cause.message : String(cause);
+  }
+});
+
+// packages/daemon/src/projects/directories.ts
+import { homedir as homedir4 } from "node:os";
+import { dirname as dirname7, join as join7 } from "node:path";
+import { readdir as readdir4, realpath as realpath2, stat as stat4 } from "node:fs/promises";
+var listDirectories, directoryEntries, errorMessage2;
+var init_directories = __esm({
+  "packages/daemon/src/projects/directories.ts"() {
+    "use strict";
+    init_registry();
+    listDirectories = async (path = homedir4()) => {
+      try {
+        const canonical = await realpath2(path);
+        if (!(await stat4(canonical)).isDirectory()) {
+          throw new ProjectRegistryError("filesystem_error", `Path is not a directory: ${path}`);
+        }
+        const entries = await directoryEntries(canonical);
+        const parent = dirname7(canonical);
+        return {
+          path: canonical,
+          parentPath: parent === canonical ? void 0 : parent,
+          entries
+        };
+      } catch (cause) {
+        if (cause instanceof ProjectRegistryError) {
+          throw cause;
+        }
+        throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
+      }
+    };
+    directoryEntries = async (path) => {
+      const entries = await readdir4(path, { withFileTypes: true });
+      const directories = await Promise.all(
+        entries.map(async (entry) => {
+          const candidate = join7(path, entry.name);
+          if (!entry.isDirectory() && !entry.isSymbolicLink()) {
+            return void 0;
+          }
+          try {
+            const canonical = await realpath2(candidate);
+            return (await stat4(canonical)).isDirectory() ? { name: entry.name, path: canonical, kind: "directory" } : void 0;
+          } catch {
+            return void 0;
+          }
+        })
+      );
+      return directories.filter((entry) => entry !== void 0).sort((left, right) => left.name.localeCompare(right.name) || left.path.localeCompare(right.path));
+    };
+    errorMessage2 = (cause) => cause instanceof Error ? cause.message : String(cause);
+  }
+});
+
+// packages/daemon/src/projects/sessions.ts
+import { readFile as readFile9, readdir as readdir5 } from "node:fs/promises";
+import { join as join8 } from "node:path";
+var listSessionSummaries, readSummary, tailSeq, latestTitle, clampLimit, parseRecord, isRecord8, isNodeError2;
+var init_sessions = __esm({
+  "packages/daemon/src/projects/sessions.ts"() {
+    "use strict";
+    init_src();
+    listSessionSummaries = async (sessionsDir, filter = {}, overrides) => {
+      let names;
+      try {
+        names = await readdir5(sessionsDir);
+      } catch (cause) {
+        if (isNodeError2(cause, "ENOENT")) {
+          return [];
+        }
+        throw cause;
+      }
+      const sessions = (await Promise.all(
+        names.filter((name) => name.endsWith(".jsonl") && !name.startsWith(".")).map((name) => readSummary(join8(sessionsDir, name), overrides))
+      )).filter((session) => session !== void 0).filter((session) => filter.projectId === void 0 || session.projectId === filter.projectId).sort((left, right) => right.updatedAt - left.updatedAt || String(left.sessionId).localeCompare(String(right.sessionId)));
+      return sessions.slice(0, clampLimit(filter.limit));
+    };
+    readSummary = async (filePath, overrides) => {
+      let content;
+      try {
+        content = await readFile9(filePath, "utf8");
+      } catch (cause) {
+        if (isNodeError2(cause, "ENOENT")) {
+          return void 0;
+        }
+        throw cause;
+      }
+      const lines = content.split(/\r?\n/).filter(Boolean);
+      const header = parseRecord(lines[0]);
+      if (header?.version !== 1 || typeof header.sessionId !== "string" || typeof header.createdAt !== "number" || !isRecord8(header.meta) || typeof header.meta.projectId !== "string") {
+        return void 0;
+      }
+      const override = overrides?.get(header.sessionId);
+      const title = latestTitle(lines.slice(1)) ?? (typeof header.meta.title === "string" ? header.meta.title : void 0);
+      return {
+        sessionId: asSessionId(header.sessionId),
+        projectId: asProjectId(header.meta.projectId),
+        title,
+        model: typeof header.meta.model === "string" ? header.meta.model : void 0,
+        updatedAt: override?.updatedAt ?? (typeof header.meta.updatedAt === "number" ? header.meta.updatedAt : header.createdAt),
+        currentSeq: asSeq(override?.currentSeq ?? tailSeq(lines.slice(1)))
+      };
+    };
+    tailSeq = (lines) => {
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const event = parseRecord(lines[index]);
+        if (typeof event?.seq === "number") {
+          return event.seq;
+        }
+      }
+      return 0;
+    };
+    latestTitle = (lines) => {
+      let title;
+      for (const line of lines) {
+        const event = parseRecord(line);
+        if (event?.type === "session_title_updated" && typeof event.title === "string" && event.title.trim()) {
+          title = event.title.trim();
+        }
+      }
+      return title;
+    };
+    clampLimit = (limit) => limit === void 0 || !Number.isFinite(limit) || limit <= 0 ? 200 : Math.min(Math.floor(limit), 1e3);
+    parseRecord = (line) => {
+      try {
+        const value = line === void 0 ? void 0 : JSON.parse(line);
+        return isRecord8(value) ? value : void 0;
+      } catch {
+        return void 0;
+      }
+    };
+    isRecord8 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+    isNodeError2 = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
   }
 });
 
@@ -4947,7 +5186,7 @@ import { basename as basename3, dirname as dirname8, join as join10, resolve as 
 import { pathToFileURL } from "node:url";
 import { promisify as promisify2 } from "node:util";
 import { WebSocketServer } from "ws";
-var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, snipUserMessageIdBlock, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger2, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord9, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
+var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, snipUserMessageIdBlock, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger3, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord9, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
 var init_src4 = __esm({
   "packages/daemon/src/index.ts"() {
     "use strict";
@@ -6028,6 +6267,7 @@ var init_src4 = __esm({
               thinkingBlocks: countContentBlocks(rawEvent.message, "thinking"),
               textBlocks: countContentBlocks(rawEvent.message, "text"),
               toolCalls: countContentBlocks(rawEvent.message, "tool_call"),
+              ...typeof rawEvent.message.meta?.errorMessage === "string" ? { errorMessage: rawEvent.message.meta.errorMessage } : {},
               inputTokens: rawEvent.message.usage?.inputTokens,
               outputTokens: rawEvent.message.usage?.outputTokens,
               totalTokens: rawEvent.message.usage?.totalTokens
@@ -7924,8 +8164,8 @@ var init_src4 = __esm({
       return {
         version: 1,
         rtk: {
-          outputTokens: nonNegativeInteger2(value.rtk.outputTokens),
-          savedTokens: nonNegativeInteger2(value.rtk.savedTokens),
+          outputTokens: nonNegativeInteger3(value.rtk.outputTokens),
+          savedTokens: nonNegativeInteger3(value.rtk.savedTokens),
           byProject: parseRuntimeStatsBuckets(value.rtk.byProject),
           bySession: parseRuntimeStatsBuckets(value.rtk.bySession)
         }
@@ -7939,8 +8179,8 @@ var init_src4 = __esm({
         Object.entries(value).map(([key, bucket]) => [
           key,
           isRecord9(bucket) ? {
-            outputTokens: nonNegativeInteger2(bucket.outputTokens),
-            savedTokens: nonNegativeInteger2(bucket.savedTokens)
+            outputTokens: nonNegativeInteger3(bucket.outputTokens),
+            savedTokens: nonNegativeInteger3(bucket.savedTokens)
           } : { outputTokens: 0, savedTokens: 0 }
         ])
       );
@@ -7963,11 +8203,11 @@ var init_src4 = __esm({
       if (!isRecord9(rtk) || rtk.applied !== true) {
         return void 0;
       }
-      const outputTokens = nonNegativeInteger2(rtk.estimatedOutputTokens);
-      const savedTokens = nonNegativeInteger2(rtk.estimatedSavedTokens);
+      const outputTokens = nonNegativeInteger3(rtk.estimatedOutputTokens);
+      const savedTokens = nonNegativeInteger3(rtk.estimatedSavedTokens);
       return outputTokens > 0 || savedTokens > 0 ? { outputTokens, savedTokens } : void 0;
     };
-    nonNegativeInteger2 = (value) => {
+    nonNegativeInteger3 = (value) => {
       if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
         return 0;
       }
@@ -9816,11 +10056,12 @@ import { createInterface } from "node:readline/promises";
 import { homedir as homedir9 } from "node:os";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
 import { basename as basename4, dirname as dirname13, join as join17 } from "node:path";
-var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, runHeadless, renderRunEvent, renderRunFinal, writeJsonLine, RunTimeoutError, withRunTimeout, makeRunSummary, writeRunSummary, readRunPrompt, resolveRunConfig, stripTrailingSlashes2, createSigintHandler, loadOrCreateSession, parseChatOptions, parseRunOptions, parseRunOutputFormat, parsePositiveInteger, parseModelSelection, parseRunProviderApi, requireValue6, promptIfInteractive, writeUsage, writeRunUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
+var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, runHeadless, renderRunEvent, renderRunFinal, writeJsonLine, RunTimeoutError, withRunTimeout, makeRunSummary, runErrorFromEvents, writeRunSummary, writeRunReports, runReportPaths, runMetadata, runTrajectory, runReportingModel, readRunPrompt, resolveRunConfig, stripTrailingSlashes2, createSigintHandler, loadOrCreateSession, parseChatOptions, parseRunOptions, parseRunOutputFormat, parsePositiveInteger, parseModelSelection, parseRunProviderApi, requireValue6, promptIfInteractive, writeUsage, writeRunUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
 var init_index = __esm({
   async "apps/cli/src/index.ts"() {
     "use strict";
     init_src2();
+    init_src3();
     init_src4();
     init_src();
     init_daemon_cli();
@@ -10476,8 +10717,10 @@ var init_index = __esm({
       const startedAt = Date.now();
       let projectId;
       const textParts = [];
+      const events = [];
       const prompt = await readRunPrompt(options, io);
       const runConfig = resolveRunConfig(options);
+      let reportingModel;
       const configScope = { scorelHomeDir: options.stateDir };
       const loadProjectConfig = async (project) => runConfig ?? options.config ?? await loadScorelConfig({ cwd: project.workDir, ...configScope });
       const loadProjectConfigProfile = async (project) => runConfig ?? options.config ?? await loadScorelConfigProfile({ cwd: project.workDir, ...configScope });
@@ -10505,9 +10748,11 @@ var init_index = __esm({
         await daemon.start();
         const project = await daemon.registerProject(options.cwd);
         projectId = project.projectId;
+        reportingModel = runReportingModel(await loadProjectConfig(project), options.modelSelection);
         await client.connect(options.sessionId);
         await loadOrCreateSession(client, options.sessionId, project.projectId, options.modelSelection);
         unsubscribe = client.subscribe((event) => {
+          events.push(event);
           if (event.type === "text_delta") {
             textParts.push(event.delta);
           }
@@ -10517,29 +10762,37 @@ var init_index = __esm({
         const result = options.timeoutMs === void 0 ? await send : await withRunTimeout(send, options.timeoutMs, async () => {
           await client.cancel().catch(() => void 0);
         });
+        const runtimeError = runErrorFromEvents(events);
         const summary = makeRunSummary({
           options,
           startedAt,
           projectId,
-          status: "completed",
-          exitReason: "completed",
+          reportingModel,
+          status: runtimeError ? "error" : "completed",
+          exitReason: runtimeError ? "error" : "completed",
           userEventId: String(result.userEventId),
-          assistantEventId: String(result.assistantEventId)
+          assistantEventId: String(result.assistantEventId),
+          ...runtimeError ? { error: runtimeError } : {},
+          events
         });
         await writeRunSummary(options.summaryPath, summary);
+        await writeRunReports(options.reportDir, summary);
         renderRunFinal(options, io, summary, textParts.join(""));
-        return 0;
+        return runtimeError ? 1 : 0;
       } catch (cause) {
         const isTimeout = cause instanceof RunTimeoutError;
         const summary = makeRunSummary({
           options,
           startedAt,
           projectId,
+          reportingModel,
           status: isTimeout ? "timeout" : "error",
           exitReason: isTimeout ? "timeout" : "error",
-          error: cause instanceof Error ? cause : new Error(String(cause))
+          error: cause instanceof Error ? cause : new Error(String(cause)),
+          events
         });
         await writeRunSummary(options.summaryPath, summary).catch(() => void 0);
+        await writeRunReports(options.reportDir, summary).catch(() => void 0);
         renderRunFinal(options, io, summary, textParts.join(""));
         if (!options.quiet && options.outputFormat === "text") {
           io.error.write(`scorel run error: ${summary.error?.message ?? "unknown error"}
@@ -10614,21 +10867,49 @@ var init_index = __esm({
         }
       }
     };
-    makeRunSummary = (input) => ({
-      status: input.status,
-      sessionId: String(input.options.sessionId),
-      ...input.projectId ? { projectId: String(input.projectId) } : {},
-      cwd: input.options.cwd,
-      stateDir: input.options.stateDir,
-      sessionsDir: input.options.sessionsDir,
-      sessionJsonl: join17(input.options.sessionsDir, `${input.options.sessionId}.jsonl`),
-      outputFormat: input.options.outputFormat,
-      elapsedMs: Date.now() - input.startedAt,
-      exitReason: input.exitReason,
-      ...input.userEventId ? { userEventId: input.userEventId } : {},
-      ...input.assistantEventId ? { assistantEventId: input.assistantEventId } : {},
-      ...input.error ? { error: { message: input.error.message } } : {}
-    });
+    makeRunSummary = (input) => {
+      const events = input.events ?? [];
+      const observation = buildRunObservation({ events, selectedModel: input.reportingModel });
+      const reports = runReportPaths(input.options);
+      return {
+        status: input.status,
+        sessionId: String(input.options.sessionId),
+        ...input.projectId ? { projectId: String(input.projectId) } : {},
+        cwd: input.options.cwd,
+        stateDir: input.options.stateDir,
+        sessionsDir: input.options.sessionsDir,
+        sessionJsonl: join17(input.options.sessionsDir, `${input.options.sessionId}.jsonl`),
+        outputFormat: input.options.outputFormat,
+        elapsedMs: Date.now() - input.startedAt,
+        exitReason: input.exitReason,
+        ...input.userEventId ? { userEventId: input.userEventId } : {},
+        ...input.assistantEventId ? { assistantEventId: input.assistantEventId } : {},
+        ...input.error ? { error: { message: input.error.message } } : {},
+        ...input.events ? { events: input.events } : {},
+        usage: observation.usage,
+        ...observation.model ? { model: observation.model } : {},
+        cost: observation.cost,
+        reports
+      };
+    };
+    runErrorFromEvents = (events) => {
+      for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index];
+        if (event?.type === "error") {
+          return new Error(event.message);
+        }
+      }
+      for (let index = events.length - 1; index >= 0; index -= 1) {
+        const event = events[index];
+        if (event?.type !== "assistant_message" || event.message.stopReason !== "error") {
+          continue;
+        }
+        const failedAssistant = event;
+        const metaMessage = failedAssistant.message.meta?.errorMessage;
+        return new Error(typeof metaMessage === "string" && metaMessage.length > 0 ? metaMessage : "assistant stopped with error");
+      }
+      return void 0;
+    };
     writeRunSummary = async (path, summary) => {
       if (!path) {
         return;
@@ -10636,6 +10917,72 @@ var init_index = __esm({
       await mkdir8(dirname13(path), { recursive: true });
       await writeFile8(path, `${JSON.stringify(summary, null, 2)}
 `);
+    };
+    writeRunReports = async (reportDir, summary) => {
+      if (!reportDir) {
+        return;
+      }
+      await mkdir8(reportDir, { recursive: true });
+      await writeFile8(join17(reportDir, "scorel-summary.json"), `${JSON.stringify(summary, null, 2)}
+`);
+      await writeFile8(join17(reportDir, "scorel-events.jsonl"), summary.events?.map((event) => JSON.stringify(event)).join("\n").concat("\n") ?? "");
+      await writeFile8(join17(reportDir, "scorel-metadata.json"), `${JSON.stringify(runMetadata(summary), null, 2)}
+`);
+      await writeFile8(join17(reportDir, "scorel-trajectory.json"), `${JSON.stringify(runTrajectory(summary), null, 2)}
+`);
+    };
+    runReportPaths = (options) => {
+      const reports = {
+        sessionJsonl: join17(options.sessionsDir, `${options.sessionId}.jsonl`),
+        sessionSummary: sessionObservationSummaryFilePath(options.sessionsDir, options.sessionId),
+        diagnosticsLog: sessionLogFilePath(options.sessionsDir, options.sessionId),
+        sessionFilesDir: sessionArtifactsDirPath(options.sessionsDir, options.sessionId)
+      };
+      if (options.reportDir) {
+        reports.summary = join17(options.reportDir, "scorel-summary.json");
+        reports.events = join17(options.reportDir, "scorel-events.jsonl");
+        reports.trajectory = join17(options.reportDir, "scorel-trajectory.json");
+        reports.metadata = join17(options.reportDir, "scorel-metadata.json");
+      }
+      return reports;
+    };
+    runMetadata = (summary) => ({
+      format: "scorel-run-metadata-v1",
+      status: summary.status,
+      exitReason: summary.exitReason,
+      sessionId: summary.sessionId,
+      projectId: summary.projectId,
+      cwd: summary.cwd,
+      elapsedMs: summary.elapsedMs,
+      usage: summary.usage,
+      model: summary.model,
+      cost: summary.cost,
+      reports: summary.reports
+    });
+    runTrajectory = (summary) => ({
+      format: "scorel-run-trajectory-v1",
+      sessionId: summary.sessionId,
+      projectId: summary.projectId,
+      status: summary.status,
+      usage: summary.usage,
+      model: summary.model,
+      cost: summary.cost,
+      events: summary.events ?? []
+    });
+    runReportingModel = (config, modelSelection) => {
+      try {
+        const selection = resolveModelSelection(config, modelSelection);
+        const model = resolvePiAiModel(selection.config);
+        return {
+          modelId: selection.modelId,
+          providerModelId: model.id,
+          provider: model.provider,
+          api: model.api,
+          displayName: selection.displayName
+        };
+      } catch {
+        return modelSelection?.modelId ? { modelId: modelSelection.modelId } : void 0;
+      }
     };
     readRunPrompt = async (options, io) => {
       if (options.promptSource === "prompt-file") {
@@ -10764,6 +11111,7 @@ var init_index = __esm({
       let timeoutMs;
       let outputFormat = "text";
       let summaryPath;
+      let reportDir;
       let quiet = false;
       let modelSelection;
       const providerOverride = {};
@@ -10819,6 +11167,11 @@ var init_index = __esm({
           index += 1;
           continue;
         }
+        if (arg === "--report-dir") {
+          reportDir = requireValue6(argv, index, "--report-dir");
+          index += 1;
+          continue;
+        }
         if (arg === "--quiet") {
           quiet = true;
           continue;
@@ -10870,6 +11223,7 @@ var init_index = __esm({
         timeoutMs,
         outputFormat,
         summaryPath,
+        reportDir,
         quiet,
         modelSelection,
         providerOverride,
@@ -10962,6 +11316,7 @@ var init_index = __esm({
           "  --timeout-ms <ms>",
           "  --output-format text|json|stream-json|none",
           "  --summary <path>",
+          "  --report-dir <path>",
           "  --quiet",
           "  --model <primary|standard|auxiliary|model-id>",
           "  --provider <name>",
