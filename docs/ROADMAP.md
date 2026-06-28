@@ -661,6 +661,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 |---|---|---|---|
 | Eval.1 | [`S0110`](spec/ship/S0110-scorel-eval-reporting-compatibility.md) | `scorel run` 输出 token usage、model/provider、estimated cost、events 和 report metadata，供 Harbor / Terminal-Bench job 收集展示。 | Done |
 | Eval.2 | [`S0111`](spec/ship/S0111-scorel-observability-baseline.md) | 为每个 session 维护 `<sessionId>.summary.json` 派生观测缓存，让 CLI / GUI / run / harness 读取同一份 usage、model、cost summary。 | Done |
+| Eval.3 | [`S0112`](spec/ship/S0112-observability-sync-assets.md) | 本地 observation asset、Langfuse 覆盖式同步 payload、OpenTelemetry OTLP 增量导出、GUI 配置入口、`scorel observe sync` 手动入口和 Host post-turn 自动同步。 | Done |
 
 **Not in Eval.1**:
 
@@ -806,9 +807,10 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0106`](spec/ship/S0106-snip-context-control.md) | Snip context control | Done |
 | [`S0107`](spec/ship/S0107-system-reminder-unification.md) | System reminder unification | Done |
 | [`S0108`](spec/ship/S0108-gui-bundled-cli-runtime.md) | GUI bundled CLI runtime | Done |
-| [`S0109`](spec/ship/S0109-scorel-run-headless-task-runner.md) | `scorel run` headless task runner | Active |
+| [`S0109`](spec/ship/S0109-scorel-run-headless-task-runner.md) | `scorel run` headless task runner | Done |
 | [`S0110`](spec/ship/S0110-scorel-eval-reporting-compatibility.md) | Scorel eval reporting compatibility for usage/cost/reports | Done |
 | [`S0111`](spec/ship/S0111-scorel-observability-baseline.md) | Scorel session observability summary cache | Done |
+| [`S0112`](spec/ship/S0112-observability-sync-assets.md) | Observability sync assets for Langfuse and OpenTelemetry | Done |
 
 ---
 

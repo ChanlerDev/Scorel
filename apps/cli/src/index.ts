@@ -10,11 +10,19 @@ import { basename, dirname, join } from "node:path";
 import { DaemonClient, WsTransport, clientPackageName } from "@scorel/client";
 import {
   buildRunObservation,
+  buildLangfuseSyncPayload,
+  buildObservationAsset,
+  buildOtelDeltaPayload,
+  loadSession,
+  readObservabilitySyncState,
   resolveModelSelection,
   resolvePiAiModel,
   sessionArtifactsDirPath,
   sessionObservationSummaryFilePath,
   sessionLogFilePath,
+  uploadLangfusePayload,
+  uploadOtelPayload,
+  writeObservabilitySyncState,
   type RunCostEstimate,
   type RunReportingModel,
 } from "@scorel/core";
@@ -104,6 +112,18 @@ type RunOptions = {
   config?: ScorelConfig;
 };
 
+type ObserveSyncTarget = "langfuse" | "otel";
+
+type ObserveSyncOptions = {
+  command: "sync";
+  sessionId: SessionId;
+  target: ObserveSyncTarget;
+  sessionsDir: string;
+  stateDir: string;
+  outPath?: string;
+  config?: ScorelConfig;
+};
+
 type RunSummary = {
   status: "completed" | "error" | "timeout";
   sessionId: string;
@@ -162,6 +182,18 @@ export const runCli = async (
     } catch (cause) {
       io.error.write(`scorel run error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
       return 2;
+    }
+  }
+  if (command === "observe") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      writeObserveUsage(io.output);
+      return 0;
+    }
+    try {
+      return runObserve(parseObserveOptions(rest, runOptions), io);
+    } catch (cause) {
+      io.error.write(`scorel observe error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+      return 1;
     }
   }
   if (command === "daemon") {
@@ -1258,6 +1290,84 @@ const resolveRunConfig = (options: RunOptions): ScorelConfig | undefined => {
 
 const stripTrailingSlashes = (value: string): string => value.replace(/\/+$/, "");
 
+const runObserve = async (options: ObserveSyncOptions, io: CliIo): Promise<number> => {
+  const session = await loadSession({ sessionsDir: options.sessionsDir, sessionId: options.sessionId });
+  const asset = buildObservationAsset(session);
+
+  if (options.target === "langfuse") {
+    const payload = buildLangfuseSyncPayload(asset);
+    await writeObservePayload(options.outPath, payload);
+    const config = options.config ?? await loadObserveConfig(options);
+    const langfuse = config?.observability?.langfuse;
+    let uploaded = false;
+    if (langfuse?.enabled && langfuse.publicKey && langfuse.secretKey) {
+      await uploadLangfusePayload({
+        host: langfuse.host ?? "https://cloud.langfuse.com",
+        publicKey: langfuse.publicKey,
+        secretKey: langfuse.secretKey,
+        payload,
+      });
+      uploaded = true;
+    } else if (!options.outPath) {
+      throw new Error("Langfuse credentials are not configured; set observability.langfuse publicKey/secretKey or pass --out to inspect the payload");
+    }
+    if (uploaded) {
+      await writeObservabilitySyncState(options.stateDir, "langfuse", asset.assetId, {
+        target: "langfuse",
+        assetId: asset.assetId,
+        lastExportedSeq: asset.currentSeq,
+        lastRevision: asset.revision,
+        updatedAt: Date.now(),
+      });
+    }
+    io.output.write(`target=langfuse asset=${asset.assetId} revision=${asset.revision} events=${payload.batch.length} uploaded=${uploaded}\n`);
+    return 0;
+  }
+
+  const state = await readObservabilitySyncState(options.stateDir, "otel", asset.assetId);
+  const payload = buildOtelDeltaPayload(asset, state);
+  await writeObservePayload(options.outPath, payload);
+  const config = options.config ?? await loadObserveConfig(options);
+  const otel = config?.observability?.otel;
+  const hasOtelEndpoint = Boolean(otel?.enabled && otel.endpoint);
+  let uploaded = false;
+  if (hasOtelEndpoint && payload.events.length > 0 && otel?.endpoint) {
+    await uploadOtelPayload({ endpoint: otel.endpoint, payload: payload.otlp });
+    uploaded = true;
+  } else if (!hasOtelEndpoint && !options.outPath) {
+    throw new Error("OpenTelemetry endpoint is not configured; set observability.otel.endpoint or pass --out to inspect the payload");
+  }
+  if (hasOtelEndpoint) {
+    await writeObservabilitySyncState(options.stateDir, "otel", asset.assetId, payload.nextState);
+  }
+  io.output.write(`target=otel asset=${asset.assetId} fromSeq=${payload.fromSeq} toSeq=${payload.toSeq} events=${payload.events.length} uploaded=${uploaded}\n`);
+  return 0;
+};
+
+const writeObservePayload = async (path: string | undefined, payload: unknown): Promise<void> => {
+  const text = `${JSON.stringify(payload, null, 2)}\n`;
+  if (!path) {
+    return;
+  }
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, text, "utf8");
+};
+
+const loadObserveConfig = async (options: Pick<ObserveSyncOptions, "stateDir">): Promise<ScorelConfig | undefined> => {
+  try {
+    return await loadScorelConfig({ cwd: process.cwd(), scorelHomeDir: options.stateDir });
+  } catch (cause) {
+    if ((cause as { code?: string }).code === "ENOENT") {
+      return undefined;
+    }
+    const message = cause instanceof Error ? cause.message : String(cause);
+    if (message.includes("No Scorel config") || message.includes("Scorel config not found")) {
+      return undefined;
+    }
+    throw cause;
+  }
+};
+
 export type SigintHandlerOptions = {
   /** Returns true when a chat turn is mid-flight; daemon should be cancelled. */
   isInFlight: () => boolean;
@@ -1492,6 +1602,73 @@ const parseRunProviderApi = (value: string): RunProviderApi => {
   throw new Error("--api must be openai-completions, openai-responses, google-generative-ai, or anthropic-messages");
 };
 
+const parseObserveOptions = (argv: string[], runOptions: CliRunOptions): ObserveSyncOptions => {
+  const [subcommand, ...rest] = argv;
+  if (subcommand !== "sync") {
+    throw new Error("scorel observe requires sync");
+  }
+  let sessionId: SessionId | undefined;
+  let target: ObserveSyncTarget | undefined;
+  let sessionsDir: string | undefined = runOptions.sessionsDir;
+  let stateDir: string | undefined;
+  let outPath: string | undefined;
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === "--session") {
+      sessionId = asSessionId(requireValue(rest, index, "--session"));
+      index += 1;
+      continue;
+    }
+    if (arg === "--target") {
+      target = parseObserveTarget(requireValue(rest, index, "--target"));
+      index += 1;
+      continue;
+    }
+    if (arg === "--sessions-dir") {
+      sessionsDir = requireValue(rest, index, "--sessions-dir");
+      index += 1;
+      continue;
+    }
+    if (arg === "--state-dir") {
+      stateDir = requireValue(rest, index, "--state-dir");
+      index += 1;
+      continue;
+    }
+    if (arg === "--out") {
+      outPath = requireValue(rest, index, "--out");
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown observe option: ${arg}`);
+  }
+
+  if (!sessionId) {
+    throw new Error("--session is required");
+  }
+  if (!target) {
+    throw new Error("--target is required");
+  }
+  const resolvedStateDir = stateDir ?? stateDirFromSessionsDir(sessionsDir);
+  const resolvedSessionsDir = sessionsDir ?? join(resolvedStateDir, "sessions");
+  return {
+    command: "sync",
+    sessionId,
+    target,
+    sessionsDir: resolvedSessionsDir,
+    stateDir: resolvedStateDir,
+    outPath,
+    config: runOptions.config,
+  };
+};
+
+const parseObserveTarget = (value: string): ObserveSyncTarget => {
+  if (value === "langfuse" || value === "otel") {
+    return value;
+  }
+  throw new Error("--target must be langfuse or otel");
+};
+
 const requireValue = (argv: string[], index: number, flag: string): string => {
   const value = argv[index + 1];
   if (!value) {
@@ -1533,6 +1710,7 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
       "       scorel upgrade",
       "       scorel version",
       "       scorel logs [--attach] --session <id> [--remote <ws-url>] [--tail <n>]",
+      "       scorel observe sync --session <id> --target langfuse|otel [--out <path>]",
       "       scorel project list",
       "       scorel project add <dir>",
       "       scorel project remove <project-id>",
@@ -1569,6 +1747,19 @@ const writeRunUsage = (output: NodeJS.WritableStream): void => {
       "  scorel run --prompt-file /tmp/instruction.txt --cwd /workspace --state-dir /tmp/scorel-state \\",
       "    --api openai-completions --baseurl http://127.0.0.1:4000/v1 --apikey \"$API_KEY\" \\",
       "    --model gpt-5.4-mini --output-format none --summary /logs/agent/scorel-summary.json",
+    ].join("\n") + "\n",
+  );
+};
+
+const writeObserveUsage = (output: NodeJS.WritableStream): void => {
+  output.write(
+    [
+      "Usage: scorel observe sync --session <id> --target langfuse|otel",
+      "",
+      "Options:",
+      "  --state-dir <dir>",
+      "  --sessions-dir <dir>",
+      "  --out <path>",
     ].join("\n") + "\n",
   );
 };

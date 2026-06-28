@@ -15,6 +15,7 @@ import {
   ScorelRuntime,
   buildContext,
   buildInstructionSnapshot,
+  buildObservationAsset,
   buildMemoryContext,
   corePackageName,
   createAppendDailyTool,
@@ -35,6 +36,7 @@ import {
   loadExtensionManifest,
   loadSession,
   renderMemoryConfig,
+  renderObservabilityConfig,
   renderRuntimeConfig,
   renderExtensionConfig,
   renderMemoryHarness,
@@ -52,6 +54,7 @@ import {
   snipUserMessageAlias,
   scorelSessionsDir,
   scorelMemoryPaths,
+  syncObservationAssetTargets,
   writeMemoryDreamState,
   writeSessionMemory,
   type ExtensionManifest,
@@ -102,6 +105,7 @@ import {
   type ModelSelectionInput,
   type ExtensionSettings,
   type MemorySettings,
+  type ObservabilitySettings,
   type RuntimeSettings,
 } from "@scorel/protocol";
 
@@ -898,6 +902,14 @@ export class ScorelHost {
         this.#respond(connection, message, { runtime: await this.#handleUpsertRuntimeSettings(message) });
         break;
       }
+      case "get_observability_settings": {
+        this.#respond(connection, message, { observability: await this.#observabilitySettings(message.projectId) });
+        break;
+      }
+      case "upsert_observability_settings": {
+        this.#respond(connection, message, { observability: await this.#handleUpsertObservabilitySettings(message) });
+        break;
+      }
       case "get_extension_settings": {
         this.#respond(connection, message, { extension: await this.#extensionSettings(message.extensionId) });
         break;
@@ -1183,8 +1195,32 @@ export class ScorelHost {
       source: input.source,
     });
     this.#scheduleSessionMemoryUpdate(lane, clientId);
+    void this.#syncObservabilityAfterTurn(lane).catch((cause) => {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      void this.#appendDiagnostic(sessionId, "observability_sync_failed", {
+        message: error.message,
+        stack: shortStack(error),
+      });
+    });
     input.onComplete?.(result);
     return { ...result, status: "completed" };
+  }
+
+  async #syncObservabilityAfterTurn(lane: SessionLane): Promise<void> {
+    const config = await this.#configForProject(lane.project.projectId);
+    const results = await syncObservationAssetTargets({
+      asset: buildObservationAsset(lane.session),
+      config,
+      stateDir: this.#scorelHomeDir,
+    });
+    for (const result of results) {
+      await this.#appendDiagnostic(lane.session.header.sessionId, "observability_sync_completed", {
+        target: result.target,
+        status: result.status,
+        events: result.events,
+        reason: result.reason,
+      });
+    }
   }
 
   #scheduleAfterUserMessageHooks(
@@ -3187,6 +3223,64 @@ export class ScorelHost {
       installStatus: installResult.status,
       ...(installResult.message ? { installMessage: installResult.message } : {}),
     });
+  }
+
+  async #observabilitySettings(projectId?: ProjectId): Promise<ObservabilitySettings> {
+    const config = await (projectId ? this.#configProfileForProject(projectId) : this.#loadUserConfigProfile()).catch((cause) => {
+      if (isMissingConfigError(cause)) {
+        return undefined;
+      }
+      throw cause;
+    });
+    return config?.observability ?? {
+      local: true,
+      sync: {
+        enabled: false,
+        mode: "manual",
+        targets: [],
+      },
+      langfuse: {
+        enabled: false,
+      },
+      otel: {
+        enabled: false,
+        protocol: "otlp-http",
+      },
+    };
+  }
+
+  async #handleUpsertObservabilitySettings(request: ClientRequest<"upsert_observability_settings">): Promise<ObservabilitySettings> {
+    const target = this.#configWriteTarget();
+    let existingConfigText: string | undefined;
+    try {
+      existingConfigText = await readFile(target.configPath, "utf8");
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+    await mkdir(target.configDir, { recursive: true });
+    await writeFile(
+      target.configPath,
+      renderObservabilityConfig({
+        local: request.local,
+        sync: request.sync,
+        langfuse: request.langfuse,
+        otel: request.otel,
+        existingConfigText,
+      }),
+      "utf8",
+    );
+    await this.#appendHostDiagnostic("observability_settings_upserted", {
+      ...(request.projectId ? { ignoredProjectId: request.projectId } : {}),
+      scope: "device",
+      workDir: target.workDir,
+      syncEnabled: request.sync?.enabled,
+      targets: request.sync?.targets?.join(","),
+      langfuseEnabled: request.langfuse?.enabled,
+      otelEnabled: request.otel?.enabled,
+    });
+    return this.#observabilitySettings();
   }
 
   async #extensionSettings(extensionId: string): Promise<ExtensionSettings> {

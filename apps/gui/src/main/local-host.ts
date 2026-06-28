@@ -26,6 +26,7 @@ import {
   type ModelRole,
   type MemoryStatus,
   type MemorySettings,
+  type ObservabilitySettings,
   type RuntimeSettings,
   type ExtensionSettings,
   type ProviderCatalogModelSummary,
@@ -33,6 +34,7 @@ import {
   type ProviderModelSummary,
   type UpsertModelProfileInput,
   type UpsertMemorySettingsInput,
+  type UpsertObservabilitySettingsInput,
   type UpsertRuntimeSettingsInput,
   type UpsertExtensionSettingsInput,
   type PersistentEvent,
@@ -73,6 +75,8 @@ export type GuiLocalHostService = {
   upsertLocalMemorySettings(input: UpsertMemorySettingsInput): Promise<MemorySettings>;
   getLocalRuntimeSettings(): Promise<RuntimeSettings>;
   upsertLocalRuntimeSettings(input: UpsertRuntimeSettingsInput): Promise<RuntimeSettings>;
+  getLocalObservabilitySettings(): Promise<ObservabilitySettings>;
+  upsertLocalObservabilitySettings(input: UpsertObservabilitySettingsInput): Promise<ObservabilitySettings>;
   getLocalExtensionSettings(extensionId: string): Promise<ExtensionSettings>;
   upsertLocalExtensionSettings(input: UpsertExtensionSettingsInput): Promise<ExtensionSettings>;
   createLocalSession(projectId: string, modelSelection?: ModelSelectionInput): Promise<SessionId>;
@@ -208,6 +212,12 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     },
     upsertLocalRuntimeSettings(input) {
       return client.upsertRuntimeSettings(input);
+    },
+    getLocalObservabilitySettings() {
+      return client.getObservabilitySettings();
+    },
+    upsertLocalObservabilitySettings(input) {
+      return client.upsertObservabilitySettings(input);
     },
     getLocalExtensionSettings(extensionId) {
       return client.getExtensionSettings({ extensionId });

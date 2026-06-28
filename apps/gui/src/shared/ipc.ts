@@ -5,6 +5,7 @@ import type {
   ModelRole,
   MemoryStatus,
   MemorySettings,
+  ObservabilitySettings,
   RuntimeSettings,
   ExtensionSettings,
   ProviderCatalogModelSummary,
@@ -16,6 +17,7 @@ import type {
   SessionSummary,
   UpsertModelProfileInput,
   UpsertMemorySettingsInput,
+  UpsertObservabilitySettingsInput,
   UpsertRuntimeSettingsInput,
   UpsertExtensionSettingsInput,
 } from "@scorel/protocol";
@@ -92,6 +94,10 @@ export type GuiRuntimeSettingsView = RuntimeSettings;
 
 export type GuiUpsertRuntimeSettingsInput = Omit<UpsertRuntimeSettingsInput, "projectId">;
 
+export type GuiObservabilitySettingsView = ObservabilitySettings;
+
+export type GuiUpsertObservabilitySettingsInput = Omit<UpsertObservabilitySettingsInput, "projectId">;
+
 export type GuiExtensionSettingsView = ExtensionSettings;
 
 export type GuiUpsertExtensionSettingsInput = UpsertExtensionSettingsInput;
@@ -142,6 +148,8 @@ export type GuiApi = {
   upsertMemorySettings(device: GuiDeviceRef, input: GuiUpsertMemorySettingsInput): Promise<GuiMemorySettingsView>;
   getRuntimeSettings(device: GuiDeviceRef): Promise<GuiRuntimeSettingsView>;
   upsertRuntimeSettings(device: GuiDeviceRef, input: GuiUpsertRuntimeSettingsInput): Promise<GuiRuntimeSettingsView>;
+  getObservabilitySettings(device: GuiDeviceRef): Promise<GuiObservabilitySettingsView>;
+  upsertObservabilitySettings(device: GuiDeviceRef, input: GuiUpsertObservabilitySettingsInput): Promise<GuiObservabilitySettingsView>;
   getExtensionSettings(extensionId: string): Promise<GuiExtensionSettingsView>;
   upsertExtensionSettings(input: GuiUpsertExtensionSettingsInput): Promise<GuiExtensionSettingsView>;
   createSession(project: GuiProjectRef, modelSelection?: GuiModelSelection): Promise<SessionId>;
@@ -175,6 +183,8 @@ export const guiIpcChannels = {
   upsertMemorySettings: "scorel:upsertMemorySettings",
   getRuntimeSettings: "scorel:getRuntimeSettings",
   upsertRuntimeSettings: "scorel:upsertRuntimeSettings",
+  getObservabilitySettings: "scorel:getObservabilitySettings",
+  upsertObservabilitySettings: "scorel:upsertObservabilitySettings",
   getExtensionSettings: "scorel:getExtensionSettings",
   upsertExtensionSettings: "scorel:upsertExtensionSettings",
   createSession: "scorel:createSession",

@@ -29,6 +29,18 @@ export const SCOREL_CONFIG_SCHEMA = {
     runtime: {
       keys: ["tokenSavingRtk"],
     },
+    observability: {
+      keys: ["local"],
+    },
+    observabilitySync: {
+      keys: ["enabled", "mode", "targets"],
+    },
+    observabilityLangfuse: {
+      keys: ["enabled", "host", "publicKey", "secretKey"],
+    },
+    observabilityOtel: {
+      keys: ["enabled", "endpoint", "protocol"],
+    },
     extension: {
       keys: ["enabled", "kind"],
     },
@@ -103,6 +115,7 @@ export type ScorelConfig = {
   };
   memory: MemoryConfig;
   runtime: RuntimeConfig;
+  observability?: ObservabilityConfig;
   extensions: Record<string, ExtensionConfig>;
 };
 
@@ -118,6 +131,28 @@ export type MemoryConfig = {
 
 export type RuntimeConfig = {
   tokenSavingRtk: boolean;
+};
+
+export type ObservabilityTarget = "langfuse" | "otel";
+
+export type ObservabilityConfig = {
+  local: boolean;
+  sync: {
+    enabled: boolean;
+    mode: "manual" | "auto";
+    targets: ObservabilityTarget[];
+  };
+  langfuse: {
+    enabled: boolean;
+    host?: string;
+    publicKey?: string;
+    secretKey?: string;
+  };
+  otel: {
+    enabled: boolean;
+    endpoint?: string;
+    protocol: "otlp-http";
+  };
 };
 
 export type ExtensionConfig = {
@@ -150,6 +185,7 @@ export type ScorelConfigProfile = {
   };
   memory: MemoryConfig;
   runtime: RuntimeConfig;
+  observability?: ObservabilityConfig;
   extensions: Record<string, ExtensionConfig>;
   warnings?: string[];
 };
@@ -224,6 +260,14 @@ export type UpsertRuntimeConfigInput = Partial<RuntimeConfig> & {
   existingConfigText?: string;
 };
 
+export type UpsertObservabilityConfigInput = {
+  local?: boolean;
+  sync?: Partial<ObservabilityConfig["sync"]>;
+  langfuse?: Partial<ObservabilityConfig["langfuse"]>;
+  otel?: Partial<ObservabilityConfig["otel"]>;
+  existingConfigText?: string;
+};
+
 export type ConfigValue = string | number | boolean;
 
 export type UpsertExtensionConfigInput = {
@@ -275,6 +319,25 @@ type RawConfig = {
   };
   memory?: Partial<MemoryConfig>;
   runtime?: Partial<RuntimeConfig>;
+  observability?: {
+    local?: boolean;
+  };
+  observabilitySync?: {
+    enabled?: boolean;
+    mode?: string;
+    targets?: string;
+  };
+  observabilityLangfuse?: {
+    enabled?: boolean;
+    host?: string;
+    publicKey?: string;
+    secretKey?: string;
+  };
+  observabilityOtel?: {
+    enabled?: boolean;
+    endpoint?: string;
+    protocol?: string;
+  };
   extensions: Record<string, {
     enabled?: boolean;
     kind?: string;
@@ -290,8 +353,13 @@ type ConfigSection =
   | { kind: "modelProfileRoles" }
   | { kind: "memory" }
   | { kind: "runtime" }
+  | { kind: "observability" }
+  | { kind: "observabilitySync" }
+  | { kind: "observabilityLangfuse" }
+  | { kind: "observabilityOtel" }
   | { kind: "extension"; id: string }
-  | { kind: "extensionConfig"; id: string };
+  | { kind: "extensionConfig"; id: string }
+  | { kind: "ignored" };
 export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promise<ScorelConfig> => {
   const env = options.env ?? process.env;
   const raw = parseToml(await readConfigText(options));
@@ -307,6 +375,7 @@ export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promis
     modelProfile: { roles },
     memory: loadMemory(raw),
     runtime: loadRuntime(raw),
+    observability: loadObservability(raw),
     extensions: loadExtensions(raw),
   };
 };
@@ -326,6 +395,7 @@ export const loadScorelConfigProfile = async (options: LoadScorelConfigOptions &
     modelProfile: { roles },
     memory: loadMemory(raw),
     runtime: loadRuntime(raw),
+    observability: loadObservability(raw),
     extensions: loadExtensions(raw),
   };
 };
@@ -614,6 +684,61 @@ export const renderRuntimeConfig = (input: UpsertRuntimeConfigInput): string => 
   return renderRawConfig(raw);
 };
 
+export const renderObservabilityConfig = (input: UpsertObservabilityConfigInput): string => {
+  const raw = parseEditableConfig(input.existingConfigText);
+  const current = loadObservability(raw);
+  raw.observability = {
+    local: input.local !== undefined ? requireBoolean(input.local, "observability.local") : current.local,
+  };
+  raw.observabilitySync = {
+    enabled: input.sync?.enabled !== undefined
+      ? requireBoolean(input.sync.enabled, "observability.sync.enabled")
+      : current.sync.enabled,
+    mode: input.sync?.mode !== undefined
+      ? requireObservabilitySyncMode(input.sync.mode)
+      : current.sync.mode,
+    targets: input.sync?.targets !== undefined
+      ? renderObservabilityTargets(input.sync.targets)
+      : current.sync.targets.join(","),
+  };
+  raw.observabilityLangfuse = {
+    enabled: input.langfuse?.enabled !== undefined
+      ? requireBoolean(input.langfuse.enabled, "observability.langfuse.enabled")
+      : current.langfuse.enabled,
+    ...observabilityOptionalString(input.langfuse, current.langfuse, "host"),
+    ...observabilityOptionalString(input.langfuse, current.langfuse, "publicKey"),
+    ...observabilityOptionalString(input.langfuse, current.langfuse, "secretKey"),
+  };
+  raw.observabilityOtel = {
+    enabled: input.otel?.enabled !== undefined
+      ? requireBoolean(input.otel.enabled, "observability.otel.enabled")
+      : current.otel.enabled,
+    ...observabilityOptionalString(input.otel, current.otel, "endpoint"),
+    protocol: input.otel?.protocol !== undefined
+      ? requireObservabilityOtelProtocol(input.otel.protocol)
+      : current.otel.protocol,
+  };
+  return renderRawConfig(raw);
+};
+
+const hasOwn = <T extends object, K extends PropertyKey>(value: T | undefined, key: K): boolean =>
+  value !== undefined && Object.prototype.hasOwnProperty.call(value, key);
+
+const observabilityOptionalString = <
+  K extends string,
+>(
+  patch: Partial<Record<K, string | undefined>> | undefined,
+  current: Partial<Record<K, string | undefined>>,
+  key: K,
+): Partial<Record<K, string>> => {
+  if (hasOwn(patch, key)) {
+    const value = patch?.[key]?.trim();
+    return value ? { [key]: value } as Partial<Record<K, string>> : {};
+  }
+  const value = current[key];
+  return value ? { [key]: value } as Partial<Record<K, string>> : {};
+};
+
 export const renderExtensionConfig = (input: UpsertExtensionConfigInput): string => {
   const raw = parseEditableConfig(input.existingConfigText);
   const extensionId = requireIdentifier(input.extensionId, "extensionId");
@@ -651,6 +776,22 @@ const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   tokenSavingRtk: false,
 };
 
+const DEFAULT_OBSERVABILITY_CONFIG: ObservabilityConfig = {
+  local: true,
+  sync: {
+    enabled: false,
+    mode: "manual",
+    targets: [],
+  },
+  langfuse: {
+    enabled: false,
+  },
+  otel: {
+    enabled: false,
+    protocol: "otlp-http",
+  },
+};
+
 const loadMemory = (raw: RawConfig): MemoryConfig => ({
   enabled: raw.memory?.enabled ?? DEFAULT_MEMORY_CONFIG.enabled,
   daily: raw.memory?.daily ?? DEFAULT_MEMORY_CONFIG.daily,
@@ -663,6 +804,26 @@ const loadMemory = (raw: RawConfig): MemoryConfig => ({
 
 const loadRuntime = (raw: RawConfig): RuntimeConfig => ({
   tokenSavingRtk: raw.runtime?.tokenSavingRtk ?? DEFAULT_RUNTIME_CONFIG.tokenSavingRtk,
+});
+
+const loadObservability = (raw: RawConfig): ObservabilityConfig => ({
+  local: raw.observability?.local ?? DEFAULT_OBSERVABILITY_CONFIG.local,
+  sync: {
+    enabled: raw.observabilitySync?.enabled ?? DEFAULT_OBSERVABILITY_CONFIG.sync.enabled,
+    mode: requireObservabilitySyncMode(raw.observabilitySync?.mode ?? DEFAULT_OBSERVABILITY_CONFIG.sync.mode),
+    targets: parseObservabilityTargets(raw.observabilitySync?.targets),
+  },
+  langfuse: {
+    enabled: raw.observabilityLangfuse?.enabled ?? DEFAULT_OBSERVABILITY_CONFIG.langfuse.enabled,
+    ...(raw.observabilityLangfuse?.host ? { host: stripTrailingSlashes(raw.observabilityLangfuse.host) } : {}),
+    ...(raw.observabilityLangfuse?.publicKey ? { publicKey: raw.observabilityLangfuse.publicKey } : {}),
+    ...(raw.observabilityLangfuse?.secretKey ? { secretKey: raw.observabilityLangfuse.secretKey } : {}),
+  },
+  otel: {
+    enabled: raw.observabilityOtel?.enabled ?? DEFAULT_OBSERVABILITY_CONFIG.otel.enabled,
+    ...(raw.observabilityOtel?.endpoint ? { endpoint: stripTrailingSlashes(raw.observabilityOtel.endpoint) } : {}),
+    protocol: requireObservabilityOtelProtocol(raw.observabilityOtel?.protocol ?? DEFAULT_OBSERVABILITY_CONFIG.otel.protocol),
+  },
 });
 
 const loadExtensions = (raw: RawConfig): Record<string, ExtensionConfig> => {
@@ -842,9 +1003,9 @@ const loadRoles = (
   }
   if (options.requireComplete === false) {
     return {
-      primary: roles.primary ? requireModelRole(roles.primary, "primary", models) : "",
-      standard: roles.standard ? requireModelRole(roles.standard, "standard", models) : "",
-      auxiliary: roles.auxiliary ? requireModelRole(roles.auxiliary, "auxiliary", models) : "",
+      primary: roles.primary && models[roles.primary] ? roles.primary : "",
+      standard: roles.standard && models[roles.standard] ? roles.standard : "",
+      auxiliary: roles.auxiliary && models[roles.auxiliary] ? roles.auxiliary : "",
     };
   }
   return {
@@ -889,7 +1050,7 @@ const parseToml = (text: string): RawConfig => {
 
     const sectionMatch = /^\[([A-Za-z0-9_.-]+)\]$/.exec(line);
     if (sectionMatch) {
-      section = requireSection(sectionMatch[1] ?? "");
+      section = parseConfigSection(sectionMatch[1] ?? "");
       ensureSection(result, section);
       continue;
     }
@@ -902,7 +1063,9 @@ const parseToml = (text: string): RawConfig => {
     if (!key || rawValue === undefined) {
       throw new Error(`Unsupported config line: ${rawLine.trim()}`);
     }
-    setConfigValue(result, section, key, parseTomlValue(rawValue));
+    if (isKnownConfigKey(section, key)) {
+      setConfigValue(result, section, key, parseTomlValue(rawValue));
+    }
   }
 
   return result;
@@ -991,6 +1154,47 @@ const renderRawConfig = (raw: RawConfig): string => {
     const runtime = loadRuntime(raw);
     lines.push("[runtime]");
     lines.push(`tokenSavingRtk = ${runtime.tokenSavingRtk}`);
+    lines.push("");
+  }
+  if (raw.observability) {
+    const observability = loadObservability(raw);
+    lines.push("[observability]");
+    lines.push(`local = ${observability.local}`);
+    lines.push("");
+  }
+  if (raw.observabilitySync) {
+    const observability = loadObservability(raw);
+    lines.push("[observability.sync]");
+    lines.push(`enabled = ${observability.sync.enabled}`);
+    lines.push(`mode = ${tomlString(observability.sync.mode)}`);
+    if (observability.sync.targets.length > 0) {
+      lines.push(`targets = ${tomlString(observability.sync.targets.join(","))}`);
+    }
+    lines.push("");
+  }
+  if (raw.observabilityLangfuse) {
+    const observability = loadObservability(raw);
+    lines.push("[observability.langfuse]");
+    lines.push(`enabled = ${observability.langfuse.enabled}`);
+    if (observability.langfuse.host) {
+      lines.push(`host = ${tomlString(observability.langfuse.host)}`);
+    }
+    if (observability.langfuse.publicKey) {
+      lines.push(`publicKey = ${tomlString(observability.langfuse.publicKey)}`);
+    }
+    if (observability.langfuse.secretKey) {
+      lines.push(`secretKey = ${tomlString(observability.langfuse.secretKey)}`);
+    }
+    lines.push("");
+  }
+  if (raw.observabilityOtel) {
+    const observability = loadObservability(raw);
+    lines.push("[observability.otel]");
+    lines.push(`enabled = ${observability.otel.enabled}`);
+    if (observability.otel.endpoint) {
+      lines.push(`endpoint = ${tomlString(observability.otel.endpoint)}`);
+    }
+    lines.push(`protocol = ${tomlString(observability.otel.protocol)}`);
     lines.push("");
   }
   for (const [extensionId, extension] of Object.entries(raw.extensions).sort(([left], [right]) => left.localeCompare(right))) {
@@ -1128,7 +1332,43 @@ const requireProviderType = (value: string | undefined, name: string): "builtin"
   throw new Error(`${name} must be builtin or custom`);
 };
 
-const requireSection = (section: string): ConfigSection => {
+const requireObservabilitySyncMode = (value: string | undefined): "manual" | "auto" => {
+  if (value === "manual" || value === "auto") {
+    return value;
+  }
+  throw new Error("observability.sync.mode must be manual or auto");
+};
+
+const requireObservabilityOtelProtocol = (value: string | undefined): "otlp-http" => {
+  if (value === "otlp-http") {
+    return value;
+  }
+  throw new Error("observability.otel.protocol must be otlp-http");
+};
+
+const parseObservabilityTargets = (value: string | undefined): ObservabilityTarget[] => {
+  if (!value) {
+    return [];
+  }
+  const targets = value.split(",").map((target) => target.trim()).filter(Boolean);
+  for (const target of targets) {
+    if (target !== "langfuse" && target !== "otel") {
+      throw new Error("observability.sync.targets must contain only langfuse or otel");
+    }
+  }
+  return [...new Set(targets)] as ObservabilityTarget[];
+};
+
+const renderObservabilityTargets = (targets: ObservabilityTarget[]): string => {
+  for (const target of targets) {
+    if (target !== "langfuse" && target !== "otel") {
+      throw new Error("observability.sync.targets must contain only langfuse or otel");
+    }
+  }
+  return [...new Set(targets)].join(",");
+};
+
+const parseConfigSection = (section: string): ConfigSection => {
   if (section === "root") {
     return { kind: "root" };
   }
@@ -1153,6 +1393,18 @@ const requireSection = (section: string): ConfigSection => {
   if (section === "runtime") {
     return { kind: "runtime" };
   }
+  if (section === "observability") {
+    return { kind: "observability" };
+  }
+  if (section === "observability.sync") {
+    return { kind: "observabilitySync" };
+  }
+  if (section === "observability.langfuse") {
+    return { kind: "observabilityLangfuse" };
+  }
+  if (section === "observability.otel") {
+    return { kind: "observabilityOtel" };
+  }
   const extensionConfigMatch = /^extensions\.([A-Za-z0-9_-]+)\.config$/.exec(section);
   if (extensionConfigMatch?.[1]) {
     return { kind: "extensionConfig", id: extensionConfigMatch[1] };
@@ -1161,7 +1413,7 @@ const requireSection = (section: string): ConfigSection => {
   if (extensionMatch?.[1]) {
     return { kind: "extension", id: extensionMatch[1] };
   }
-  throw new Error(`Unsupported config section: ${section}`);
+  return { kind: "ignored" };
 };
 
 const ensureSection = (config: RawConfig, section: ConfigSection): void => {
@@ -1178,6 +1430,14 @@ const ensureSection = (config: RawConfig, section: ConfigSection): void => {
     config.memory ??= {};
   } else if (section.kind === "runtime") {
     config.runtime ??= {};
+  } else if (section.kind === "observability") {
+    config.observability ??= {};
+  } else if (section.kind === "observabilitySync") {
+    config.observabilitySync ??= {};
+  } else if (section.kind === "observabilityLangfuse") {
+    config.observabilityLangfuse ??= {};
+  } else if (section.kind === "observabilityOtel") {
+    config.observabilityOtel ??= {};
   } else if (section.kind === "extension") {
     config.extensions[section.id] ??= {};
   } else if (section.kind === "extensionConfig") {
@@ -1187,7 +1447,9 @@ const ensureSection = (config: RawConfig, section: ConfigSection): void => {
 };
 
 const setConfigValue = (config: RawConfig, section: ConfigSection, key: string, value: ConfigValue): void => {
-  assertKnownKey(section, key);
+  if (!isKnownConfigKey(section, key)) {
+    return;
+  }
   if (section.kind === "provider") {
     config.providers[section.id] ??= {};
     setValue(config.providers[section.id], key, value);
@@ -1207,6 +1469,18 @@ const setConfigValue = (config: RawConfig, section: ConfigSection, key: string, 
   } else if (section.kind === "runtime") {
     config.runtime ??= {};
     setValue(config.runtime, key, value);
+  } else if (section.kind === "observability") {
+    config.observability ??= {};
+    setValue(config.observability, key, value);
+  } else if (section.kind === "observabilitySync") {
+    config.observabilitySync ??= {};
+    setValue(config.observabilitySync, key, value);
+  } else if (section.kind === "observabilityLangfuse") {
+    config.observabilityLangfuse ??= {};
+    setValue(config.observabilityLangfuse, key, value);
+  } else if (section.kind === "observabilityOtel") {
+    config.observabilityOtel ??= {};
+    setValue(config.observabilityOtel, key, value);
   } else if (section.kind === "extension") {
     config.extensions[section.id] ??= {};
     setValue(config.extensions[section.id], key, value);
@@ -1218,18 +1492,16 @@ const setConfigValue = (config: RawConfig, section: ConfigSection, key: string, 
   }
 };
 
-const assertKnownKey = (section: ConfigSection, key: string): void => {
+const isKnownConfigKey = (section: ConfigSection, key: string): boolean => {
   const schemaSection = section.kind;
+  if (schemaSection === "ignored") {
+    return false;
+  }
   if (schemaSection === "extensionConfig") {
-    if (!/^[A-Za-z0-9_-]+$/.test(key)) {
-      throw new Error(`Unsupported config key: ${key}`);
-    }
-    return;
+    return /^[A-Za-z0-9_-]+$/.test(key);
   }
   const allowed = SCOREL_CONFIG_SCHEMA.sections[schemaSection].keys;
-  if (!(allowed as readonly string[]).includes(key)) {
-    throw new Error(`Unsupported config key: ${key}`);
-  }
+  return (allowed as readonly string[]).includes(key);
 };
 
 const setValue = (target: object, key: string, value: ConfigValue): void => {

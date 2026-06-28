@@ -373,6 +373,370 @@ describe("@scorel/app-cli", () => {
     }
   });
 
+  it("writes a Langfuse observe sync payload with stable trace ids", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-observe-langfuse-"));
+    const sessionsDir = join(stateDir, "sessions");
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-observe-langfuse-workspace-"));
+    const outPath = join(stateDir, "langfuse.json");
+    const server = await startChatServer([
+      {
+        content: "Observable response.",
+        tool_calls: [],
+        usage: { prompt_tokens: 21, completion_tokens: 8, total_tokens: 29 },
+      },
+    ]);
+
+    try {
+      const run = await runCliWithInput(
+        [
+          "run",
+          "--prompt",
+          "observe this",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_observe_cli",
+          "--api",
+          "openai-completions",
+          "--base-url",
+          server.baseURL,
+          "--api-key",
+          "direct-secret-observe",
+          "--model",
+          "gpt-4o-mini",
+          "--output-format",
+          "none",
+        ],
+        "",
+        undefined,
+        sessionsDir,
+      );
+      expect(run.code, run.stderr).toBe(0);
+
+      const observed = await runCliWithInput(
+        ["observe", "sync", "--session", "ses_observe_cli", "--target", "langfuse", "--state-dir", stateDir, "--out", outPath],
+        "",
+        undefined,
+        sessionsDir,
+      );
+
+      expect(observed.code, observed.stderr).toBe(0);
+      expect(observed.stdout).toContain("target=langfuse");
+      const payload = JSON.parse(await readFile(outPath, "utf8")) as {
+        target?: string;
+        traceIds?: string[];
+        batch?: Array<{ type?: string; body?: { id?: string; sessionId?: string; input?: unknown; output?: unknown; usageDetails?: unknown } }>;
+      };
+      expect(payload.target).toBe("langfuse");
+      expect(payload.traceIds?.[0]).toContain("scorel-turn");
+      expect(payload.batch?.find((event) => event.type === "trace-create")?.body?.id).toBe(payload.traceIds?.[0]);
+      expect(payload.batch?.find((event) => event.type === "trace-create")?.body?.input).toMatchObject({ role: "user", content: "observe this" });
+      expect(payload.batch?.find((event) => event.type === "trace-create")?.body?.output).toBe("Observable response.");
+      expect(payload.batch?.find((event) => event.type === "generation-create")?.body?.sessionId).toBe("ses_observe_cli");
+      expect(payload.batch?.find((event) => event.type === "generation-create")?.body?.usageDetails).toMatchObject({ input: 21, output: 8, total: 29 });
+      expect(JSON.stringify(payload)).not.toContain("direct-secret-observe");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("uploads Langfuse observe sync payloads when credentials are configured", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-observe-langfuse-upload-"));
+    const sessionsDir = join(stateDir, "sessions");
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-observe-langfuse-upload-workspace-"));
+    const chatServer = await startChatServer([
+      {
+        content: "Uploaded observable response.",
+        tool_calls: [],
+        usage: { prompt_tokens: 18, completion_tokens: 9, total_tokens: 27 },
+      },
+    ]);
+    const langfuseServer = await startLangfuseServer();
+
+    try {
+      const config = {
+        ...testConfig(chatServer.baseURL),
+        observability: {
+          local: true,
+          sync: { enabled: true, mode: "manual" as const, targets: ["langfuse" as const] },
+          langfuse: {
+            enabled: true,
+            host: langfuseServer.baseURL,
+            publicKey: "pk-lf-test",
+            secretKey: "sk-lf-test",
+          },
+          otel: { enabled: false, protocol: "otlp-http" as const },
+        },
+      };
+      const run = await runCliWithInput(
+        [
+          "run",
+          "--prompt",
+          "upload observe",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_observe_langfuse_upload",
+          "--api",
+          "openai-completions",
+          "--base-url",
+          chatServer.baseURL,
+          "--api-key",
+          "direct-secret-observe",
+          "--model",
+          "gpt-4o-mini",
+          "--output-format",
+          "none",
+        ],
+        "",
+        config,
+        sessionsDir,
+      );
+      expect(run.code, run.stderr).toBe(0);
+
+      const observed = await runCliWithInput(
+        ["observe", "sync", "--session", "ses_observe_langfuse_upload", "--target", "langfuse", "--state-dir", stateDir],
+        "",
+        config,
+        sessionsDir,
+      );
+
+      expect(observed.code, observed.stderr).toBe(0);
+      expect(observed.stdout).toContain("target=langfuse");
+      expect(observed.stdout).toContain("uploaded=true");
+      expect(langfuseServer.requests).toHaveLength(1);
+      expect(langfuseServer.requests[0]?.url).toBe("/api/public/ingestion");
+      expect(langfuseServer.requests[0]?.authorization).toBe(`Basic ${Buffer.from("pk-lf-test:sk-lf-test").toString("base64")}`);
+      expect(langfuseServer.requests[0]?.body).toMatchObject({
+        batch: expect.arrayContaining([
+          expect.objectContaining({ type: "trace-create" }),
+          expect.objectContaining({ type: "generation-create" }),
+        ]),
+      });
+      expect(JSON.stringify(langfuseServer.requests[0]?.body)).not.toContain("direct-secret-observe");
+    } finally {
+      await chatServer.close();
+      await langfuseServer.close();
+    }
+  });
+
+  it("loads Langfuse credentials from the Scorel state config for observe sync", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-observe-langfuse-config-"));
+    const sessionsDir = join(stateDir, "sessions");
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-observe-langfuse-config-workspace-"));
+    const chatServer = await startChatServer([
+      {
+        content: "Config observable response.",
+        tool_calls: [],
+        usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 },
+      },
+    ]);
+    const langfuseServer = await startLangfuseServer();
+
+    try {
+      const run = await runCliWithInput(
+        [
+          "run",
+          "--prompt",
+          "config observe",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_observe_langfuse_config",
+          "--api",
+          "openai-completions",
+          "--base-url",
+          chatServer.baseURL,
+          "--api-key",
+          "direct-secret-observe",
+          "--model",
+          "gpt-4o-mini",
+          "--output-format",
+          "none",
+        ],
+        "",
+        testConfig(chatServer.baseURL),
+        sessionsDir,
+      );
+      expect(run.code, run.stderr).toBe(0);
+      await writeFile(join(stateDir, "config.toml"), langfuseConfigToml(chatServer.baseURL, langfuseServer.baseURL), "utf8");
+
+      const observed = await runCliWithInput(
+        ["observe", "sync", "--session", "ses_observe_langfuse_config", "--target", "langfuse", "--state-dir", stateDir],
+        "",
+        undefined,
+        sessionsDir,
+      );
+
+      expect(observed.code, observed.stderr).toBe(0);
+      expect(observed.stdout).toContain("uploaded=true");
+      expect(langfuseServer.requests).toHaveLength(1);
+    } finally {
+      await chatServer.close();
+      await langfuseServer.close();
+    }
+  });
+
+  it("does not checkpoint OpenTelemetry inspect-only output", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-observe-otel-"));
+    const sessionsDir = join(stateDir, "sessions");
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-observe-otel-workspace-"));
+    const firstOut = join(stateDir, "otel-first.json");
+    const secondOut = join(stateDir, "otel-second.json");
+    const server = await startChatServer([
+      {
+        content: "OTel response.",
+        tool_calls: [],
+        usage: { prompt_tokens: 30, completion_tokens: 12, total_tokens: 42 },
+      },
+    ]);
+
+    try {
+      const run = await runCliWithInput(
+        [
+          "run",
+          "--prompt",
+          "observe otel",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_observe_otel",
+          "--api",
+          "openai-completions",
+          "--base-url",
+          server.baseURL,
+          "--api-key",
+          "direct-secret-otel",
+          "--model",
+          "gpt-4o-mini",
+          "--output-format",
+          "none",
+        ],
+        "",
+        undefined,
+        sessionsDir,
+      );
+      expect(run.code, run.stderr).toBe(0);
+
+      const first = await runCliWithInput(
+        ["observe", "sync", "--session", "ses_observe_otel", "--target", "otel", "--state-dir", stateDir, "--out", firstOut],
+        "",
+        undefined,
+        sessionsDir,
+      );
+      const second = await runCliWithInput(
+        ["observe", "sync", "--session", "ses_observe_otel", "--target", "otel", "--state-dir", stateDir, "--out", secondOut],
+        "",
+        undefined,
+        sessionsDir,
+      );
+
+      expect(first.code, first.stderr).toBe(0);
+      expect(second.code, second.stderr).toBe(0);
+      const firstPayload = JSON.parse(await readFile(firstOut, "utf8")) as { metrics?: { totalTokens?: number }; events?: unknown[] };
+      const secondPayload = JSON.parse(await readFile(secondOut, "utf8")) as { metrics?: { totalTokens?: number }; events?: unknown[] };
+      expect(firstPayload.metrics?.totalTokens).toBe(42);
+      expect(firstPayload.events?.length).toBeGreaterThan(0);
+      expect(secondPayload.metrics?.totalTokens).toBe(42);
+      expect(secondPayload.events?.length).toBe(firstPayload.events?.length);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("uploads OpenTelemetry observe sync payloads to OTLP HTTP endpoints when configured", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-observe-otel-upload-"));
+    const sessionsDir = join(stateDir, "sessions");
+    const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-observe-otel-upload-workspace-"));
+    const chatServer = await startChatServer([
+      {
+        content: "OTLP response.",
+        tool_calls: [],
+        usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+      },
+    ]);
+    const otelServer = await startOtelServer();
+
+    try {
+      const config = {
+        ...testConfig(chatServer.baseURL),
+        observability: {
+          local: true,
+          sync: { enabled: true, mode: "manual" as const, targets: ["otel" as const] },
+          langfuse: { enabled: false },
+          otel: { enabled: true, endpoint: otelServer.baseURL, protocol: "otlp-http" as const },
+        },
+      };
+      const run = await runCliWithInput(
+        [
+          "run",
+          "--prompt",
+          "observe otlp",
+          "--cwd",
+          workspaceDir,
+          "--state-dir",
+          stateDir,
+          "--session",
+          "ses_observe_otel_upload",
+          "--api",
+          "openai-completions",
+          "--base-url",
+          chatServer.baseURL,
+          "--api-key",
+          "direct-secret-otel",
+          "--model",
+          "gpt-4o-mini",
+          "--output-format",
+          "none",
+        ],
+        "",
+        config,
+        sessionsDir,
+      );
+      expect(run.code, run.stderr).toBe(0);
+
+      const observed = await runCliWithInput(
+        ["observe", "sync", "--session", "ses_observe_otel_upload", "--target", "otel", "--state-dir", stateDir],
+        "",
+        config,
+        sessionsDir,
+      );
+
+      expect(observed.code, observed.stderr).toBe(0);
+      expect(observed.stdout).toContain("uploaded=true");
+      expect(otelServer.requests.map((request) => request.url).sort()).toEqual([
+        "/v1/logs",
+        "/v1/metrics",
+        "/v1/traces",
+      ]);
+      expect(JSON.stringify(otelServer.requests.map((request) => request.body))).toContain("scorel.session");
+      expect(JSON.stringify(otelServer.requests.map((request) => request.body))).not.toContain("direct-secret-otel");
+
+      const second = await runCliWithInput(
+        ["observe", "sync", "--session", "ses_observe_otel_upload", "--target", "otel", "--state-dir", stateDir],
+        "",
+        config,
+        sessionsDir,
+      );
+
+      expect(second.code, second.stderr).toBe(0);
+      expect(second.stdout).toContain("events=0");
+      expect(second.stdout).toContain("uploaded=false");
+      expect(otelServer.requests).toHaveLength(3);
+    } finally {
+      await chatServer.close();
+      await otelServer.close();
+    }
+  });
+
   it("runs with prompt file and output-format none", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "scorel-cli-run-file-"));
     const workspaceDir = await mkdtemp(join(tmpdir(), "scorel-run-file-workspace-"));
@@ -1721,6 +2085,57 @@ const startErrorChatServer = async (finishReason: string) => {
   };
 };
 
+const startLangfuseServer = async () => {
+  const requests: Array<{ url?: string; authorization?: string; body: unknown }> = [];
+  const server = createServer(async (request, response) => {
+    if (request.method !== "POST" || request.url !== "/api/public/ingestion") {
+      response.writeHead(404).end();
+      return;
+    }
+    requests.push({
+      url: request.url,
+      authorization: request.headers.authorization,
+      body: await readJson(request),
+    });
+    response.writeHead(207, { "content-type": "application/json" }).end(JSON.stringify({ successes: [{ id: "ok" }], errors: [] }));
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("missing server address");
+  }
+  return {
+    baseURL: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
+};
+
+const startOtelServer = async () => {
+  const requests: Array<{ url?: string; body: unknown }> = [];
+  const server = createServer(async (request, response) => {
+    if (request.method !== "POST" || !["/v1/traces", "/v1/metrics", "/v1/logs"].includes(request.url ?? "")) {
+      response.writeHead(404).end();
+      return;
+    }
+    requests.push({
+      url: request.url,
+      body: await readJson(request),
+    });
+    response.writeHead(200, { "content-type": "application/json" }).end("{}");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("missing server address");
+  }
+  return {
+    baseURL: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
+};
+
 const isToolChatRequest = (
   request: unknown,
 ): request is { tools: Array<{ function?: { name?: string; parameters?: unknown } }> } => {
@@ -1810,6 +2225,43 @@ const testConfig = (baseURL: string): ScorelConfig => ({
   },
   extensions: {},
 });
+
+const langfuseConfigToml = (providerBaseUrl: string, langfuseHost: string): string => `
+[providers.test]
+type = "custom"
+provider = "scorel-test"
+api = "openai-completions"
+baseUrl = "${providerBaseUrl}"
+apiKey = "chanleramp"
+
+[provider_models.main]
+provider = "test"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.main]
+model = "main"
+displayName = "GPT 5.4 Mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
+
+[observability]
+local = true
+
+[observability.sync]
+enabled = true
+mode = "manual"
+targets = "langfuse"
+
+[observability.langfuse]
+enabled = true
+host = "${langfuseHost}"
+publicKey = "pk-lf-test"
+secretKey = "sk-lf-test"
+`;
 
 const readJson = async (request: IncomingMessage): Promise<unknown> => {
   const chunks: Buffer[] = [];

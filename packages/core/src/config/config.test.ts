@@ -505,40 +505,64 @@ auxiliary = "main"
     });
   });
 
-  it("rejects config keys outside the schema", async () => {
+  it("ignores config keys outside the schema", async () => {
     const cwd = await mkProject(`
 sessionsDir = "/tmp/nope"
 
-[model]
+[providers.openai]
 type = "builtin"
 provider = "openai"
-id = "gpt-5.4-mini"
 apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.openai_gpt_54_mini]
+provider = "openai"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.main]
+model = "openai_gpt_54_mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
 `);
 
-    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).rejects.toThrow(
-      "Unsupported config key: sessionsDir",
-    );
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).resolves.toMatchObject({
+      models: { main: { model: "openai_gpt_54_mini" } },
+    });
   });
 
-  it("rejects config sections outside the schema", async () => {
+  it("ignores config sections outside the schema", async () => {
     const cwd = await mkProject(`
 [session]
 autoCompactThreshold = 0.7
 
-[model]
+[providers.openai]
 type = "builtin"
 provider = "openai"
-id = "gpt-5.4-mini"
 apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.openai_gpt_54_mini]
+provider = "openai"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.main]
+model = "openai_gpt_54_mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
 `);
 
-    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).rejects.toThrow(
-      "Unsupported config section: session",
-    );
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).resolves.toMatchObject({
+      models: { main: { model: "openai_gpt_54_mini" } },
+    });
   });
 
-  it("rejects legacy models sections in development-stage config", async () => {
+  it("ignores legacy models sections in development-stage config", async () => {
     const cwd = await mkProject(`
 [providers.openai]
 type = "builtin"
@@ -556,8 +580,8 @@ standard = "main"
 auxiliary = "main"
 `);
 
-    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).rejects.toThrow(
-      "Unsupported config section: models.main",
+    await expect(loadScorelConfigProfile({ cwd, env: { SCOREL_API_KEY: "chanleramp" } })).resolves.toMatchObject(
+      { models: {} },
     );
   });
 

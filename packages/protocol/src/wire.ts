@@ -16,9 +16,11 @@ import type {
   MemoryStatus,
   MemorySettings,
   ModelSelectionInput,
+  ObservabilitySettings,
   RuntimeSettings,
   UpsertExtensionSettingsInput,
   UpsertMemorySettingsInput,
+  UpsertObservabilitySettingsInput,
   UpsertRuntimeSettingsInput,
   PersistentEvent,
   QueueItem,
@@ -111,6 +113,14 @@ export type ClientRequestMap = {
   upsert_runtime_settings: {
     request: UpsertRuntimeSettingsInput;
     response: { runtime: RuntimeSettings };
+  };
+  get_observability_settings: {
+    request: { projectId?: ProjectId };
+    response: { observability: ObservabilitySettings };
+  };
+  upsert_observability_settings: {
+    request: UpsertObservabilitySettingsInput;
+    response: { observability: ObservabilitySettings };
   };
   get_extension_settings: {
     request: { extensionId: string };

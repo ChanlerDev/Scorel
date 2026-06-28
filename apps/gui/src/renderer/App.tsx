@@ -22,6 +22,7 @@ import type {
   GuiMemorySettingsView,
   GuiMemoryStatusView,
   GuiModelProfileView,
+  GuiObservabilitySettingsView,
   GuiRelayDeviceView,
   GuiRemoteProjectView,
   GuiRuntimeSettingsView,
@@ -56,6 +57,13 @@ const defaultRuntimeSettings = (): GuiRuntimeSettingsView => ({
   rtkAvailable: false,
   estimatedOutputTokens: 0,
   estimatedSavedTokens: 0,
+});
+
+const defaultObservabilitySettings = (): GuiObservabilitySettingsView => ({
+  local: true,
+  sync: { enabled: false, mode: "manual", targets: [] },
+  langfuse: { enabled: false },
+  otel: { enabled: false, protocol: "otlp-http" },
 });
 
 const defaultModelProfile = (): GuiModelProfileView => ({
@@ -124,6 +132,7 @@ export function App() {
   const [memorySettings, setMemorySettings] = useState<GuiMemorySettingsView>(defaultMemorySettings());
   const [memoryStatus, setMemoryStatus] = useState<GuiMemoryStatusView>(defaultMemoryStatus());
   const [runtimeSettings, setRuntimeSettings] = useState<GuiRuntimeSettingsView>(defaultRuntimeSettings());
+  const [observabilitySettings, setObservabilitySettings] = useState<GuiObservabilitySettingsView>(defaultObservabilitySettings());
   const [imSettings, setImSettings] = useState<Record<string, GuiExtensionSettingsView>>({
     telegram: defaultExtensionSettings("telegram"),
     qq: defaultExtensionSettings("qq"),
@@ -352,6 +361,7 @@ export function App() {
     setMemorySettings(defaultMemorySettings());
     setMemoryStatus(defaultMemoryStatus());
     setRuntimeSettings(defaultRuntimeSettings());
+    setObservabilitySettings(defaultObservabilitySettings());
     if (selectedProject) {
       void window.scorel.getMemoryStatus(projectRef(selectedProject))
         .then((status) => {
@@ -396,6 +406,16 @@ export function App() {
       .catch((cause) => {
         if (!isCurrent()) return;
         setRuntimeSettings(defaultRuntimeSettings());
+        setError(cause instanceof Error ? cause.message : String(cause));
+      });
+    void window.scorel.getObservabilitySettings(activeConfigDevice)
+      .then((observability) => {
+        if (!isCurrent()) return;
+        setObservabilitySettings(observability);
+      })
+      .catch((cause) => {
+        if (!isCurrent()) return;
+        setObservabilitySettings(defaultObservabilitySettings());
         setError(cause instanceof Error ? cause.message : String(cause));
       });
     return () => {
@@ -571,6 +591,7 @@ export function App() {
         memory={memorySettings}
         memoryStatus={memoryStatus}
         runtime={runtimeSettings}
+        observability={observabilitySettings}
         imExtensions={imSettings}
         onModelProfileChange={(profile) => {
           setModelProfile(profile);
@@ -580,6 +601,7 @@ export function App() {
         }}
         onMemoryChange={setMemorySettings}
         onRuntimeChange={setRuntimeSettings}
+        onObservabilityChange={setObservabilitySettings}
         onExtensionChange={(extension) => setImSettings((current) => ({ ...current, [extension.extensionId]: extension }))}
         onBack={() => setView("workspace")}
       />

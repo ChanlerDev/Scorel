@@ -1,17 +1,19 @@
 import { Component, useState, type ErrorInfo, type ReactNode } from "react";
 
 import {
+  Activity,
   Box,
   FileText,
   Server,
   Smartphone,
   Terminal,
 } from "../icons/index.js";
-import type { GuiDeviceRef, GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiRelayDeviceView, GuiRuntimeSettingsView } from "../../shared/ipc.js";
+import type { GuiDeviceRef, GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiObservabilitySettingsView, GuiRelayDeviceView, GuiRuntimeSettingsView } from "../../shared/ipc.js";
 import { ConfigSection } from "./sections/ConfigSection.js";
 import { ImSection } from "./sections/ImSection.js";
 import { MemorySection } from "./sections/MemorySection.js";
 import { ModelSection } from "./sections/ModelSection.js";
+import { ObservabilitySection } from "./sections/ObservabilitySection.js";
 import { ProviderSection } from "./sections/ProviderSection.js";
 import { RuntimeSection } from "./sections/RuntimeSection.js";
 import { SettingsNav, type SettingsNavGroup } from "./SettingsNav.js";
@@ -24,10 +26,12 @@ export type SettingsShellProps = {
   memory: GuiMemorySettingsView;
   memoryStatus: GuiMemoryStatusView;
   runtime: GuiRuntimeSettingsView;
+  observability: GuiObservabilitySettingsView;
   imExtensions: Record<string, GuiExtensionSettingsView>;
   onModelProfileChange(profile: GuiModelProfileView): void;
   onMemoryChange(memory: GuiMemorySettingsView): void;
   onRuntimeChange(runtime: GuiRuntimeSettingsView): void;
+  onObservabilityChange(observability: GuiObservabilitySettingsView): void;
   onExtensionChange(extension: GuiExtensionSettingsView): void;
   busy: boolean;
   setBusy(value: boolean): void;
@@ -45,6 +49,7 @@ const NAV_GROUPS: SettingsNavGroup[] = [
       { id: "provider", label: "Provider", icon: <Box size={14} /> },
       { id: "memory", label: "记忆", icon: <FileText size={14} /> },
       { id: "runtime", label: "Token 节省", icon: <Terminal size={14} /> },
+      { id: "observability", label: "可观测性", icon: <Activity size={14} /> },
       { id: "im", label: "IM", icon: <Smartphone size={14} /> },
       { id: "connections", label: "连接", icon: <Server size={14} /> },
     ],
@@ -102,6 +107,18 @@ export function SettingsShell(props: SettingsShellProps) {
           setBusy={props.setBusy}
           setError={props.setError}
           onRuntimeChange={props.onRuntimeChange}
+        />
+      );
+      break;
+    case "observability":
+      content = (
+        <ObservabilitySection
+          device={props.device}
+          observability={props.observability}
+          busy={props.busy}
+          setBusy={props.setBusy}
+          setError={props.setError}
+          onObservabilityChange={props.onObservabilityChange}
         />
       );
       break;

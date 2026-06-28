@@ -119,6 +119,28 @@ export type RuntimeSettings = {
   estimatedSavedTokens: number;
 };
 
+export type ObservabilityTarget = "langfuse" | "otel";
+
+export type ObservabilitySettings = {
+  local: boolean;
+  sync: {
+    enabled: boolean;
+    mode: "manual" | "auto";
+    targets: ObservabilityTarget[];
+  };
+  langfuse: {
+    enabled: boolean;
+    host?: string;
+    publicKey?: string;
+    secretKey?: string;
+  };
+  otel: {
+    enabled: boolean;
+    endpoint?: string;
+    protocol: "otlp-http";
+  };
+};
+
 export type MemoryStatus = {
   projectId: ProjectId;
   dirty: boolean;
@@ -143,6 +165,14 @@ export type UpsertMemorySettingsInput = Partial<MemorySettings> & {
 export type UpsertRuntimeSettingsInput = {
   projectId?: ProjectId;
   tokenSavingRtk?: boolean;
+};
+
+export type UpsertObservabilitySettingsInput = {
+  projectId?: ProjectId;
+  local?: boolean;
+  sync?: Partial<ObservabilitySettings["sync"]>;
+  langfuse?: Partial<ObservabilitySettings["langfuse"]>;
+  otel?: Partial<ObservabilitySettings["otel"]>;
 };
 
 export type ExtensionSettings = {

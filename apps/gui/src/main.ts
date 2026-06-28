@@ -16,6 +16,7 @@ import {
   type GuiModelSelection,
   type GuiUpsertMemorySettingsInput,
   type GuiUpsertModelProfileInput,
+  type GuiUpsertObservabilitySettingsInput,
   type GuiDeviceRef,
   type GuiProjectRef,
   type GuiRemoteProjectView,
@@ -223,6 +224,19 @@ const registerIpc = (): void => {
     return ref.source === "local"
       ? requireConnectedLocalHost().upsertLocalRuntimeSettings(payload)
       : relayService.upsertRemoteRuntimeSettings(requireDeviceId(ref), payload);
+  });
+  ipcMain.handle(guiIpcChannels.getObservabilitySettings, async (_event, device: GuiDeviceRef) => {
+    const ref = normalizeDeviceRef(device);
+    return ref.source === "local"
+      ? requireConnectedLocalHost().getLocalObservabilitySettings()
+      : relayService.getRemoteObservabilitySettings(requireDeviceId(ref));
+  });
+  ipcMain.handle(guiIpcChannels.upsertObservabilitySettings, async (_event, device: GuiDeviceRef, input: GuiUpsertObservabilitySettingsInput) => {
+    const ref = normalizeDeviceRef(device);
+    const payload = { ...input };
+    return ref.source === "local"
+      ? requireConnectedLocalHost().upsertLocalObservabilitySettings(payload)
+      : relayService.upsertRemoteObservabilitySettings(requireDeviceId(ref), payload);
   });
   ipcMain.handle(guiIpcChannels.getExtensionSettings, async (_event, extensionId: string) =>
     requireConnectedLocalHost().getLocalExtensionSettings(extensionId),

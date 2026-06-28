@@ -1098,7 +1098,7 @@ describe("ScorelHost + embedded transport", () => {
     });
   });
 
-  it("surfaces development-stage legacy models device config as a schema error", async () => {
+  it("ignores development-stage legacy models device config so the Host remains usable", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-legacy-models-"));
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
@@ -1124,10 +1124,15 @@ displayName = "GPT 5.4 Mini"
       createRuntime: async () => new ScorelRuntime({ provider }),
       now: () => 1_000,
     });
-    await expect(host.start()).rejects.toThrow("Unsupported config section: models.main");
+    await host.start();
+    try {
+      expect(await host.listProjects()).toEqual([]);
+    } finally {
+      await host.shutdown();
+    }
   });
 
-  it("surfaces the deprecated single model device config as a schema error", async () => {
+  it("ignores the deprecated single model device config so the Host remains usable", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-legacy-single-model-"));
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
@@ -1149,10 +1154,15 @@ apiKeyEnv = "SCOREL_API_KEY"
       createRuntime: async () => new ScorelRuntime({ provider }),
       now: () => 1_000,
     });
-    await expect(host.start()).rejects.toThrow("Unsupported config section: model");
+    await host.start();
+    try {
+      expect(await host.listProjects()).toEqual([]);
+    } finally {
+      await host.shutdown();
+    }
   });
 
-  it("surfaces invalid model profile config instead of treating it as empty", async () => {
+  it("keeps the Host usable when optional model profile roles are stale", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-invalid-models-"));
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
@@ -1187,7 +1197,29 @@ auxiliary = "main"
       createRuntime: async () => new ScorelRuntime({ provider }),
       now: () => 1_000,
     });
-    await expect(host.start()).rejects.toThrow("model_profile.roles.standard must reference a configured model");
+    await host.start();
+    try {
+      const transport = createEmbeddedTransport(host);
+      await transport.connect({ clientId: asClientId("client_test") });
+      const response = waitForResponse(transport, "req_models_stale_role");
+      await transport.send({
+        type: "list_models",
+        requestId: asRequestId("req_models_stale_role"),
+      });
+      await expect(response).resolves.toMatchObject({
+        type: "response",
+        requestType: "list_models",
+        data: {
+          roles: {
+            primary: "main",
+            standard: "",
+            auxiliary: "main",
+          },
+        },
+      });
+    } finally {
+      await host.shutdown();
+    }
   });
 
   it("writes GUI model profile changes to device config without requiring provider credentials", async () => {
@@ -1380,7 +1412,7 @@ auxiliary = "main"
     }
   });
 
-  it("ignores projectId when writing memory and runtime settings", async () => {
+  it("ignores projectId when writing memory, runtime, and observability settings", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-host-device-settings-"));
     const sessionsDir = join(root, "sessions");
     const projectsPath = join(root, "projects.json");
@@ -1440,13 +1472,123 @@ auxiliary = "main"
       },
     });
 
+    const observabilityResponse = waitForResponse(transport, "req_observe_device");
+    await transport.send({
+      type: "upsert_observability_settings",
+      requestId: asRequestId("req_observe_device"),
+      projectId: project.projectId,
+      local: true,
+      sync: { enabled: true, mode: "manual", targets: ["langfuse", "otel"] },
+      langfuse: {
+        enabled: true,
+        host: "https://cloud.langfuse.com",
+        publicKey: "pk-lf-test",
+        secretKey: "sk-lf-test",
+      },
+      otel: {
+        enabled: true,
+        endpoint: "http://127.0.0.1:4318",
+        protocol: "otlp-http",
+      },
+    });
+    await expect(observabilityResponse).resolves.toMatchObject({
+      type: "response",
+      requestType: "upsert_observability_settings",
+      data: {
+        observability: {
+          local: true,
+          sync: {
+            enabled: true,
+            targets: ["langfuse", "otel"],
+          },
+          langfuse: {
+            enabled: true,
+            host: "https://cloud.langfuse.com",
+          },
+          otel: {
+            enabled: true,
+            endpoint: "http://127.0.0.1:4318",
+          },
+        },
+      },
+    });
+
     const config = await readFile(join(root, "config.toml"), "utf8");
     expect(config).toContain("[memory]");
     expect(config).toContain("daily = false");
     expect(config).toContain("dreamIdleMinutes = 45");
     expect(config).toContain("[runtime]");
     expect(config).toContain("tokenSavingRtk = false");
+    expect(config).toContain("[observability]");
+    expect(config).toContain("[observability.sync]");
+    expect(config).toContain('targets = "langfuse,otel"');
+    expect(config).toContain("[observability.langfuse]");
+    expect(config).toContain('host = "https://cloud.langfuse.com"');
+    expect(config).toContain('publicKey = "pk-lf-test"');
+    expect(config).toContain('secretKey = "sk-lf-test"');
+    expect(config).toContain("[observability.otel]");
+    expect(config).toContain('endpoint = "http://127.0.0.1:4318"');
     await expect(readFile(join(repo, ".scorel", "config.toml"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("auto-syncs completed chat turns to Langfuse when observability sync is enabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-observe-auto-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const langfuse = await startLangfuseIngestionServer();
+    await mkdir(sessionsDir);
+    try {
+      const host = new ScorelHost({
+        sessionsDir,
+        projectsPath,
+        deviceId: asDeviceId("device_test"),
+        modelProfile: {
+          ...modelProfile,
+          observability: {
+            local: true,
+            sync: { enabled: true, mode: "auto", targets: ["langfuse"] },
+            langfuse: {
+              enabled: true,
+              host: langfuse.url,
+              publicKey: "pk_test",
+              secretKey: "sk_test",
+            },
+            otel: { enabled: false, protocol: "otlp-http" },
+          },
+        },
+        createRuntime: async () => new ScorelRuntime({ provider }),
+        now: () => 1_000,
+      });
+      await host.start();
+      const repo = join(root, "repo");
+      await mkdir(repo);
+      const project = await host.registerProject(repo);
+      const transport = createEmbeddedTransport(host);
+      await transport.connect({ clientId: asClientId("client_test") });
+      await transport.send({
+        type: "create_session",
+        requestId: asRequestId("req_create"),
+        sessionId: asSessionId("ses_observe_auto"),
+        meta: { projectId: project.projectId },
+      });
+      const response = waitForResponse(transport, "req_send");
+      await transport.send({
+        type: "send_message",
+        requestId: asRequestId("req_send"),
+        sessionId: asSessionId("ses_observe_auto"),
+        content: "hello",
+      });
+
+      await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+      await eventually(() => expect(langfuse.requests).toHaveLength(1));
+      expect(langfuse.requests[0]?.url).toBe("/api/public/ingestion");
+      expect(langfuse.requests[0]?.authorization).toBe(`Basic ${Buffer.from("pk_test:sk_test").toString("base64")}`);
+      expect(langfuse.requests[0]?.body.batch.map((event: { type: string }) => event.type)).toContain("trace-create");
+      expect(JSON.stringify(langfuse.requests[0]?.body)).not.toContain("secret");
+      await host.shutdown();
+    } finally {
+      await langfuse.close();
+    }
   });
 
   it("detects RTK through the user's default shell environment", async () => {
@@ -2473,6 +2615,37 @@ const writeOpenAiSse = (response: ServerResponse, chunks: unknown[]): void => {
 const writeDeviceConfig = async (scorelHomeDir: string, config: string): Promise<void> => {
   await mkdir(scorelHomeDir, { recursive: true });
   await writeFile(join(scorelHomeDir, "config.toml"), config);
+};
+
+const startLangfuseIngestionServer = async (): Promise<{
+  url: string;
+  requests: Array<{ url: string | undefined; authorization: string | undefined; body: { batch: Array<{ type: string }> } }>;
+  close: () => Promise<void>;
+}> => {
+  const requests: Array<{ url: string | undefined; authorization: string | undefined; body: { batch: Array<{ type: string }> } }> = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk: Buffer) => chunks.push(chunk));
+    request.on("end", () => {
+      requests.push({
+        url: request.url,
+        authorization: request.headers.authorization,
+        body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as { batch: Array<{ type: string }> },
+      });
+      response.writeHead(207, { "content-type": "application/json" });
+      response.end(JSON.stringify({ successes: [], errors: [] }));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Langfuse test server did not expose a TCP address");
+  }
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    requests,
+    close: () => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())),
+  };
 };
 
 const deferred = <T>() => {

@@ -22,6 +22,7 @@ import {
   type AvailableModelSummary,
   type ModelRole,
   type MemoryStatus,
+  type ObservabilitySettings,
   type RuntimeSettings,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
@@ -30,6 +31,7 @@ import {
   type MemorySettings,
   type UpsertExtensionSettingsInput,
   type UpsertMemorySettingsInput,
+  type UpsertObservabilitySettingsInput,
   type UpsertRuntimeSettingsInput,
   type PersistentEvent,
   type ProjectId,
@@ -340,6 +342,16 @@ export class DaemonClient {
   async upsertRuntimeSettings(input: UpsertRuntimeSettingsInput): Promise<RuntimeSettings> {
     this.#assertDaemonConnected();
     return (await this.#request("upsert_runtime_settings", input)).runtime;
+  }
+
+  async getObservabilitySettings(input: { projectId?: ProjectId } = {}): Promise<ObservabilitySettings> {
+    this.#assertDaemonConnected();
+    return (await this.#request("get_observability_settings", input)).observability;
+  }
+
+  async upsertObservabilitySettings(input: UpsertObservabilitySettingsInput): Promise<ObservabilitySettings> {
+    this.#assertDaemonConnected();
+    return (await this.#request("upsert_observability_settings", input)).observability;
   }
 
   async getExtensionSettings(input: { extensionId: string }): Promise<ExtensionSettings> {

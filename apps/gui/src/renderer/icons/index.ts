@@ -1,4 +1,5 @@
 export {
+  Activity,
   Plus,
   Search,
   Puzzle,

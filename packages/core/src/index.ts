@@ -10,6 +10,7 @@ export * from "./channel/index.js";
 export * from "./extensions/index.js";
 export * from "./instructions/index.js";
 export * from "./memory/index.js";
+export * from "./observability/index.js";
 export * from "./provider/pi-ai.js";
 export * from "./reminders/index.js";
 export * from "./reporting/index.js";

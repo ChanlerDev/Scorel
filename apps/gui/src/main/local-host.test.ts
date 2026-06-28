@@ -338,7 +338,7 @@ describe("GUI local Host service", () => {
     }
   });
 
-  it("updates local model and runtime settings in the device config", async () => {
+  it("updates local model, runtime, and observability settings in the device config", async () => {
     const root = await mkdtemp(join(tmpdir(), "scorel-gui-device-config-"));
     const scorelHomeDir = join(root, ".scorel");
     const repo = join(root, "repo");
@@ -365,10 +365,33 @@ describe("GUI local Host service", () => {
         displayName: "DeepSeek Flash",
       });
       await service.upsertLocalRuntimeSettings({ tokenSavingRtk: false });
+      await service.upsertLocalObservabilitySettings({
+        local: true,
+        sync: { enabled: true, mode: "auto", targets: ["langfuse", "otel"] },
+        langfuse: {
+          enabled: true,
+          host: "https://cloud.langfuse.com",
+          publicKey: "pk-lf-test",
+          secretKey: "sk-lf-test",
+        },
+        otel: {
+          enabled: true,
+          endpoint: "http://localhost:4318",
+          protocol: "otlp-http",
+        },
+      });
 
       const deviceConfig = await readFile(join(scorelHomeDir, "config.toml"), "utf8");
       expect(deviceConfig).toContain("[providers.chanleramp]");
       expect(deviceConfig).toContain("[runtime]");
+      expect(deviceConfig).toContain("[observability]");
+      expect(deviceConfig).toContain("[observability.sync]");
+      expect(deviceConfig).toContain('mode = "auto"');
+      expect(deviceConfig).toContain('targets = "langfuse,otel"');
+      expect(deviceConfig).toContain("[observability.langfuse]");
+      expect(deviceConfig).toContain('publicKey = "pk-lf-test"');
+      expect(deviceConfig).toContain('secretKey = "sk-lf-test"');
+      expect(deviceConfig).toContain("[observability.otel]");
       await expect(readFile(join(repo, ".scorel", "config.toml"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await service.stop();

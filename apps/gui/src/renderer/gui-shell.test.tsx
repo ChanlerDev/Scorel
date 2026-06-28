@@ -9,6 +9,7 @@ import type { GuiModelProfileView, GuiProjectView } from "../shared/ipc.js";
 import { modelSelectionFromValue, selectedModelValue } from "./App.js";
 import { ProjectPickerMenu } from "./composer/ProjectPickerMenu.js";
 import { MemorySection } from "./settings/sections/MemorySection.js";
+import { ObservabilitySection } from "./settings/sections/ObservabilitySection.js";
 import { RuntimeSection } from "./settings/sections/RuntimeSection.js";
 import { ImSection } from "./settings/sections/ImSection.js";
 import { ProviderSection } from "./settings/sections/ProviderSection.js";
@@ -110,6 +111,22 @@ const runtimeSettings = {
   rtkVersion: "rtk 0.42.4",
   estimatedOutputTokens: 1200,
   estimatedSavedTokens: 4800,
+};
+
+const observabilitySettings = {
+  local: true,
+  sync: { enabled: false, mode: "manual" as const, targets: ["langfuse" as const] },
+  langfuse: {
+    enabled: true,
+    host: "https://cloud.langfuse.com",
+    publicKey: "pk-lf-test",
+    secretKey: "sk-lf-test",
+  },
+  otel: {
+    enabled: false,
+    endpoint: "http://localhost:4318",
+    protocol: "otlp-http" as const,
+  },
 };
 
 const telegramSettings = {
@@ -405,10 +422,12 @@ describe("GUI shell rendering contract", () => {
         memory={memorySettings}
         memoryStatus={memoryStatus}
         runtime={runtimeSettings}
+        observability={observabilitySettings}
         imExtensions={imExtensions}
         onModelProfileChange={noop}
         onMemoryChange={noop}
         onRuntimeChange={noop}
+        onObservabilityChange={noop}
         onExtensionChange={noop}
         busy={false}
         setBusy={noop}
@@ -422,6 +441,7 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("Provider");
     expect(html).toContain("记忆");
     expect(html).toContain("Token 节省");
+    expect(html).toContain("可观测性");
     expect(html).toContain("Main Model");
     expect(html).toContain("工作模型");
     expect(html).toContain("已选用模型");
@@ -457,10 +477,12 @@ describe("GUI shell rendering contract", () => {
         memory={memorySettings}
         memoryStatus={memoryStatus}
         runtime={runtimeSettings}
+        observability={observabilitySettings}
         imExtensions={imExtensions}
         onModelProfileChange={noop}
         onMemoryChange={noop}
         onRuntimeChange={noop}
+        onObservabilityChange={noop}
         onExtensionChange={noop}
         busy={false}
         setBusy={noop}
@@ -474,6 +496,7 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("Provider");
     expect(html).toContain("记忆");
     expect(html).toContain("Token 节省");
+    expect(html).toContain("可观测性");
     expect(html).toContain("连接");
     expect(html).toContain("已选用模型");
     expect(html).not.toContain("加入可用模型");
@@ -493,10 +516,12 @@ describe("GUI shell rendering contract", () => {
         memory={memorySettings}
         memoryStatus={memoryStatus}
         runtime={runtimeSettings}
+        observability={observabilitySettings}
         imExtensions={imExtensions}
         onModelProfileChange={noop}
         onMemoryChange={noop}
         onRuntimeChange={noop}
+        onObservabilityChange={noop}
         onExtensionChange={noop}
         busy={false}
         setBusy={noop}
@@ -772,6 +797,27 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("Scorel 已记录的 Bash 工具原始输出估算量");
     expect(html).toContain("4,800");
     expect(html).toContain("1,200");
+  });
+
+  it("renders observability sync settings for Langfuse and OpenTelemetry", () => {
+    const html = renderToStaticMarkup(
+      <ObservabilitySection
+        device={{ source: "local" }}
+        observability={observabilitySettings}
+        busy={false}
+        setBusy={noop}
+        setError={noop}
+        onObservabilityChange={noop}
+      />,
+    );
+
+    expect(html).toContain("可观测性");
+    expect(html).toContain("本地观测资产");
+    expect(html).toContain("自动同步");
+    expect(html).toContain("Langfuse");
+    expect(html).toContain("Public Key");
+    expect(html).toContain("OpenTelemetry");
+    expect(html).toContain("OTLP Endpoint");
   });
 
   it("renders compact IM platform rows collapsed by default", () => {

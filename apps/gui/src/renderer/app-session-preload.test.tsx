@@ -254,6 +254,12 @@ function installScorelApi(overrides: {
         estimatedOutputTokens: 0,
         estimatedSavedTokens: 0,
       })),
+      getObservabilitySettings: vi.fn(async () => ({
+        local: true,
+        sync: { enabled: false, mode: "manual", targets: [] },
+        langfuse: { enabled: false },
+        otel: { enabled: false, protocol: "otlp-http" },
+      })),
       onSessionEvent: vi.fn(() => () => undefined),
       onSessionsChanged: overrides.onSessionsChanged ?? vi.fn(() => () => undefined),
       onOpenSettings: overrides.onOpenSettings ?? vi.fn(() => () => undefined),

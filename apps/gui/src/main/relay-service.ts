@@ -13,12 +13,14 @@ import {
   type ModelRole,
   type MemoryStatus,
   type MemorySettings,
+  type ObservabilitySettings,
   type RuntimeSettings,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
   type ProviderModelSummary,
   type UpsertModelProfileInput,
   type UpsertMemorySettingsInput,
+  type UpsertObservabilitySettingsInput,
   type UpsertRuntimeSettingsInput,
   type PersistentEvent,
   type ProjectId,
@@ -61,6 +63,8 @@ export type GuiRelayService = {
   upsertRemoteMemorySettings(deviceId: string, input: UpsertMemorySettingsInput): Promise<MemorySettings>;
   getRemoteRuntimeSettings(deviceId: string): Promise<RuntimeSettings>;
   upsertRemoteRuntimeSettings(deviceId: string, input: UpsertRuntimeSettingsInput): Promise<RuntimeSettings>;
+  getRemoteObservabilitySettings(deviceId: string): Promise<ObservabilitySettings>;
+  upsertRemoteObservabilitySettings(deviceId: string, input: UpsertObservabilitySettingsInput): Promise<ObservabilitySettings>;
   createRemoteSession(deviceId: string, projectId: string, modelSelection?: ModelSelectionInput): Promise<SessionId>;
   openRemoteSession(deviceId: string, sessionId: string): Promise<PersistentEvent[]>;
   attachRemoteSession(
@@ -168,6 +172,12 @@ export const createGuiRelayService = (store: GuiStore): GuiRelayService => {
     },
     async upsertRemoteRuntimeSettings(deviceId, input) {
       return (await connectedClient(deviceId)).upsertRuntimeSettings(input);
+    },
+    async getRemoteObservabilitySettings(deviceId) {
+      return (await connectedClient(deviceId)).getObservabilitySettings();
+    },
+    async upsertRemoteObservabilitySettings(deviceId, input) {
+      return (await connectedClient(deviceId)).upsertObservabilitySettings(input);
     },
     async createRemoteSession(deviceId, projectId, modelSelection) {
       return (await connectedClient(deviceId)).createSession({ meta: { projectId: asProjectId(projectId) as ProjectId, modelSelection } });
