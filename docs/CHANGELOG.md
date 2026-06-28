@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+## 0.0.10 - 2026-06-28
+
+### Highlights
+
+- Daemon lifetime management: auto-started daemons now shut down when the last client disconnects
+- New observability sync features for Langfuse and OpenTelemetry
+
+### Changes
+
+- `scorel up` and GUI auto-start use `--lifetime attached`, so the daemon shuts down when the last WebSocket client disconnects
+- Manual `host serve` and `host start` default to `user_started`, daemon stays alive until explicit stop or process exit
+- New `scorel observe sync --session <id> --target langfuse|otel` CLI command for manual observability export
+- Added GUI Settings page for observability configuration
+- Automatic post-turn sync to enabled targets when sync mode is 'auto'
+- `host status` output now includes `lifetime=user_started` or `lifetime=attached`
+- WebUI `/api/local-daemon` endpoint returns `launchIntent` field
+
+### Fixes
+
+- Config parser now ignores unknown keys/sections instead of throwing errors
+
+### Breaking Changes
+
+- `--idle-timeout-ms` flag removed; use `--lifetime attached` for similar behavior (shutdown on last client disconnect)
+
+### Verification
+
+- Updated unit tests for new `--lifetime` flag and attach behavior
+- CLI tests for Langfuse sync payload generation, upload, credential loading
+- CLI tests for OTel inspect and export with checkpoint
+- Core tests for Langfuse trace mapping and OTel delta export
+- Config tests for observability settings loading and unknown key handling
+- Daemon tests for upserting settings and auto-sync behavior
+- GUI test for observability settings rendering
+
+### Internal
+
+- Added specification S0113 for daemon attach lifetime (Planned)
+- Added `[observability]` config sections: local, sync, langfuse, otel
+- Sync state persisted under Scorel state directory
+- IM extensions no longer prevent shutdown in `attached` mode
+
 ## 0.0.9 - 2026-06-26
 
 ### Highlights

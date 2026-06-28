@@ -281,6 +281,14 @@ var init_src2 = __esm({
         this.#assertDaemonConnected();
         return (await this.#request("upsert_runtime_settings", input)).runtime;
       }
+      async getObservabilitySettings(input = {}) {
+        this.#assertDaemonConnected();
+        return (await this.#request("get_observability_settings", input)).observability;
+      }
+      async upsertObservabilitySettings(input) {
+        this.#assertDaemonConnected();
+        return (await this.#request("upsert_observability_settings", input)).observability;
+      }
       async getExtensionSettings(input) {
         this.#assertDaemonConnected();
         return (await this.#request("get_extension_settings", input)).extension;
@@ -511,7 +519,7 @@ var init_src2 = __esm({
 // packages/core/src/config/index.ts
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, removeProvider, renderMemoryConfig, renderRuntimeConfig, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, DEFAULT_RUNTIME_CONFIG, loadMemory, loadRuntime, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, configPathForDevice, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireCompactThreshold, requireBoolean, requireCustomApi, requireProviderType, requireSection, ensureSection, setConfigValue, assertKnownKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, isNodeErrorCode, requireModelRole, modelRoles;
+var SCOREL_CONFIG_SCHEMA, scorelUserRoot, scorelUserConfigPath, scorelSessionsDir, loadScorelConfig, loadScorelConfigProfile, listProviderConnections, listAvailableModels, listProviderModels, resolveModelSelection, renderModelProfileConfig, removeProvider, renderMemoryConfig, renderRuntimeConfig, renderObservabilityConfig, hasOwn, observabilityOptionalString, renderExtensionConfig, DEFAULT_MEMORY_CONFIG, DEFAULT_RUNTIME_CONFIG, DEFAULT_OBSERVABILITY_CONFIG, loadMemory, loadRuntime, loadObservability, loadExtensions, loadProviders, loadProviderProfiles, loadProviderModels, loadAvailableModels, loadRoles, readConfigText, configPathForDevice, parseToml, parseEditableConfig, renderRawConfig, emptyRawConfig, stripComment, requireString, normalizeProviderName, requireProviderCredential, resolveProviderApiKey, providerCredentialSummary, requireNumber, requireNonNegativeNumber, requireCompactThreshold, requireBoolean, requireCustomApi, requireProviderType, requireObservabilitySyncMode, requireObservabilityOtelProtocol, parseObservabilityTargets, renderObservabilityTargets, parseConfigSection, ensureSection, setConfigValue, isKnownConfigKey, setValue, parseTomlValue, stripTrailingSlashes, requireIdentifier, tomlString, renderTomlValue, isNodeErrorCode, requireModelRole, modelRoles;
 var init_config = __esm({
   "packages/core/src/config/index.ts"() {
     "use strict";
@@ -543,6 +551,18 @@ var init_config = __esm({
         runtime: {
           keys: ["tokenSavingRtk"]
         },
+        observability: {
+          keys: ["local"]
+        },
+        observabilitySync: {
+          keys: ["enabled", "mode", "targets"]
+        },
+        observabilityLangfuse: {
+          keys: ["enabled", "host", "publicKey", "secretKey"]
+        },
+        observabilityOtel: {
+          keys: ["enabled", "endpoint", "protocol"]
+        },
         extension: {
           keys: ["enabled", "kind"]
         },
@@ -568,6 +588,7 @@ var init_config = __esm({
         modelProfile: { roles },
         memory: loadMemory(raw),
         runtime: loadRuntime(raw),
+        observability: loadObservability(raw),
         extensions: loadExtensions(raw)
       };
     };
@@ -585,6 +606,7 @@ var init_config = __esm({
         modelProfile: { roles },
         memory: loadMemory(raw),
         runtime: loadRuntime(raw),
+        observability: loadObservability(raw),
         extensions: loadExtensions(raw)
       };
     };
@@ -849,6 +871,39 @@ var init_config = __esm({
       };
       return renderRawConfig(raw);
     };
+    renderObservabilityConfig = (input) => {
+      const raw = parseEditableConfig(input.existingConfigText);
+      const current = loadObservability(raw);
+      raw.observability = {
+        local: input.local !== void 0 ? requireBoolean(input.local, "observability.local") : current.local
+      };
+      raw.observabilitySync = {
+        enabled: input.sync?.enabled !== void 0 ? requireBoolean(input.sync.enabled, "observability.sync.enabled") : current.sync.enabled,
+        mode: input.sync?.mode !== void 0 ? requireObservabilitySyncMode(input.sync.mode) : current.sync.mode,
+        targets: input.sync?.targets !== void 0 ? renderObservabilityTargets(input.sync.targets) : current.sync.targets.join(",")
+      };
+      raw.observabilityLangfuse = {
+        enabled: input.langfuse?.enabled !== void 0 ? requireBoolean(input.langfuse.enabled, "observability.langfuse.enabled") : current.langfuse.enabled,
+        ...observabilityOptionalString(input.langfuse, current.langfuse, "host"),
+        ...observabilityOptionalString(input.langfuse, current.langfuse, "publicKey"),
+        ...observabilityOptionalString(input.langfuse, current.langfuse, "secretKey")
+      };
+      raw.observabilityOtel = {
+        enabled: input.otel?.enabled !== void 0 ? requireBoolean(input.otel.enabled, "observability.otel.enabled") : current.otel.enabled,
+        ...observabilityOptionalString(input.otel, current.otel, "endpoint"),
+        protocol: input.otel?.protocol !== void 0 ? requireObservabilityOtelProtocol(input.otel.protocol) : current.otel.protocol
+      };
+      return renderRawConfig(raw);
+    };
+    hasOwn = (value, key) => value !== void 0 && Object.prototype.hasOwnProperty.call(value, key);
+    observabilityOptionalString = (patch, current, key) => {
+      if (hasOwn(patch, key)) {
+        const value2 = patch?.[key]?.trim();
+        return value2 ? { [key]: value2 } : {};
+      }
+      const value = current[key];
+      return value ? { [key]: value } : {};
+    };
     renderExtensionConfig = (input) => {
       const raw = parseEditableConfig(input.existingConfigText);
       const extensionId = requireIdentifier(input.extensionId, "extensionId");
@@ -883,6 +938,21 @@ var init_config = __esm({
     DEFAULT_RUNTIME_CONFIG = {
       tokenSavingRtk: false
     };
+    DEFAULT_OBSERVABILITY_CONFIG = {
+      local: true,
+      sync: {
+        enabled: false,
+        mode: "manual",
+        targets: []
+      },
+      langfuse: {
+        enabled: false
+      },
+      otel: {
+        enabled: false,
+        protocol: "otlp-http"
+      }
+    };
     loadMemory = (raw) => ({
       enabled: raw.memory?.enabled ?? DEFAULT_MEMORY_CONFIG.enabled,
       daily: raw.memory?.daily ?? DEFAULT_MEMORY_CONFIG.daily,
@@ -894,6 +964,25 @@ var init_config = __esm({
     });
     loadRuntime = (raw) => ({
       tokenSavingRtk: raw.runtime?.tokenSavingRtk ?? DEFAULT_RUNTIME_CONFIG.tokenSavingRtk
+    });
+    loadObservability = (raw) => ({
+      local: raw.observability?.local ?? DEFAULT_OBSERVABILITY_CONFIG.local,
+      sync: {
+        enabled: raw.observabilitySync?.enabled ?? DEFAULT_OBSERVABILITY_CONFIG.sync.enabled,
+        mode: requireObservabilitySyncMode(raw.observabilitySync?.mode ?? DEFAULT_OBSERVABILITY_CONFIG.sync.mode),
+        targets: parseObservabilityTargets(raw.observabilitySync?.targets)
+      },
+      langfuse: {
+        enabled: raw.observabilityLangfuse?.enabled ?? DEFAULT_OBSERVABILITY_CONFIG.langfuse.enabled,
+        ...raw.observabilityLangfuse?.host ? { host: stripTrailingSlashes(raw.observabilityLangfuse.host) } : {},
+        ...raw.observabilityLangfuse?.publicKey ? { publicKey: raw.observabilityLangfuse.publicKey } : {},
+        ...raw.observabilityLangfuse?.secretKey ? { secretKey: raw.observabilityLangfuse.secretKey } : {}
+      },
+      otel: {
+        enabled: raw.observabilityOtel?.enabled ?? DEFAULT_OBSERVABILITY_CONFIG.otel.enabled,
+        ...raw.observabilityOtel?.endpoint ? { endpoint: stripTrailingSlashes(raw.observabilityOtel.endpoint) } : {},
+        protocol: requireObservabilityOtelProtocol(raw.observabilityOtel?.protocol ?? DEFAULT_OBSERVABILITY_CONFIG.otel.protocol)
+      }
     });
     loadExtensions = (raw) => {
       const extensions = {};
@@ -1045,9 +1134,9 @@ var init_config = __esm({
       }
       if (options.requireComplete === false) {
         return {
-          primary: roles.primary ? requireModelRole(roles.primary, "primary", models) : "",
-          standard: roles.standard ? requireModelRole(roles.standard, "standard", models) : "",
-          auxiliary: roles.auxiliary ? requireModelRole(roles.auxiliary, "auxiliary", models) : ""
+          primary: roles.primary && models[roles.primary] ? roles.primary : "",
+          standard: roles.standard && models[roles.standard] ? roles.standard : "",
+          auxiliary: roles.auxiliary && models[roles.auxiliary] ? roles.auxiliary : ""
         };
       }
       return {
@@ -1087,7 +1176,7 @@ var init_config = __esm({
         }
         const sectionMatch = /^\[([A-Za-z0-9_.-]+)\]$/.exec(line);
         if (sectionMatch) {
-          section2 = requireSection(sectionMatch[1] ?? "");
+          section2 = parseConfigSection(sectionMatch[1] ?? "");
           ensureSection(result, section2);
           continue;
         }
@@ -1099,7 +1188,9 @@ var init_config = __esm({
         if (!key || rawValue === void 0) {
           throw new Error(`Unsupported config line: ${rawLine.trim()}`);
         }
-        setConfigValue(result, section2, key, parseTomlValue(rawValue));
+        if (isKnownConfigKey(section2, key)) {
+          setConfigValue(result, section2, key, parseTomlValue(rawValue));
+        }
       }
       return result;
     };
@@ -1182,6 +1273,47 @@ var init_config = __esm({
         const runtime = loadRuntime(raw);
         lines.push("[runtime]");
         lines.push(`tokenSavingRtk = ${runtime.tokenSavingRtk}`);
+        lines.push("");
+      }
+      if (raw.observability) {
+        const observability = loadObservability(raw);
+        lines.push("[observability]");
+        lines.push(`local = ${observability.local}`);
+        lines.push("");
+      }
+      if (raw.observabilitySync) {
+        const observability = loadObservability(raw);
+        lines.push("[observability.sync]");
+        lines.push(`enabled = ${observability.sync.enabled}`);
+        lines.push(`mode = ${tomlString(observability.sync.mode)}`);
+        if (observability.sync.targets.length > 0) {
+          lines.push(`targets = ${tomlString(observability.sync.targets.join(","))}`);
+        }
+        lines.push("");
+      }
+      if (raw.observabilityLangfuse) {
+        const observability = loadObservability(raw);
+        lines.push("[observability.langfuse]");
+        lines.push(`enabled = ${observability.langfuse.enabled}`);
+        if (observability.langfuse.host) {
+          lines.push(`host = ${tomlString(observability.langfuse.host)}`);
+        }
+        if (observability.langfuse.publicKey) {
+          lines.push(`publicKey = ${tomlString(observability.langfuse.publicKey)}`);
+        }
+        if (observability.langfuse.secretKey) {
+          lines.push(`secretKey = ${tomlString(observability.langfuse.secretKey)}`);
+        }
+        lines.push("");
+      }
+      if (raw.observabilityOtel) {
+        const observability = loadObservability(raw);
+        lines.push("[observability.otel]");
+        lines.push(`enabled = ${observability.otel.enabled}`);
+        if (observability.otel.endpoint) {
+          lines.push(`endpoint = ${tomlString(observability.otel.endpoint)}`);
+        }
+        lines.push(`protocol = ${tomlString(observability.otel.protocol)}`);
         lines.push("");
       }
       for (const [extensionId, extension] of Object.entries(raw.extensions).sort(([left], [right]) => left.localeCompare(right))) {
@@ -1293,7 +1425,39 @@ var init_config = __esm({
       }
       throw new Error(`${name} must be builtin or custom`);
     };
-    requireSection = (section2) => {
+    requireObservabilitySyncMode = (value) => {
+      if (value === "manual" || value === "auto") {
+        return value;
+      }
+      throw new Error("observability.sync.mode must be manual or auto");
+    };
+    requireObservabilityOtelProtocol = (value) => {
+      if (value === "otlp-http") {
+        return value;
+      }
+      throw new Error("observability.otel.protocol must be otlp-http");
+    };
+    parseObservabilityTargets = (value) => {
+      if (!value) {
+        return [];
+      }
+      const targets = value.split(",").map((target) => target.trim()).filter(Boolean);
+      for (const target of targets) {
+        if (target !== "langfuse" && target !== "otel") {
+          throw new Error("observability.sync.targets must contain only langfuse or otel");
+        }
+      }
+      return [...new Set(targets)];
+    };
+    renderObservabilityTargets = (targets) => {
+      for (const target of targets) {
+        if (target !== "langfuse" && target !== "otel") {
+          throw new Error("observability.sync.targets must contain only langfuse or otel");
+        }
+      }
+      return [...new Set(targets)].join(",");
+    };
+    parseConfigSection = (section2) => {
       if (section2 === "root") {
         return { kind: "root" };
       }
@@ -1318,6 +1482,18 @@ var init_config = __esm({
       if (section2 === "runtime") {
         return { kind: "runtime" };
       }
+      if (section2 === "observability") {
+        return { kind: "observability" };
+      }
+      if (section2 === "observability.sync") {
+        return { kind: "observabilitySync" };
+      }
+      if (section2 === "observability.langfuse") {
+        return { kind: "observabilityLangfuse" };
+      }
+      if (section2 === "observability.otel") {
+        return { kind: "observabilityOtel" };
+      }
       const extensionConfigMatch = /^extensions\.([A-Za-z0-9_-]+)\.config$/.exec(section2);
       if (extensionConfigMatch?.[1]) {
         return { kind: "extensionConfig", id: extensionConfigMatch[1] };
@@ -1326,7 +1502,7 @@ var init_config = __esm({
       if (extensionMatch?.[1]) {
         return { kind: "extension", id: extensionMatch[1] };
       }
-      throw new Error(`Unsupported config section: ${section2}`);
+      return { kind: "ignored" };
     };
     ensureSection = (config, section2) => {
       if (section2.kind === "provider") {
@@ -1342,6 +1518,14 @@ var init_config = __esm({
         config.memory ??= {};
       } else if (section2.kind === "runtime") {
         config.runtime ??= {};
+      } else if (section2.kind === "observability") {
+        config.observability ??= {};
+      } else if (section2.kind === "observabilitySync") {
+        config.observabilitySync ??= {};
+      } else if (section2.kind === "observabilityLangfuse") {
+        config.observabilityLangfuse ??= {};
+      } else if (section2.kind === "observabilityOtel") {
+        config.observabilityOtel ??= {};
       } else if (section2.kind === "extension") {
         config.extensions[section2.id] ??= {};
       } else if (section2.kind === "extensionConfig") {
@@ -1350,7 +1534,9 @@ var init_config = __esm({
       }
     };
     setConfigValue = (config, section2, key, value) => {
-      assertKnownKey(section2, key);
+      if (!isKnownConfigKey(section2, key)) {
+        return;
+      }
       if (section2.kind === "provider") {
         config.providers[section2.id] ??= {};
         setValue(config.providers[section2.id], key, value);
@@ -1370,6 +1556,18 @@ var init_config = __esm({
       } else if (section2.kind === "runtime") {
         config.runtime ??= {};
         setValue(config.runtime, key, value);
+      } else if (section2.kind === "observability") {
+        config.observability ??= {};
+        setValue(config.observability, key, value);
+      } else if (section2.kind === "observabilitySync") {
+        config.observabilitySync ??= {};
+        setValue(config.observabilitySync, key, value);
+      } else if (section2.kind === "observabilityLangfuse") {
+        config.observabilityLangfuse ??= {};
+        setValue(config.observabilityLangfuse, key, value);
+      } else if (section2.kind === "observabilityOtel") {
+        config.observabilityOtel ??= {};
+        setValue(config.observabilityOtel, key, value);
       } else if (section2.kind === "extension") {
         config.extensions[section2.id] ??= {};
         setValue(config.extensions[section2.id], key, value);
@@ -1380,18 +1578,16 @@ var init_config = __esm({
         setValue(extensionConfig, key, value);
       }
     };
-    assertKnownKey = (section2, key) => {
+    isKnownConfigKey = (section2, key) => {
       const schemaSection = section2.kind;
+      if (schemaSection === "ignored") {
+        return false;
+      }
       if (schemaSection === "extensionConfig") {
-        if (!/^[A-Za-z0-9_-]+$/.test(key)) {
-          throw new Error(`Unsupported config key: ${key}`);
-        }
-        return;
+        return /^[A-Za-z0-9_-]+$/.test(key);
       }
       const allowed = SCOREL_CONFIG_SCHEMA.sections[schemaSection].keys;
-      if (!allowed.includes(key)) {
-        throw new Error(`Unsupported config key: ${key}`);
-      }
+      return allowed.includes(key);
     };
     setValue = (target, key, value) => {
       target[key] = value;
@@ -3110,280 +3306,6 @@ var init_memory = __esm({
   }
 });
 
-// packages/core/src/reminders/index.ts
-var createSystemReminderBlock, renderSystemReminderText, renderSystemReminder, systemReminderMessage, appendSystemReminderToToolResult, cloneSystemReminderBlock, isToolResultWithContent;
-var init_reminders = __esm({
-  "packages/core/src/reminders/index.ts"() {
-    "use strict";
-    createSystemReminderBlock = (input) => ({
-      type: "system_reminder",
-      kind: input.kind,
-      origin: input.origin,
-      text: input.text,
-      visibility: input.visibility,
-      scope: input.scope,
-      ...input.data ? { data: { ...input.data } } : {}
-    });
-    renderSystemReminderText = (text) => `<system-reminder>
-${text}
-</system-reminder>`;
-    renderSystemReminder = (input) => renderSystemReminderText(typeof input === "string" ? input : input.text);
-    systemReminderMessage = (block, meta) => ({
-      role: "user",
-      content: [cloneSystemReminderBlock(block)],
-      ...meta ? { meta: { ...meta } } : {}
-    });
-    appendSystemReminderToToolResult = (message, block) => {
-      for (let i = message.content.length - 1; i >= 0; i -= 1) {
-        const candidate = message.content[i];
-        if (candidate?.type !== "tool_result" || !isToolResultWithContent(candidate.result)) {
-          continue;
-        }
-        const mergedResult = {
-          ...candidate.result,
-          content: [...candidate.result.content, cloneSystemReminderBlock(block)]
-        };
-        message.content[i] = {
-          ...candidate,
-          result: mergedResult
-        };
-        return true;
-      }
-      return false;
-    };
-    cloneSystemReminderBlock = (block) => ({
-      ...block,
-      ...block.data ? { data: { ...block.data } } : {}
-    });
-    isToolResultWithContent = (value) => typeof value === "object" && value !== null && "content" in value && Array.isArray(value.content);
-  }
-});
-
-// packages/core/src/provider/pi-ai.ts
-import {
-  getModels,
-  streamSimple
-} from "@mariozechner/pi-ai";
-var DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW, DEFAULT_CUSTOM_MODEL_MAX_TOKENS, createPiAiProvider, resolvePiAiModel, toPiContext, toPiMessage, toPiAssistantBlock, fromPiAssistant, fromPiContentBlock, toPiTool, textContent, toolResultText, isSystemReminderContentBlock, stringMeta, toPiStopReason, fromPiStopReason, fromPiUsage;
-var init_pi_ai = __esm({
-  "packages/core/src/provider/pi-ai.ts"() {
-    "use strict";
-    init_reminders();
-    DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW = 2e5;
-    DEFAULT_CUSTOM_MODEL_MAX_TOKENS = 64e3;
-    createPiAiProvider = (options) => ({
-      streamTurn: async function* ({ context, systemPrompt, tools, signal }) {
-        const stream = streamSimple(options.model, toPiContext(context, systemPrompt, tools), {
-          apiKey: options.apiKey,
-          signal,
-          ...options.reasoning ? { reasoning: options.reasoning } : {},
-          ...options.onPayload ? { onPayload: options.onPayload } : {}
-        });
-        for await (const event of stream) {
-          if (event.type === "text_delta") {
-            yield { type: "text_delta", delta: event.delta };
-          } else if (event.type === "thinking_delta") {
-            yield { type: "thinking_delta", delta: event.delta };
-          }
-        }
-        return fromPiAssistant(await stream.result());
-      }
-    });
-    resolvePiAiModel = (config) => {
-      if (config.type === "custom") {
-        return {
-          id: config.id,
-          name: config.id,
-          api: config.api,
-          provider: config.provider,
-          baseUrl: config.baseUrl,
-          input: config.supportsImageInput ? ["text", "image"] : ["text"],
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          reasoning: config.reasoning ?? false,
-          contextWindow: config.contextWindow ?? DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW,
-          maxTokens: config.maxTokens ?? DEFAULT_CUSTOM_MODEL_MAX_TOKENS,
-          ...config.api === "openai-completions" ? { compat: { supportsDeveloperRole: config.compat?.supportsDeveloperRole ?? false } } : {}
-        };
-      }
-      const model = getModels(config.provider).find((candidate) => candidate.id === config.id);
-      if (!model) {
-        throw new Error(`Unknown pi-ai model: ${config.provider}/${config.id}`);
-      }
-      return {
-        ...model,
-        ...config.baseUrl ? { baseUrl: config.baseUrl } : {}
-      };
-    };
-    toPiContext = (context, systemPrompt, tools) => ({
-      ...systemPrompt ? { systemPrompt } : {},
-      messages: context.flatMap(toPiMessage),
-      tools: tools.map(toPiTool)
-    });
-    toPiMessage = (message) => {
-      if (message.role === "system") {
-        return [{ role: "user", content: textContent(message), timestamp: Date.now() }];
-      }
-      if (message.role === "user") {
-        return [{ role: "user", content: textContent(message), timestamp: Date.now() }];
-      }
-      if (message.role === "assistant") {
-        return [
-          {
-            role: "assistant",
-            content: message.content.flatMap(toPiAssistantBlock),
-            api: stringMeta(message, "api") ?? "openai-completions",
-            provider: stringMeta(message, "provider") ?? "scorel",
-            model: stringMeta(message, "model") ?? "unknown",
-            usage: {
-              input: message.usage?.inputTokens ?? 0,
-              output: message.usage?.outputTokens ?? 0,
-              cacheRead: 0,
-              cacheWrite: 0,
-              totalTokens: message.usage?.totalTokens ?? 0,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
-            },
-            stopReason: toPiStopReason(message.stopReason),
-            timestamp: Date.now()
-          }
-        ];
-      }
-      return message.content.flatMap((block) => {
-        if (block.type !== "tool_result") {
-          return [];
-        }
-        return [
-          {
-            role: "toolResult",
-            toolCallId: block.toolCallId,
-            toolName: block.toolName,
-            content: [{ type: "text", text: toolResultText(block.result) }],
-            isError: block.isError ?? false,
-            timestamp: Date.now()
-          }
-        ];
-      });
-    };
-    toPiAssistantBlock = (block) => {
-      if (block.type === "text") {
-        return [{ type: "text", text: block.text }];
-      }
-      if (block.type === "system_reminder") {
-        return [{ type: "text", text: renderSystemReminder(block) }];
-      }
-      if (block.type === "thinking") {
-        return [{ type: "thinking", thinking: block.text }];
-      }
-      if (block.type === "tool_call") {
-        return [{ type: "toolCall", id: block.toolCallId, name: block.toolName, arguments: block.args }];
-      }
-      return [];
-    };
-    fromPiAssistant = (message) => ({
-      role: "assistant",
-      content: message.content.map(fromPiContentBlock),
-      stopReason: fromPiStopReason(message.stopReason),
-      usage: fromPiUsage(message.usage),
-      meta: {
-        api: message.api,
-        provider: message.provider,
-        model: message.model,
-        ...message.errorMessage ? { errorMessage: message.errorMessage } : {},
-        ...message.diagnostics ? { diagnostics: message.diagnostics } : {}
-      }
-    });
-    fromPiContentBlock = (block) => {
-      if (block.type === "text") {
-        return { type: "text", text: block.text };
-      }
-      if (block.type === "thinking") {
-        return { type: "thinking", text: block.thinking };
-      }
-      return {
-        type: "tool_call",
-        toolCallId: block.id,
-        toolName: block.name,
-        args: block.arguments
-      };
-    };
-    toPiTool = (tool) => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters
-    });
-    textContent = (message) => message.content.flatMap((block) => {
-      if (block.type === "text") {
-        return [block.text];
-      }
-      if (block.type === "system_reminder") {
-        return [renderSystemReminder(block)];
-      }
-      return [];
-    }).join("\n");
-    toolResultText = (result) => {
-      if (typeof result === "object" && result !== null && "content" in result) {
-        const content = result.content;
-        if (Array.isArray(content)) {
-          return content.flatMap((block) => {
-            if (block?.type === "text" && typeof block.text === "string") {
-              return [block.text];
-            }
-            if (isSystemReminderContentBlock(block)) {
-              return [renderSystemReminder(block)];
-            }
-            return [];
-          }).join("\n");
-        }
-      }
-      return JSON.stringify(result);
-    };
-    isSystemReminderContentBlock = (value) => typeof value === "object" && value !== null && value.type === "system_reminder" && typeof value.text === "string";
-    stringMeta = (message, key) => {
-      const value = message.meta?.[key];
-      return typeof value === "string" ? value : void 0;
-    };
-    toPiStopReason = (reason) => {
-      if (reason === "tool_call") {
-        return "toolUse";
-      }
-      if (reason === "max_tokens") {
-        return "length";
-      }
-      if (reason === "cancelled") {
-        return "aborted";
-      }
-      if (reason === "error") {
-        return "error";
-      }
-      return "stop";
-    };
-    fromPiStopReason = (reason) => {
-      if (reason === "toolUse") {
-        return "tool_call";
-      }
-      if (reason === "length") {
-        return "max_tokens";
-      }
-      if (reason === "aborted") {
-        return "cancelled";
-      }
-      if (reason === "error") {
-        return "error";
-      }
-      return "end_turn";
-    };
-    fromPiUsage = (usage) => {
-      if (!usage) {
-        return void 0;
-      }
-      return {
-        inputTokens: usage.input,
-        outputTokens: usage.output,
-        totalTokens: usage.totalTokens
-      };
-    };
-  }
-});
-
 // packages/core/src/reporting/index.ts
 function modelPrices(prices) {
   const entries = {};
@@ -3574,192 +3496,52 @@ var init_reporting = __esm({
   }
 });
 
-// packages/core/src/runtime/index.ts
-var ScorelRuntime, toolResultForContext, normalizeAssistantMessage, isAssistantMessage, partialAssistantMessage;
-var init_runtime = __esm({
-  "packages/core/src/runtime/index.ts"() {
+// packages/core/src/reminders/index.ts
+var createSystemReminderBlock, renderSystemReminderText, renderSystemReminder, systemReminderMessage, appendSystemReminderToToolResult, cloneSystemReminderBlock, isToolResultWithContent;
+var init_reminders = __esm({
+  "packages/core/src/reminders/index.ts"() {
     "use strict";
-    ScorelRuntime = class {
-      #provider;
-      #tools = /* @__PURE__ */ new Map();
-      #controller;
-      constructor({ provider }) {
-        this.#provider = provider;
-      }
-      get running() {
-        return this.#controller !== void 0;
-      }
-      registerTool(tool) {
-        this.#tools.set(tool.name, tool);
-      }
-      unregisterTool(name) {
-        this.#tools.delete(name);
-      }
-      cancel() {
-        this.#controller?.abort();
-      }
-      async *executeTurn(context, systemPrompt, options) {
-        if (this.#controller) {
-          throw new Error("Runtime is already running");
-        }
-        const controller = new AbortController();
-        this.#controller = controller;
-        yield { type: "turn_start" };
-        try {
-          let nextContext = [...context];
-          while (!controller.signal.aborted) {
-            const result = yield* this.#runProviderTurn(nextContext, systemPrompt, options, controller.signal);
-            if (result.finished) {
-              return;
-            }
-            const assistant = result.message;
-            if (!assistant) {
-              yield { type: "turn_end", stopReason: result.stopReason ?? "end_turn" };
-              return;
-            }
-            const toolCalls = assistant.content.filter(
-              (block) => block.type === "tool_call"
-            );
-            if (controller.signal.aborted || toolCalls.length === 0 || assistant.stopReason !== "tool_call") {
-              yield { type: "turn_end", stopReason: controller.signal.aborted ? "cancelled" : assistant.stopReason };
-              return;
-            }
-            const toolMessages = [];
-            for (const toolCall of toolCalls) {
-              if (controller.signal.aborted) {
-                break;
-              }
-              toolMessages.push(yield* this.#executeTool(toolCall, controller.signal));
-            }
-            if (controller.signal.aborted) {
-              yield { type: "turn_end", stopReason: "cancelled" };
-              return;
-            }
-            const contextAfterTools = [...nextContext, assistant, ...toolMessages];
-            nextContext = options.refreshContext ? await options.refreshContext(contextAfterTools) : contextAfterTools;
-          }
-          yield { type: "turn_end", stopReason: "cancelled" };
-        } finally {
-          this.#controller = void 0;
-        }
-      }
-      async *#runProviderTurn(context, systemPrompt, options, signal) {
-        let text = "";
-        let thinking = "";
-        yield { type: "message_start", role: "assistant" };
-        try {
-          const stream = this.#provider.streamTurn({
-            context,
-            systemPrompt,
-            tools: [...this.#tools.values()],
-            signal,
-            options
-          });
-          while (true) {
-            if (signal.aborted) {
-              break;
-            }
-            const next = await stream.next();
-            if (next.done) {
-              const message = normalizeAssistantMessage(next.value, { thinking, text }, signal.aborted ? "cancelled" : "end_turn");
-              if (message) {
-                yield { type: "message_end", message };
-              }
-              return { message, stopReason: message?.stopReason ?? "end_turn" };
-            }
-            if (next.value.type === "text_delta") {
-              text += next.value.delta;
-              yield next.value;
-            } else if (next.value.type === "thinking_delta") {
-              thinking += next.value.delta;
-              yield next.value;
-            }
-          }
-          const cancelledMessage = partialAssistantMessage({ thinking, text }, "cancelled");
-          if (cancelledMessage) {
-            yield { type: "message_end", message: cancelledMessage };
-          }
-          return { stopReason: "cancelled" };
-        } catch (cause) {
-          const error = cause instanceof Error ? cause : new Error(String(cause));
-          const partial = partialAssistantMessage({ thinking, text }, "error");
-          if (partial) {
-            yield { type: "message_end", message: partial };
-          }
-          yield { type: "error", error };
-          yield { type: "turn_end", stopReason: "error" };
-          return { finished: true };
-        }
-      }
-      async *#executeTool(toolCall, signal) {
-        const start = Date.now();
-        const tool = this.#tools.get(toolCall.toolName);
-        yield {
-          type: "tool_execution_start",
-          toolCallId: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-          args: toolCall.args
-        };
-        let result;
-        let isError = false;
-        try {
-          if (!tool) {
-            throw new Error(`Unknown tool: ${toolCall.toolName}`);
-          }
-          result = await tool.execute(toolCall.toolCallId, toolCall.args, signal, () => void 0);
-        } catch (cause) {
-          isError = true;
-          const message = cause instanceof Error ? cause.message : String(cause);
-          result = { content: [{ type: "text", text: message }] };
-        }
-        yield {
-          type: "tool_execution_end",
-          toolCallId: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-          durationMs: Date.now() - start,
-          isError,
-          result
-        };
-        const block = {
-          type: "tool_result",
-          toolCallId: toolCall.toolCallId,
-          toolName: toolCall.toolName,
-          result: toolResultForContext(result),
-          isError
-        };
-        return {
-          role: "tool_result",
-          content: [block]
-        };
-      }
-    };
-    toolResultForContext = (result) => ({
-      content: result.content
+    createSystemReminderBlock = (input) => ({
+      type: "system_reminder",
+      kind: input.kind,
+      origin: input.origin,
+      text: input.text,
+      visibility: input.visibility,
+      scope: input.scope,
+      ...input.data ? { data: { ...input.data } } : {}
     });
-    normalizeAssistantMessage = (value, streamed, fallbackStopReason) => {
-      if (value) {
-        if (!isAssistantMessage(value)) {
-          throw new Error(`Provider returned ${value.role} message instead of assistant`);
+    renderSystemReminderText = (text) => `<system-reminder>
+${text}
+</system-reminder>`;
+    renderSystemReminder = (input) => renderSystemReminderText(typeof input === "string" ? input : input.text);
+    systemReminderMessage = (block, meta) => ({
+      role: "user",
+      content: [cloneSystemReminderBlock(block)],
+      ...meta ? { meta: { ...meta } } : {}
+    });
+    appendSystemReminderToToolResult = (message, block) => {
+      for (let i = message.content.length - 1; i >= 0; i -= 1) {
+        const candidate = message.content[i];
+        if (candidate?.type !== "tool_result" || !isToolResultWithContent(candidate.result)) {
+          continue;
         }
-        return value;
+        const mergedResult = {
+          ...candidate.result,
+          content: [...candidate.result.content, cloneSystemReminderBlock(block)]
+        };
+        message.content[i] = {
+          ...candidate,
+          result: mergedResult
+        };
+        return true;
       }
-      return partialAssistantMessage(streamed, fallbackStopReason);
+      return false;
     };
-    isAssistantMessage = (message) => message.role === "assistant";
-    partialAssistantMessage = (streamed, stopReason) => {
-      if (streamed.thinking.length === 0 && streamed.text.length === 0) {
-        return void 0;
-      }
-      return {
-        role: "assistant",
-        content: [
-          ...streamed.thinking ? [{ type: "thinking", text: streamed.thinking }] : [],
-          ...streamed.text ? [{ type: "text", text: streamed.text }] : []
-        ],
-        stopReason,
-        meta: stopReason === "end_turn" ? void 0 : { partial: true }
-      };
-    };
+    cloneSystemReminderBlock = (block) => ({
+      ...block,
+      ...block.data ? { data: { ...block.data } } : {}
+    });
+    isToolResultWithContent = (value) => typeof value === "object" && value !== null && "content" in value && Array.isArray(value.content);
   }
 });
 
@@ -4299,12 +4081,993 @@ var init_session = __esm({
   }
 });
 
-// packages/core/src/skills/index.ts
+// packages/core/src/observability/index.ts
 import { createHash as createHash3 } from "node:crypto";
+import { mkdir as mkdir4, readFile as readFile7, writeFile as writeFile4 } from "node:fs/promises";
+import { dirname as dirname5, join as join5 } from "node:path";
+import process2 from "node:process";
+var buildObservationAsset, buildLangfuseSyncPayload, buildOtelDeltaPayload, buildOtelSyncPayload, syncObservationAssetTargets, uploadLangfusePayload, uploadOtelPayload, observabilitySyncStateFilePath, readObservabilitySyncState, writeObservabilitySyncState, stableAssetId, postOtelJson, stripTrailingSlashes2, safeJson, truncateForError, stableLangfuseId, revisionEnvelopeId, shortHash, stableOtelHex, isoFromMillis, unixNanoFromMillis, langfuseTurns, messageInput, turnInputMessages, turnOutput, langfuseTags, scorelRelease, usageDetailsFromUsage, costDetailsFromSummary, prorateCost, toolCallsFromContent, toolResultBlock, matchingToolCallInput, parentGenerationId, safeObservationValue, otelResourceAttributes, otelEventAttributes, otelSpanKind, toolResultIsError, tokenDataPoint, stringAttribute, intAttribute, boolAttribute, addUsage, normalizeUsage, nonNegativeInteger3, stringValue3, displayMessageText, messageText;
+var init_observability = __esm({
+  "packages/core/src/observability/index.ts"() {
+    "use strict";
+    init_session();
+    buildObservationAsset = (session) => {
+      const events = [...session.tree];
+      const summary = buildSessionObservationSummary(session);
+      const currentSeq = events.reduce((max, event) => Math.max(max, Number(event.seq)), 0);
+      const assetId = stableAssetId(summary.deviceId, summary.projectId, summary.sessionId);
+      const revision = shortHash(JSON.stringify({ currentSeq, events }));
+      return {
+        format: "scorel-observation-asset-v1",
+        assetId,
+        revision,
+        sessionId: summary.sessionId,
+        deviceId: summary.deviceId,
+        projectId: summary.projectId,
+        currentSeq,
+        sourceSessionJsonl: summary.sourceSessionJsonl,
+        summary,
+        trajectory: {
+          format: "scorel-session-trajectory-v1",
+          events
+        }
+      };
+    };
+    buildLangfuseSyncPayload = (asset) => {
+      const batch = [];
+      const traceIds = [];
+      const turns = langfuseTurns(asset.trajectory.events);
+      turns.forEach((turn, index) => {
+        const turnIndex = index + 1;
+        const traceId = stableLangfuseId("scorel-turn", asset.assetId, String(turn.user.id));
+        const output = turnOutput(turn);
+        traceIds.push(traceId);
+        batch.push({
+          id: revisionEnvelopeId("trace", traceId, asset.revision),
+          type: "trace-create",
+          timestamp: isoFromMillis(turn.user.ts),
+          body: {
+            id: traceId,
+            name: `scorel.chat.turn ${turnIndex}`,
+            timestamp: isoFromMillis(turn.user.ts),
+            sessionId: asset.sessionId,
+            input: messageInput(turn.user),
+            ...output ? { output } : {},
+            release: scorelRelease(),
+            version: asset.revision,
+            tags: langfuseTags(asset),
+            environment: "development",
+            metadata: {
+              scorelAssetId: asset.assetId,
+              scorelRevision: asset.revision,
+              scorelTurnIndex: turnIndex,
+              userEventId: String(turn.user.id),
+              deviceId: asset.deviceId,
+              projectId: asset.projectId,
+              sourceSessionJsonl: asset.sourceSessionJsonl,
+              eventCount: turn.events.length,
+              currentSeq: asset.currentSeq
+            }
+          }
+        });
+        const generationParents = /* @__PURE__ */ new Map();
+        const turnEventsById = new Map(turn.events.map((event) => [String(event.id), event]));
+        for (const event of turn.events) {
+          if (event.type === "assistant_message") {
+            const generationId = stableLangfuseId("scorel-generation", traceId, String(event.id));
+            generationParents.set(String(event.id), generationId);
+            const costDetails = costDetailsFromSummary(asset, event.message.usage);
+            batch.push({
+              id: revisionEnvelopeId("generation", generationId, asset.revision),
+              type: "generation-create",
+              timestamp: isoFromMillis(event.ts),
+              body: {
+                id: generationId,
+                traceId,
+                sessionId: asset.sessionId,
+                name: "llm.generate",
+                startTime: isoFromMillis(event.ts),
+                endTime: isoFromMillis(event.ts),
+                model: stringValue3(event.message.meta?.model) ?? asset.summary.model?.providerModelId ?? asset.summary.model?.modelId,
+                input: turnInputMessages(turn.user),
+                output: displayMessageText(event.message.content),
+                usageDetails: usageDetailsFromUsage(event.message.usage),
+                ...costDetails ? { costDetails } : {},
+                environment: "development",
+                version: asset.revision,
+                metadata: {
+                  scorelEventId: String(event.id),
+                  seq: Number(event.seq),
+                  stopReason: event.message.stopReason,
+                  provider: stringValue3(event.message.meta?.provider) ?? asset.summary.model?.provider,
+                  api: stringValue3(event.message.meta?.api) ?? asset.summary.model?.api,
+                  toolCalls: toolCallsFromContent(event.message.content)
+                }
+              }
+            });
+          }
+          if (event.type === "tool_result") {
+            const toolBlock = toolResultBlock(event.message.content);
+            const toolName = toolBlock?.toolName ?? "tool";
+            const toolId = stableLangfuseId("scorel-tool", traceId, String(event.id));
+            batch.push({
+              id: revisionEnvelopeId("tool", toolId, asset.revision),
+              type: "observation-create",
+              timestamp: isoFromMillis(event.ts),
+              body: {
+                id: toolId,
+                traceId,
+                sessionId: asset.sessionId,
+                type: "TOOL",
+                name: `tool.${toolName}`,
+                startTime: isoFromMillis(event.ts),
+                endTime: isoFromMillis(event.ts),
+                parentObservationId: parentGenerationId(event, generationParents, turnEventsById),
+                input: matchingToolCallInput(event, turn.events),
+                output: toolBlock ? safeObservationValue(toolBlock.result) : void 0,
+                level: toolBlock?.isError ? "ERROR" : "DEFAULT",
+                statusMessage: toolBlock?.isError ? "Tool result reported an error" : void 0,
+                environment: "development",
+                version: asset.revision,
+                metadata: {
+                  scorelEventId: String(event.id),
+                  seq: Number(event.seq),
+                  toolCallId: toolBlock?.toolCallId,
+                  isError: toolBlock?.isError === true,
+                  outputTextLength: messageText(event.message.content).length
+                }
+              }
+            });
+          }
+        }
+      });
+      return {
+        target: "langfuse",
+        format: "scorel-langfuse-sync-v1",
+        assetId: asset.assetId,
+        revision: asset.revision,
+        traceIds,
+        batch
+      };
+    };
+    buildOtelDeltaPayload = (asset, state) => {
+      const lastExportedSeq = state?.lastExportedSeq ?? 0;
+      const events = asset.trajectory.events.filter((event) => Number(event.seq) > lastExportedSeq);
+      const metrics = events.reduce(
+        (total, event) => {
+          if (event.type === "assistant_message") {
+            addUsage(total, event.message.usage);
+          }
+          return total;
+        },
+        { inputTokens: 0, outputTokens: 0, totalTokens: 0, eventCount: events.length }
+      );
+      const toSeq = events.reduce((max, event) => Math.max(max, Number(event.seq)), lastExportedSeq);
+      return {
+        target: "otel",
+        format: "scorel-otel-delta-v1",
+        assetId: asset.assetId,
+        revision: asset.revision,
+        fromSeq: lastExportedSeq + 1,
+        toSeq,
+        events,
+        metrics,
+        otlp: buildOtelSyncPayload(asset, events, metrics),
+        nextState: {
+          target: state?.target ?? "otel",
+          assetId: asset.assetId,
+          lastExportedSeq: toSeq,
+          lastRevision: asset.revision,
+          updatedAt: Date.now()
+        }
+      };
+    };
+    buildOtelSyncPayload = (asset, events, metrics) => {
+      const resource = { attributes: otelResourceAttributes(asset) };
+      const scope = { name: "scorel.observability", version: "1" };
+      const traceId = stableOtelHex("trace", asset.assetId, 32);
+      const sessionSpanId = stableOtelHex("span", asset.assetId, 16);
+      const timestamps = events.map((event) => Number(event.ts));
+      const startMillis = timestamps.length > 0 ? Math.min(...timestamps) : asset.summary.updatedAt;
+      const endMillis = timestamps.length > 0 ? Math.max(...timestamps) : asset.summary.updatedAt;
+      const spans = [
+        {
+          traceId,
+          spanId: sessionSpanId,
+          name: "scorel.session",
+          kind: 1,
+          startTimeUnixNano: unixNanoFromMillis(startMillis),
+          endTimeUnixNano: unixNanoFromMillis(endMillis),
+          attributes: [
+            stringAttribute("scorel.asset_id", asset.assetId),
+            stringAttribute("scorel.revision", asset.revision),
+            stringAttribute("scorel.session_id", asset.sessionId),
+            intAttribute("scorel.current_seq", asset.currentSeq)
+          ]
+        },
+        ...events.map((event) => ({
+          traceId,
+          spanId: stableOtelHex("span", asset.assetId, String(event.id), 16),
+          parentSpanId: sessionSpanId,
+          name: `scorel.${event.type}`,
+          kind: otelSpanKind(event),
+          startTimeUnixNano: unixNanoFromMillis(event.ts),
+          endTimeUnixNano: unixNanoFromMillis(event.ts),
+          attributes: otelEventAttributes(event)
+        }))
+      ];
+      const timeUnixNano = unixNanoFromMillis(endMillis);
+      return {
+        traces: {
+          resourceSpans: [{ resource, scopeSpans: [{ scope, spans }] }]
+        },
+        metrics: {
+          resourceMetrics: [{
+            resource,
+            scopeMetrics: [{
+              scope,
+              metrics: [
+                {
+                  name: "scorel.session.events",
+                  description: "Scorel session events exported in this delta",
+                  unit: "{event}",
+                  sum: {
+                    aggregationTemporality: 1,
+                    isMonotonic: true,
+                    dataPoints: [{
+                      timeUnixNano,
+                      asInt: String(metrics.eventCount),
+                      attributes: [stringAttribute("scorel.asset_id", asset.assetId)]
+                    }]
+                  }
+                },
+                {
+                  name: "scorel.assistant.tokens",
+                  description: "Assistant token usage exported in this delta",
+                  unit: "{token}",
+                  sum: {
+                    aggregationTemporality: 1,
+                    isMonotonic: true,
+                    dataPoints: [
+                      tokenDataPoint("input", metrics.inputTokens, timeUnixNano, asset.assetId),
+                      tokenDataPoint("output", metrics.outputTokens, timeUnixNano, asset.assetId),
+                      tokenDataPoint("total", metrics.totalTokens, timeUnixNano, asset.assetId)
+                    ]
+                  }
+                }
+              ]
+            }]
+          }]
+        },
+        logs: {
+          resourceLogs: [{
+            resource,
+            scopeLogs: [{
+              scope,
+              logRecords: events.map((event) => ({
+                timeUnixNano: unixNanoFromMillis(event.ts),
+                severityText: "INFO",
+                body: { stringValue: event.type },
+                attributes: otelEventAttributes(event)
+              }))
+            }]
+          }]
+        }
+      };
+    };
+    syncObservationAssetTargets = async (input) => {
+      const observability = input.config?.observability;
+      if (!observability?.sync.enabled || observability.sync.mode !== "auto") {
+        return [];
+      }
+      const results = [];
+      for (const target of observability.sync.targets) {
+        if (target === "langfuse") {
+          const langfuse = observability.langfuse;
+          if (!langfuse.enabled || !langfuse.publicKey || !langfuse.secretKey) {
+            results.push({ target, status: "skipped", events: 0, reason: "langfuse credentials are not configured" });
+            continue;
+          }
+          const payload2 = buildLangfuseSyncPayload(input.asset);
+          await uploadLangfusePayload({
+            host: langfuse.host ?? "https://cloud.langfuse.com",
+            publicKey: langfuse.publicKey,
+            secretKey: langfuse.secretKey,
+            payload: payload2
+          });
+          await writeObservabilitySyncState(input.stateDir, "langfuse", input.asset.assetId, {
+            target: "langfuse",
+            assetId: input.asset.assetId,
+            lastExportedSeq: input.asset.currentSeq,
+            lastRevision: input.asset.revision,
+            updatedAt: Date.now()
+          });
+          results.push({ target, status: "uploaded", events: payload2.batch.length });
+          continue;
+        }
+        const otel = observability.otel;
+        if (!otel.enabled || !otel.endpoint) {
+          results.push({ target, status: "skipped", events: 0, reason: "otel endpoint is not configured" });
+          continue;
+        }
+        const state = await readObservabilitySyncState(input.stateDir, "otel", input.asset.assetId);
+        const payload = buildOtelDeltaPayload(input.asset, state);
+        if (payload.events.length > 0) {
+          await uploadOtelPayload({ endpoint: otel.endpoint, payload: payload.otlp });
+        }
+        await writeObservabilitySyncState(input.stateDir, "otel", input.asset.assetId, payload.nextState);
+        results.push({ target, status: "uploaded", events: payload.events.length });
+      }
+      return results;
+    };
+    uploadLangfusePayload = async (input) => {
+      const endpoint = `${stripTrailingSlashes2(input.host)}/api/public/ingestion`;
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          authorization: `Basic ${Buffer.from(`${input.publicKey}:${input.secretKey}`).toString("base64")}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ batch: input.payload.batch })
+      });
+      const text = await response.text();
+      if (!response.ok && response.status !== 207) {
+        throw new Error(`Langfuse ingestion failed: ${response.status} ${response.statusText}${text ? ` ${truncateForError(text)}` : ""}`);
+      }
+      if (!text) return;
+      const payload = safeJson(text);
+      const errors = Array.isArray(payload.errors) ? payload.errors : [];
+      if (errors.length > 0) {
+        throw new Error(`Langfuse ingestion returned ${errors.length} error(s): ${truncateForError(JSON.stringify(errors))}`);
+      }
+    };
+    uploadOtelPayload = async (input) => {
+      const endpoint = stripTrailingSlashes2(input.endpoint);
+      await postOtelJson(`${endpoint}/v1/traces`, input.payload.traces);
+      await postOtelJson(`${endpoint}/v1/metrics`, input.payload.metrics);
+      await postOtelJson(`${endpoint}/v1/logs`, input.payload.logs);
+    };
+    observabilitySyncStateFilePath = (stateDir, target, assetId) => join5(stateDir, "observability-sync", target, `${shortHash(assetId)}.json`);
+    readObservabilitySyncState = async (stateDir, target, assetId) => {
+      try {
+        const content = await readFile7(observabilitySyncStateFilePath(stateDir, target, assetId), "utf8");
+        return JSON.parse(content);
+      } catch (cause) {
+        if (cause.code === "ENOENT") {
+          return void 0;
+        }
+        throw cause;
+      }
+    };
+    writeObservabilitySyncState = async (stateDir, target, assetId, state) => {
+      const path = observabilitySyncStateFilePath(stateDir, target, assetId);
+      await mkdir4(dirname5(path), { recursive: true });
+      await writeFile4(path, `${JSON.stringify(state, null, 2)}
+`, "utf8");
+    };
+    stableAssetId = (deviceId, projectId, sessionId) => `scorel-session:${deviceId}:${projectId}:${sessionId}`;
+    postOtelJson = async (url, body) => {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`OTLP HTTP export failed: ${response.status} ${response.statusText}${text ? ` ${truncateForError(text)}` : ""}`);
+      }
+    };
+    stripTrailingSlashes2 = (value) => value.replace(/\/+$/, "");
+    safeJson = (value) => {
+      try {
+        return JSON.parse(value);
+      } catch {
+        return void 0;
+      }
+    };
+    truncateForError = (value) => value.length <= 500 ? value : `${value.slice(0, 500)}...`;
+    stableLangfuseId = (...parts) => `${parts[0]}-${shortHash(parts.slice(1).join(":"))}`;
+    revisionEnvelopeId = (kind, bodyId, revision) => `${kind}-${shortHash(`${bodyId}:${revision}`)}`;
+    shortHash = (value) => createHash3("sha256").update(value).digest("hex").slice(0, 24);
+    stableOtelHex = (...parts) => {
+      const width = Number(parts.at(-1));
+      const hashParts = typeof width === "number" && Number.isInteger(width) ? parts.slice(0, -1) : parts;
+      const length = typeof width === "number" && Number.isInteger(width) ? width : 16;
+      return createHash3("sha256").update(hashParts.join(":")).digest("hex").slice(0, length);
+    };
+    isoFromMillis = (value) => new Date(value).toISOString();
+    unixNanoFromMillis = (value) => `${Math.trunc(value) * 1e6}`;
+    langfuseTurns = (events) => {
+      const turns = [];
+      for (const event of events) {
+        if (event.type === "user_message") {
+          turns.push({ user: event, events: [event] });
+          continue;
+        }
+        const current = turns.at(-1);
+        if (current) {
+          current.events.push(event);
+        }
+      }
+      return turns;
+    };
+    messageInput = (event) => ({
+      role: "user",
+      content: displayMessageText(event.message.content)
+    });
+    turnInputMessages = (event) => [
+      messageInput(event)
+    ];
+    turnOutput = (turn) => {
+      const text = turn.events.filter((event) => event.type === "assistant_message").map((event) => displayMessageText(event.message.content)).filter(Boolean).join("\n\n");
+      return text || void 0;
+    };
+    langfuseTags = (asset) => [
+      "scorel",
+      "scorel.chat",
+      ...asset.summary.model?.provider ? [`provider:${asset.summary.model.provider}`] : [],
+      ...asset.summary.model?.modelId ? [`model:${asset.summary.model.modelId}`] : []
+    ].filter((tag) => tag.length <= 200);
+    scorelRelease = () => stringValue3(process2.env.SCOREL_RELEASE) ?? stringValue3(process2.env.npm_package_version);
+    usageDetailsFromUsage = (usage) => {
+      const normalized = normalizeUsage(usage);
+      return {
+        input: normalized.inputTokens,
+        output: normalized.outputTokens,
+        total: normalized.totalTokens
+      };
+    };
+    costDetailsFromSummary = (asset, usage) => {
+      if (!asset.summary.cost.known) {
+        return void 0;
+      }
+      const normalized = normalizeUsage(usage);
+      const summaryUsage = asset.summary.usage;
+      const input = prorateCost(asset.summary.cost.input, normalized.inputTokens, summaryUsage.inputTokens);
+      const output = prorateCost(asset.summary.cost.output, normalized.outputTokens, summaryUsage.outputTokens);
+      const total = input + output;
+      return { input, output, total };
+    };
+    prorateCost = (cost, part, total) => total > 0 ? Number((cost * part / total).toFixed(12)) : 0;
+    toolCallsFromContent = (content) => content.filter((block) => block.type === "tool_call").map((block) => ({ id: block.toolCallId, name: block.toolName, args: safeObservationValue(block.args) }));
+    toolResultBlock = (content) => content.find((block) => block.type === "tool_result");
+    matchingToolCallInput = (event, events) => {
+      const result = toolResultBlock(event.message.content);
+      if (!result) {
+        return void 0;
+      }
+      for (const candidate of events) {
+        if (candidate.type !== "assistant_message") {
+          continue;
+        }
+        const call = candidate.message.content.find(
+          (block) => block.type === "tool_call" && block.toolCallId === result.toolCallId
+        );
+        if (call) {
+          return safeObservationValue(call.args);
+        }
+      }
+      return void 0;
+    };
+    parentGenerationId = (event, generationParents, eventsById) => {
+      let parentId = event.parentId ? String(event.parentId) : void 0;
+      while (parentId) {
+        const generationId = generationParents.get(parentId);
+        if (generationId) {
+          return generationId;
+        }
+        parentId = eventsById.get(parentId)?.parentId ? String(eventsById.get(parentId)?.parentId) : void 0;
+      }
+      return void 0;
+    };
+    safeObservationValue = (value) => {
+      const text = typeof value === "string" ? value : JSON.stringify(value);
+      if (!text || text.length <= 4e3) {
+        return value;
+      }
+      return {
+        truncated: true,
+        characters: text.length,
+        preview: text.slice(0, 4e3)
+      };
+    };
+    otelResourceAttributes = (asset) => [
+      stringAttribute("service.name", "scorel"),
+      stringAttribute("scorel.device_id", asset.deviceId),
+      stringAttribute("scorel.project_id", asset.projectId),
+      stringAttribute("scorel.session_id", asset.sessionId)
+    ];
+    otelEventAttributes = (event) => [
+      stringAttribute("scorel.event_id", String(event.id)),
+      stringAttribute("scorel.event_type", event.type),
+      intAttribute("scorel.seq", Number(event.seq)),
+      stringAttribute("scorel.session_id", String(event.sessionId)),
+      ...event.type === "assistant_message" ? [
+        intAttribute("scorel.usage.input_tokens", normalizeUsage(event.message.usage).inputTokens),
+        intAttribute("scorel.usage.output_tokens", normalizeUsage(event.message.usage).outputTokens),
+        intAttribute("scorel.usage.total_tokens", normalizeUsage(event.message.usage).totalTokens)
+      ] : [],
+      ...event.type === "tool_result" ? [boolAttribute("scorel.tool.is_error", toolResultIsError(event))] : []
+    ].filter((attribute) => attribute.value.stringValue !== "" && attribute.value.intValue !== "");
+    otelSpanKind = (event) => event.type === "tool_result" ? 3 : 1;
+    toolResultIsError = (event) => {
+      const toolBlock = Array.isArray(event.message.content) ? event.message.content.find((block) => block.type === "tool_result") : void 0;
+      return toolBlock?.type === "tool_result" ? toolBlock.isError === true : false;
+    };
+    tokenDataPoint = (kind, value, timeUnixNano, assetId) => ({
+      timeUnixNano,
+      asInt: String(value),
+      attributes: [
+        stringAttribute("scorel.asset_id", assetId),
+        stringAttribute("scorel.token.kind", kind)
+      ]
+    });
+    stringAttribute = (key, value) => ({
+      key,
+      value: { stringValue: value ?? "" }
+    });
+    intAttribute = (key, value) => ({
+      key,
+      value: { intValue: String(nonNegativeInteger3(value)) }
+    });
+    boolAttribute = (key, value) => ({
+      key,
+      value: { boolValue: value }
+    });
+    addUsage = (total, usage) => {
+      total.inputTokens += nonNegativeInteger3(usage?.inputTokens);
+      total.outputTokens += nonNegativeInteger3(usage?.outputTokens);
+      const totalTokens = nonNegativeInteger3(usage?.totalTokens);
+      total.totalTokens += totalTokens > 0 ? totalTokens : nonNegativeInteger3(usage?.inputTokens) + nonNegativeInteger3(usage?.outputTokens);
+    };
+    normalizeUsage = (usage) => {
+      const normalized = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+      addUsage(normalized, usage);
+      return normalized;
+    };
+    nonNegativeInteger3 = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+    stringValue3 = (value) => typeof value === "string" && value.length > 0 ? value : void 0;
+    displayMessageText = (content) => content.filter((block) => block.type === "text").map((block) => block.text).filter(Boolean).join("\n");
+    messageText = (content) => {
+      if (typeof content === "string") {
+        return content;
+      }
+      if (!Array.isArray(content)) {
+        return "";
+      }
+      return content.map((block) => {
+        if (!block || typeof block !== "object") {
+          return "";
+        }
+        if ("text" in block && typeof block.text === "string") {
+          return block.text;
+        }
+        return "";
+      }).filter(Boolean).join("\n");
+    };
+  }
+});
+
+// packages/core/src/provider/pi-ai.ts
+import {
+  getModels,
+  streamSimple
+} from "@mariozechner/pi-ai";
+var DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW, DEFAULT_CUSTOM_MODEL_MAX_TOKENS, createPiAiProvider, resolvePiAiModel, toPiContext, toPiMessage, toPiAssistantBlock, fromPiAssistant, fromPiContentBlock, toPiTool, textContent, toolResultText, isSystemReminderContentBlock, stringMeta, toPiStopReason, fromPiStopReason, fromPiUsage;
+var init_pi_ai = __esm({
+  "packages/core/src/provider/pi-ai.ts"() {
+    "use strict";
+    init_reminders();
+    DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW = 2e5;
+    DEFAULT_CUSTOM_MODEL_MAX_TOKENS = 64e3;
+    createPiAiProvider = (options) => ({
+      streamTurn: async function* ({ context, systemPrompt, tools, signal }) {
+        const stream = streamSimple(options.model, toPiContext(context, systemPrompt, tools), {
+          apiKey: options.apiKey,
+          signal,
+          ...options.reasoning ? { reasoning: options.reasoning } : {},
+          ...options.onPayload ? { onPayload: options.onPayload } : {}
+        });
+        for await (const event of stream) {
+          if (event.type === "text_delta") {
+            yield { type: "text_delta", delta: event.delta };
+          } else if (event.type === "thinking_delta") {
+            yield { type: "thinking_delta", delta: event.delta };
+          }
+        }
+        return fromPiAssistant(await stream.result());
+      }
+    });
+    resolvePiAiModel = (config) => {
+      if (config.type === "custom") {
+        return {
+          id: config.id,
+          name: config.id,
+          api: config.api,
+          provider: config.provider,
+          baseUrl: config.baseUrl,
+          input: config.supportsImageInput ? ["text", "image"] : ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          reasoning: config.reasoning ?? false,
+          contextWindow: config.contextWindow ?? DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW,
+          maxTokens: config.maxTokens ?? DEFAULT_CUSTOM_MODEL_MAX_TOKENS,
+          ...config.api === "openai-completions" ? { compat: { supportsDeveloperRole: config.compat?.supportsDeveloperRole ?? false } } : {}
+        };
+      }
+      const model = getModels(config.provider).find((candidate) => candidate.id === config.id);
+      if (!model) {
+        throw new Error(`Unknown pi-ai model: ${config.provider}/${config.id}`);
+      }
+      return {
+        ...model,
+        ...config.baseUrl ? { baseUrl: config.baseUrl } : {}
+      };
+    };
+    toPiContext = (context, systemPrompt, tools) => ({
+      ...systemPrompt ? { systemPrompt } : {},
+      messages: context.flatMap(toPiMessage),
+      tools: tools.map(toPiTool)
+    });
+    toPiMessage = (message) => {
+      if (message.role === "system") {
+        return [{ role: "user", content: textContent(message), timestamp: Date.now() }];
+      }
+      if (message.role === "user") {
+        return [{ role: "user", content: textContent(message), timestamp: Date.now() }];
+      }
+      if (message.role === "assistant") {
+        return [
+          {
+            role: "assistant",
+            content: message.content.flatMap(toPiAssistantBlock),
+            api: stringMeta(message, "api") ?? "openai-completions",
+            provider: stringMeta(message, "provider") ?? "scorel",
+            model: stringMeta(message, "model") ?? "unknown",
+            usage: {
+              input: message.usage?.inputTokens ?? 0,
+              output: message.usage?.outputTokens ?? 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: message.usage?.totalTokens ?? 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+            },
+            stopReason: toPiStopReason(message.stopReason),
+            timestamp: Date.now()
+          }
+        ];
+      }
+      return message.content.flatMap((block) => {
+        if (block.type !== "tool_result") {
+          return [];
+        }
+        return [
+          {
+            role: "toolResult",
+            toolCallId: block.toolCallId,
+            toolName: block.toolName,
+            content: [{ type: "text", text: toolResultText(block.result) }],
+            isError: block.isError ?? false,
+            timestamp: Date.now()
+          }
+        ];
+      });
+    };
+    toPiAssistantBlock = (block) => {
+      if (block.type === "text") {
+        return [{ type: "text", text: block.text }];
+      }
+      if (block.type === "system_reminder") {
+        return [{ type: "text", text: renderSystemReminder(block) }];
+      }
+      if (block.type === "thinking") {
+        return [{ type: "thinking", thinking: block.text }];
+      }
+      if (block.type === "tool_call") {
+        return [{ type: "toolCall", id: block.toolCallId, name: block.toolName, arguments: block.args }];
+      }
+      return [];
+    };
+    fromPiAssistant = (message) => ({
+      role: "assistant",
+      content: message.content.map(fromPiContentBlock),
+      stopReason: fromPiStopReason(message.stopReason),
+      usage: fromPiUsage(message.usage),
+      meta: {
+        api: message.api,
+        provider: message.provider,
+        model: message.model,
+        ...message.errorMessage ? { errorMessage: message.errorMessage } : {},
+        ...message.diagnostics ? { diagnostics: message.diagnostics } : {}
+      }
+    });
+    fromPiContentBlock = (block) => {
+      if (block.type === "text") {
+        return { type: "text", text: block.text };
+      }
+      if (block.type === "thinking") {
+        return { type: "thinking", text: block.thinking };
+      }
+      return {
+        type: "tool_call",
+        toolCallId: block.id,
+        toolName: block.name,
+        args: block.arguments
+      };
+    };
+    toPiTool = (tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters
+    });
+    textContent = (message) => message.content.flatMap((block) => {
+      if (block.type === "text") {
+        return [block.text];
+      }
+      if (block.type === "system_reminder") {
+        return [renderSystemReminder(block)];
+      }
+      return [];
+    }).join("\n");
+    toolResultText = (result) => {
+      if (typeof result === "object" && result !== null && "content" in result) {
+        const content = result.content;
+        if (Array.isArray(content)) {
+          return content.flatMap((block) => {
+            if (block?.type === "text" && typeof block.text === "string") {
+              return [block.text];
+            }
+            if (isSystemReminderContentBlock(block)) {
+              return [renderSystemReminder(block)];
+            }
+            return [];
+          }).join("\n");
+        }
+      }
+      return JSON.stringify(result);
+    };
+    isSystemReminderContentBlock = (value) => typeof value === "object" && value !== null && value.type === "system_reminder" && typeof value.text === "string";
+    stringMeta = (message, key) => {
+      const value = message.meta?.[key];
+      return typeof value === "string" ? value : void 0;
+    };
+    toPiStopReason = (reason) => {
+      if (reason === "tool_call") {
+        return "toolUse";
+      }
+      if (reason === "max_tokens") {
+        return "length";
+      }
+      if (reason === "cancelled") {
+        return "aborted";
+      }
+      if (reason === "error") {
+        return "error";
+      }
+      return "stop";
+    };
+    fromPiStopReason = (reason) => {
+      if (reason === "toolUse") {
+        return "tool_call";
+      }
+      if (reason === "length") {
+        return "max_tokens";
+      }
+      if (reason === "aborted") {
+        return "cancelled";
+      }
+      if (reason === "error") {
+        return "error";
+      }
+      return "end_turn";
+    };
+    fromPiUsage = (usage) => {
+      if (!usage) {
+        return void 0;
+      }
+      return {
+        inputTokens: usage.input,
+        outputTokens: usage.output,
+        totalTokens: usage.totalTokens
+      };
+    };
+  }
+});
+
+// packages/core/src/runtime/index.ts
+var ScorelRuntime, toolResultForContext, normalizeAssistantMessage, isAssistantMessage, partialAssistantMessage;
+var init_runtime = __esm({
+  "packages/core/src/runtime/index.ts"() {
+    "use strict";
+    ScorelRuntime = class {
+      #provider;
+      #tools = /* @__PURE__ */ new Map();
+      #controller;
+      constructor({ provider }) {
+        this.#provider = provider;
+      }
+      get running() {
+        return this.#controller !== void 0;
+      }
+      registerTool(tool) {
+        this.#tools.set(tool.name, tool);
+      }
+      unregisterTool(name) {
+        this.#tools.delete(name);
+      }
+      cancel() {
+        this.#controller?.abort();
+      }
+      async *executeTurn(context, systemPrompt, options) {
+        if (this.#controller) {
+          throw new Error("Runtime is already running");
+        }
+        const controller = new AbortController();
+        this.#controller = controller;
+        yield { type: "turn_start" };
+        try {
+          let nextContext = [...context];
+          while (!controller.signal.aborted) {
+            const result = yield* this.#runProviderTurn(nextContext, systemPrompt, options, controller.signal);
+            if (result.finished) {
+              return;
+            }
+            const assistant = result.message;
+            if (!assistant) {
+              yield { type: "turn_end", stopReason: result.stopReason ?? "end_turn" };
+              return;
+            }
+            const toolCalls = assistant.content.filter(
+              (block) => block.type === "tool_call"
+            );
+            if (controller.signal.aborted || toolCalls.length === 0 || assistant.stopReason !== "tool_call") {
+              yield { type: "turn_end", stopReason: controller.signal.aborted ? "cancelled" : assistant.stopReason };
+              return;
+            }
+            const toolMessages = [];
+            for (const toolCall of toolCalls) {
+              if (controller.signal.aborted) {
+                break;
+              }
+              toolMessages.push(yield* this.#executeTool(toolCall, controller.signal));
+            }
+            if (controller.signal.aborted) {
+              yield { type: "turn_end", stopReason: "cancelled" };
+              return;
+            }
+            const contextAfterTools = [...nextContext, assistant, ...toolMessages];
+            nextContext = options.refreshContext ? await options.refreshContext(contextAfterTools) : contextAfterTools;
+          }
+          yield { type: "turn_end", stopReason: "cancelled" };
+        } finally {
+          this.#controller = void 0;
+        }
+      }
+      async *#runProviderTurn(context, systemPrompt, options, signal) {
+        let text = "";
+        let thinking = "";
+        yield { type: "message_start", role: "assistant" };
+        try {
+          const stream = this.#provider.streamTurn({
+            context,
+            systemPrompt,
+            tools: [...this.#tools.values()],
+            signal,
+            options
+          });
+          while (true) {
+            if (signal.aborted) {
+              break;
+            }
+            const next = await stream.next();
+            if (next.done) {
+              const message = normalizeAssistantMessage(next.value, { thinking, text }, signal.aborted ? "cancelled" : "end_turn");
+              if (message) {
+                yield { type: "message_end", message };
+              }
+              return { message, stopReason: message?.stopReason ?? "end_turn" };
+            }
+            if (next.value.type === "text_delta") {
+              text += next.value.delta;
+              yield next.value;
+            } else if (next.value.type === "thinking_delta") {
+              thinking += next.value.delta;
+              yield next.value;
+            }
+          }
+          const cancelledMessage = partialAssistantMessage({ thinking, text }, "cancelled");
+          if (cancelledMessage) {
+            yield { type: "message_end", message: cancelledMessage };
+          }
+          return { stopReason: "cancelled" };
+        } catch (cause) {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          const partial = partialAssistantMessage({ thinking, text }, "error");
+          if (partial) {
+            yield { type: "message_end", message: partial };
+          }
+          yield { type: "error", error };
+          yield { type: "turn_end", stopReason: "error" };
+          return { finished: true };
+        }
+      }
+      async *#executeTool(toolCall, signal) {
+        const start = Date.now();
+        const tool = this.#tools.get(toolCall.toolName);
+        yield {
+          type: "tool_execution_start",
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          args: toolCall.args
+        };
+        let result;
+        let isError = false;
+        try {
+          if (!tool) {
+            throw new Error(`Unknown tool: ${toolCall.toolName}`);
+          }
+          result = await tool.execute(toolCall.toolCallId, toolCall.args, signal, () => void 0);
+        } catch (cause) {
+          isError = true;
+          const message = cause instanceof Error ? cause.message : String(cause);
+          result = { content: [{ type: "text", text: message }] };
+        }
+        yield {
+          type: "tool_execution_end",
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          durationMs: Date.now() - start,
+          isError,
+          result
+        };
+        const block = {
+          type: "tool_result",
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          result: toolResultForContext(result),
+          isError
+        };
+        return {
+          role: "tool_result",
+          content: [block]
+        };
+      }
+    };
+    toolResultForContext = (result) => ({
+      content: result.content
+    });
+    normalizeAssistantMessage = (value, streamed, fallbackStopReason) => {
+      if (value) {
+        if (!isAssistantMessage(value)) {
+          throw new Error(`Provider returned ${value.role} message instead of assistant`);
+        }
+        return value;
+      }
+      return partialAssistantMessage(streamed, fallbackStopReason);
+    };
+    isAssistantMessage = (message) => message.role === "assistant";
+    partialAssistantMessage = (streamed, stopReason) => {
+      if (streamed.thinking.length === 0 && streamed.text.length === 0) {
+        return void 0;
+      }
+      return {
+        role: "assistant",
+        content: [
+          ...streamed.thinking ? [{ type: "thinking", text: streamed.thinking }] : [],
+          ...streamed.text ? [{ type: "text", text: streamed.text }] : []
+        ],
+        stopReason,
+        meta: stopReason === "end_turn" ? void 0 : { partial: true }
+      };
+    };
+  }
+});
+
+// packages/core/src/skills/index.ts
+import { createHash as createHash4 } from "node:crypto";
 import { existsSync as existsSync2 } from "node:fs";
-import { readdir as readdir2, readFile as readFile7, stat as stat2 } from "node:fs/promises";
+import { readdir as readdir2, readFile as readFile8, stat as stat2 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { dirname as dirname5, join as join5, resolve as resolve4 } from "node:path";
+import { dirname as dirname6, join as join6, resolve as resolve4 } from "node:path";
 import { Type as Type5 } from "@mariozechner/pi-ai";
 var scanSkillIndex, diffSkillIndex, hasSkillIndexDelta, renderSkillListing, renderSkillDelta, createSkillTool, projectSkillRoots, readSkillEntry, parseSkillMetadata, firstParagraph, parseSkillArgs, findGitRoot2, isNodeErrorCode4;
 var init_skills = __esm({
@@ -4316,7 +5079,7 @@ var init_skills = __esm({
       const homeDir = resolve4(options.homeDir ?? homedir3());
       const roots = [
         ...projectSkillRoots(cwd, homeDir),
-        { path: join5(homeDir, ".scorel", "skills"), scope: "user", priority: 0 },
+        { path: join6(homeDir, ".scorel", "skills"), scope: "user", priority: 0 },
         ...(options.extensionSkillRoots ?? []).map((root, index) => ({
           path: root.path,
           scope: "extension",
@@ -4337,7 +5100,7 @@ var init_skills = __esm({
         for (const child of children.sort()) {
           const entry = await readSkillEntry({
             name: child,
-            skillPath: join5(root.path, child, "SKILL.md"),
+            skillPath: join6(root.path, child, "SKILL.md"),
             scope: root.scope,
             priority: root.priority
           });
@@ -4406,7 +5169,7 @@ var init_skills = __esm({
         if (!entry) {
           throw new Error(`Unknown skill: ${input.name}. Available skills: ${options.listNames().join(", ") || "none"}`);
         }
-        const content = await readFile7(entry.path, "utf8");
+        const content = await readFile8(entry.path, "utf8");
         return {
           content: [{ type: "text", text: content }],
           details: {
@@ -4427,12 +5190,12 @@ var init_skills = __esm({
       let current = cwd;
       while (true) {
         if (current !== homeDir) {
-          roots.push(join5(current, ".scorel", "skills"));
+          roots.push(join6(current, ".scorel", "skills"));
         }
-        if (current === stopAt || current === dirname5(current)) {
+        if (current === stopAt || current === dirname6(current)) {
           break;
         }
-        const next = dirname5(current);
+        const next = dirname6(current);
         if (!gitRoot && next === homeDir) {
           break;
         }
@@ -4444,7 +5207,7 @@ var init_skills = __esm({
       let fileStat;
       let content;
       try {
-        [fileStat, content] = await Promise.all([stat2(options.skillPath), readFile7(options.skillPath, "utf8")]);
+        [fileStat, content] = await Promise.all([stat2(options.skillPath), readFile8(options.skillPath, "utf8")]);
       } catch (cause) {
         if (isNodeErrorCode4(cause, "ENOENT") || isNodeErrorCode4(cause, "ENOTDIR")) {
           return void 0;
@@ -4464,7 +5227,7 @@ var init_skills = __esm({
         ...parsed.displayName ? { displayName: parsed.displayName } : {},
         mtimeMs: fileStat.mtimeMs,
         size: fileStat.size,
-        contentHash: createHash3("sha256").update(content).digest("hex"),
+        contentHash: createHash4("sha256").update(content).digest("hex"),
         priority: options.priority
       };
     };
@@ -4516,10 +5279,10 @@ var init_skills = __esm({
     findGitRoot2 = (cwd) => {
       let current = cwd;
       while (true) {
-        if (existsSync2(join5(current, ".git"))) {
+        if (existsSync2(join6(current, ".git"))) {
           return current;
         }
-        const next = dirname5(current);
+        const next = dirname6(current);
         if (next === current) {
           return void 0;
         }
@@ -4540,6 +5303,7 @@ var init_src3 = __esm({
     init_extensions();
     init_instructions();
     init_memory();
+    init_observability();
     init_pi_ai();
     init_reminders();
     init_reporting();
@@ -4552,8 +5316,8 @@ var init_src3 = __esm({
 
 // packages/daemon/src/projects/registry.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-import { mkdir as mkdir4, readFile as readFile8, readdir as readdir3, realpath, rename as rename2, stat as stat3, writeFile as writeFile4 } from "node:fs/promises";
-import { basename as basename2, dirname as dirname6, join as join6 } from "node:path";
+import { mkdir as mkdir5, readFile as readFile9, readdir as readdir3, realpath, rename as rename2, stat as stat3, writeFile as writeFile5 } from "node:fs/promises";
+import { basename as basename2, dirname as dirname7, join as join7 } from "node:path";
 var ProjectRegistryError, ProjectRegistry, canonicalDirectory, sessionReferencesProject, sortProjects, isRegistryFile, isRecord7, isNodeError, errorMessage;
 var init_registry = __esm({
   "packages/daemon/src/projects/registry.ts"() {
@@ -4642,7 +5406,7 @@ var init_registry = __esm({
       }
       async #read() {
         try {
-          const parsed = JSON.parse(await readFile8(this.#projectsPath, "utf8"));
+          const parsed = JSON.parse(await readFile9(this.#projectsPath, "utf8"));
           if (!isRegistryFile(parsed)) {
             throw new ProjectRegistryError("filesystem_error", `Invalid project registry: ${this.#projectsPath}`);
           }
@@ -4658,10 +5422,10 @@ var init_registry = __esm({
         }
       }
       async #write(file) {
-        await mkdir4(dirname6(this.#projectsPath), { recursive: true });
+        await mkdir5(dirname7(this.#projectsPath), { recursive: true });
         const temporaryPath = `${this.#projectsPath}.${process.pid}.${randomUUID2()}.tmp`;
         try {
-          await writeFile4(temporaryPath, `${JSON.stringify(file, null, 2)}
+          await writeFile5(temporaryPath, `${JSON.stringify(file, null, 2)}
 `, "utf8");
           await rename2(temporaryPath, this.#projectsPath);
         } catch (cause) {
@@ -4698,7 +5462,7 @@ var init_registry = __esm({
           continue;
         }
         try {
-          const firstLine = (await readFile8(join6(sessionsDir, name), "utf8")).split(/\r?\n/, 1)[0];
+          const firstLine = (await readFile9(join7(sessionsDir, name), "utf8")).split(/\r?\n/, 1)[0];
           const parsed = firstLine ? JSON.parse(firstLine) : void 0;
           if (isRecord7(parsed) && isRecord7(parsed.meta) && parsed.meta.projectId === projectId) {
             return true;
@@ -4723,7 +5487,7 @@ var init_registry = __esm({
 
 // packages/daemon/src/projects/directories.ts
 import { homedir as homedir4 } from "node:os";
-import { dirname as dirname7, join as join7 } from "node:path";
+import { dirname as dirname8, join as join8 } from "node:path";
 import { readdir as readdir4, realpath as realpath2, stat as stat4 } from "node:fs/promises";
 var listDirectories, directoryEntries, errorMessage2;
 var init_directories = __esm({
@@ -4737,7 +5501,7 @@ var init_directories = __esm({
           throw new ProjectRegistryError("filesystem_error", `Path is not a directory: ${path}`);
         }
         const entries = await directoryEntries(canonical);
-        const parent = dirname7(canonical);
+        const parent = dirname8(canonical);
         return {
           path: canonical,
           parentPath: parent === canonical ? void 0 : parent,
@@ -4754,7 +5518,7 @@ var init_directories = __esm({
       const entries = await readdir4(path, { withFileTypes: true });
       const directories = await Promise.all(
         entries.map(async (entry) => {
-          const candidate = join7(path, entry.name);
+          const candidate = join8(path, entry.name);
           if (!entry.isDirectory() && !entry.isSymbolicLink()) {
             return void 0;
           }
@@ -4773,8 +5537,8 @@ var init_directories = __esm({
 });
 
 // packages/daemon/src/projects/sessions.ts
-import { readFile as readFile9, readdir as readdir5 } from "node:fs/promises";
-import { join as join8 } from "node:path";
+import { readFile as readFile10, readdir as readdir5 } from "node:fs/promises";
+import { join as join9 } from "node:path";
 var listSessionSummaries, readSummary, tailSeq, latestTitle, clampLimit, parseRecord, isRecord8, isNodeError2;
 var init_sessions = __esm({
   "packages/daemon/src/projects/sessions.ts"() {
@@ -4791,14 +5555,14 @@ var init_sessions = __esm({
         throw cause;
       }
       const sessions = (await Promise.all(
-        names.filter((name) => name.endsWith(".jsonl") && !name.startsWith(".")).map((name) => readSummary(join8(sessionsDir, name), overrides))
+        names.filter((name) => name.endsWith(".jsonl") && !name.startsWith(".")).map((name) => readSummary(join9(sessionsDir, name), overrides))
       )).filter((session) => session !== void 0).filter((session) => filter.projectId === void 0 || session.projectId === filter.projectId).sort((left, right) => right.updatedAt - left.updatedAt || String(left.sessionId).localeCompare(String(right.sessionId)));
       return sessions.slice(0, clampLimit(filter.limit));
     };
     readSummary = async (filePath, overrides) => {
       let content;
       try {
-        content = await readFile9(filePath, "utf8");
+        content = await readFile10(filePath, "utf8");
       } catch (cause) {
         if (isNodeError2(cause, "ENOENT")) {
           return void 0;
@@ -4856,15 +5620,15 @@ var init_sessions = __esm({
 
 // packages/daemon/src/relay/auth.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
-import { mkdir as mkdir5, readFile as readFile10, writeFile as writeFile5 } from "node:fs/promises";
-import { join as join9 } from "node:path";
+import { mkdir as mkdir6, readFile as readFile11, writeFile as writeFile6 } from "node:fs/promises";
+import { join as join10 } from "node:path";
 var hostDeviceIdentityPath, hostRelayAuthPath, loadOrCreateHostDeviceIdentity, readHostDeviceIdentity, readHostRelayAuth, authorizeRelayClient, isRelayClientAuthorized, emptyAuthFile;
 var init_auth = __esm({
   "packages/daemon/src/relay/auth.ts"() {
     "use strict";
     init_src();
-    hostDeviceIdentityPath = (stateDir) => join9(stateDir, "device.json");
-    hostRelayAuthPath = (stateDir) => join9(stateDir, "relay-auth.json");
+    hostDeviceIdentityPath = (stateDir) => join10(stateDir, "device.json");
+    hostRelayAuthPath = (stateDir) => join10(stateDir, "relay-auth.json");
     loadOrCreateHostDeviceIdentity = async (options) => {
       const existing = await readHostDeviceIdentity(options.stateDir);
       if (existing) {
@@ -4875,14 +5639,14 @@ var init_auth = __esm({
         deviceId: asDeviceId(`device_${randomUUID3()}`),
         displayName: options.displayName ?? "Local daemon"
       };
-      await mkdir5(options.stateDir, { recursive: true });
-      await writeFile5(hostDeviceIdentityPath(options.stateDir), `${JSON.stringify(identity, null, 2)}
+      await mkdir6(options.stateDir, { recursive: true });
+      await writeFile6(hostDeviceIdentityPath(options.stateDir), `${JSON.stringify(identity, null, 2)}
 `);
       return identity;
     };
     readHostDeviceIdentity = async (stateDir) => {
       try {
-        const raw = JSON.parse(await readFile10(hostDeviceIdentityPath(stateDir), "utf8"));
+        const raw = JSON.parse(await readFile11(hostDeviceIdentityPath(stateDir), "utf8"));
         if (raw.version !== 1 || typeof raw.deviceId !== "string" || typeof raw.displayName !== "string") {
           return null;
         }
@@ -4900,7 +5664,7 @@ var init_auth = __esm({
     };
     readHostRelayAuth = async (stateDir) => {
       try {
-        const raw = JSON.parse(await readFile10(hostRelayAuthPath(stateDir), "utf8"));
+        const raw = JSON.parse(await readFile11(hostRelayAuthPath(stateDir), "utf8"));
         if (raw.version !== 1 || !Array.isArray(raw.clients)) {
           return emptyAuthFile();
         }
@@ -4926,8 +5690,8 @@ var init_auth = __esm({
         createdAt: (options.now ?? Date.now)(),
         label: options.label
       });
-      await mkdir5(options.stateDir, { recursive: true });
-      await writeFile5(hostRelayAuthPath(options.stateDir), `${JSON.stringify(auth, null, 2)}
+      await mkdir6(options.stateDir, { recursive: true });
+      await writeFile6(hostRelayAuthPath(options.stateDir), `${JSON.stringify(auth, null, 2)}
 `);
       return auth;
     };
@@ -5180,13 +5944,13 @@ var init_host_client = __esm({
 // packages/daemon/src/index.ts
 import { execFile as execFile2 } from "node:child_process";
 import { existsSync as existsSync3 } from "node:fs";
-import { appendFile as appendFile3, mkdir as mkdir6, readFile as readFile11, readdir as readdir6, rename as rename3, rm as rm2, writeFile as writeFile6 } from "node:fs/promises";
+import { appendFile as appendFile3, mkdir as mkdir7, readFile as readFile12, readdir as readdir6, rename as rename3, rm as rm2, writeFile as writeFile7 } from "node:fs/promises";
 import { userInfo as userInfo2 } from "node:os";
-import { basename as basename3, dirname as dirname8, join as join10, resolve as resolve5 } from "node:path";
+import { basename as basename3, dirname as dirname9, join as join11, resolve as resolve5 } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify as promisify2 } from "node:util";
 import { WebSocketServer } from "ws";
-var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, snipUserMessageIdBlock, inputText, assistantText, messageText, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger3, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord9, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
+var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, snipUserMessageIdBlock, inputText, assistantText, messageText2, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger4, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord9, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
 var init_src4 = __esm({
   "packages/daemon/src/index.ts"() {
     "use strict";
@@ -5202,7 +5966,7 @@ var init_src4 = __esm({
     SESSION_MEMORY_COMPACT_WAIT_MS = 5e3;
     AUTO_COMPACT_RETAINED_EVENTS = 8;
     execFileAsync2 = promisify2(execFile2);
-    localDaemonStateFile = (stateDir) => join10(stateDir, "daemon.json");
+    localDaemonStateFile = (stateDir) => join11(stateDir, "daemon.json");
     createLocalDaemonState = async (options) => {
       const state = {
         host: options.host,
@@ -5211,17 +5975,18 @@ var init_src4 = __esm({
         token: options.token,
         pid: options.pid,
         startedAt: options.startedAt,
-        stoppedAt: options.stoppedAt
+        stoppedAt: options.stoppedAt,
+        launchIntent: options.launchIntent
       };
-      await mkdir6(options.stateDir, { recursive: true });
-      await writeFile6(localDaemonStateFile(options.stateDir), `${JSON.stringify(state, null, 2)}
+      await mkdir7(options.stateDir, { recursive: true });
+      await writeFile7(localDaemonStateFile(options.stateDir), `${JSON.stringify(state, null, 2)}
 `);
       return state;
     };
     readLocalDaemonState = async (options) => {
       try {
-        const raw = JSON.parse(await readFile11(localDaemonStateFile(options.stateDir), "utf8"));
-        if (typeof raw.host !== "string" || typeof raw.port !== "number" || typeof raw.wsUrl !== "string" || typeof raw.token !== "string" || typeof raw.pid !== "number" || typeof raw.startedAt !== "number" || !(raw.stoppedAt === null || typeof raw.stoppedAt === "number")) {
+        const raw = JSON.parse(await readFile12(localDaemonStateFile(options.stateDir), "utf8"));
+        if (typeof raw.host !== "string" || typeof raw.port !== "number" || typeof raw.wsUrl !== "string" || typeof raw.token !== "string" || typeof raw.pid !== "number" || typeof raw.startedAt !== "number" || !(raw.stoppedAt === null || typeof raw.stoppedAt === "number") || !(raw.launchIntent === "attached" || raw.launchIntent === "user_started")) {
           return null;
         }
         return {
@@ -5231,7 +5996,8 @@ var init_src4 = __esm({
           token: raw.token,
           pid: raw.pid,
           startedAt: raw.startedAt,
-          stoppedAt: raw.stoppedAt
+          stoppedAt: raw.stoppedAt,
+          launchIntent: raw.launchIntent
         };
       } catch (cause) {
         if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
@@ -5248,7 +6014,7 @@ var init_src4 = __esm({
       if (!state) {
         return;
       }
-      await writeFile6(
+      await writeFile7(
         localDaemonStateFile(options.stateDir),
         `${JSON.stringify({ ...state, stoppedAt: options.stoppedAt }, null, 2)}
 `
@@ -5453,8 +6219,7 @@ var init_src4 = __esm({
       #createRuntime;
       #memoryHomeDir;
       #onSessionListChanged;
-      #idleShutdownMs;
-      #onIdleShutdown;
+      #onLastClientDisconnect;
       #now;
       #createId;
       #sessions = /* @__PURE__ */ new Map();
@@ -5467,15 +6232,15 @@ var init_src4 = __esm({
       #imBindings = /* @__PURE__ */ new Map();
       #registry;
       #runtimeStatsQueue = Promise.resolve();
-      #idleShutdownTimer;
+      #hadClientConnection = false;
       #lastActiveWorkAt;
       #started = false;
       constructor(options) {
         this.#sessionsDir = options.sessionsDir;
         this.#deviceId = options.deviceId;
         this.#deviceDisplayName = options.deviceDisplayName;
-        this.#scorelHomeDir = resolve5(options.scorelHomeDir ?? dirname8(options.projectsPath));
-        this.#userHomeDir = dirname8(this.#scorelHomeDir);
+        this.#scorelHomeDir = resolve5(options.scorelHomeDir ?? dirname9(options.projectsPath));
+        this.#userHomeDir = dirname9(this.#scorelHomeDir);
         this.#builtinExtensionsDir = resolve5(options.builtinExtensionsDir ?? defaultBuiltinExtensionsDir());
         this.#modelProfile = options.modelProfile;
         this.#loadConfig = options.loadConfig;
@@ -5483,8 +6248,7 @@ var init_src4 = __esm({
         this.#createRuntime = options.createRuntime;
         this.#memoryHomeDir = options.memoryHomeDir;
         this.#onSessionListChanged = options.onSessionListChanged;
-        this.#idleShutdownMs = options.idleShutdownMs;
-        this.#onIdleShutdown = options.onIdleShutdown;
+        this.#onLastClientDisconnect = options.onLastClientDisconnect;
         this.#now = options.now ?? Date.now;
         this.#createId = options.createId ?? (() => crypto.randomUUID());
         this.#lastActiveWorkAt = this.#now();
@@ -5497,13 +6261,11 @@ var init_src4 = __esm({
       }
       async start() {
         this.#started = true;
-        await mkdir6(this.#scorelHomeDir, { recursive: true });
+        await mkdir7(this.#scorelHomeDir, { recursive: true });
         await this.#loadImBindings();
         await this.#startEnabledImExtensions();
-        this.#scheduleIdleShutdownCheck();
       }
       async shutdown() {
-        this.#clearIdleShutdownTimer();
         for (const schedule of this.#memoryDreams.values()) {
           if (schedule.timer) {
             clearTimeout(schedule.timer);
@@ -5512,17 +6274,17 @@ var init_src4 = __esm({
         this.#memoryDreams.clear();
         await this.#stopImExtensions();
         this.#connections.clear();
+        this.#hadClientConnection = false;
         this.#started = false;
       }
       async refreshImExtensions() {
         this.#assertStarted();
         await this.#stopImExtensions();
         await this.#startEnabledImExtensions();
-        this.#scheduleIdleShutdownCheck();
       }
       connect(connection, sessionId) {
         this.#assertStarted();
-        this.#clearIdleShutdownTimer();
+        this.#hadClientConnection = true;
         connection.sessionId = sessionId;
         this.#connections.add(connection);
         if (sessionId) {
@@ -5547,7 +6309,9 @@ var init_src4 = __esm({
           });
         }
         this.#connections.delete(connection);
-        this.#scheduleIdleShutdownCheck();
+        if (this.#started && this.#hadClientConnection && this.#connections.size === 0) {
+          this.#onLastClientDisconnect?.();
+        }
       }
       releaseSessionEventBuffer(sessionId) {
         this.#events.delete(sessionId);
@@ -5575,8 +6339,6 @@ var init_src4 = __esm({
             return;
           }
           throw cause;
-        } finally {
-          this.#scheduleIdleShutdownCheck();
         }
       }
       async listDirectories(path) {
@@ -5704,6 +6466,14 @@ var init_src4 = __esm({
             this.#respond(connection, message, { runtime: await this.#handleUpsertRuntimeSettings(message) });
             break;
           }
+          case "get_observability_settings": {
+            this.#respond(connection, message, { observability: await this.#observabilitySettings(message.projectId) });
+            break;
+          }
+          case "upsert_observability_settings": {
+            this.#respond(connection, message, { observability: await this.#handleUpsertObservabilitySettings(message) });
+            break;
+          }
           case "get_extension_settings": {
             this.#respond(connection, message, { extension: await this.#extensionSettings(message.extensionId) });
             break;
@@ -5731,28 +6501,6 @@ var init_src4 = __esm({
             await this.#handleCancel(connection, message);
             break;
         }
-      }
-      #scheduleIdleShutdownCheck() {
-        this.#clearIdleShutdownTimer();
-        if (!this.#shouldIdleShutdown()) {
-          return;
-        }
-        this.#idleShutdownTimer = setTimeout(() => {
-          this.#idleShutdownTimer = void 0;
-          if (this.#shouldIdleShutdown()) {
-            this.#onIdleShutdown?.();
-          }
-        }, this.#idleShutdownMs);
-      }
-      #clearIdleShutdownTimer() {
-        if (!this.#idleShutdownTimer) {
-          return;
-        }
-        clearTimeout(this.#idleShutdownTimer);
-        this.#idleShutdownTimer = void 0;
-      }
-      #shouldIdleShutdown() {
-        return this.#started && this.#idleShutdownMs !== void 0 && this.#idleShutdownMs > 0 && this.#connections.size === 0 && this.#imExtensions.size === 0 && !this.#hasActiveWork();
       }
       #hasActiveWork() {
         for (const lane of this.#sessions.values()) {
@@ -5952,8 +6700,31 @@ var init_src4 = __esm({
           source: input.source
         });
         this.#scheduleSessionMemoryUpdate(lane, clientId);
+        void this.#syncObservabilityAfterTurn(lane).catch((cause) => {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          void this.#appendDiagnostic(sessionId, "observability_sync_failed", {
+            message: error.message,
+            stack: shortStack(error)
+          });
+        });
         input.onComplete?.(result);
         return { ...result, status: "completed" };
+      }
+      async #syncObservabilityAfterTurn(lane) {
+        const config = await this.#configForProject(lane.project.projectId);
+        const results = await syncObservationAssetTargets({
+          asset: buildObservationAsset(lane.session),
+          config,
+          stateDir: this.#scorelHomeDir
+        });
+        for (const result of results) {
+          await this.#appendDiagnostic(lane.session.header.sessionId, "observability_sync_completed", {
+            target: result.target,
+            status: result.status,
+            events: result.events,
+            reason: result.reason
+          });
+        }
       }
       #scheduleAfterUserMessageHooks(lane, clientId, userEvent) {
         const hooks = [
@@ -6706,7 +7477,7 @@ var init_src4 = __esm({
           if (event.type === "compact") {
             return `[compact] ${compactLine2(event.summary, 500)}`;
           }
-          return `[${event.message.role}] ${compactLine2(messageText(event.message), 500)}`;
+          return `[${event.message.role}] ${compactLine2(messageText2(event.message), 500)}`;
         });
       }
       async #appendChannelHarness(lane, clientId, context, parentId) {
@@ -6855,14 +7626,14 @@ var init_src4 = __esm({
             now: this.#now
           });
           if (generated?.projectMemory?.trim()) {
-            await writeFile6(paths.projectMemoryPath, normalizeMarkdownFile2(generated.projectMemory), "utf8");
+            await writeFile7(paths.projectMemoryPath, normalizeMarkdownFile2(generated.projectMemory), "utf8");
             await this.#appendDiagnostic(lane.session.header.sessionId, "project_memory_updated", {
               clientId: schedule.clientId,
               path: paths.projectMemoryPath
             });
           }
           if (memory.promoteRoot && generated?.rootMemory?.trim()) {
-            await writeFile6(paths.rootMemoryPath, normalizeMarkdownFile2(generated.rootMemory), "utf8");
+            await writeFile7(paths.rootMemoryPath, normalizeMarkdownFile2(generated.rootMemory), "utf8");
             await this.#appendDiagnostic(lane.session.header.sessionId, "root_memory_updated", {
               clientId: schedule.clientId,
               path: paths.rootMemoryPath
@@ -7394,7 +8165,7 @@ var init_src4 = __esm({
       async #discoverExtensionManifests() {
         const roots = [
           this.#builtinExtensionsDir,
-          join10(this.#scorelHomeDir, "extensions")
+          join11(this.#scorelHomeDir, "extensions")
         ];
         const manifests = /* @__PURE__ */ new Map();
         for (const root of roots) {
@@ -7408,7 +8179,7 @@ var init_src4 = __esm({
             throw cause;
           }
           for (const child of children.sort()) {
-            const manifestPath = join10(root, child, "scorel.extension.json");
+            const manifestPath = join11(root, child, "scorel.extension.json");
             try {
               const manifest = await loadExtensionManifest(manifestPath);
               manifests.set(manifest.id, manifest);
@@ -7495,8 +8266,8 @@ var init_src4 = __esm({
         return binding;
       }
       async #ensureDefaultWorkspaceProject() {
-        const workspace = join10(this.#scorelHomeDir, "workspace");
-        await mkdir6(workspace, { recursive: true });
+        const workspace = join11(this.#scorelHomeDir, "workspace");
+        await mkdir7(workspace, { recursive: true });
         return this.registerProject(workspace);
       }
       #extensionSkillRoots() {
@@ -7506,7 +8277,7 @@ var init_src4 = __esm({
       }
       async #loadImBindings() {
         try {
-          const text = await readFile11(this.#imBindingsPath(), "utf8");
+          const text = await readFile12(this.#imBindingsPath(), "utf8");
           const value = JSON.parse(text);
           for (const binding of value.bindings ?? []) {
             this.#imBindings.set(imBindingKey(binding.extensionId, binding.externalConversationId), binding);
@@ -7519,12 +8290,12 @@ var init_src4 = __esm({
       }
       async #saveImBindings() {
         const path = this.#imBindingsPath();
-        await mkdir6(dirname8(path), { recursive: true });
-        await writeFile6(path, `${JSON.stringify({ bindings: [...this.#imBindings.values()] }, null, 2)}
+        await mkdir7(dirname9(path), { recursive: true });
+        await writeFile7(path, `${JSON.stringify({ bindings: [...this.#imBindings.values()] }, null, 2)}
 `, "utf8");
       }
       #imBindingsPath() {
-        return join10(this.#scorelHomeDir, "channels", "im-bindings.json");
+        return join11(this.#scorelHomeDir, "channels", "im-bindings.json");
       }
       async #loadUserConfigProfile(options = {}) {
         try {
@@ -7543,7 +8314,7 @@ var init_src4 = __esm({
       #configWriteTarget() {
         return {
           configDir: this.#scorelHomeDir,
-          configPath: join10(this.#scorelHomeDir, "config.toml"),
+          configPath: join11(this.#scorelHomeDir, "config.toml"),
           workDir: this.#userHomeDir
         };
       }
@@ -7583,14 +8354,14 @@ var init_src4 = __esm({
         const target = this.#configWriteTarget();
         let existingConfigText;
         try {
-          existingConfigText = await readFile11(target.configPath, "utf8");
+          existingConfigText = await readFile12(target.configPath, "utf8");
         } catch (cause) {
           if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
-        await mkdir6(target.configDir, { recursive: true });
-        await writeFile6(
+        await mkdir7(target.configDir, { recursive: true });
+        await writeFile7(
           target.configPath,
           renderModelProfileConfig({
             providerId: request.providerId,
@@ -7630,14 +8401,14 @@ var init_src4 = __esm({
         const target = this.#configWriteTarget();
         let existingConfigText;
         try {
-          existingConfigText = await readFile11(target.configPath, "utf8");
+          existingConfigText = await readFile12(target.configPath, "utf8");
         } catch (cause) {
           if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
-        await mkdir6(target.configDir, { recursive: true });
-        await writeFile6(
+        await mkdir7(target.configDir, { recursive: true });
+        await writeFile7(
           target.configPath,
           renderModelProfileConfig({
             removeProviderId: request.providerId,
@@ -7677,14 +8448,14 @@ var init_src4 = __esm({
         const target = this.#configWriteTarget();
         let existingConfigText;
         try {
-          existingConfigText = await readFile11(target.configPath, "utf8");
+          existingConfigText = await readFile12(target.configPath, "utf8");
         } catch (cause) {
           if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
-        await mkdir6(target.configDir, { recursive: true });
-        await writeFile6(
+        await mkdir7(target.configDir, { recursive: true });
+        await writeFile7(
           target.configPath,
           renderMemoryConfig({
             enabled: request.enabled,
@@ -7732,14 +8503,14 @@ var init_src4 = __esm({
         const target = this.#configWriteTarget();
         let existingConfigText;
         try {
-          existingConfigText = await readFile11(target.configPath, "utf8");
+          existingConfigText = await readFile12(target.configPath, "utf8");
         } catch (cause) {
           if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
-        await mkdir6(target.configDir, { recursive: true });
-        await writeFile6(
+        await mkdir7(target.configDir, { recursive: true });
+        await writeFile7(
           target.configPath,
           renderRuntimeConfig({
             tokenSavingRtk: request.tokenSavingRtk,
@@ -7760,6 +8531,62 @@ var init_src4 = __esm({
           ...installResult.message ? { installMessage: installResult.message } : {}
         });
       }
+      async #observabilitySettings(projectId) {
+        const config = await (projectId ? this.#configProfileForProject(projectId) : this.#loadUserConfigProfile()).catch((cause) => {
+          if (isMissingConfigError(cause)) {
+            return void 0;
+          }
+          throw cause;
+        });
+        return config?.observability ?? {
+          local: true,
+          sync: {
+            enabled: false,
+            mode: "manual",
+            targets: []
+          },
+          langfuse: {
+            enabled: false
+          },
+          otel: {
+            enabled: false,
+            protocol: "otlp-http"
+          }
+        };
+      }
+      async #handleUpsertObservabilitySettings(request) {
+        const target = this.#configWriteTarget();
+        let existingConfigText;
+        try {
+          existingConfigText = await readFile12(target.configPath, "utf8");
+        } catch (cause) {
+          if (!isNodeErrorCode5(cause, "ENOENT")) {
+            throw cause;
+          }
+        }
+        await mkdir7(target.configDir, { recursive: true });
+        await writeFile7(
+          target.configPath,
+          renderObservabilityConfig({
+            local: request.local,
+            sync: request.sync,
+            langfuse: request.langfuse,
+            otel: request.otel,
+            existingConfigText
+          }),
+          "utf8"
+        );
+        await this.#appendHostDiagnostic("observability_settings_upserted", {
+          ...request.projectId ? { ignoredProjectId: request.projectId } : {},
+          scope: "device",
+          workDir: target.workDir,
+          syncEnabled: request.sync?.enabled,
+          targets: request.sync?.targets?.join(","),
+          langfuseEnabled: request.langfuse?.enabled,
+          otelEnabled: request.otel?.enabled
+        });
+        return this.#observabilitySettings();
+      }
       async #extensionSettings(extensionId) {
         const config = await this.#loadUserConfigProfile().catch((cause) => {
           if (isMissingConfigError(cause)) {
@@ -7777,17 +8604,17 @@ var init_src4 = __esm({
         };
       }
       async #handleUpsertExtensionSettings(request) {
-        const configPath = join10(this.#scorelHomeDir, "config.toml");
+        const configPath = join11(this.#scorelHomeDir, "config.toml");
         let existingConfigText;
         try {
-          existingConfigText = await readFile11(configPath, "utf8");
+          existingConfigText = await readFile12(configPath, "utf8");
         } catch (cause) {
           if (!isNodeErrorCode5(cause, "ENOENT")) {
             throw cause;
           }
         }
-        await mkdir6(this.#scorelHomeDir, { recursive: true });
-        await writeFile6(
+        await mkdir7(this.#scorelHomeDir, { recursive: true });
+        await writeFile7(
           configPath,
           renderExtensionConfig({
             extensionId: request.extensionId,
@@ -7927,18 +8754,18 @@ var init_src4 = __esm({
           sessionId,
           ...fields
         });
-        await mkdir6(this.#sessionsDir, { recursive: true });
+        await mkdir7(this.#sessionsDir, { recursive: true });
         await appendFile3(sessionLogFilePath(this.#sessionsDir, sessionId), `${line}
 `, "utf8");
       }
       async #appendHostDiagnostic(event, fields = {}) {
         const line = formatDiagnosticLine({ ts: this.#now(), level: "info", event, ...fields });
-        await mkdir6(this.#sessionsDir, { recursive: true });
-        await appendFile3(join10(this.#sessionsDir, "host.log"), `${line}
+        await mkdir7(this.#sessionsDir, { recursive: true });
+        await appendFile3(join11(this.#sessionsDir, "host.log"), `${line}
 `, "utf8");
       }
       #runtimeStatsPath() {
-        return join10(this.#scorelHomeDir, "runtime-stats.json");
+        return join11(this.#scorelHomeDir, "runtime-stats.json");
       }
       async #recordRtkSavings(input) {
         const updateTask = this.#runtimeStatsQueue.then(async () => {
@@ -8040,7 +8867,7 @@ var init_src4 = __esm({
     });
     inputText = (message) => message.content.flatMap((block) => block.type === "text" && block.visibility !== "model" ? [block.text] : []).join("\n").trim();
     assistantText = (message) => message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n").trim();
-    messageText = (message) => {
+    messageText2 = (message) => {
       const text = message.content.map((block) => {
         if (block.type === "text") {
           return block.text;
@@ -8061,7 +8888,7 @@ var init_src4 = __esm({
       }).filter(Boolean).join("\n").trim();
       return text || "(empty)";
     };
-    estimateScorelMessagesTokens = (messages) => estimateTextTokens(messages.map(messageText).join("\n"));
+    estimateScorelMessagesTokens = (messages) => estimateTextTokens(messages.map(messageText2).join("\n"));
     estimateTextTokens = (value) => Math.ceil(value.length / 3);
     compactLine2 = (value, maxChars) => value.replace(/\s+/g, " ").trim().slice(0, maxChars);
     parseSessionMemoryJson = (raw) => {
@@ -8137,7 +8964,7 @@ var init_src4 = __esm({
     });
     readRuntimeStats = async (path) => {
       try {
-        return parseRuntimeStats(JSON.parse(await readFile11(path, "utf8")));
+        return parseRuntimeStats(JSON.parse(await readFile12(path, "utf8")));
       } catch (cause) {
         if (isNodeErrorCode5(cause, "ENOENT")) {
           return emptyRuntimeStats();
@@ -8146,10 +8973,10 @@ var init_src4 = __esm({
       }
     };
     writeRuntimeStats = async (path, stats) => {
-      await mkdir6(dirname8(path), { recursive: true });
-      const tempPath = join10(dirname8(path), `.runtime-stats-${process.pid}-${Date.now()}.tmp`);
+      await mkdir7(dirname9(path), { recursive: true });
+      const tempPath = join11(dirname9(path), `.runtime-stats-${process.pid}-${Date.now()}.tmp`);
       try {
-        await writeFile6(tempPath, `${JSON.stringify(stats, null, 2)}
+        await writeFile7(tempPath, `${JSON.stringify(stats, null, 2)}
 `, "utf8");
         await rename3(tempPath, path);
       } catch (cause) {
@@ -8164,8 +8991,8 @@ var init_src4 = __esm({
       return {
         version: 1,
         rtk: {
-          outputTokens: nonNegativeInteger3(value.rtk.outputTokens),
-          savedTokens: nonNegativeInteger3(value.rtk.savedTokens),
+          outputTokens: nonNegativeInteger4(value.rtk.outputTokens),
+          savedTokens: nonNegativeInteger4(value.rtk.savedTokens),
           byProject: parseRuntimeStatsBuckets(value.rtk.byProject),
           bySession: parseRuntimeStatsBuckets(value.rtk.bySession)
         }
@@ -8179,8 +9006,8 @@ var init_src4 = __esm({
         Object.entries(value).map(([key, bucket]) => [
           key,
           isRecord9(bucket) ? {
-            outputTokens: nonNegativeInteger3(bucket.outputTokens),
-            savedTokens: nonNegativeInteger3(bucket.savedTokens)
+            outputTokens: nonNegativeInteger4(bucket.outputTokens),
+            savedTokens: nonNegativeInteger4(bucket.savedTokens)
           } : { outputTokens: 0, savedTokens: 0 }
         ])
       );
@@ -8203,11 +9030,11 @@ var init_src4 = __esm({
       if (!isRecord9(rtk) || rtk.applied !== true) {
         return void 0;
       }
-      const outputTokens = nonNegativeInteger3(rtk.estimatedOutputTokens);
-      const savedTokens = nonNegativeInteger3(rtk.estimatedSavedTokens);
+      const outputTokens = nonNegativeInteger4(rtk.estimatedOutputTokens);
+      const savedTokens = nonNegativeInteger4(rtk.estimatedSavedTokens);
       return outputTokens > 0 || savedTokens > 0 ? { outputTokens, savedTokens } : void 0;
     };
-    nonNegativeInteger3 = (value) => {
+    nonNegativeInteger4 = (value) => {
       if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
         return 0;
       }
@@ -8282,24 +9109,24 @@ var init_src4 = __esm({
       if (typeof __dirname === "string") {
         return __dirname;
       }
-      return process.argv[1] ? dirname8(process.argv[1]) : process.cwd();
+      return process.argv[1] ? dirname9(process.argv[1]) : process.cwd();
     };
     findBuiltinExtensionsDir = (starts) => {
       for (const start of starts) {
         let current = resolve5(start);
         while (true) {
-          const candidate = join10(current, "extensions", "builtin");
+          const candidate = join11(current, "extensions", "builtin");
           if (existsSync3(candidate)) {
             return candidate;
           }
-          const next = dirname8(current);
+          const next = dirname9(current);
           if (next === current) {
             break;
           }
           current = next;
         }
       }
-      return join10(starts[0] ?? process.cwd(), "extensions", "builtin");
+      return join11(starts[0] ?? process.cwd(), "extensions", "builtin");
     };
     isSteerMessage = (text) => /^\/(?:steer|interrupt)\b/i.test(text.trim());
     stripImCommandPrefix = (text) => text.trim().replace(/^\/(?:steer|interrupt)\s*/i, "").trim() || text;
@@ -8339,7 +9166,7 @@ var init_src4 = __esm({
 
 // apps/cli/src/relay-cli.ts
 import { homedir as homedir5 } from "node:os";
-import { join as join11 } from "node:path";
+import { join as join12 } from "node:path";
 var DEFAULT_SCOREL_RELAY_URL, DEFAULT_SCOREL_WEBUI_URL, defaultStateDir, runCliPair, resolveDefaultRelayUrl, parsePairFlags, requireValue, writePairUsage;
 var init_relay_cli = __esm({
   "apps/cli/src/relay-cli.ts"() {
@@ -8347,7 +9174,7 @@ var init_relay_cli = __esm({
     init_src4();
     DEFAULT_SCOREL_RELAY_URL = "wss://scorel-relay.chanler.dev";
     DEFAULT_SCOREL_WEBUI_URL = "https://scorel.chanler.dev";
-    defaultStateDir = () => join11(homedir5(), ".scorel");
+    defaultStateDir = () => join12(homedir5(), ".scorel");
     runCliPair = async (argv, options) => {
       let flags;
       try {
@@ -8410,8 +9237,8 @@ var init_relay_cli = __esm({
 
 // apps/cli/src/update-cli.ts
 import { execFile as execFileCallback } from "node:child_process";
-import { readFile as readFile12 } from "node:fs/promises";
-import { dirname as dirname9, join as join12 } from "node:path";
+import { readFile as readFile13 } from "node:fs/promises";
+import { dirname as dirname10, join as join13 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify as promisify3 } from "node:util";
 var SCOREL_PACKAGE_NAME, AUTO_UPDATE_INTERVAL_MS, ACTIVE_WORK_STALE_MS, execFileAsync3, compareSemver, shouldRunAutoUpdate, createNpmPackageUpdater, readInstalledScorelVersion, runCliUpdate, writeUpdateUsage, parseSemver;
@@ -8456,14 +9283,14 @@ var init_update_cli = __esm({
       };
     };
     readInstalledScorelVersion = async () => {
-      const here = dirname9(fileURLToPath(import.meta.url));
+      const here = dirname10(fileURLToPath(import.meta.url));
       for (const candidate of [
-        join12(here, "..", "package.json"),
-        join12(here, "..", "..", "package.json"),
-        join12(process.cwd(), "package.json")
+        join13(here, "..", "package.json"),
+        join13(here, "..", "..", "package.json"),
+        join13(process.cwd(), "package.json")
       ]) {
         try {
-          const parsed = JSON.parse(await readFile12(candidate, "utf8"));
+          const parsed = JSON.parse(await readFile13(candidate, "utf8"));
           if (typeof parsed.version === "string" && (parsed.name === SCOREL_PACKAGE_NAME || parsed.name === "@scorel/app-cli")) {
             return parsed.version;
           }
@@ -8516,9 +9343,9 @@ var init_update_cli = __esm({
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { spawn } from "node:child_process";
 import { homedir as homedir6 } from "node:os";
-import { dirname as dirname10, join as join13 } from "node:path";
+import { dirname as dirname11, join as join14 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, START_READY_TIMEOUT_MS, AUTO_STARTED_IDLE_SHUTDOWN_MS, FOREGROUND_IDLE_SHUTDOWN_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runStartCommand, runServeCommand, startAutoUpdateLoop, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep, waitForDaemonReady, detachBackgroundDaemon, nodeEntrypointArgs, writeDaemonUsage;
+var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, START_READY_TIMEOUT_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runStartCommand, runServeCommand, startAutoUpdateLoop, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep, waitForDaemonReady, detachBackgroundDaemon, nodeEntrypointArgs, writeDaemonUsage;
 var init_daemon_cli = __esm({
   "apps/cli/src/daemon-cli.ts"() {
     "use strict";
@@ -8530,9 +9357,7 @@ var init_daemon_cli = __esm({
     STOP_POLL_INTERVAL_MS = 200;
     STOP_GRACE_MS = 5e3;
     START_READY_TIMEOUT_MS = 3e4;
-    AUTO_STARTED_IDLE_SHUTDOWN_MS = 15 * 60 * 1e3;
-    FOREGROUND_IDLE_SHUTDOWN_MS = 0;
-    defaultStateDir2 = () => join13(homedir6(), ".scorel");
+    defaultStateDir2 = () => join14(homedir6(), ".scorel");
     isLoopbackHost = (host) => host === "127.0.0.1" || host === "::1" || host === "localhost";
     formatTimestamp = (epochMs) => new Date(epochMs).toISOString();
     runCliDaemon = async (argv, options) => {
@@ -8561,7 +9386,7 @@ var init_daemon_cli = __esm({
     runStartCommand = async (argv, options) => {
       let flags;
       try {
-        flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, FOREGROUND_IDLE_SHUTDOWN_MS);
+        flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, "user_started");
       } catch (cause) {
         options.error.write(`scorel daemon start error: ${cause.message}
 `);
@@ -8585,13 +9410,13 @@ var init_daemon_cli = __esm({
         String(flags.port),
         "--cwd",
         flags.cwd,
-        "--idle-timeout-ms",
-        String(flags.idleShutdownMs),
+        "--lifetime",
+        flags.launchIntent,
         ...flags.token ? ["--token", flags.token] : [],
         ...flags.relayUrl ? ["--relay", flags.relayUrl] : ["--no-relay"],
         ...flags.replace ? ["--replace"] : []
       ], {
-        cwd: dirname10(cliEntrypoint),
+        cwd: dirname11(cliEntrypoint),
         env: { ...process.env, ...options.env ?? {} },
         detached: true,
         stdio: ["ignore", "pipe", "pipe"]
@@ -8618,7 +9443,7 @@ var init_daemon_cli = __esm({
     runServeCommand = async (argv, options) => {
       let flags;
       try {
-        flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, FOREGROUND_IDLE_SHUTDOWN_MS);
+        flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, "user_started");
       } catch (cause) {
         options.error.write(`scorel daemon serve error: ${cause.message}
 `);
@@ -8654,11 +9479,10 @@ Use --replace to stop it and start a new one.
       const sessionsDir = options.sessionsDir ?? scorelSessionsDir(homedir6());
       const daemon = new ScorelHost({
         sessionsDir,
-        projectsPath: join13(options.stateDir, "projects.json"),
+        projectsPath: join14(options.stateDir, "projects.json"),
         deviceId: identity.deviceId,
         deviceDisplayName: identity.displayName,
-        idleShutdownMs: flags.idleShutdownMs,
-        onIdleShutdown: () => requestStop("idle"),
+        ...flags.launchIntent === "attached" ? { onLastClientDisconnect: () => requestStop("last-client-disconnected") } : {},
         scorelHomeDir: options.stateDir,
         loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir, ...configScope }),
         loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir, ...configScope }),
@@ -8695,7 +9519,8 @@ Use --replace to stop it and start a new one.
         token,
         pid: process.pid,
         startedAt,
-        stoppedAt: null
+        stoppedAt: null,
+        launchIntent: flags.launchIntent
       };
       await createLocalDaemonState({ stateDir: options.stateDir, ...persistedState });
       options.output.write(`scorel host serving url=${server.url}
@@ -8911,19 +9736,19 @@ Use --replace to stop it and start a new one.
     formatStatusLine = (state, liveness, showToken) => {
       if (liveness === "running") {
         const tokenSuffix = isLoopbackHost(state.host) || showToken ? ` token=${state.token}` : "";
-        return `running url=${state.wsUrl} pid=${state.pid}${tokenSuffix}`;
+        return `running url=${state.wsUrl} pid=${state.pid} lifetime=${state.launchIntent}${tokenSuffix}`;
       }
       const stoppedAt = state.stoppedAt !== null ? formatTimestamp(state.stoppedAt) : "unknown";
       return `stopped url=${state.wsUrl} last-pid=${state.pid} stoppedAt=${stoppedAt} liveness=${liveness}`;
     };
-    parseServeFlags = (argv, defaultCwd, env, defaultIdleShutdownMs) => {
+    parseServeFlags = (argv, defaultCwd, env, defaultLaunchIntent) => {
       let host = DEFAULT_HOST;
       let port = DEFAULT_PORT;
       let cwd = defaultCwd;
       let token;
       let relayUrl = resolveDefaultRelayUrl(env);
       let replace = false;
-      let idleShutdownMs = defaultIdleShutdownMs;
+      let launchIntent = defaultLaunchIntent;
       for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === "--host") {
@@ -8967,17 +9792,18 @@ Use --replace to stop it and start a new one.
           replace = true;
           continue;
         }
-        if (arg === "--idle-timeout-ms") {
-          idleShutdownMs = Number(requireValue2(argv, index, "--idle-timeout-ms"));
-          if (!Number.isInteger(idleShutdownMs) || idleShutdownMs < 0) {
-            throw new Error("--idle-timeout-ms must be a non-negative integer");
+        if (arg === "--lifetime") {
+          const value = requireValue2(argv, index, "--lifetime");
+          if (value !== "attached" && value !== "user_started") {
+            throw new Error("--lifetime must be attached or user_started");
           }
+          launchIntent = value;
           index += 1;
           continue;
         }
         throw new Error(`Unknown serve option: ${arg}`);
       }
-      return { host, port, token, cwd, relayUrl, replace, idleShutdownMs };
+      return { host, port, token, cwd, relayUrl, replace, launchIntent };
     };
     parseStatusFlags = (argv) => {
       let showToken = false;
@@ -9057,9 +9883,9 @@ Use --replace to stop it and start a new one.
       output.write(
         [
           "Usage: scorel host serve [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
-          "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
+          "                        [--relay <relay-url> | --no-relay] [--replace]",
           "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
-          "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
+          "                        [--relay <relay-url> | --no-relay] [--replace]",
           "       scorel host status [--show-token]",
           "       scorel host stop",
           "       scorel host reset",
@@ -9260,8 +10086,8 @@ var init_routing = __esm({
 });
 
 // apps/relay/src/store.ts
-import { mkdir as mkdir7, readFile as readFile13, writeFile as writeFile7 } from "node:fs/promises";
-import { join as join14 } from "node:path";
+import { mkdir as mkdir8, readFile as readFile14, writeFile as writeFile8 } from "node:fs/promises";
+import { join as join15 } from "node:path";
 var FileRelayStore, emptyStoreFile;
 var init_store = __esm({
   "apps/relay/src/store.ts"() {
@@ -9271,7 +10097,7 @@ var init_store = __esm({
       #now;
       #queue = Promise.resolve();
       constructor(options) {
-        this.#filePath = join14(options.dataDir, "relay-store.json");
+        this.#filePath = join15(options.dataDir, "relay-store.json");
         this.#now = options.now ?? Date.now;
       }
       async upsertDevice(record) {
@@ -9314,15 +10140,15 @@ var init_store = __esm({
         this.#queue = this.#queue.then(async () => {
           const file = await this.#read();
           mutator(file);
-          await mkdir7(join14(this.#filePath, ".."), { recursive: true });
-          await writeFile7(this.#filePath, `${JSON.stringify(file, null, 2)}
+          await mkdir8(join15(this.#filePath, ".."), { recursive: true });
+          await writeFile8(this.#filePath, `${JSON.stringify(file, null, 2)}
 `);
         });
         await this.#queue;
       }
       async #read() {
         try {
-          const raw = JSON.parse(await readFile13(this.#filePath, "utf8"));
+          const raw = JSON.parse(await readFile14(this.#filePath, "utf8"));
           if (raw.version !== 1 || !Array.isArray(raw.devices) || !Array.isArray(raw.clients) || !Array.isArray(raw.bindings)) {
             return emptyStoreFile();
           }
@@ -9575,7 +10401,7 @@ var init_library = __esm({
 
 // apps/cli/src/relay-server-cli.ts
 import { homedir as homedir7 } from "node:os";
-import { join as join15 } from "node:path";
+import { join as join16 } from "node:path";
 var DEFAULT_HOST2, DEFAULT_PORT2, runCliRelay, runRelayServe, parseRelayServeFlags, waitForStop, requireValue3, writeRelayUsage;
 var init_relay_server_cli = __esm({
   "apps/cli/src/relay-server-cli.ts"() {
@@ -9627,7 +10453,7 @@ var init_relay_server_cli = __esm({
     parseRelayServeFlags = (argv) => {
       let host = DEFAULT_HOST2;
       let port = DEFAULT_PORT2;
-      let dataDir = join15(homedir7(), ".scorel", "relay");
+      let dataDir = join16(homedir7(), ".scorel", "relay");
       for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === "--host") {
@@ -9685,18 +10511,17 @@ var init_relay_server_cli = __esm({
 // apps/cli/src/up-cli.ts
 import { spawn as spawn2 } from "node:child_process";
 import { homedir as homedir8 } from "node:os";
-import { dirname as dirname11, join as join16 } from "node:path";
+import { dirname as dirname12, join as join17 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var DEFAULT_DAEMON_PORT, DEFAULT_WEBUI_PORT, DEFAULT_DAEMON_READY_TIMEOUT_MS, defaultStateDir3, defaultAttachSigint, runCliUp, parseUpFlags, requireValue4, waitForDaemonReady2, pipeWithPrefix, detachBackgroundDaemon2, nodeEntrypointArgs2, pipeStreamLines, once;
 var init_up_cli = __esm({
   "apps/cli/src/up-cli.ts"() {
     "use strict";
     init_src4();
-    init_daemon_cli();
     DEFAULT_DAEMON_PORT = 7777;
     DEFAULT_WEBUI_PORT = 3e3;
     DEFAULT_DAEMON_READY_TIMEOUT_MS = 3e4;
-    defaultStateDir3 = () => join16(homedir8(), ".scorel");
+    defaultStateDir3 = () => join17(homedir8(), ".scorel");
     defaultAttachSigint = (listener) => {
       process.on("SIGINT", listener);
       return () => process.off("SIGINT", listener);
@@ -9730,12 +10555,12 @@ var init_up_cli = __esm({
           String(flags.daemonPort),
           "--cwd",
           flags.cwd,
-          "--idle-timeout-ms",
-          String(AUTO_STARTED_IDLE_SHUTDOWN_MS),
+          "--lifetime",
+          "attached",
           "--no-relay"
         ];
         daemonChild = spawnFn(process.execPath, daemonArgs, {
-          cwd: dirname11(cliEntrypoint),
+          cwd: dirname12(cliEntrypoint),
           env: { ...process.env },
           detached: true,
           stdio: ["ignore", "pipe", "pipe"]
@@ -9765,7 +10590,7 @@ var init_up_cli = __esm({
         String(flags.webuiPort)
       ];
       const webuiChild = spawnFn(process.execPath, webuiArgs, {
-        cwd: dirname11(cliEntrypoint),
+        cwd: dirname12(cliEntrypoint),
         env: { ...process.env },
         stdio: ["ignore", "pipe", "pipe"]
       });
@@ -9930,7 +10755,7 @@ var init_up_cli = __esm({
 // apps/cli/src/webui-cli.ts
 import { spawn as spawn3 } from "node:child_process";
 import { existsSync as existsSync4 } from "node:fs";
-import { dirname as dirname12, resolve as resolve6 } from "node:path";
+import { dirname as dirname13, resolve as resolve6 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 var DEFAULT_PORT3, DEFAULT_HOST3, runCliWebUi, findWebuiAppDir, buildWebUiSpawnPlan, parseWebUiFlags, requireValue5, waitForChildExit;
 var init_webui_cli = __esm({
@@ -9962,7 +10787,7 @@ var init_webui_cli = __esm({
       return await waitForChildExit(child, options);
     };
     findWebuiAppDir = () => {
-      let cursor = dirname12(fileURLToPath4(import.meta.url));
+      let cursor = dirname13(fileURLToPath4(import.meta.url));
       for (let depth = 0; depth < 8; depth += 1) {
         const candidate = resolve6(cursor, "apps/webui/package.json");
         if (existsSync4(candidate)) {
@@ -10050,13 +10875,13 @@ __export(index_exports, {
   runChat: () => runChat,
   runCli: () => runCli
 });
-import { createHash as createHash4 } from "node:crypto";
-import { appendFile as appendFile4, mkdir as mkdir8, readFile as readFile14, realpath as realpath3, readdir as readdir7, writeFile as writeFile8 } from "node:fs/promises";
+import { createHash as createHash5 } from "node:crypto";
+import { appendFile as appendFile4, mkdir as mkdir9, readFile as readFile15, realpath as realpath3, readdir as readdir7, writeFile as writeFile9 } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { homedir as homedir9 } from "node:os";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
-import { basename as basename4, dirname as dirname13, join as join17 } from "node:path";
-var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, runHeadless, renderRunEvent, renderRunFinal, writeJsonLine, RunTimeoutError, withRunTimeout, makeRunSummary, runErrorFromEvents, writeRunSummary, writeRunReports, runReportPaths, runMetadata, runTrajectory, runReportingModel, readRunPrompt, resolveRunConfig, stripTrailingSlashes2, createSigintHandler, loadOrCreateSession, parseChatOptions, parseRunOptions, parseRunOutputFormat, parsePositiveInteger, parseModelSelection, parseRunProviderApi, requireValue6, promptIfInteractive, writeUsage, writeRunUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
+import { basename as basename4, dirname as dirname14, join as join18 } from "node:path";
+var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, runHeadless, renderRunEvent, renderRunFinal, writeJsonLine, RunTimeoutError, withRunTimeout, makeRunSummary, runErrorFromEvents, writeRunSummary, writeRunReports, runReportPaths, runMetadata, runTrajectory, runReportingModel, readRunPrompt, resolveRunConfig, stripTrailingSlashes3, runObserve, writeObservePayload, loadObserveConfig, createSigintHandler, loadOrCreateSession, parseChatOptions, parseRunOptions, parseRunOutputFormat, parsePositiveInteger, parseModelSelection, parseRunProviderApi, parseObserveOptions, parseObserveTarget, requireValue6, promptIfInteractive, writeUsage, writeRunUsage, writeObserveUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
 var init_index = __esm({
   async "apps/cli/src/index.ts"() {
     "use strict";
@@ -10074,7 +10899,7 @@ var init_index = __esm({
     cliClientDependency = clientPackageName;
     cliDaemonDependency = daemonPackageName;
     defaultSessionsDir = () => scorelSessionsDir(homedir9());
-    defaultStateDir4 = () => join17(homedir9(), ".scorel");
+    defaultStateDir4 = () => join18(homedir9(), ".scorel");
     runCli = async (argv, io = { input: process.stdin, output: process.stdout, error: process.stderr }, runOptions = {}) => {
       const [command, ...rest] = argv;
       if (command === "--version" || command === "-v" || command === "version") {
@@ -10102,6 +10927,19 @@ var init_index = __esm({
           io.error.write(`scorel run error: ${cause instanceof Error ? cause.message : String(cause)}
 `);
           return 2;
+        }
+      }
+      if (command === "observe") {
+        if (rest.includes("--help") || rest.includes("-h")) {
+          writeObserveUsage(io.output);
+          return 0;
+        }
+        try {
+          return runObserve(parseObserveOptions(rest, runOptions), io);
+        } catch (cause) {
+          io.error.write(`scorel observe error: ${cause instanceof Error ? cause.message : String(cause)}
+`);
+          return 1;
         }
       }
       if (command === "daemon") {
@@ -10230,10 +11068,10 @@ var init_index = __esm({
       }
     };
     runLogs = async (options, io) => {
-      const filePath = options.attach ? await findAttachDiagnosticsFilePath(io.stateDir, options.sessionId, options.remoteUrl) : join17(io.sessionsDir, `${options.sessionId}.log`);
+      const filePath = options.attach ? await findAttachDiagnosticsFilePath(io.stateDir, options.sessionId, options.remoteUrl) : join18(io.sessionsDir, `${options.sessionId}.log`);
       let content;
       try {
-        content = await readFile14(filePath, "utf8");
+        content = await readFile15(filePath, "utf8");
       } catch (cause) {
         io.error.write(`scorel logs error: ${cause instanceof Error ? cause.message : String(cause)}
 `);
@@ -10386,32 +11224,32 @@ var init_index = __esm({
       };
     };
     attachCacheFilePath = (stateDir, scope, sessionId) => {
-      const scopeKey = createHash4("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
-      return join17(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
+      const scopeKey = createHash5("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
+      return join18(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
     };
     attachDiagnosticsFilePath = (stateDir, scope, sessionId) => {
-      const scopeKey = createHash4("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
-      return join17(stateDir, "attach-cache", scopeKey, `${sessionId}.log`);
+      const scopeKey = createHash5("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
+      return join18(stateDir, "attach-cache", scopeKey, `${sessionId}.log`);
     };
     findAttachDiagnosticsFilePath = async (stateDir, sessionId, _remoteUrl) => {
-      const root = join17(stateDir, "attach-cache");
+      const root = join18(stateDir, "attach-cache");
       const scopes = await readdir7(root).catch(() => []);
       for (const scope of scopes) {
-        const candidate = join17(root, scope, `${sessionId}.log`);
+        const candidate = join18(root, scope, `${sessionId}.log`);
         try {
-          await readFile14(candidate, "utf8");
+          await readFile15(candidate, "utf8");
           return candidate;
         } catch {
           continue;
         }
       }
-      return join17(root, "__missing__", `${sessionId}.log`);
+      return join18(root, "__missing__", `${sessionId}.log`);
     };
     stateDirFromSessionsDir = (sessionsDir) => {
       if (!sessionsDir) {
         return defaultStateDir4();
       }
-      return basename4(sessionsDir) === "sessions" ? dirname13(sessionsDir) : sessionsDir;
+      return basename4(sessionsDir) === "sessions" ? dirname14(sessionsDir) : sessionsDir;
     };
     AttachDiagnostics = class {
       #stateDir;
@@ -10463,14 +11301,14 @@ var init_index = __esm({
         }
         const filePath = attachDiagnosticsFilePath(this.#stateDir, this.#scope, this.#sessionId);
         this.#writes.push(
-          mkdir8(dirname13(filePath), { recursive: true }).then(() => appendFile4(filePath, `${line}
+          mkdir9(dirname14(filePath), { recursive: true }).then(() => appendFile4(filePath, `${line}
 `, "utf8"))
         );
       }
     };
     readAttachCache = async (stateDir, scope, sessionId) => {
       try {
-        const raw = JSON.parse(await readFile14(attachCacheFilePath(stateDir, scope, sessionId), "utf8"));
+        const raw = JSON.parse(await readFile15(attachCacheFilePath(stateDir, scope, sessionId), "utf8"));
         if (raw.version !== 1 || raw.sessionId !== String(sessionId) || raw.scope.kind !== scope.kind || raw.scope.locator !== scope.locator || !Array.isArray(raw.events)) {
           return emptyAttachCacheSnapshot();
         }
@@ -10493,8 +11331,8 @@ var init_index = __esm({
       const filePath = attachCacheFilePath(stateDir, scope, sessionId);
       const uniqueEvents = mergePersistentEvents(snapshot.events);
       const transients = removeCompletedTransients(snapshot.transients, uniqueEvents);
-      await mkdir8(dirname13(filePath), { recursive: true });
-      await writeFile8(
+      await mkdir9(dirname14(filePath), { recursive: true });
+      await writeFile9(
         filePath,
         `${JSON.stringify({ version: 1, scope, sessionId: String(sessionId), events: uniqueEvents, transients }, null, 2)}
 `
@@ -10635,7 +11473,7 @@ var init_index = __esm({
       const loadProjectConfigProfile = async (project2) => options.config ?? await loadScorelConfigProfile({ cwd: project2.workDir, ...configScope });
       const daemon = new ScorelHost({
         sessionsDir: options.sessionsDir,
-        projectsPath: join17(options.stateDir, "projects.json"),
+        projectsPath: join18(options.stateDir, "projects.json"),
         deviceId: asDeviceId("device_local"),
         scorelHomeDir: options.stateDir,
         loadConfig: async ({ project: project2 }) => loadProjectConfig(project2),
@@ -10726,7 +11564,7 @@ var init_index = __esm({
       const loadProjectConfigProfile = async (project) => runConfig ?? options.config ?? await loadScorelConfigProfile({ cwd: project.workDir, ...configScope });
       const daemon = new ScorelHost({
         sessionsDir: options.sessionsDir,
-        projectsPath: join17(options.stateDir, "projects.json"),
+        projectsPath: join18(options.stateDir, "projects.json"),
         deviceId: asDeviceId("device_local"),
         scorelHomeDir: options.stateDir,
         loadConfig: async ({ project }) => loadProjectConfig(project),
@@ -10878,7 +11716,7 @@ var init_index = __esm({
         cwd: input.options.cwd,
         stateDir: input.options.stateDir,
         sessionsDir: input.options.sessionsDir,
-        sessionJsonl: join17(input.options.sessionsDir, `${input.options.sessionId}.jsonl`),
+        sessionJsonl: join18(input.options.sessionsDir, `${input.options.sessionId}.jsonl`),
         outputFormat: input.options.outputFormat,
         elapsedMs: Date.now() - input.startedAt,
         exitReason: input.exitReason,
@@ -10914,35 +11752,35 @@ var init_index = __esm({
       if (!path) {
         return;
       }
-      await mkdir8(dirname13(path), { recursive: true });
-      await writeFile8(path, `${JSON.stringify(summary, null, 2)}
+      await mkdir9(dirname14(path), { recursive: true });
+      await writeFile9(path, `${JSON.stringify(summary, null, 2)}
 `);
     };
     writeRunReports = async (reportDir, summary) => {
       if (!reportDir) {
         return;
       }
-      await mkdir8(reportDir, { recursive: true });
-      await writeFile8(join17(reportDir, "scorel-summary.json"), `${JSON.stringify(summary, null, 2)}
+      await mkdir9(reportDir, { recursive: true });
+      await writeFile9(join18(reportDir, "scorel-summary.json"), `${JSON.stringify(summary, null, 2)}
 `);
-      await writeFile8(join17(reportDir, "scorel-events.jsonl"), summary.events?.map((event) => JSON.stringify(event)).join("\n").concat("\n") ?? "");
-      await writeFile8(join17(reportDir, "scorel-metadata.json"), `${JSON.stringify(runMetadata(summary), null, 2)}
+      await writeFile9(join18(reportDir, "scorel-events.jsonl"), summary.events?.map((event) => JSON.stringify(event)).join("\n").concat("\n") ?? "");
+      await writeFile9(join18(reportDir, "scorel-metadata.json"), `${JSON.stringify(runMetadata(summary), null, 2)}
 `);
-      await writeFile8(join17(reportDir, "scorel-trajectory.json"), `${JSON.stringify(runTrajectory(summary), null, 2)}
+      await writeFile9(join18(reportDir, "scorel-trajectory.json"), `${JSON.stringify(runTrajectory(summary), null, 2)}
 `);
     };
     runReportPaths = (options) => {
       const reports = {
-        sessionJsonl: join17(options.sessionsDir, `${options.sessionId}.jsonl`),
+        sessionJsonl: join18(options.sessionsDir, `${options.sessionId}.jsonl`),
         sessionSummary: sessionObservationSummaryFilePath(options.sessionsDir, options.sessionId),
         diagnosticsLog: sessionLogFilePath(options.sessionsDir, options.sessionId),
         sessionFilesDir: sessionArtifactsDirPath(options.sessionsDir, options.sessionId)
       };
       if (options.reportDir) {
-        reports.summary = join17(options.reportDir, "scorel-summary.json");
-        reports.events = join17(options.reportDir, "scorel-events.jsonl");
-        reports.trajectory = join17(options.reportDir, "scorel-trajectory.json");
-        reports.metadata = join17(options.reportDir, "scorel-metadata.json");
+        reports.summary = join18(options.reportDir, "scorel-summary.json");
+        reports.events = join18(options.reportDir, "scorel-events.jsonl");
+        reports.trajectory = join18(options.reportDir, "scorel-trajectory.json");
+        reports.metadata = join18(options.reportDir, "scorel-metadata.json");
       }
       return reports;
     };
@@ -10986,7 +11824,7 @@ var init_index = __esm({
     };
     readRunPrompt = async (options, io) => {
       if (options.promptSource === "prompt-file") {
-        return (await readFile14(options.promptFile, "utf8")).trim();
+        return (await readFile15(options.promptFile, "utf8")).trim();
       }
       if (options.promptSource === "stdin") {
         const chunks = [];
@@ -11020,7 +11858,7 @@ var init_index = __esm({
             type: "custom",
             api: override.api ?? "openai-completions",
             provider: override.provider ?? "openai",
-            baseUrl: stripTrailingSlashes2(override.baseUrl),
+            baseUrl: stripTrailingSlashes3(override.baseUrl),
             apiKey: override.apiKey
           }
         },
@@ -11059,7 +11897,83 @@ var init_index = __esm({
         extensions: {}
       };
     };
-    stripTrailingSlashes2 = (value) => value.replace(/\/+$/, "");
+    stripTrailingSlashes3 = (value) => value.replace(/\/+$/, "");
+    runObserve = async (options, io) => {
+      const session = await loadSession({ sessionsDir: options.sessionsDir, sessionId: options.sessionId });
+      const asset = buildObservationAsset(session);
+      if (options.target === "langfuse") {
+        const payload2 = buildLangfuseSyncPayload(asset);
+        await writeObservePayload(options.outPath, payload2);
+        const config2 = options.config ?? await loadObserveConfig(options);
+        const langfuse = config2?.observability?.langfuse;
+        let uploaded2 = false;
+        if (langfuse?.enabled && langfuse.publicKey && langfuse.secretKey) {
+          await uploadLangfusePayload({
+            host: langfuse.host ?? "https://cloud.langfuse.com",
+            publicKey: langfuse.publicKey,
+            secretKey: langfuse.secretKey,
+            payload: payload2
+          });
+          uploaded2 = true;
+        } else if (!options.outPath) {
+          throw new Error("Langfuse credentials are not configured; set observability.langfuse publicKey/secretKey or pass --out to inspect the payload");
+        }
+        if (uploaded2) {
+          await writeObservabilitySyncState(options.stateDir, "langfuse", asset.assetId, {
+            target: "langfuse",
+            assetId: asset.assetId,
+            lastExportedSeq: asset.currentSeq,
+            lastRevision: asset.revision,
+            updatedAt: Date.now()
+          });
+        }
+        io.output.write(`target=langfuse asset=${asset.assetId} revision=${asset.revision} events=${payload2.batch.length} uploaded=${uploaded2}
+`);
+        return 0;
+      }
+      const state = await readObservabilitySyncState(options.stateDir, "otel", asset.assetId);
+      const payload = buildOtelDeltaPayload(asset, state);
+      await writeObservePayload(options.outPath, payload);
+      const config = options.config ?? await loadObserveConfig(options);
+      const otel = config?.observability?.otel;
+      const hasOtelEndpoint = Boolean(otel?.enabled && otel.endpoint);
+      let uploaded = false;
+      if (hasOtelEndpoint && payload.events.length > 0 && otel?.endpoint) {
+        await uploadOtelPayload({ endpoint: otel.endpoint, payload: payload.otlp });
+        uploaded = true;
+      } else if (!hasOtelEndpoint && !options.outPath) {
+        throw new Error("OpenTelemetry endpoint is not configured; set observability.otel.endpoint or pass --out to inspect the payload");
+      }
+      if (hasOtelEndpoint) {
+        await writeObservabilitySyncState(options.stateDir, "otel", asset.assetId, payload.nextState);
+      }
+      io.output.write(`target=otel asset=${asset.assetId} fromSeq=${payload.fromSeq} toSeq=${payload.toSeq} events=${payload.events.length} uploaded=${uploaded}
+`);
+      return 0;
+    };
+    writeObservePayload = async (path, payload) => {
+      const text = `${JSON.stringify(payload, null, 2)}
+`;
+      if (!path) {
+        return;
+      }
+      await mkdir9(dirname14(path), { recursive: true });
+      await writeFile9(path, text, "utf8");
+    };
+    loadObserveConfig = async (options) => {
+      try {
+        return await loadScorelConfig({ cwd: process.cwd(), scorelHomeDir: options.stateDir });
+      } catch (cause) {
+        if (cause.code === "ENOENT") {
+          return void 0;
+        }
+        const message = cause instanceof Error ? cause.message : String(cause);
+        if (message.includes("No Scorel config") || message.includes("Scorel config not found")) {
+          return void 0;
+        }
+        throw cause;
+      }
+    };
     createSigintHandler = (options) => {
       return () => {
         if (options.isInFlight()) {
@@ -11213,7 +12127,7 @@ var init_index = __esm({
         throw new Error("scorel run requires exactly one prompt source");
       }
       const resolvedStateDir = stateDir ?? stateDirFromSessionsDir(sessionsDir);
-      const resolvedSessionsDir = sessionsDir ?? join17(resolvedStateDir, "sessions");
+      const resolvedSessionsDir = sessionsDir ?? join18(resolvedStateDir, "sessions");
       return {
         ...promptSources[0],
         sessionId,
@@ -11255,6 +12169,69 @@ var init_index = __esm({
       }
       throw new Error("--api must be openai-completions, openai-responses, google-generative-ai, or anthropic-messages");
     };
+    parseObserveOptions = (argv, runOptions) => {
+      const [subcommand, ...rest] = argv;
+      if (subcommand !== "sync") {
+        throw new Error("scorel observe requires sync");
+      }
+      let sessionId;
+      let target;
+      let sessionsDir = runOptions.sessionsDir;
+      let stateDir;
+      let outPath;
+      for (let index = 0; index < rest.length; index += 1) {
+        const arg = rest[index];
+        if (arg === "--session") {
+          sessionId = asSessionId(requireValue6(rest, index, "--session"));
+          index += 1;
+          continue;
+        }
+        if (arg === "--target") {
+          target = parseObserveTarget(requireValue6(rest, index, "--target"));
+          index += 1;
+          continue;
+        }
+        if (arg === "--sessions-dir") {
+          sessionsDir = requireValue6(rest, index, "--sessions-dir");
+          index += 1;
+          continue;
+        }
+        if (arg === "--state-dir") {
+          stateDir = requireValue6(rest, index, "--state-dir");
+          index += 1;
+          continue;
+        }
+        if (arg === "--out") {
+          outPath = requireValue6(rest, index, "--out");
+          index += 1;
+          continue;
+        }
+        throw new Error(`Unknown observe option: ${arg}`);
+      }
+      if (!sessionId) {
+        throw new Error("--session is required");
+      }
+      if (!target) {
+        throw new Error("--target is required");
+      }
+      const resolvedStateDir = stateDir ?? stateDirFromSessionsDir(sessionsDir);
+      const resolvedSessionsDir = sessionsDir ?? join18(resolvedStateDir, "sessions");
+      return {
+        command: "sync",
+        sessionId,
+        target,
+        sessionsDir: resolvedSessionsDir,
+        stateDir: resolvedStateDir,
+        outPath,
+        config: runOptions.config
+      };
+    };
+    parseObserveTarget = (value) => {
+      if (value === "langfuse" || value === "otel") {
+        return value;
+      }
+      throw new Error("--target must be langfuse or otel");
+    };
     requireValue6 = (argv, index, flag) => {
       const value = argv[index + 1];
       if (!value) {
@@ -11280,9 +12257,9 @@ var init_index = __esm({
           "                 [--base-url|--baseurl <url>] [--api-key|--apikey <key>] [--model <id>]",
           "       scorel attach --session <id> --remote <ws-url> --token <token>",
           "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
-          "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
+          "                        [--relay <relay-url> | --no-relay] [--replace]",
           "       scorel host serve [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
-          "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
+          "                        [--relay <relay-url> | --no-relay] [--replace]",
           "       scorel host status [--show-token]",
           "       scorel host stop",
           "       scorel host reset",
@@ -11294,6 +12271,7 @@ var init_index = __esm({
           "       scorel upgrade",
           "       scorel version",
           "       scorel logs [--attach] --session <id> [--remote <ws-url>] [--tail <n>]",
+          "       scorel observe sync --session <id> --target langfuse|otel [--out <path>]",
           "       scorel project list",
           "       scorel project add <dir>",
           "       scorel project remove <project-id>"
@@ -11329,6 +12307,18 @@ var init_index = __esm({
           "  scorel run --prompt-file /tmp/instruction.txt --cwd /workspace --state-dir /tmp/scorel-state \\",
           '    --api openai-completions --baseurl http://127.0.0.1:4000/v1 --apikey "$API_KEY" \\',
           "    --model gpt-5.4-mini --output-format none --summary /logs/agent/scorel-summary.json"
+        ].join("\n") + "\n"
+      );
+    };
+    writeObserveUsage = (output) => {
+      output.write(
+        [
+          "Usage: scorel observe sync --session <id> --target langfuse|otel",
+          "",
+          "Options:",
+          "  --state-dir <dir>",
+          "  --sessions-dir <dir>",
+          "  --out <path>"
         ].join("\n") + "\n"
       );
     };
