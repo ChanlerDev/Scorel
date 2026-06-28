@@ -91,6 +91,7 @@ describe("scorel up orchestrator", () => {
                 pid: 99,
                 startedAt: 1,
                 stoppedAt: null,
+                launchIntent: "attached",
               },
         attachSigint: (handler) => {
           sigintHandler = handler;
@@ -106,7 +107,8 @@ describe("scorel up orchestrator", () => {
     expect(out.toString()).toContain("daemon  ws://127.0.0.1:7800  token=auto-token");
     expect(out.toString()).toContain("webui   http://127.0.0.1:3100");
     expect(spawnCwds).toEqual(["/cli", "/cli"]);
-    expect(spawnArgvs[0]).toEqual(expect.arrayContaining(["daemon", "serve", "--idle-timeout-ms", "900000"]));
+    expect(spawnArgvs[0]).toEqual(expect.arrayContaining(["daemon", "serve", "--lifetime", "attached"]));
+    expect(spawnArgvs[0]).not.toContain("--idle-timeout-ms");
 
     expect(daemon.unrefCalled).toBe(true);
 
@@ -151,6 +153,7 @@ describe("scorel up orchestrator", () => {
               pid: 99,
               startedAt: 1,
               stoppedAt: null,
+              launchIntent: "attached",
             },
       attachSigint: (handler) => {
         sigintHandler = handler;
@@ -196,6 +199,7 @@ describe("scorel up orchestrator", () => {
               pid: 99,
               startedAt: 1,
               stoppedAt: null,
+              launchIntent: "attached",
             },
       attachSigint: () => () => undefined,
       daemonReadyTimeoutMs: 1000,
@@ -264,6 +268,7 @@ describe("scorel up orchestrator", () => {
         pid: process.pid, // alive → running
         startedAt: 1,
         stoppedAt: null,
+        launchIntent: "user_started",
       }),
       attachSigint: () => () => undefined,
       daemonReadyTimeoutMs: 500,

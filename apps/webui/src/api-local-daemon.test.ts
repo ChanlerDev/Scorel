@@ -35,6 +35,7 @@ describe("/api/local-daemon", () => {
         pid: 42,
         startedAt: 1,
         stoppedAt: null,
+        launchIntent: "user_started",
       }),
     );
     const { GET } = await import("../app/api/local-daemon/route");
@@ -47,6 +48,7 @@ describe("/api/local-daemon", () => {
       token: "tk",
       host: "127.0.0.1",
       port: 7777,
+      launchIntent: "user_started",
     });
   });
 

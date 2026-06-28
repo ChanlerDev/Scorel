@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { buildHostStartInvocation, resolveHostLauncher } from "./host-launcher.js";
+import { buildHostServeInvocation, resolveHostLauncher } from "./host-launcher.js";
 
 describe("GUI Host launcher", () => {
   it("uses the bundled scorel executable for packaged GUI startup without relying on PATH", () => {
@@ -39,28 +39,27 @@ describe("GUI Host launcher", () => {
     });
   });
 
-  it("builds the host start invocation behind the shared launcher contract", () => {
-    const invocation = buildHostStartInvocation({
+  it("builds the attach-owned host serve invocation behind the shared launcher contract", () => {
+    const invocation = buildHostServeInvocation({
       launcher: {
         command: "/Applications/Scorel.app/Contents/Resources/scorel",
         prefixArgs: [],
         cwd: "/Applications/Scorel.app/Contents/Resources",
       },
       bootstrapProject: "/Users/test/.scorel/workspace",
-      idleTimeoutMs: 900_000,
     });
 
     expect(invocation).toEqual({
       command: "/Applications/Scorel.app/Contents/Resources/scorel",
       args: [
         "host",
-        "start",
+        "serve",
         "--port",
         "0",
         "--cwd",
         "/Users/test/.scorel/workspace",
-        "--idle-timeout-ms",
-        "900000",
+        "--lifetime",
+        "attached",
         "--no-relay",
       ],
       cwd: "/Applications/Scorel.app/Contents/Resources",

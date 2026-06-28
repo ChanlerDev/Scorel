@@ -38,7 +38,8 @@ export async function GET(): Promise<Response> {
   const token = typeof parsed.token === "string" ? parsed.token : undefined;
   const host = typeof parsed.host === "string" ? parsed.host : undefined;
   const port = typeof parsed.port === "number" ? parsed.port : undefined;
-  if (!wsUrl || !token || !host || port === undefined) {
+  const launchIntent = parsed.launchIntent === "attached" || parsed.launchIntent === "user_started" ? parsed.launchIntent : undefined;
+  if (!wsUrl || !token || !host || port === undefined || !launchIntent) {
     console.warn(`/api/local-daemon: invalid shape at ${filePath}`);
     return NextResponse.json({ ok: false, reason: "invalid" }, { status: 404 });
   }
@@ -48,5 +49,6 @@ export async function GET(): Promise<Response> {
     token,
     host,
     port,
+    launchIntent,
   });
 }

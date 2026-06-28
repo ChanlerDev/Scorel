@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 
+import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -92,6 +93,7 @@ describe("scorel daemon CLI", () => {
               pid: process.pid,
               startedAt: 1,
               stoppedAt: null,
+              launchIntent: "user_started",
             }
           : null;
       },
@@ -103,7 +105,8 @@ describe("scorel daemon CLI", () => {
     expect(spawnCalls).toHaveLength(1);
     expect(spawnCalls[0]).toMatchObject({ command: process.execPath, cwd: "/cli", detached: true });
     expect(spawnCalls[0]!.argv).toEqual(expect.arrayContaining(["host", "serve", "--cwd", cwd, "--no-relay"]));
-    expect(spawnCalls[0]!.argv).toEqual(expect.arrayContaining(["--idle-timeout-ms", "0"]));
+    expect(spawnCalls[0]!.argv).toEqual(expect.arrayContaining(["--lifetime", "user_started"]));
+    expect(spawnCalls[0]!.argv).not.toContain("--idle-timeout-ms");
     expect(child.unrefCalled).toBe(true);
     expect(child.killSignals).toEqual([]);
     expect(out.toString()).toContain("scorel host started url=ws://127.0.0.1:7777");
@@ -136,6 +139,7 @@ describe("scorel daemon CLI", () => {
               pid: process.pid,
               startedAt: 1,
               stoppedAt: null,
+              launchIntent: "user_started",
             }
           : null;
       },
@@ -161,6 +165,7 @@ describe("scorel daemon CLI", () => {
       pid: process.pid,
       startedAt: 100,
       stoppedAt: null,
+      launchIntent: "user_started",
     });
     const out = new StringWritable();
     const err = new StringWritable();
@@ -203,6 +208,7 @@ describe("scorel daemon CLI", () => {
       pid: process.pid,
       startedAt: 100,
       stoppedAt: null,
+      launchIntent: "user_started",
     });
     const out = new StringWritable();
     const err = new StringWritable();
@@ -211,6 +217,7 @@ describe("scorel daemon CLI", () => {
     expect(code).toBe(0);
     expect(out.toString()).toContain("running url=ws://127.0.0.1:7777");
     expect(out.toString()).toContain(`pid=${process.pid}`);
+    expect(out.toString()).toContain("lifetime=user_started");
     expect(out.toString()).toContain("token=loopback-token");
   });
 
@@ -225,6 +232,7 @@ describe("scorel daemon CLI", () => {
       pid: process.pid,
       startedAt: 100,
       stoppedAt: null,
+      launchIntent: "user_started",
     });
     const hidden = new StringWritable();
     const hiddenErr = new StringWritable();
@@ -254,6 +262,7 @@ describe("scorel daemon CLI", () => {
       pid: process.pid,
       startedAt: 100,
       stoppedAt: 200,
+      launchIntent: "user_started",
     });
     const out = new StringWritable();
     const err = new StringWritable();
@@ -274,6 +283,7 @@ describe("scorel daemon CLI", () => {
       pid: 1,
       startedAt: 100,
       stoppedAt: 200,
+      launchIntent: "user_started",
     });
     const out = new StringWritable();
     const err = new StringWritable();
@@ -294,6 +304,7 @@ describe("scorel daemon CLI", () => {
       pid: process.pid,
       startedAt: 100,
       stoppedAt: 250,
+      launchIntent: "user_started",
     });
     const out = new StringWritable();
     const err = new StringWritable();
@@ -313,6 +324,7 @@ describe("scorel daemon CLI", () => {
       pid: process.pid,
       startedAt: 100,
       stoppedAt: null,
+      launchIntent: "user_started",
     });
     const out = new StringWritable();
     const err = new StringWritable();
@@ -321,16 +333,16 @@ describe("scorel daemon CLI", () => {
     expect(err.toString()).toContain("already running");
   });
 
-  it("serve exits on idle timeout when there are no clients or active IM extensions", async () => {
-    const root = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-idle-"));
+  it("attached serve exits when the last client disconnects", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-attached-"));
     const stateDir = join(root, ".scorel");
     const sessionsDir = join(stateDir, "sessions");
-    const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-idle-cwd-"));
+    const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-attached-cwd-"));
     await writeConfig(cwd);
 
     const out = new StringWritable();
     const err = new StringWritable();
-    const serving = runCliDaemon(["serve", "--port", "0", "--cwd", cwd, "--no-relay", "--idle-timeout-ms", "20"], {
+    const serving = runCliDaemon(["serve", "--port", "0", "--cwd", cwd, "--no-relay", "--lifetime", "attached"], {
       stateDir,
       sessionsDir,
       output: out,
@@ -338,8 +350,11 @@ describe("scorel daemon CLI", () => {
     });
 
     await waitForText(out, "scorel host serving url=ws://127.0.0.1:");
+    const state = await readLocalDaemonState({ stateDir });
+    expect(state?.launchIntent).toBe("attached");
+    await connectAndClose(state!.wsUrl, state!.token, "client_attached_test");
     await expect(serving).resolves.toBe(0);
-    expect(out.toString()).toContain("scorel host serve stopped reason=idle");
+    expect(out.toString()).toContain("scorel host serve stopped reason=last-client-disconnected");
     expect((await readLocalDaemonState({ stateDir }))?.stoppedAt).not.toBeNull();
     expect(err.toString()).toBe("");
   });
@@ -371,11 +386,11 @@ describe("scorel daemon CLI", () => {
     expect(err.toString()).toBe("");
   });
 
-  it("serve does not idle-exit while an IM extension is active", async () => {
-    const root = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-im-active-"));
+  it("attached serve exits after the last client disconnects even when an IM extension is active", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-im-attached-"));
     const stateDir = join(root, ".scorel");
     const sessionsDir = join(stateDir, "sessions");
-    const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-im-active-cwd-"));
+    const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-serve-im-attached-cwd-"));
     await writeConfig(cwd);
     await mkdir(stateDir, { recursive: true });
     await writeFile(join(stateDir, "config.toml"), [
@@ -387,21 +402,18 @@ describe("scorel daemon CLI", () => {
 
     const out = new StringWritable();
     const err = new StringWritable();
-    const abort = new AbortController();
-    const serving = runCliDaemon(["serve", "--port", "0", "--cwd", cwd, "--no-relay", "--idle-timeout-ms", "20"], {
+    const serving = runCliDaemon(["serve", "--port", "0", "--cwd", cwd, "--no-relay", "--lifetime", "attached"], {
       stateDir,
       sessionsDir,
       output: out,
       error: err,
-      serveSignal: abort.signal,
     });
 
     await waitForText(out, "scorel host serving url=ws://127.0.0.1:");
-    await sleep(80);
-    expect(out.toString()).not.toContain("reason=idle");
-    abort.abort();
+    const state = await readLocalDaemonState({ stateDir });
+    await connectAndClose(state!.wsUrl, state!.token, "client_im_attached_test");
     await expect(serving).resolves.toBe(0);
-    expect(out.toString()).toContain("scorel host serve stopped reason=abort");
+    expect(out.toString()).toContain("scorel host serve stopped reason=last-client-disconnected");
     expect(err.toString()).toBe("");
   });
 
@@ -500,6 +512,7 @@ describe("scorel daemon CLI", () => {
       pid: 0x7fffffff, // unlikely to be a real pid
       startedAt: 1,
       stoppedAt: null, // crashed-orphan shape
+      launchIntent: "user_started",
     });
 
     const abort = new AbortController();
@@ -575,6 +588,29 @@ const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+
+const connectAndClose = async (url: string, token: string, clientId: string): Promise<void> => {
+  const socket = new WebSocket(url);
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timed out waiting for daemon connected frame")), 2000);
+    socket.once("message", (data) => {
+      clearTimeout(timer);
+      const frame = JSON.parse(data.toString()) as { type?: string };
+      if (frame.type !== "connected") {
+        reject(new Error(`unexpected daemon frame: ${data.toString()}`));
+        return;
+      }
+      resolve();
+    });
+    socket.send(JSON.stringify({ type: "connect", token, clientId }));
+  });
+  socket.close();
+  await new Promise<void>((resolve) => socket.once("close", resolve));
+};
 
 // Touch readFile import so unused-import lint doesn't trip.
 void readFile;

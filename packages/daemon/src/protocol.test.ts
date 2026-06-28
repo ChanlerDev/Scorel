@@ -184,6 +184,7 @@ describe("daemon protocol boundary", () => {
       pid: 4242,
       startedAt: 1700,
       stoppedAt: null,
+      launchIntent: "user_started",
     });
     expect(state).not.toHaveProperty("cwd");
     expect(await readLocalDaemonState({ stateDir })).toEqual(state);
@@ -202,6 +203,7 @@ describe("daemon protocol boundary", () => {
       pid: 1,
       startedAt: 1,
       stoppedAt: null,
+      launchIntent: "user_started" as const,
     };
     expect(daemonStateLiveness(state, { isPidAlive: () => true })).toBe("running");
     expect(daemonStateLiveness(state, { isPidAlive: () => false })).toBe("orphan");

@@ -148,6 +148,7 @@ export type LocalDaemonState = {
   pid: number;
   startedAt: number;
   stoppedAt: number | null;
+  launchIntent: "attached" | "user_started";
 };
 
 export type LocalDaemonStateOptions = {
@@ -190,6 +191,7 @@ export const createLocalDaemonState = async (options: CreateLocalDaemonStateOpti
     pid: options.pid,
     startedAt: options.startedAt,
     stoppedAt: options.stoppedAt,
+    launchIntent: options.launchIntent,
   };
   await mkdir(options.stateDir, { recursive: true });
   await writeFile(localDaemonStateFile(options.stateDir), `${JSON.stringify(state, null, 2)}\n`);
@@ -206,7 +208,8 @@ export const readLocalDaemonState = async (options: LocalDaemonStateOptions): Pr
       typeof raw.token !== "string" ||
       typeof raw.pid !== "number" ||
       typeof raw.startedAt !== "number" ||
-      !(raw.stoppedAt === null || typeof raw.stoppedAt === "number")
+      !(raw.stoppedAt === null || typeof raw.stoppedAt === "number") ||
+      !(raw.launchIntent === "attached" || raw.launchIntent === "user_started")
     ) {
       return null;
     }
@@ -218,6 +221,7 @@ export const readLocalDaemonState = async (options: LocalDaemonStateOptions): Pr
       pid: raw.pid,
       startedAt: raw.startedAt,
       stoppedAt: raw.stoppedAt,
+      launchIntent: raw.launchIntent,
     };
   } catch (cause) {
     if (cause instanceof Error && "code" in cause && cause.code === "ENOENT") {
@@ -463,8 +467,7 @@ export type ScorelHostOptions = {
   createRuntime: (options: { sessionId: SessionId; project: HostProject; selectedModel?: SelectedModelSummary; purpose: "chat" | "title" | "memory" }) => Promise<ScorelRuntime>;
   memoryHomeDir?: string;
   onSessionListChanged?: (change: { projectId: ProjectId; sessionId: SessionId }) => void;
-  idleShutdownMs?: number;
-  onIdleShutdown?: () => void;
+  onLastClientDisconnect?: () => void;
   now?: () => number;
   createId?: () => string;
 };
@@ -635,8 +638,7 @@ export class ScorelHost {
   readonly #createRuntime: ScorelHostOptions["createRuntime"];
   readonly #memoryHomeDir: string | undefined;
   readonly #onSessionListChanged: ((change: { projectId: ProjectId; sessionId: SessionId }) => void) | undefined;
-  readonly #idleShutdownMs: number | undefined;
-  readonly #onIdleShutdown: (() => void) | undefined;
+  readonly #onLastClientDisconnect: (() => void) | undefined;
   readonly #now: () => number;
   readonly #createId: () => string;
   readonly #sessions = new Map<SessionId, SessionLane>();
@@ -649,7 +651,7 @@ export class ScorelHost {
   readonly #imBindings = new Map<string, ImSessionBinding>();
   readonly #registry: ProjectRegistry;
   #runtimeStatsQueue: Promise<void> = Promise.resolve();
-  #idleShutdownTimer: ReturnType<typeof setTimeout> | undefined;
+  #hadClientConnection = false;
   #lastActiveWorkAt: number;
   #started = false;
 
@@ -666,8 +668,7 @@ export class ScorelHost {
     this.#createRuntime = options.createRuntime;
     this.#memoryHomeDir = options.memoryHomeDir;
     this.#onSessionListChanged = options.onSessionListChanged;
-    this.#idleShutdownMs = options.idleShutdownMs;
-    this.#onIdleShutdown = options.onIdleShutdown;
+    this.#onLastClientDisconnect = options.onLastClientDisconnect;
     this.#now = options.now ?? Date.now;
     this.#createId = options.createId ?? (() => crypto.randomUUID());
     this.#lastActiveWorkAt = this.#now();
@@ -684,11 +685,9 @@ export class ScorelHost {
     await mkdir(this.#scorelHomeDir, { recursive: true });
     await this.#loadImBindings();
     await this.#startEnabledImExtensions();
-    this.#scheduleIdleShutdownCheck();
   }
 
   async shutdown(): Promise<void> {
-    this.#clearIdleShutdownTimer();
     for (const schedule of this.#memoryDreams.values()) {
       if (schedule.timer) {
         clearTimeout(schedule.timer);
@@ -697,6 +696,7 @@ export class ScorelHost {
     this.#memoryDreams.clear();
     await this.#stopImExtensions();
     this.#connections.clear();
+    this.#hadClientConnection = false;
     this.#started = false;
   }
 
@@ -704,12 +704,11 @@ export class ScorelHost {
     this.#assertStarted();
     await this.#stopImExtensions();
     await this.#startEnabledImExtensions();
-    this.#scheduleIdleShutdownCheck();
   }
 
   connect(connection: Connection, sessionId?: SessionId): ConnectResult {
     this.#assertStarted();
-    this.#clearIdleShutdownTimer();
+    this.#hadClientConnection = true;
     connection.sessionId = sessionId;
     this.#connections.add(connection);
     if (sessionId) {
@@ -735,7 +734,9 @@ export class ScorelHost {
       });
     }
     this.#connections.delete(connection);
-    this.#scheduleIdleShutdownCheck();
+    if (this.#started && this.#hadClientConnection && this.#connections.size === 0) {
+      this.#onLastClientDisconnect?.();
+    }
   }
 
   releaseSessionEventBuffer(sessionId: SessionId): void {
@@ -766,8 +767,6 @@ export class ScorelHost {
         return;
       }
       throw cause;
-    } finally {
-      this.#scheduleIdleShutdownCheck();
     }
   }
 
@@ -937,38 +936,6 @@ export class ScorelHost {
         await this.#handleCancel(connection, message);
         break;
     }
-  }
-
-  #scheduleIdleShutdownCheck(): void {
-    this.#clearIdleShutdownTimer();
-    if (!this.#shouldIdleShutdown()) {
-      return;
-    }
-    this.#idleShutdownTimer = setTimeout(() => {
-      this.#idleShutdownTimer = undefined;
-      if (this.#shouldIdleShutdown()) {
-        this.#onIdleShutdown?.();
-      }
-    }, this.#idleShutdownMs);
-  }
-
-  #clearIdleShutdownTimer(): void {
-    if (!this.#idleShutdownTimer) {
-      return;
-    }
-    clearTimeout(this.#idleShutdownTimer);
-    this.#idleShutdownTimer = undefined;
-  }
-
-  #shouldIdleShutdown(): boolean {
-    return (
-      this.#started &&
-      this.#idleShutdownMs !== undefined &&
-      this.#idleShutdownMs > 0 &&
-      this.#connections.size === 0 &&
-      this.#imExtensions.size === 0 &&
-      !this.#hasActiveWork()
-    );
   }
 
   #hasActiveWork(): boolean {

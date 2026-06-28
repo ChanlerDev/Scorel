@@ -303,7 +303,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 - `scorel daemon serve` 全部 flag 有合理默认;token 在 `~/.scorel/daemon.json` 持久化,跨重启复用。
 - `~/.scorel/daemon.json` 不再每次启动删除;通过 pid liveness + `stoppedAt` 判存活。
 - WebUI Settings 页面通过 `/api/local-daemon` server route 自动发现本地 daemon,一键添加 device。
-- `scorel up` 确保 singleton daemon 可用并启动 WebUI；退出 `scorel up` 不关闭后台 daemon；无 client/无 active work/无 active IM 后 idle 自动退出。
+- `scorel up` 确保 singleton daemon 可用并启动 WebUI；便利入口自动拉起的 attach-owned daemon 在最后一个 client 断开后立即退出，手动 `host start` / `host serve` 例外。
 - 全部改动通过自动测试,真实 LLM 手工烟雾通过。
 
 **Steps**:
@@ -593,7 +593,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.17 | [`S0088`](spec/ship/S0088-gui-streaming-thinking-contract.md) | Streaming thinking contract：补 thinking/content delta，使 thinking 在 turn 运行中按序显示，而不是最终 assistant_message 后才插入 | Done |
 | M9.F1.18 | [`S0089`](spec/ship/S0089-memory-reliability-and-dream-trigger.md) | Memory reliability：修复 AppendDaily 调用质量、dreaming 触发与可观测性，让 M9 后半段聚焦真实使用中的质量优化 | Done |
 | M9.F1.19 | [`S0097`](spec/ship/S0097-rtk-token-saving-settings.md) | GUI Token 节省设置 + RTK Bash output proxy + runtime config | Done |
-| M9.F1.20 | [`S0098`](spec/ship/S0098-local-daemon-singleton-unified-state.md) | 统一本机 Host state root、后台 singleton start、GUI/CLI auto-start + attach、idle shutdown、active IM 保活 | Done |
+| M9.F1.20 | [`S0098`](spec/ship/S0098-local-daemon-singleton-unified-state.md) | 统一本机 Host state root、后台 singleton start、GUI/CLI auto-start + attach | Done |
 | M9.F1.21 | [`S0099`](spec/ship/S0099-gui-connection-device-settings.md) | GUI 连接设置默认官方 Relay、配对设备命名/详情、Settings scope 初版 | Done |
 | M9.F1.22 | [`S0100`](spec/ship/S0100-gui-provider-danger-zone.md) | GUI Provider 删除按钮位置初版 | Done |
 | M9.F1.23 | [`S0101`](spec/ship/S0101-gui-device-settings-polish.md) | GUI Settings 改为设备级配置，修正 Provider 删除位置、Token 文案、设备展开/重命名交互 | Done |
@@ -603,7 +603,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.27 | [`S0106`](spec/ship/S0106-snip-context-control.md) | `context_control` 持久事件和 `snip` tool，让 agent 隐藏已完成 user turn 的未来 LLM context 投影 | Done |
 | M9.F1.28 | [`S0107`](spec/ship/S0107-system-reminder-unification.md) | 统一 system reminder 的持久化、构造、LLM 投影和 UI visibility 语义 | Done |
 | M9.F1.29 | [`S0108`](spec/ship/S0108-gui-bundled-cli-runtime.md) | GUI release 内置同版本 CLI runtime，packaged GUI 用 bundle 内可执行文件启动本地 Host | Done |
-| M9.F1.30 | [`S0113`](spec/ship/S0113-daemon-attach-lifetime.md) | Daemon attach 生命周期：GUI/CLI 自动拉起的 daemon 随最后一个 client 断开立即退出，只有手动 `host start` / `host serve` 可零连接常驻 | Planned |
+| M9.F1.30 | [`S0113`](spec/ship/S0113-daemon-attach-lifetime.md) | Daemon attach 生命周期：GUI/CLI 自动拉起的 daemon 随最后一个 client 断开立即退出，只有手动 `host start` / `host serve` 可零连接常驻 | Done |
 
 **Not in M9 Follow-up**:
 
@@ -812,7 +812,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0110`](spec/ship/S0110-scorel-eval-reporting-compatibility.md) | Scorel eval reporting compatibility for usage/cost/reports | Done |
 | [`S0111`](spec/ship/S0111-scorel-observability-baseline.md) | Scorel session observability summary cache | Done |
 | [`S0112`](spec/ship/S0112-observability-sync-assets.md) | Observability sync assets for Langfuse and OpenTelemetry | Done |
-| [`S0113`](spec/ship/S0113-daemon-attach-lifetime.md) | Daemon attach lifetime | Planned |
+| [`S0113`](spec/ship/S0113-daemon-attach-lifetime.md) | Daemon attach lifetime | Done |
 
 ---
 

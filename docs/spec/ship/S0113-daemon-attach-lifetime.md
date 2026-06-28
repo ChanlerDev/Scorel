@@ -111,4 +111,4 @@ Manual/E2E:
 
 ## Status
 
-Planned.
+Done.

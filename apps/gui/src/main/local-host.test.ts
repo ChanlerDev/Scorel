@@ -79,6 +79,7 @@ describe("GUI local Host service", () => {
         pid: process.pid,
         startedAt: 1,
         stoppedAt: null,
+        launchIntent: "user_started",
       }),
       createWebSocket: (url) => new WebSocket(url),
     });
@@ -133,6 +134,7 @@ describe("GUI local Host service", () => {
           pid: process.pid,
           startedAt: 1,
           stoppedAt: null,
+          launchIntent: "attached",
         };
       },
       ensureDaemon: async () => {

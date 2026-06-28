@@ -142,6 +142,7 @@ describe("@scorel/app-cli", () => {
       pid: process.pid,
       startedAt: Date.now(),
       stoppedAt: null,
+      launchIntent: "user_started",
     });
 
     try {

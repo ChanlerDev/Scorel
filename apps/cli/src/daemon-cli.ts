@@ -61,8 +61,7 @@ const DEFAULT_PORT = 7777;
 const STOP_POLL_INTERVAL_MS = 200;
 const STOP_GRACE_MS = 5000;
 const START_READY_TIMEOUT_MS = 30_000;
-export const AUTO_STARTED_IDLE_SHUTDOWN_MS = 15 * 60 * 1000;
-const FOREGROUND_IDLE_SHUTDOWN_MS = 0;
+type DaemonLaunchIntent = "attached" | "user_started";
 
 const defaultStateDir = (): string => join(homedir(), ".scorel");
 
@@ -104,7 +103,7 @@ const runStartCommand = async (
 ): Promise<number> => {
   let flags: ServeFlags;
   try {
-    flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, FOREGROUND_IDLE_SHUTDOWN_MS);
+    flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, "user_started");
   } catch (cause) {
     options.error.write(`scorel daemon start error: ${(cause as Error).message}\n`);
     return 1;
@@ -128,8 +127,8 @@ const runStartCommand = async (
     String(flags.port),
     "--cwd",
     flags.cwd,
-    "--idle-timeout-ms",
-    String(flags.idleShutdownMs),
+    "--lifetime",
+    flags.launchIntent,
     ...(flags.token ? ["--token", flags.token] : []),
     ...(flags.relayUrl ? ["--relay", flags.relayUrl] : ["--no-relay"]),
     ...(flags.replace ? ["--replace"] : []),
@@ -166,7 +165,7 @@ type ServeFlags = {
   cwd: string;
   relayUrl?: string;
   replace: boolean;
-  idleShutdownMs: number;
+  launchIntent: DaemonLaunchIntent;
 };
 
 const runServeCommand = async (
@@ -175,7 +174,7 @@ const runServeCommand = async (
 ): Promise<number> => {
   let flags: ServeFlags;
   try {
-    flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, FOREGROUND_IDLE_SHUTDOWN_MS);
+    flags = parseServeFlags(argv, options.cwd ?? process.cwd(), options.env ?? process.env, "user_started");
   } catch (cause) {
     options.error.write(`scorel daemon serve error: ${(cause as Error).message}\n`);
     return 1;
@@ -213,8 +212,7 @@ const runServeCommand = async (
     projectsPath: join(options.stateDir, "projects.json"),
     deviceId: identity.deviceId,
     deviceDisplayName: identity.displayName,
-    idleShutdownMs: flags.idleShutdownMs,
-    onIdleShutdown: () => requestStop("idle"),
+    ...(flags.launchIntent === "attached" ? { onLastClientDisconnect: () => requestStop("last-client-disconnected") } : {}),
     scorelHomeDir: options.stateDir,
     loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir, ...configScope }),
     loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir, ...configScope }),
@@ -256,6 +254,7 @@ const runServeCommand = async (
     pid: process.pid,
     startedAt,
     stoppedAt: null,
+    launchIntent: flags.launchIntent,
   };
   await createLocalDaemonState({ stateDir: options.stateDir, ...persistedState });
 
@@ -496,21 +495,21 @@ const formatStatusLine = (
 ): string => {
   if (liveness === "running") {
     const tokenSuffix = isLoopbackHost(state.host) || showToken ? ` token=${state.token}` : "";
-    return `running url=${state.wsUrl} pid=${state.pid}${tokenSuffix}`;
+    return `running url=${state.wsUrl} pid=${state.pid} lifetime=${state.launchIntent}${tokenSuffix}`;
   }
   const stoppedAt =
     state.stoppedAt !== null ? formatTimestamp(state.stoppedAt) : "unknown";
   return `stopped url=${state.wsUrl} last-pid=${state.pid} stoppedAt=${stoppedAt} liveness=${liveness}`;
 };
 
-const parseServeFlags = (argv: string[], defaultCwd: string, env: NodeJS.ProcessEnv, defaultIdleShutdownMs: number): ServeFlags => {
+const parseServeFlags = (argv: string[], defaultCwd: string, env: NodeJS.ProcessEnv, defaultLaunchIntent: DaemonLaunchIntent): ServeFlags => {
   let host = DEFAULT_HOST;
   let port = DEFAULT_PORT;
   let cwd = defaultCwd;
   let token: string | undefined;
   let relayUrl: string | undefined = resolveDefaultRelayUrl(env);
   let replace = false;
-  let idleShutdownMs = defaultIdleShutdownMs;
+  let launchIntent = defaultLaunchIntent;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--host") {
@@ -554,17 +553,18 @@ const parseServeFlags = (argv: string[], defaultCwd: string, env: NodeJS.Process
       replace = true;
       continue;
     }
-    if (arg === "--idle-timeout-ms") {
-      idleShutdownMs = Number(requireValue(argv, index, "--idle-timeout-ms"));
-      if (!Number.isInteger(idleShutdownMs) || idleShutdownMs < 0) {
-        throw new Error("--idle-timeout-ms must be a non-negative integer");
+    if (arg === "--lifetime") {
+      const value = requireValue(argv, index, "--lifetime");
+      if (value !== "attached" && value !== "user_started") {
+        throw new Error("--lifetime must be attached or user_started");
       }
+      launchIntent = value;
       index += 1;
       continue;
     }
     throw new Error(`Unknown serve option: ${arg}`);
   }
-  return { host, port, token, cwd, relayUrl, replace, idleShutdownMs };
+  return { host, port, token, cwd, relayUrl, replace, launchIntent };
 };
 
 const parseStatusFlags = (argv: string[]): StatusFlags => {
@@ -654,9 +654,9 @@ const writeDaemonUsage = (output: NodeJS.WritableStream): void => {
   output.write(
     [
       "Usage: scorel host serve [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
-      "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
+      "                        [--relay <relay-url> | --no-relay] [--replace]",
       "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
-      "                        [--relay <relay-url> | --no-relay] [--replace] [--idle-timeout-ms <ms>]",
+      "                        [--relay <relay-url> | --no-relay] [--replace]",
       "       scorel host status [--show-token]",
       "       scorel host stop",
       "       scorel host reset",

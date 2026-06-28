@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { createGuiStore, type GuiRelayDevice, type GuiStore, type GuiVisibleRemoteProject } from "./main/gui-store.js";
-import { buildHostStartInvocation, resolveHostLauncher } from "./main/host-launcher.js";
+import { buildHostServeInvocation, resolveHostLauncher } from "./main/host-launcher.js";
 import { createGuiLocalHostService, type GuiLocalHostService } from "./main/local-host.js";
 import { createGuiRelayService, type GuiRelayService } from "./main/relay-service.js";
 import {
@@ -38,39 +38,69 @@ const sessionSubscriptions = new Map<string, () => void>();
 
 const scorelHomeDir = (): string => join(homedir(), ".scorel");
 const guiStorePath = (): string => join(scorelHomeDir(), "gui-store.json");
-const AUTO_STARTED_IDLE_SHUTDOWN_MS = 15 * 60 * 1000;
 const GUI_AUTO_UPDATE_INTERVAL_MS = 60 * 60 * 1000;
 
 const ensureLocalDaemon = async (stateDir: string): Promise<void> => {
   const bootstrapProject = join(stateDir, "workspace");
   await mkdir(bootstrapProject, { recursive: true });
   await new Promise<void>((resolve, reject) => {
-    const invocation = buildHostStartInvocation({
+    const invocation = buildHostServeInvocation({
       launcher: resolveHostLauncher({
         isPackaged: app.isPackaged,
         resourcesPath: process.resourcesPath,
         appDistDir: here,
       }),
       bootstrapProject,
-      idleTimeoutMs: AUTO_STARTED_IDLE_SHUTDOWN_MS,
     });
     const child = spawn(invocation.command, invocation.args, {
       cwd: invocation.cwd,
       env: { ...process.env },
-      stdio: ["ignore", "ignore", "pipe"],
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
     });
     let stderr = "";
-    child.stderr?.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.once("error", reject);
-    child.once("exit", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
+    let stdout = "";
+    let settled = false;
+    const cleanup = () => {
+      child.stdout?.off("data", onStdout);
+      child.stderr?.off("data", onStderr);
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+    const settle = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const onStdout = (chunk: Buffer | string): void => {
+      stdout += chunk.toString();
+      if (stdout.includes("scorel host serving url=") || stdout.includes("scorel daemon serving url=")) {
+        settle(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          child.unref();
+          resolve();
+        });
       }
-      reject(new Error(stderr.trim() || `scorel host start exited with code ${code ?? "unknown"}`));
+      const newlineIndex = stdout.lastIndexOf("\n");
+      stdout = newlineIndex >= 0 ? stdout.slice(newlineIndex + 1) : stdout;
+    };
+    const onStderr = (chunk: Buffer | string): void => {
+      stderr += chunk.toString();
+    };
+    const onError = (cause: Error): void => {
+      settle(() => reject(cause));
+    };
+    const onExit = (code: number | null): void => {
+      settle(() => reject(new Error(stderr.trim() || `scorel host serve exited before ready with code ${code ?? "unknown"}`)));
+    };
+    child.stdout?.on("data", onStdout);
+    child.stderr?.on("data", (chunk) => {
+      onStderr(chunk);
     });
+    child.once("error", onError);
+    child.once("exit", onExit);
   });
 };
 

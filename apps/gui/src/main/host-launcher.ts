@@ -13,16 +13,15 @@ export type ResolveHostLauncherOptions = {
   env?: NodeJS.ProcessEnv;
 };
 
-export type HostStartInvocation = {
+export type HostServeInvocation = {
   command: string;
   args: string[];
   cwd: string;
 };
 
-export type BuildHostStartInvocationOptions = {
+export type BuildHostServeInvocationOptions = {
   launcher: GuiHostLauncher;
   bootstrapProject: string;
-  idleTimeoutMs: number;
 };
 
 const repoRoot = (appDistDir: string): string => join(appDistDir, "..", "..", "..");
@@ -48,18 +47,18 @@ export const resolveHostLauncher = (options: ResolveHostLauncherOptions): GuiHos
   };
 };
 
-export const buildHostStartInvocation = (options: BuildHostStartInvocationOptions): HostStartInvocation => ({
+export const buildHostServeInvocation = (options: BuildHostServeInvocationOptions): HostServeInvocation => ({
   command: options.launcher.command,
   args: [
     ...options.launcher.prefixArgs,
     "host",
-    "start",
+    "serve",
     "--port",
     "0",
     "--cwd",
     options.bootstrapProject,
-    "--idle-timeout-ms",
-    String(options.idleTimeoutMs),
+    "--lifetime",
+    "attached",
     "--no-relay",
   ],
   cwd: options.launcher.cwd,
