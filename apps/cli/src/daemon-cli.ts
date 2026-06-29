@@ -136,23 +136,23 @@ const runStartCommand = async (
     cwd: dirname(cliEntrypoint),
     env: { ...process.env, ...(options.env ?? {}) },
     detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "ignore", "ignore"],
   });
 
+  let state: LocalDaemonState;
   try {
-    await waitForDaemonReady(child, options.daemonReadyTimeoutMs ?? START_READY_TIMEOUT_MS);
+    state = await waitForDaemonStateReady(
+      child,
+      options.stateDir,
+      readState,
+      options.daemonReadyTimeoutMs ?? START_READY_TIMEOUT_MS,
+    );
   } catch (cause) {
     options.error.write(`scorel daemon start error: ${(cause as Error).message}\n`);
     child.kill("SIGTERM");
     return 1;
   }
 
-  const state = await readState(options.stateDir);
-  if (!state || daemonStateLiveness(state) !== "running") {
-    options.error.write("scorel daemon start error: daemon state missing after start\n");
-    child.kill("SIGTERM");
-    return 1;
-  }
   detachBackgroundDaemon(child);
   options.output.write(`scorel host started url=${state.wsUrl} pid=${state.pid}\n`);
   return 0;
@@ -592,58 +592,53 @@ const sleep = (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
-const waitForDaemonReady = (child: ChildProcess, timeoutMs: number): Promise<void> =>
+const waitForDaemonStateReady = (
+  child: ChildProcess,
+  stateDir: string,
+  readState: (stateDir: string) => Promise<LocalDaemonState | null>,
+  timeoutMs: number,
+): Promise<LocalDaemonState> =>
   new Promise((resolveReady, rejectReady) => {
-    if (!child.stdout) {
-      rejectReady(new Error("daemon child has no stdout stream"));
-      return;
-    }
-    let buffer = "";
-    let stderrBuffer = "";
     let settled = false;
-    const timer = setTimeout(() => {
+    const deadline = Date.now() + timeoutMs;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const settle = (callback: () => void) => {
       if (settled) return;
       settled = true;
-      cleanup();
-      rejectReady(new Error("timed out waiting for daemon ready line"));
-    }, timeoutMs);
-    const onData = (chunk: Buffer | string) => {
-      buffer += chunk.toString();
-      if (!buffer.includes("\n")) return;
-      if (buffer.includes("scorel daemon serving url=") || buffer.includes("scorel host serving url=")) {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolveReady();
+      if (timer) {
+        clearTimeout(timer);
       }
-      const newlineIndex = buffer.lastIndexOf("\n");
-      buffer = newlineIndex >= 0 ? buffer.slice(newlineIndex + 1) : buffer;
-    };
-    const onStderr = (chunk: Buffer | string) => {
-      stderrBuffer += chunk.toString();
-    };
-    const onExit = (code: number | null) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      const trimmed = stderrBuffer.trim();
-      const detail = trimmed ? `: ${trimmed}` : "";
-      rejectReady(new Error(`daemon exited before ready code=${code}${detail}`));
-    };
-    const cleanup = () => {
-      clearTimeout(timer);
-      child.stdout?.off("data", onData);
-      child.stderr?.off("data", onStderr);
       child.off("exit", onExit);
+      callback();
     };
-    child.stdout.on("data", onData);
-    child.stderr?.on("data", onStderr);
+
+    const poll = async () => {
+      try {
+        const state = await readState(stateDir);
+        if (state && daemonStateLiveness(state) === "running") {
+          settle(() => resolveReady(state));
+          return;
+        }
+        if (Date.now() >= deadline) {
+          settle(() => rejectReady(new Error("timed out waiting for daemon state")));
+          return;
+        }
+        timer = setTimeout(() => void poll(), STOP_POLL_INTERVAL_MS);
+      } catch (cause) {
+        settle(() => rejectReady(cause instanceof Error ? cause : new Error(String(cause))));
+      }
+    };
+
+    const onExit = (code: number | null) => {
+      settle(() => rejectReady(new Error(`daemon exited before ready code=${code}`)));
+    };
+
     child.once("exit", onExit);
+    void poll();
   });
 
 const detachBackgroundDaemon = (child: ChildProcess): void => {
-  child.stdout?.destroy();
-  child.stderr?.destroy();
   child.unref();
 };
 

@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type { SpawnOptions } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,7 +69,7 @@ describe("scorel daemon CLI", () => {
     const stateDir = await mkdtemp(join(tmpdir(), "scorel-daemon-start-"));
     const cwd = await mkdtemp(join(tmpdir(), "scorel-daemon-start-cwd-"));
     const child = makeChild();
-    const spawnCalls: Array<{ command: string; argv: string[]; cwd?: string; detached?: boolean }> = [];
+    const spawnCalls: Array<{ command: string; argv: string[]; cwd?: string; detached?: boolean; stdio?: SpawnOptions["stdio"] }> = [];
     const out = new StringWritable();
     const err = new StringWritable();
     let readCalls = 0;
@@ -79,7 +80,7 @@ describe("scorel daemon CLI", () => {
       error: err,
       cliEntrypoint: "/cli/index.ts",
       spawn: (command, argv, opts) => {
-        spawnCalls.push({ command, argv, cwd: String(opts.cwd), detached: opts.detached });
+        spawnCalls.push({ command, argv, cwd: String(opts.cwd), detached: opts.detached, stdio: opts.stdio });
         return child as never;
       },
       readState: async () => {
@@ -100,10 +101,9 @@ describe("scorel daemon CLI", () => {
       daemonReadyTimeoutMs: 1000,
     });
 
-    child.stdout!.push("scorel host serving url=ws://127.0.0.1:7777\n");
     await expect(started).resolves.toBe(0);
     expect(spawnCalls).toHaveLength(1);
-    expect(spawnCalls[0]).toMatchObject({ command: process.execPath, cwd: "/cli", detached: true });
+    expect(spawnCalls[0]).toMatchObject({ command: process.execPath, cwd: "/cli", detached: true, stdio: ["ignore", "ignore", "ignore"] });
     expect(spawnCalls[0]!.argv).toEqual(expect.arrayContaining(["host", "serve", "--cwd", cwd, "--no-relay"]));
     expect(spawnCalls[0]!.argv).toEqual(expect.arrayContaining(["--lifetime", "user_started"]));
     expect(spawnCalls[0]!.argv).not.toContain("--idle-timeout-ms");
@@ -146,7 +146,6 @@ describe("scorel daemon CLI", () => {
     });
 
     await vi.advanceTimersByTimeAsync(12_000);
-    child.stdout!.push("scorel host serving url=ws://127.0.0.1:7777\n");
 
     await expect(started).resolves.toBe(0);
     expect(child.killSignals).toEqual([]);
