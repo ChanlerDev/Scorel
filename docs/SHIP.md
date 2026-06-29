@@ -25,6 +25,7 @@
 ```bash
 pnpm install
 pnpm scorel       # 在当前目录进入交互式项目会话
+pnpm gui          # 开发态 GUI：先停止旧本机 daemon，再用当前 checkout 启动 dev Host
 pnpm scorel --version
 pnpm scorel update
 ```

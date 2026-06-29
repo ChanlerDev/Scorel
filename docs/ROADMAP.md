@@ -604,6 +604,7 @@ M5 WebUI 的正式产品方向记录在 [`S0030`](spec/ship/S0030-webui-product-
 | M9.F1.28 | [`S0107`](spec/ship/S0107-system-reminder-unification.md) | 统一 system reminder 的持久化、构造、LLM 投影和 UI visibility 语义 | Done |
 | M9.F1.29 | [`S0108`](spec/ship/S0108-gui-bundled-cli-runtime.md) | GUI release 内置同版本 CLI runtime，packaged GUI 用 bundle 内可执行文件启动本地 Host | Done |
 | M9.F1.30 | [`S0113`](spec/ship/S0113-daemon-attach-lifetime.md) | Daemon attach 生命周期：GUI/CLI 自动拉起的 daemon 随最后一个 client 断开立即退出，只有手动 `host start` / `host serve` 可零连接常驻 | Done |
+| M9.F1.31 | [`S0114`](spec/ship/S0114-dev-gui-host-owner.md) | `pnpm gui` 先停止旧本机 daemon，再用当前 checkout 启动 attach-owned dev Host，避免 GUI 开发误连系统安装版 | Done |
 
 **Not in M9 Follow-up**:
 
@@ -813,6 +814,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0111`](spec/ship/S0111-scorel-observability-baseline.md) | Scorel session observability summary cache | Done |
 | [`S0112`](spec/ship/S0112-observability-sync-assets.md) | Observability sync assets for Langfuse and OpenTelemetry | Done |
 | [`S0113`](spec/ship/S0113-daemon-attach-lifetime.md) | Daemon attach lifetime | Done |
+| [`S0114`](spec/ship/S0114-dev-gui-host-owner.md) | Dev GUI Host owner | Done |
 
 ---
 
