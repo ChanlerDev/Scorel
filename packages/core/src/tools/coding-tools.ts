@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
@@ -14,8 +14,7 @@ const execFileAsync = promisify(execFile);
 
 export type CodingToolsOptions = {
   cwd: string;
-  defaultTimeoutMs?: number;
-  maxTimeoutMs?: number;
+  defaultWaitTimeSeconds?: number;
   maxOutputBytes?: number;
   maxReadTokens?: number;
   contextWindow?: number;
@@ -29,6 +28,48 @@ export type CodingToolsOptions = {
       executable?: string;
     };
   };
+};
+
+export type BackgroundBashRegistry = {
+  hasActiveWork(): boolean;
+  start(input: StartBashInput): Promise<BashTaskResult>;
+  interact(input: InteractBashInput): Promise<BashTaskResult>;
+  stop(taskId: string): Promise<ToolResult>;
+};
+
+type StartBashInput = {
+  cwd: string;
+  waitMs: number;
+  outputLimit: number;
+  artifactDir?: string;
+  toolCallId: string;
+  shell: string;
+  executionCommand: string;
+  displayCommand: string;
+  rtk: BashRtkDetails;
+  rtkGainBefore?: { savedTokens: number };
+  signal: AbortSignal;
+};
+
+type InteractBashInput = {
+  taskId: string;
+  command?: string;
+  waitMs: number;
+  outputLimit: number;
+  artifactDir?: string;
+  toolCallId: string;
+};
+
+type BashTaskResult =
+  | { status: "running"; taskId: string; pid: number; cwd: string }
+  | { status: "completed"; taskId: string; pid: number; result: ToolResult };
+
+type BashRtkDetails = {
+  enabled: boolean;
+  applied: boolean;
+  executable?: string;
+  rewrittenCommand?: string;
+  estimatedSavedTokens?: number;
 };
 
 type FileReadSnapshot = {
@@ -70,10 +111,10 @@ type EditArgs = {
 };
 
 type BashArgs = {
-  command: string;
+  command?: string;
   cwd?: string;
-  timeoutMs?: number;
-  maxOutputBytes?: number;
+  taskId?: string;
+  waitTimeSeconds?: number;
   description?: string;
 };
 
@@ -122,12 +163,12 @@ const FULL_READ_TOKEN_BUDGET_RATIO = 0.1;
 export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
   const root = resolve(options.cwd);
   const state: CodingToolsState = { reads: new Map(), todos: [] };
-  const defaultTimeoutMs = options.defaultTimeoutMs ?? 30_000;
-  const maxTimeoutMs = options.maxTimeoutMs ?? 120_000;
+  const defaultWaitMs = Math.max(0, (options.defaultWaitTimeSeconds ?? 60) * 1_000);
   const maxOutputBytes = options.maxOutputBytes ?? 16_000;
   const normalReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, READ_TOKEN_BUDGET_RATIO);
   const fullReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, FULL_READ_TOKEN_BUDGET_RATIO);
   const defaultShell = resolveDefaultShell(options.defaultShell);
+  const bashRegistry = createBackgroundBashRegistry();
 
   const resolveWorkspacePath = (input: string): string => {
     if (input.length === 0) {
@@ -307,25 +348,43 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
     }),
     defineTool({
       name: "Bash",
-      description: "Execute a shell command in the workspace with timeout and output truncation.",
+      description: [
+        "Execute a shell command in the workspace.",
+        "If the command does not finish within wait_time seconds, it continues in the background and returns a task_id.",
+        "Call Bash again with task_id to wait for output; include command with task_id to write those exact bytes to stdin.",
+        "The command field is used both to start a new process and to send stdin to an existing background process.",
+        "Final output is returned using the normal Bash result format; oversized results are archived automatically.",
+      ].join(" "),
       parameters: Type.Object({
-        command: Type.String(),
+        command: Type.Optional(Type.String()),
         cwd: Type.Optional(Type.String()),
-        timeout: Type.Optional(Type.Number()),
+        task_id: Type.Optional(Type.String()),
+        wait_time: Type.Optional(Type.Number()),
         description: Type.Optional(Type.String()),
-        maxOutputBytes: Type.Optional(Type.Number()),
       }),
       execute: async (toolCallId, args, signal) => {
         const input = parseBashArgs(args);
+        const waitMs = input.waitTimeSeconds === undefined ? defaultWaitMs : Math.max(0, input.waitTimeSeconds * 1_000);
+        const outputLimit = maxOutputBytes;
+        if (input.taskId) {
+          const result = await bashRegistry.interact({
+            taskId: input.taskId,
+            command: input.command,
+            waitMs,
+            outputLimit,
+            artifactDir: options.toolResultArtifacts?.dir,
+            toolCallId,
+          });
+          return projectBashTaskResult(result);
+        }
+        if (!input.command) {
+          throw new Error("Bash requires command when task_id is not provided");
+        }
         const commandCwd = input.cwd ? resolveWorkspacePath(input.cwd) : root;
-        const timeoutMs = Math.min(input.timeoutMs ?? defaultTimeoutMs, maxTimeoutMs);
-        const outputLimit = input.maxOutputBytes ?? maxOutputBytes;
         const rtk = options.tokenSaving?.rtk;
         const rtkCommand = await resolveRtkCommand(rtk, input.command);
         const command = rtkCommand.rewrittenCommand ?? input.command;
         const executionCommand = rtkCommand.executionCommand ?? input.command;
-        const executable = defaultShell;
-        const argv = shellCommandArgs(defaultShell, executionCommand);
         const rtkGainBefore = rtkCommand.applied && rtk?.executable ? await readRtkGain(rtk.executable, commandCwd) : undefined;
         const rtkResult = {
           enabled: rtk?.enabled === true,
@@ -334,47 +393,32 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
           ...(rtkCommand.rewrittenCommand ? { rewrittenCommand: rtkCommand.rewrittenCommand } : {}),
         };
 
-        try {
-          const result = await execFileAsync(executable, argv, {
-            cwd: commandCwd,
-            timeout: timeoutMs,
-            signal,
-            maxBuffer: Math.max(outputLimit * 4, 1024 * 1024),
-          });
-          const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : undefined;
-          return await bashResult({
-            exitCode: 0,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            cwd: commandCwd,
-            outputLimit,
-            artifactDir: options.toolResultArtifacts?.dir,
-            toolCallId,
-            shell: defaultShell,
-            command,
-            rtk: withRtkSavings(rtkResult, rtkSavedTokens),
-          });
-        } catch (cause) {
-          if (isTimeoutError(cause)) {
-            throw new Error(`Bash command timed out after ${timeoutMs}ms`);
-          }
-          if (isExecError(cause)) {
-            const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : undefined;
-            return await bashResult({
-              exitCode: typeof cause.code === "number" ? cause.code : 1,
-              stdout: String(cause.stdout ?? ""),
-              stderr: String(cause.stderr ?? cause.message),
-              cwd: commandCwd,
-              outputLimit,
-              artifactDir: options.toolResultArtifacts?.dir,
-              toolCallId,
-              shell: defaultShell,
-              command,
-              rtk: withRtkSavings(rtkResult, rtkSavedTokens),
-            });
-          }
-          throw cause;
-        }
+        const result = await bashRegistry.start({
+          cwd: commandCwd,
+          waitMs,
+          outputLimit,
+          artifactDir: options.toolResultArtifacts?.dir,
+          toolCallId,
+          shell: defaultShell,
+          executionCommand,
+          displayCommand: command,
+          rtk: rtkResult,
+          rtkGainBefore,
+          signal,
+        });
+        return projectBashTaskResult(result);
+      },
+      hasActiveWork: () => bashRegistry.hasActiveWork(),
+    }),
+    defineTool({
+      name: "BashStop",
+      description: "Stop a background Bash task by task_id. Use this instead of killing the PID directly.",
+      parameters: Type.Object({
+        task_id: Type.String(),
+      }),
+      execute: async (_toolCallId, args) => {
+        const input = expectRecord(args);
+        return bashRegistry.stop(expectString(input.task_id, "task_id"));
       },
     }),
     defineTool({
@@ -535,10 +579,10 @@ const parseEditArgs = (args: unknown): EditArgs => {
 const parseBashArgs = (args: unknown): BashArgs => {
   const input = expectRecord(args);
   return {
-    command: expectString(input.command, "command"),
+    command: optionalString(input.command, "command"),
     cwd: optionalString(input.cwd, "cwd"),
-    timeoutMs: optionalNumber(input.timeoutMs ?? input.timeout, "timeout"),
-    maxOutputBytes: optionalNumber(input.maxOutputBytes, "maxOutputBytes"),
+    taskId: optionalString(input.task_id, "task_id"),
+    waitTimeSeconds: optionalNumber(input.wait_time, "wait_time"),
     description: optionalString(input.description, "description"),
   };
 };
@@ -819,6 +863,201 @@ const atomicWriteFile = async (path: string, content: string): Promise<void> => 
   }
 };
 
+export const createBackgroundBashRegistry = (): BackgroundBashRegistry => {
+  const tasks = new Map<string, BashTask>();
+
+  const finishResult = async (task: BashTask, toolCallId: string, outputLimit: number, artifactDir?: string): Promise<ToolResult> => {
+    const rtkSavedTokens = task.rtk.executable
+      ? await rtkSavedTokenDelta(task.rtk.executable, task.cwd, task.rtkGainBefore)
+      : undefined;
+    const result = await bashResult({
+      exitCode: task.exitCode ?? 1,
+      stdout: task.stdout,
+      stderr: task.stderr,
+      cwd: task.cwd,
+      outputLimit,
+      artifactDir,
+      toolCallId,
+      shell: task.shell,
+      command: task.displayCommand,
+      pid: task.pid,
+      taskId: task.taskId,
+      rtk: withRtkSavings(task.rtk, rtkSavedTokens),
+    });
+    return {
+      ...result,
+      details: {
+        ...(isRecord(result.details) ? result.details : {}),
+        task_id: task.taskId,
+        pid: task.pid,
+      },
+    };
+  };
+
+  const project = async (task: BashTask, waitMs: number, toolCallId: string, outputLimit: number, artifactDir?: string): Promise<BashTaskResult> => {
+    await waitForTask(task, waitMs);
+    if (!task.completed) {
+      return { status: "running", taskId: task.taskId, pid: task.pid, cwd: task.cwd };
+    }
+    return {
+      status: "completed",
+      taskId: task.taskId,
+      pid: task.pid,
+      result: await finishResult(task, toolCallId, outputLimit, artifactDir),
+    };
+  };
+
+  return {
+    hasActiveWork() {
+      return [...tasks.values()].some((task) => !task.completed);
+    },
+    async start(input) {
+      const taskId = `task_${randomUUID()}`;
+      const child = spawn(input.shell, shellCommandArgs(input.shell, input.executionCommand), {
+        cwd: input.cwd,
+        detached: true,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const task: BashTask = {
+        taskId,
+        child,
+        pid: child.pid ?? -1,
+        cwd: input.cwd,
+        shell: input.shell,
+        displayCommand: input.displayCommand,
+        stdout: "",
+        stderr: "",
+        completed: false,
+        rtk: input.rtk,
+        rtkGainBefore: input.rtkGainBefore,
+      };
+      tasks.set(taskId, task);
+      child.stdout.on("data", (chunk) => {
+        task.stdout += chunk.toString();
+      });
+      child.stderr.on("data", (chunk) => {
+        task.stderr += chunk.toString();
+      });
+      child.once("close", (code, signal) => {
+        task.completed = true;
+        task.exitCode = typeof code === "number" ? code : signalExitCode(signal);
+        task.exitSignal = signal ?? undefined;
+      });
+      child.once("error", (error) => {
+        task.completed = true;
+        task.exitCode = 1;
+        task.stderr += task.stderr ? `\n${error.message}` : error.message;
+      });
+      const abort = () => {
+        stopTaskProcess(task);
+      };
+      if (input.signal.aborted) {
+        abort();
+      } else {
+        input.signal.addEventListener("abort", abort, { once: true });
+      }
+      const result = await project(task, input.waitMs, input.toolCallId, input.outputLimit, input.artifactDir);
+      input.signal.removeEventListener("abort", abort);
+      if (result.status === "running") {
+        task.child.unref();
+      }
+      return result;
+    },
+    async interact(input) {
+      const task = tasks.get(input.taskId);
+      if (!task) {
+        throw new Error(`Unknown Bash task: ${input.taskId}`);
+      }
+      if (input.command !== undefined) {
+        if (task.completed) {
+          throw new Error(`Bash task already completed: ${input.taskId}`);
+        }
+        task.child.stdin.write(input.command);
+      }
+      return project(task, input.waitMs, input.toolCallId, input.outputLimit, input.artifactDir);
+    },
+    async stop(taskId) {
+      const task = tasks.get(taskId);
+      if (!task) {
+        throw new Error(`Unknown Bash task: ${taskId}`);
+      }
+      if (!task.completed) {
+        stopTaskProcess(task);
+        await waitForTask(task, 1_000);
+      }
+      return textResult(`Bash task stopped: ${taskId}`, {
+        task_id: taskId,
+        pid: task.pid,
+        status: "stopped",
+      });
+    },
+  };
+};
+
+type BashTask = {
+  taskId: string;
+  child: ChildProcessWithoutNullStreams;
+  pid: number;
+  cwd: string;
+  shell: string;
+  displayCommand: string;
+  stdout: string;
+  stderr: string;
+  completed: boolean;
+  exitCode?: number;
+  exitSignal?: NodeJS.Signals;
+  rtk: BashRtkDetails;
+  rtkGainBefore?: { savedTokens: number };
+};
+
+const projectBashTaskResult = (result: BashTaskResult): ToolResult => {
+  if (result.status === "completed") {
+    return result.result;
+  }
+  return textResult(`status: running\ntask_id: ${result.taskId}\npid: ${result.pid}`, {
+    status: "running",
+    task_id: result.taskId,
+    pid: result.pid,
+    cwd: result.cwd,
+  });
+};
+
+const waitForTask = (task: BashTask, waitMs: number): Promise<void> =>
+  new Promise((resolve) => {
+    if (task.completed || waitMs <= 0) {
+      resolve();
+      return;
+    }
+    const timeout = setTimeout(resolve, waitMs);
+    const onDone = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    task.child.once("close", onDone);
+    task.child.once("error", onDone);
+  });
+
+const stopTaskProcess = (task: BashTask): void => {
+  try {
+    if (task.pid > 0) {
+      process.kill(-task.pid, "SIGTERM");
+      return;
+    }
+  } catch {
+    // Fall back to the direct child below.
+  }
+  task.child.kill("SIGTERM");
+};
+
+const signalExitCode = (signal: NodeJS.Signals | null): number => signal ? 128 + signalNumber(signal) : 1;
+
+const signalNumber = (signal: NodeJS.Signals): number => {
+  if (signal === "SIGTERM") return 15;
+  if (signal === "SIGKILL") return 9;
+  if (signal === "SIGINT") return 2;
+  return 1;
+};
+
 const bashResult = async (input: {
   exitCode: number;
   stdout: string;
@@ -829,6 +1068,8 @@ const bashResult = async (input: {
   toolCallId: string;
   shell?: string;
   command?: string;
+  pid?: number;
+  taskId?: string;
   rtk?: {
     enabled: boolean;
     applied: boolean;
@@ -874,6 +1115,8 @@ const bashResult = async (input: {
     } : {}),
     ...(input.shell ? { shell: input.shell } : {}),
     ...(input.command ? { command: input.command } : {}),
+    ...(input.pid ? { pid: input.pid } : {}),
+    ...(input.taskId ? { task_id: input.taskId } : {}),
     ...(input.rtk ? {
       rtk: {
         ...input.rtk,

@@ -11,6 +11,7 @@ export type AgentTool = {
   name: string;
   description: string;
   parameters: TSchema;
+  hasActiveWork?: () => boolean;
   execute: (
     toolCallId: string,
     args: unknown,

@@ -943,6 +943,9 @@ export class ScorelHost {
       if (lane.runtime.running) {
         return true;
       }
+      if (lane.runtime.hasActiveToolWork()) {
+        return true;
+      }
       if (
         lane.session.tree.controlState.queues.follow_up.length > 0 ||
         lane.session.tree.controlState.queues.steer.length > 0

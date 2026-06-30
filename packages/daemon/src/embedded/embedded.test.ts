@@ -161,6 +161,52 @@ describe("ScorelHost + embedded transport", () => {
     await expect(responseB).resolves.toMatchObject({ type: "response", requestType: "create_session" });
   });
 
+  it("counts background tool work as active host work", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-active-tool-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    await mkdir(sessionsDir);
+    let activeToolWork = true;
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async () => {
+        const runtime = new ScorelRuntime({ provider });
+        runtime.registerTool(
+          defineTool({
+            name: "BackgroundTool",
+            description: "test background activity",
+            parameters: Type.Object({}),
+            hasActiveWork: () => activeToolWork,
+            execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
+          }),
+        );
+        return runtime;
+      },
+      now: () => 1_000,
+    });
+    await host.start();
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+    const response = waitForResponse(transport, "req_create");
+
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_active_tool"),
+      meta: { projectId: project.projectId },
+    });
+
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "create_session" });
+    expect(host.activityStatus()).toMatchObject({ activeWork: true });
+    activeToolWork = false;
+    expect(host.activityStatus()).toMatchObject({ activeWork: false });
+  });
+
   it("isolates runtime work directories for sessions in two registered projects", async () => {
     const { root, runtimeProjects, host } = await fixture();
     const repoA = join(root, "repo-a");
@@ -1702,7 +1748,7 @@ auxiliary = "main"
                       type: "function",
                       function: {
                         name: "Bash",
-                        arguments: "{\"command\":\"git status\",\"maxOutputBytes\":1000}",
+                        arguments: "{\"command\":\"git status\"}",
                       },
                     },
                   ],

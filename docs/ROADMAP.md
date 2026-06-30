@@ -137,6 +137,12 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Remote Control → WebUI �
 
 **Goal**: 为长时间运行的构建、测试、dev server、日志监控提供明确的后台任务模型，而不是把 monitor 语义塞进一次性 `Bash`。
 
+**Steps**:
+
+| Step | Spec | Goal | Status |
+|---|---|---|---|
+| Background.1 | [`S0115`](spec/ship/S0115-async-bash-sessions.md) | Bash 支持 `wait_time` 转后台、`task_id` 轮询/写 stdin、`BashStop` 停止，并复用原 Bash result/artifact 逻辑。 | Done |
+
 **Candidate scope**:
 
 - Background Bash / task id / poll / stop。
@@ -815,6 +821,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0112`](spec/ship/S0112-observability-sync-assets.md) | Observability sync assets for Langfuse and OpenTelemetry | Done |
 | [`S0113`](spec/ship/S0113-daemon-attach-lifetime.md) | Daemon attach lifetime | Done |
 | [`S0114`](spec/ship/S0114-dev-gui-host-owner.md) | Dev GUI Host owner | Done |
+| [`S0115`](spec/ship/S0115-async-bash-sessions.md) | Async Bash sessions | Done |
 
 ---
 

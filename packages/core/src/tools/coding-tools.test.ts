@@ -240,24 +240,96 @@ describe("coding tools", () => {
     await expect(readFile(path, "utf8")).resolves.toBe("one\ndos\none\n");
   });
 
-  it("runs Bash with cwd, timeout, and output truncation", async () => {
+  it("runs Bash with cwd and output truncation", async () => {
     const cwd = await tempRoot();
     await mkdir(join(cwd, "nested"));
-    const bash = toolByName(cwd, "Bash");
+    const bash = createCodingTools({ cwd, maxOutputBytes: 4 }).find((tool) => tool.name === "Bash")!;
 
     const ok = await bash.execute(
       "call_bash",
-      { command: "pwd && printf 'abcdef'", cwd: "nested", timeoutMs: 2_000, maxOutputBytes: 4 },
+      { command: "pwd && printf 'abcdef'", cwd: "nested" },
       new AbortController().signal,
       () => undefined,
     );
     expect(textOf(ok)).toContain("exitCode: 0");
     expect(textOf(ok)).toContain("[stdout truncated");
     expect(await stat(join(cwd, "nested"))).toBeTruthy();
+  });
 
-    await expect(
-      bash.execute("call_bash", { command: "sleep 2", timeoutMs: 10 }, new AbortController().signal, () => undefined),
-    ).rejects.toThrow("timed out");
+  it("returns a background task id when Bash exceeds wait_time and later resolves through Bash", async () => {
+    const cwd = await tempRoot();
+    const bash = toolByName(cwd, "Bash");
+    const started = await bash.execute(
+      "call_async_bash",
+      { command: `${JSON.stringify(process.execPath)} -e "setTimeout(() => console.log('async done'), 120)"`, wait_time: 0.01 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(started)).toContain("status: running");
+    const taskId = (started.details as { task_id?: string }).task_id;
+    expect(taskId).toMatch(/^task_/);
+    expect(started.details).toMatchObject({ status: "running", pid: expect.any(Number) });
+
+    const finished = await bash.execute(
+      "call_async_bash_output",
+      { task_id: taskId, wait_time: 1 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(finished)).toContain("exitCode: 0");
+    expect(textOf(finished)).toContain("async done");
+    expect(finished.details).toMatchObject({ exitCode: 0, task_id: taskId });
+  });
+
+  it("writes stdin to an existing background Bash task using command", async () => {
+    const cwd = await tempRoot();
+    const bash = toolByName(cwd, "Bash");
+    const started = await bash.execute(
+      "call_interactive_bash",
+      {
+        command: [
+          JSON.stringify(process.execPath),
+          "-e",
+          JSON.stringify("process.stdin.once('data', (chunk) => { console.log('echo:' + chunk.toString().trim()); process.exit(0); });"),
+        ].join(" "),
+        wait_time: 0.01,
+      },
+      new AbortController().signal,
+      () => undefined,
+    );
+    const taskId = (started.details as { task_id?: string }).task_id;
+    expect(taskId).toBeTruthy();
+
+    const finished = await bash.execute(
+      "call_interactive_bash_input",
+      { task_id: taskId, command: "hello from stdin\n", wait_time: 1 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(finished)).toContain("exitCode: 0");
+    expect(textOf(finished)).toContain("echo:hello from stdin");
+  });
+
+  it("stops a background Bash task through BashStop", async () => {
+    const cwd = await tempRoot();
+    const tools = createCodingTools({ cwd });
+    const bash = tools.find((tool) => tool.name === "Bash")!;
+    const stop = tools.find((tool) => tool.name === "BashStop")!;
+    const started = await bash.execute(
+      "call_stop_bash",
+      { command: `${JSON.stringify(process.execPath)} -e "setInterval(() => {}, 1000)"`, wait_time: 0.01 },
+      new AbortController().signal,
+      () => undefined,
+    );
+    const taskId = (started.details as { task_id?: string }).task_id;
+
+    const stopped = await stop.execute("call_stop_bash_stop", { task_id: taskId }, new AbortController().signal, () => undefined);
+
+    expect(textOf(stopped)).toContain("stopped");
+    expect(stopped.details).toMatchObject({ task_id: taskId, status: "stopped" });
   });
 
   it("archives oversized Bash results while returning one budgeted head/tail projection", async () => {
@@ -265,12 +337,13 @@ describe("coding tools", () => {
     const artifactDir = join(cwd, ".scorel", "sessions", "ses_artifacts.artifacts");
     const bash = createCodingTools({
       cwd,
+      maxOutputBytes: 10,
       toolResultArtifacts: { dir: artifactDir },
     }).find((tool) => tool.name === "Bash")!;
 
     const result = await bash.execute(
       "call_bash_artifact",
-      { command: "printf '0123456789abcdefghijklmnopqrstuvwxyz'", maxOutputBytes: 10 },
+      { command: "printf '0123456789abcdefghijklmnopqrstuvwxyz'" },
       new AbortController().signal,
       () => undefined,
     );
@@ -306,7 +379,7 @@ describe("coding tools", () => {
 
     const result = await bash.execute(
       "call_bash",
-      { command: "printf 'from-default-shell'", maxOutputBytes: 1_000 },
+      { command: "printf 'from-default-shell'" },
       new AbortController().signal,
       () => undefined,
     );
@@ -337,7 +410,7 @@ describe("coding tools", () => {
 
     const result = await bash.execute(
       "call_bash",
-      { command: "printf 'from-csh-compatible-shell'", maxOutputBytes: 1_000 },
+      { command: "printf 'from-csh-compatible-shell'" },
       new AbortController().signal,
       () => undefined,
     );
@@ -393,7 +466,7 @@ describe("coding tools", () => {
 
     const result = await bash.execute(
       "call_bash",
-      { command: "git status", maxOutputBytes: 1_000 },
+      { command: "git status" },
       new AbortController().signal,
       () => undefined,
     );
@@ -429,7 +502,7 @@ describe("coding tools", () => {
 
     const result = await bash.execute(
       "call_bash",
-      { command: "printf 'direct'", maxOutputBytes: 1_000 },
+      { command: "printf 'direct'" },
       new AbortController().signal,
       () => undefined,
     );

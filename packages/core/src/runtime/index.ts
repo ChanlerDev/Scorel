@@ -74,6 +74,10 @@ export class ScorelRuntime {
     this.#tools.delete(name);
   }
 
+  hasActiveToolWork(): boolean {
+    return [...this.#tools.values()].some((tool) => tool.hasActiveWork?.() === true);
+  }
+
   cancel(): void {
     this.#controller?.abort();
   }
