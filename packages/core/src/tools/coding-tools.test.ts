@@ -313,6 +313,44 @@ describe("coding tools", () => {
     expect(textOf(finished)).toContain("echo:hello from stdin");
   });
 
+  it("allows completed Bash tasks to be read again but rejects further stdin writes", async () => {
+    const cwd = await tempRoot();
+    const bash = toolByName(cwd, "Bash");
+    const started = await bash.execute(
+      "call_completed_bash",
+      { command: `${JSON.stringify(process.execPath)} -e "setTimeout(() => console.log('completed once'), 80)"`, wait_time: 0.01 },
+      new AbortController().signal,
+      () => undefined,
+    );
+    const taskId = (started.details as { task_id?: string }).task_id;
+    expect(taskId).toBeTruthy();
+
+    const final = await bash.execute(
+      "call_completed_bash_output",
+      { task_id: taskId, wait_time: 1 },
+      new AbortController().signal,
+      () => undefined,
+    );
+    expect(textOf(final)).toContain("completed once");
+
+    const repeatedFinal = await bash.execute(
+      "call_completed_bash_output_again",
+      { task_id: taskId, wait_time: 0 },
+      new AbortController().signal,
+      () => undefined,
+    );
+    expect(textOf(repeatedFinal)).toContain("completed once");
+
+    await expect(
+      bash.execute(
+        "call_completed_bash_input",
+        { task_id: taskId, command: "too late\n", wait_time: 0 },
+        new AbortController().signal,
+        () => undefined,
+      ),
+    ).rejects.toThrow("already completed");
+  });
+
   it("stops a background Bash task through BashStop", async () => {
     const cwd = await tempRoot();
     const tools = createCodingTools({ cwd });

@@ -20,6 +20,7 @@ Long commands should not require a fake timeout. `wait_time` controls how long t
   - `cwd`.
 - Calling `Bash` with `task_id` and no `command` waits for output/final completion.
 - Calling `Bash` with `task_id` and `command` writes that exact string to stdin, then waits for output/final completion.
+- Completed Bash tasks are read-only. Calling `Bash` with a completed `task_id` and no `command` can return the final Bash result again; calling it with `command` must fail instead of writing to a closed process.
 - Add `BashStop({ task_id })` to stop a background Bash task. The implementation owns process-group cleanup; models should not kill PIDs directly.
 - Preserve the existing Bash final result shape and S0104 artifact behavior. Async completion must call the same `bashResult()` path as synchronous completion.
 - Keep background Bash tasks visible to runtime active-work detection so attach-owned daemon shutdown does not treat a running background command as idle.
@@ -61,6 +62,7 @@ For S0115, completion is surfaced through explicit `Bash({ task_id })` calls and
 - A command still running after `wait_time` returns a compact running result with `task_id` and `pid`.
 - `Bash({ task_id })` returns the final normal Bash result when the background command completes.
 - `Bash({ task_id, command })` writes exact stdin bytes and can return the final normal Bash result.
+- `Bash({ task_id, command })` rejects completed tasks; completed tasks remain readable by `task_id`.
 - `BashStop({ task_id })` stops a running background Bash task.
 - Oversized final output still uses S0104 artifact projection through the shared Bash result path.
 - Runtime active-work detection returns true while a background Bash task is running.
@@ -72,6 +74,7 @@ For S0115, completion is surfaced through explicit `Bash({ task_id })` calls and
   - long Bash returns `task_id` after `wait_time`;
   - polling by `task_id` returns final Bash result;
   - writing stdin through `Bash({ task_id, command })` works;
+  - completed tasks can be read again but reject additional stdin writes;
   - `BashStop` stops a running task;
   - artifact projection still works for oversized final output.
 - Runtime/daemon tests:
