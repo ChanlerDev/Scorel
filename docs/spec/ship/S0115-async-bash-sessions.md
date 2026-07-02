@@ -55,6 +55,14 @@ The existing reminder system can already project persisted harness items into mo
 
 For S0115, completion is surfaced through explicit `Bash({ task_id })` calls and normal final Bash tool results.
 
+When that future system-reminder delivery exists, it must mark the task result as delivered-to-context. After that point:
+
+- `Bash({ task_id })` should return a compact advisory instead of the full final result, for example: `Task task_... has already been injected through a system reminder. Do not read it again unless the user explicitly asks for the raw result.`
+- `Bash({ task_id, command })` must still reject because completed tasks are read-only.
+- The raw final Bash result should remain available internally for diagnostics/artifacts, but the model-facing default should avoid duplicating context that was already injected.
+
+This keeps the two delivery paths from double-counting the same output in model context: explicit polling returns the Bash result; reminder delivery returns the Bash result once through the reminder and future polling only acknowledges that delivery.
+
 ## Acceptance Criteria
 
 - `Bash` exposes `wait_time` and `task_id` in its schema and description.
