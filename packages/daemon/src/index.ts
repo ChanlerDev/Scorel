@@ -58,6 +58,8 @@ import {
   writeMemoryDreamState,
   writeSessionMemory,
   type ExtensionManifest,
+  type BackgroundBashCompletion,
+  type BackgroundBashDeliveryHooks,
   type ScorelConfig,
   type ScorelConfigProfile,
   type JsonlSession,
@@ -84,6 +86,7 @@ import {
   type EventId,
   type AvailableModelSummary,
   type HostProject,
+  type InstructionSnapshot,
   type PersistentEvent,
   type ProjectId,
   type QueueItem,
@@ -452,6 +455,7 @@ export type RuntimeFactoryOptions = {
   modelSelection?: { modelId?: string; role?: "primary" | "standard" | "auxiliary" };
   includeTools?: boolean;
   rtkExecutable?: string;
+  backgroundBash?: BackgroundBashDeliveryHooks;
 };
 
 export type ScorelHostOptions = {
@@ -464,7 +468,13 @@ export type ScorelHostOptions = {
   modelProfile?: ScorelConfig;
   loadConfig?: (options: { project: HostProject }) => Promise<ScorelConfig>;
   loadConfigProfile?: (options: { project: HostProject }) => Promise<ScorelConfigProfile | ScorelConfig>;
-  createRuntime: (options: { sessionId: SessionId; project: HostProject; selectedModel?: SelectedModelSummary; purpose: "chat" | "title" | "memory" }) => Promise<ScorelRuntime>;
+  createRuntime: (options: {
+    sessionId: SessionId;
+    project: HostProject;
+    selectedModel?: SelectedModelSummary;
+    purpose: "chat" | "title" | "memory";
+    backgroundBash?: BackgroundBashDeliveryHooks;
+  }) => Promise<ScorelRuntime>;
   memoryHomeDir?: string;
   onSessionListChanged?: (change: { projectId: ProjectId; sessionId: SessionId }) => void;
   onLastClientDisconnect?: () => void;
@@ -537,6 +547,7 @@ export const createRealRuntime = async (options: RuntimeFactoryOptions): Promise
           executable: rtkExecutable,
         },
       },
+      backgroundBash: options.backgroundBash,
     })) {
       runtime.registerTool(tool);
     }
@@ -1139,18 +1150,7 @@ export class ScorelHost {
     lane.channelContext = input.channelContext;
     lane.snipClientId = clientId;
     try {
-      for await (const rawEvent of lane.runtime.executeTurn(
-        buildContext(lane.session.tree, userEvent.id),
-        renderSystemPrompt(instructionSnapshot),
-        {
-          refreshContext: async () => {
-            await this.#consumeSteer(lane, clientId, state);
-            return buildContext(lane.session.tree, lane.session.activeLeafId ?? state.parentId);
-          },
-        },
-      )) {
-        await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
-      }
+      await this.#executeRuntimeLoop(lane, clientId, state, userEvent.id, instructionSnapshot);
     } finally {
       lane.channelContext = undefined;
       lane.snipClientId = undefined;
@@ -1176,6 +1176,68 @@ export class ScorelHost {
     return { ...result, status: "completed" };
   }
 
+  async #executeRuntimeLoop(
+    lane: SessionLane,
+    clientId: ClientId,
+    state: RuntimeEventState,
+    contextLeafId: EventId,
+    instructionSnapshot: InstructionSnapshot,
+  ): Promise<void> {
+    for await (const rawEvent of lane.runtime.executeTurn(
+      buildContext(lane.session.tree, contextLeafId),
+      renderSystemPrompt(instructionSnapshot),
+      {
+        refreshContext: async () => {
+          await this.#consumeSteer(lane, clientId, state);
+          return buildContext(lane.session.tree, lane.session.activeLeafId ?? state.parentId);
+        },
+      },
+    )) {
+      await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
+    }
+  }
+
+  async #runSystemReminderTurn(lane: SessionLane, clientId: ClientId, reminderEventId: EventId): Promise<void> {
+    this.#lastActiveWorkAt = this.#now();
+    const sessionId = lane.session.header.sessionId;
+    await this.#selectChatRuntime(lane, undefined);
+    await this.#appendDiagnostic(sessionId, "system_reminder_turn_started", {
+      clientId,
+      reminderEventId,
+      selectedModelId: lane.selectedModel?.modelId,
+    });
+    const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, clientId);
+    await this.#syncSkillIndex(lane, clientId);
+    await this.#ensureMemoryHarness(lane, clientId);
+    await this.#syncMemoryTools(lane, clientId);
+    await this.#autoCompactIfNeeded(lane, clientId);
+    this.#syncChannelTool(lane, undefined);
+    const firstAssistantEventId = asEventId(this.#createId());
+    const state: RuntimeEventState = {
+      parentId: reminderEventId,
+      assistantEventId: firstAssistantEventId,
+      finalAssistantEventId: firstAssistantEventId,
+    };
+    try {
+      await this.#executeRuntimeLoop(lane, clientId, state, reminderEventId, instructionSnapshot);
+    } finally {
+      lane.runtime.unregisterTool("SendChannelMessage");
+    }
+    await this.#appendDiagnostic(sessionId, "system_reminder_turn_finished", {
+      clientId,
+      reminderEventId,
+      assistantEventId: state.finalAssistantEventId,
+    });
+    this.#scheduleSessionMemoryUpdate(lane, clientId);
+    void this.#syncObservabilityAfterTurn(lane).catch((cause) => {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      void this.#appendDiagnostic(sessionId, "observability_sync_failed", {
+        message: error.message,
+        stack: shortStack(error),
+      });
+    });
+  }
+
   async #syncObservabilityAfterTurn(lane: SessionLane): Promise<void> {
     const config = await this.#configForProject(lane.project.projectId);
     const results = await syncObservationAssetTargets({
@@ -1191,6 +1253,87 @@ export class ScorelHost {
         reason: result.reason,
       });
     }
+  }
+
+  #backgroundBashForSession(sessionId: SessionId): BackgroundBashDeliveryHooks {
+    return {
+      onComplete: async (completion) => this.#handleBackgroundBashCompleted(sessionId, completion),
+      isDeliveryVisible: ({ task_id }) => this.#backgroundBashDeliveryVisible(sessionId, task_id),
+    };
+  }
+
+  async #handleBackgroundBashCompleted(
+    sessionId: SessionId,
+    completion: BackgroundBashCompletion,
+  ): Promise<{ eventId?: string } | void> {
+    const lane = this.#sessions.get(sessionId);
+    if (!lane) {
+      return undefined;
+    }
+    const clientId = asClientId("client_system");
+    const parentId = lane.session.activeLeafId;
+    if (!parentId) {
+      return undefined;
+    }
+    const resultText = toolResultText(completion.result);
+    const event = await this.#appendPersistent(lane, {
+      type: "harness_item",
+      id: asEventId(this.#createId()),
+      parentId,
+      sessionId,
+      clientId,
+      ts: this.#now(),
+      item: {
+        kind: "runtime_notice",
+        origin: "system",
+        visibility: "hidden",
+        content: [
+          `Background Bash task completed: ${completion.task_id}`,
+          `pid: ${completion.pid}`,
+          `cwd: ${completion.cwd}`,
+          "",
+          resultText,
+          "",
+          "This Bash result has already been injected through a system reminder.",
+          "Do not call Bash with this task_id again unless the user explicitly asks for the raw result.",
+        ].join("\n"),
+        data: {
+          type: "background_bash_completed",
+          task_id: completion.task_id,
+          pid: completion.pid,
+          cwd: completion.cwd,
+        },
+      },
+    });
+    await this.#appendDiagnostic(sessionId, "background_bash_completed", {
+      clientId,
+      taskId: completion.task_id,
+      pid: completion.pid,
+      harnessEventId: event.id,
+      runtimeRunning: lane.runtime.running,
+    });
+    if (!lane.runtime.running) {
+      lane.queue = lane.queue.then(() => this.#runSystemReminderTurn(lane, clientId, event.id));
+      void lane.queue.catch((cause) => {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        void this.#appendDiagnostic(sessionId, "system_reminder_turn_failed", {
+          clientId,
+          reminderEventId: event.id,
+          message: error.message,
+          stack: shortStack(error),
+        });
+      });
+    }
+    return { eventId: event.id };
+  }
+
+  #backgroundBashDeliveryVisible(sessionId: SessionId, taskId: string): boolean {
+    const lane = this.#sessions.get(sessionId);
+    const leafId = lane?.session.activeLeafId;
+    if (!lane || !leafId) {
+      return false;
+    }
+    return buildContext(lane.session.tree, leafId).some((message) => messageHasBackgroundBashReminder(message, taskId));
   }
 
   #scheduleAfterUserMessageHooks(
@@ -2482,7 +2625,13 @@ export class ScorelHost {
     const loaded = await loadSession({ sessionsDir: this.#sessionsDir, sessionId });
     const project = await this.#resolveProject(sessionId, loaded.header.meta.projectId);
     const selectedModel = await this.#selectedModelFromMeta(loaded.header.meta, project);
-    const runtime = await this.#createRuntime({ sessionId, project, selectedModel, purpose: "chat" });
+    const runtime = await this.#createRuntime({
+      sessionId,
+      project,
+      selectedModel,
+      purpose: "chat",
+      backgroundBash: this.#backgroundBashForSession(sessionId),
+    });
     await this.#appendDiagnostic(sessionId, "runtime_created", {
       projectId: project.projectId,
       workDir: project.workDir,
@@ -2538,7 +2687,13 @@ export class ScorelHost {
         },
       },
     });
-    const runtime = await this.#createRuntime({ sessionId, project, selectedModel, purpose: "chat" });
+    const runtime = await this.#createRuntime({
+      sessionId,
+      project,
+      selectedModel,
+      purpose: "chat",
+      backgroundBash: this.#backgroundBashForSession(sessionId),
+    });
     await this.#appendDiagnostic(sessionId, "runtime_created", {
       projectId: project.projectId,
       workDir: project.workDir,
@@ -2662,6 +2817,7 @@ export class ScorelHost {
       project: lane.project,
       selectedModel,
       purpose: "chat",
+      backgroundBash: this.#backgroundBashForSession(lane.session.header.sessionId),
     });
     lane.selectedModel = selectedModel;
     this.#registerLaneTools(lane);
@@ -3610,6 +3766,33 @@ const messageText = (message: ScorelMessage): string => {
     .trim();
   return text || "(empty)";
 };
+
+const toolResultText = (result: BackgroundBashCompletion["result"]): string => {
+  const text = result.content
+    .map((block) => block.type === "text" ? block.text : "")
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+  return text || "(empty Bash result)";
+};
+
+const messageHasBackgroundBashReminder = (message: ScorelMessage, taskId: string): boolean =>
+  message.content.some((block) => {
+    if (block.type === "system_reminder") {
+      return isBackgroundBashReminderData(block.data, taskId);
+    }
+    if (block.type !== "tool_result" || !isRecord(block.result) || !Array.isArray(block.result.content)) {
+      return false;
+    }
+    return block.result.content.some((item) =>
+      isRecord(item) &&
+      item.type === "system_reminder" &&
+      isBackgroundBashReminderData(item.data, taskId)
+    );
+  });
+
+const isBackgroundBashReminderData = (value: unknown, taskId: string): boolean =>
+  isRecord(value) && value.type === "background_bash_completed" && value.task_id === taskId;
 
 const estimateScorelMessagesTokens = (messages: ScorelMessage[]): number =>
   estimateTextTokens(messages.map(messageText).join("\n"));

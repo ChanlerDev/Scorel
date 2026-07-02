@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Type } from "@mariozechner/pi-ai";
 import { describe, expect, it } from "vitest";
 
-import { ScorelRuntime, defineTool, loadScorelConfig, loadScorelConfigProfile, type RuntimeProvider, type RuntimeProviderTurn, type ScorelConfig } from "@scorel/core";
+import { ScorelRuntime, defineTool, loadScorelConfig, loadScorelConfigProfile, type BackgroundBashDeliveryHooks, type RuntimeProvider, type RuntimeProviderTurn, type ScorelConfig } from "@scorel/core";
 import {
   asClientId,
   asDeviceId,
@@ -2620,6 +2620,86 @@ apiKey = "secret"
       scope: "session",
     });
     expect(providerTurns[0]?.tools.map((tool) => tool.name)).toContain("Skill");
+  });
+
+  it("injects completed background Bash output as a system reminder and starts an idle continuation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-background-bash-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const repo = join(root, "repo");
+    await mkdir(repo, { recursive: true });
+    await mkdir(sessionsDir);
+    const providerTurns: RuntimeProviderTurn[] = [];
+    let backgroundBash: BackgroundBashDeliveryHooks | undefined;
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async (options) => {
+        backgroundBash = options.backgroundBash;
+        return new ScorelRuntime({
+          provider: {
+            streamTurn: async function* (turn) {
+              providerTurns.push(turn);
+              return assistantMessage(`ok ${providerTurns.length}`);
+            },
+          },
+        });
+      },
+      now: () => 1_000,
+    });
+    await host.start();
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_background_bash"),
+      meta: { projectId: project.projectId },
+    });
+    const response = waitForResponse(transport, "req_send");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send"),
+      sessionId: asSessionId("ses_background_bash"),
+      content: "start",
+    });
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const delivery = await backgroundBash?.onComplete?.({
+      task_id: "task_finished",
+      pid: 123,
+      cwd: repo,
+      result: {
+        content: [{ type: "text", text: "exitCode: 0\nstdout:\nbackground done\nstderr:\n" }],
+      },
+    });
+
+    await eventually(() => expect(providerTurns).toHaveLength(2));
+    const reminder = providerTurns[1]?.context
+      .flatMap((message) => message.content)
+      .find((block) => block.type === "system_reminder" && block.data?.task_id === "task_finished");
+    expect(reminder).toMatchObject({
+      type: "system_reminder",
+      kind: "runtime_notice",
+      text: expect.stringContaining("background done"),
+      scope: "next_model_call",
+    });
+    expect(backgroundBash?.isDeliveryVisible?.({ task_id: "task_finished", eventId: delivery?.eventId })).toBe(true);
+
+    const events = (await readFile(join(sessionsDir, "ses_background_bash.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .slice(1)
+      .map((line) => JSON.parse(line) as { type: string; item?: { kind: string; data?: Record<string, unknown> } });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "harness_item",
+      item: expect.objectContaining({
+        kind: "runtime_notice",
+        data: expect.objectContaining({ type: "background_bash_completed", task_id: "task_finished" }),
+      }),
+    }));
   });
 
   it("rejects creating a session for an unregistered project", async () => {

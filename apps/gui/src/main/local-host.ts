@@ -116,7 +116,7 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
         }),
     createRuntime:
       options.createRuntime ??
-      (async ({ sessionId, project, selectedModel, purpose }) =>
+      (async ({ sessionId, project, selectedModel, purpose, backgroundBash }) =>
         createRealRuntime({
           cwd: project.workDir,
           config: await loadScorelConfig({ cwd: project.workDir, ...configScope }),
@@ -124,6 +124,7 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
           sessionId,
           modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
           includeTools: purpose === "chat",
+          backgroundBash,
         })),
   });
   let client = new DaemonClient(createEmbeddedTransport(host), {

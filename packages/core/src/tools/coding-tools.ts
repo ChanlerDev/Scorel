@@ -28,6 +28,19 @@ export type CodingToolsOptions = {
       executable?: string;
     };
   };
+  backgroundBash?: BackgroundBashDeliveryHooks;
+};
+
+export type BackgroundBashCompletion = {
+  task_id: string;
+  pid: number;
+  cwd: string;
+  result: ToolResult;
+};
+
+export type BackgroundBashDeliveryHooks = {
+  onComplete?: (completion: BackgroundBashCompletion) => Promise<{ eventId?: string } | void>;
+  isDeliveryVisible?: (delivery: { task_id: string; eventId?: string }) => boolean;
 };
 
 export type BackgroundBashRegistry = {
@@ -62,6 +75,7 @@ type InteractBashInput = {
 
 type BashTaskResult =
   | { status: "running"; taskId: string; pid: number; cwd: string }
+  | { status: "delivered"; taskId: string; pid: number; eventId?: string }
   | { status: "completed"; taskId: string; pid: number; result: ToolResult };
 
 type BashRtkDetails = {
@@ -168,7 +182,7 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
   const normalReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, READ_TOKEN_BUDGET_RATIO);
   const fullReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, FULL_READ_TOKEN_BUDGET_RATIO);
   const defaultShell = resolveDefaultShell(options.defaultShell);
-  const bashRegistry = createBackgroundBashRegistry();
+  const bashRegistry = createBackgroundBashRegistry({ delivery: options.backgroundBash });
 
   const resolveWorkspacePath = (input: string): string => {
     if (input.length === 0) {
@@ -863,7 +877,7 @@ const atomicWriteFile = async (path: string, content: string): Promise<void> => 
   }
 };
 
-export const createBackgroundBashRegistry = (): BackgroundBashRegistry => {
+export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBashDeliveryHooks } = {}): BackgroundBashRegistry => {
   const tasks = new Map<string, BashTask>();
 
   const finishResult = async (task: BashTask, toolCallId: string, outputLimit: number, artifactDir?: string): Promise<ToolResult> => {
@@ -895,9 +909,20 @@ export const createBackgroundBashRegistry = (): BackgroundBashRegistry => {
   };
 
   const project = async (task: BashTask, waitMs: number, toolCallId: string, outputLimit: number, artifactDir?: string): Promise<BashTaskResult> => {
-    await waitForTask(task, waitMs);
+    task.activeWaiters += 1;
+    try {
+      await waitForTask(task, waitMs);
+    } finally {
+      task.activeWaiters -= 1;
+    }
     if (!task.completed) {
       return { status: "running", taskId: task.taskId, pid: task.pid, cwd: task.cwd };
+    }
+    if (task.deliveryPromise) {
+      await task.deliveryPromise;
+    }
+    if (task.deliveredEventId && options.delivery?.isDeliveryVisible?.({ task_id: task.taskId, eventId: task.deliveredEventId })) {
+      return { status: "delivered", taskId: task.taskId, pid: task.pid, eventId: task.deliveredEventId };
     }
     return {
       status: "completed",
@@ -905,6 +930,36 @@ export const createBackgroundBashRegistry = (): BackgroundBashRegistry => {
       pid: task.pid,
       result: await finishResult(task, toolCallId, outputLimit, artifactDir),
     };
+  };
+
+  const maybeDeliver = (task: BashTask): void => {
+    if (!task.completed || !task.returnedRunning || task.activeWaiters > 0 || task.deliveryStarted || !options.delivery?.onComplete) {
+      return;
+    }
+    task.deliveryStarted = true;
+    task.deliveryPromise = finishResult(task, task.toolCallId, task.outputLimit, task.artifactDir)
+      .then((result) => options.delivery?.onComplete?.({
+        task_id: task.taskId,
+        pid: task.pid,
+        cwd: task.cwd,
+        result,
+      }))
+      .then((delivery) => {
+        if (delivery?.eventId) {
+          task.deliveredEventId = delivery.eventId;
+        }
+      })
+      .catch((cause) => {
+        task.deliveryStarted = false;
+        task.stderr += task.stderr ? `\n${errorMessage(cause)}` : errorMessage(cause);
+      });
+  };
+
+  const markCompleted = (task: BashTask, exitCode: number, signal?: NodeJS.Signals): void => {
+    task.completed = true;
+    task.exitCode = exitCode;
+    task.exitSignal = signal;
+    maybeDeliver(task);
   };
 
   return {
@@ -928,6 +983,12 @@ export const createBackgroundBashRegistry = (): BackgroundBashRegistry => {
         stdout: "",
         stderr: "",
         completed: false,
+        returnedRunning: false,
+        activeWaiters: 0,
+        deliveryStarted: false,
+        toolCallId: input.toolCallId,
+        outputLimit: input.outputLimit,
+        artifactDir: input.artifactDir,
         rtk: input.rtk,
         rtkGainBefore: input.rtkGainBefore,
       };
@@ -939,14 +1000,11 @@ export const createBackgroundBashRegistry = (): BackgroundBashRegistry => {
         task.stderr += chunk.toString();
       });
       child.once("close", (code, signal) => {
-        task.completed = true;
-        task.exitCode = typeof code === "number" ? code : signalExitCode(signal);
-        task.exitSignal = signal ?? undefined;
+        markCompleted(task, typeof code === "number" ? code : signalExitCode(signal), signal ?? undefined);
       });
       child.once("error", (error) => {
-        task.completed = true;
-        task.exitCode = 1;
         task.stderr += task.stderr ? `\n${error.message}` : error.message;
+        markCompleted(task, 1);
       });
       const abort = () => {
         stopTaskProcess(task);
@@ -959,7 +1017,9 @@ export const createBackgroundBashRegistry = (): BackgroundBashRegistry => {
       const result = await project(task, input.waitMs, input.toolCallId, input.outputLimit, input.artifactDir);
       input.signal.removeEventListener("abort", abort);
       if (result.status === "running") {
+        task.returnedRunning = true;
         task.child.unref();
+        maybeDeliver(task);
       }
       return result;
     },
@@ -974,7 +1034,11 @@ export const createBackgroundBashRegistry = (): BackgroundBashRegistry => {
         }
         task.child.stdin.write(input.command);
       }
-      return project(task, input.waitMs, input.toolCallId, input.outputLimit, input.artifactDir);
+      const result = await project(task, input.waitMs, input.toolCallId, input.outputLimit, input.artifactDir);
+      if (result.status === "running") {
+        task.returnedRunning = true;
+      }
+      return result;
     },
     async stop(taskId) {
       const task = tasks.get(taskId);
@@ -1004,6 +1068,14 @@ type BashTask = {
   stdout: string;
   stderr: string;
   completed: boolean;
+  returnedRunning: boolean;
+  activeWaiters: number;
+  deliveryStarted: boolean;
+  deliveryPromise?: Promise<void>;
+  deliveredEventId?: string;
+  toolCallId: string;
+  outputLimit: number;
+  artifactDir?: string;
   exitCode?: number;
   exitSignal?: NodeJS.Signals;
   rtk: BashRtkDetails;
@@ -1013,6 +1085,20 @@ type BashTask = {
 const projectBashTaskResult = (result: BashTaskResult): ToolResult => {
   if (result.status === "completed") {
     return result.result;
+  }
+  if (result.status === "delivered") {
+    return textResult(
+      [
+        `Bash task ${result.taskId} has already been injected through a system reminder.`,
+        "Do not read it again unless the user explicitly asks for the raw result.",
+      ].join("\n"),
+      {
+        status: "delivered",
+        task_id: result.taskId,
+        pid: result.pid,
+        ...(result.eventId ? { event_id: result.eventId } : {}),
+      },
+    );
   }
   return textResult(`status: running\ntask_id: ${result.taskId}\npid: ${result.pid}`, {
     status: "running",
@@ -1314,6 +1400,9 @@ const isTimeoutError = (cause: unknown): boolean =>
 
 const isExecError = (cause: unknown): cause is Error & { code?: number | string; stdout?: string; stderr?: string } =>
   cause instanceof Error && ("stdout" in cause || "stderr" in cause || "code" in cause);
+
+const errorMessage = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : String(cause);
 
 const runRipgrep = async (args: string[], target: string, cwd: string, signal: AbortSignal): Promise<string[]> => {
   try {

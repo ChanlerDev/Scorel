@@ -51,11 +51,11 @@ The single `command` field keeps the model contract simple:
 
 S0115 does not auto-start a new chat turn when a background task completes.
 
-The existing reminder system can already project persisted harness items into model context on the next agent call. A future spec should define a daemon-owned `background_bash_completed` event and whether session-idle completion should enqueue a system-initiated follow-up turn.
+The existing reminder system can already project persisted harness items into model context on the next agent call. S0116 defines daemon-owned `background_bash_completed` runtime notices and whether session-idle completion should enqueue a system-initiated follow-up turn.
 
 For S0115, completion is surfaced through explicit `Bash({ task_id })` calls and normal final Bash tool results.
 
-When that future system-reminder delivery exists, it must mark the task result as delivered-to-context. After that point:
+When S0116 system-reminder delivery exists, it must mark the task result as delivered-to-context. After that point:
 
 - `Bash({ task_id })` should return a compact advisory instead of the full final result, for example: `Task task_... has already been injected through a system reminder. Do not read it again unless the user explicitly asks for the raw result.`
 - `Bash({ task_id, command })` must still reject because completed tasks are read-only.

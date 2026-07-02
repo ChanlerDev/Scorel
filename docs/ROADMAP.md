@@ -142,10 +142,11 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Remote Control → WebUI �
 | Step | Spec | Goal | Status |
 |---|---|---|---|
 | Background.1 | [`S0115`](spec/ship/S0115-async-bash-sessions.md) | Bash 支持 `wait_time` 转后台、`task_id` 轮询/写 stdin、`BashStop` 停止，并复用原 Bash result/artifact 逻辑。 | Done |
+| Background.2 | [`S0116`](spec/ship/S0116-background-bash-system-reminders.md) | 后台 Bash 完成后通过现有 `system_reminder` 注入结果，空闲时自动启动续跑，并避免按 `task_id` 重复读取已注入结果。 | Done |
 
 **Candidate scope**:
 
-- Background Bash / task id / poll / stop。
+- 通用 task/sub-agent 后台执行模型。
 - 超长输出归档和增量读取。
 - Dev server readiness 检测。
 - 权限策略与 command classifier。

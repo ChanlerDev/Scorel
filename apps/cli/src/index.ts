@@ -842,13 +842,14 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
     scorelHomeDir: options.stateDir,
     loadConfig: async ({ project }) => loadProjectConfig(project),
     loadConfigProfile: async ({ project }) => loadProjectConfigProfile(project),
-    createRuntime: async ({ sessionId, project, selectedModel, purpose }) => createRealRuntime({
+    createRuntime: async ({ sessionId, project, selectedModel, purpose, backgroundBash }) => createRealRuntime({
       cwd: project.workDir,
       config: await loadProjectConfig(project),
       sessionsDir: options.sessionsDir,
       sessionId,
       modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
       includeTools: purpose === "chat",
+      backgroundBash,
     }),
   });
   const client = new DaemonClient(createEmbeddedTransport(daemon), {
@@ -937,13 +938,14 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
     scorelHomeDir: options.stateDir,
     loadConfig: async ({ project }) => loadProjectConfig(project),
     loadConfigProfile: async ({ project }) => loadProjectConfigProfile(project),
-    createRuntime: async ({ sessionId, project, selectedModel, purpose }) => createRealRuntime({
+    createRuntime: async ({ sessionId, project, selectedModel, purpose, backgroundBash }) => createRealRuntime({
       cwd: project.workDir,
       config: await loadProjectConfig(project),
       sessionsDir: options.sessionsDir,
       sessionId,
       modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
       includeTools: purpose === "chat",
+      backgroundBash,
     }),
   });
   const client = new DaemonClient(createEmbeddedTransport(daemon), {

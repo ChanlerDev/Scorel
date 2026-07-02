@@ -216,13 +216,14 @@ const runServeCommand = async (
     scorelHomeDir: options.stateDir,
     loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir, ...configScope }),
     loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir, ...configScope }),
-    createRuntime: async ({ sessionId, project, selectedModel, purpose }) => createRealRuntime({
+    createRuntime: async ({ sessionId, project, selectedModel, purpose, backgroundBash }) => createRealRuntime({
       cwd: project.workDir,
       config: await loadScorelConfig({ cwd: project.workDir, ...configScope }),
       sessionsDir,
       sessionId,
       modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
       includeTools: purpose === "chat",
+      backgroundBash,
     }),
   });
   await daemon.start();

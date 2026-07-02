@@ -351,6 +351,67 @@ describe("coding tools", () => {
     ).rejects.toThrow("already completed");
   });
 
+  it("returns an advisory for delivered Bash tasks while the reminder remains visible", async () => {
+    const cwd = await tempRoot();
+    const delivered = new Set<string>();
+    const bash = createCodingTools({
+      cwd,
+      backgroundBash: {
+        onComplete: async ({ task_id }) => {
+          delivered.add(task_id);
+          return { eventId: "evt_delivered" };
+        },
+        isDeliveryVisible: ({ task_id }) => delivered.has(task_id),
+      },
+    }).find((tool) => tool.name === "Bash")!;
+    const started = await bash.execute(
+      "call_delivered_bash",
+      { command: `${JSON.stringify(process.execPath)} -e "setTimeout(() => console.log('delivered result'), 80)"`, wait_time: 0.01 },
+      new AbortController().signal,
+      () => undefined,
+    );
+    const taskId = (started.details as { task_id?: string }).task_id!;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const deliveredRead = await bash.execute(
+      "call_delivered_bash_read",
+      { task_id: taskId, wait_time: 0 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(deliveredRead)).toContain("already been injected through a system reminder");
+    expect(textOf(deliveredRead)).not.toContain("delivered result");
+  });
+
+  it("returns the Bash result again when a delivered reminder is no longer visible after compaction", async () => {
+    const cwd = await tempRoot();
+    const bash = createCodingTools({
+      cwd,
+      backgroundBash: {
+        onComplete: async () => ({ eventId: "evt_delivered" }),
+        isDeliveryVisible: () => false,
+      },
+    }).find((tool) => tool.name === "Bash")!;
+    const started = await bash.execute(
+      "call_compacted_delivery_bash",
+      { command: `${JSON.stringify(process.execPath)} -e "setTimeout(() => console.log('visible again'), 80)"`, wait_time: 0.01 },
+      new AbortController().signal,
+      () => undefined,
+    );
+    const taskId = (started.details as { task_id?: string }).task_id!;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const read = await bash.execute(
+      "call_compacted_delivery_bash_read",
+      { task_id: taskId, wait_time: 0 },
+      new AbortController().signal,
+      () => undefined,
+    );
+
+    expect(textOf(read)).toContain("visible again");
+  });
+
   it("stops a background Bash task through BashStop", async () => {
     const cwd = await tempRoot();
     const tools = createCodingTools({ cwd });
