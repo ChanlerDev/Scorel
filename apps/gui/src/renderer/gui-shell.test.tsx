@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GuiModelProfileView, GuiProjectView } from "../shared/ipc.js";
-import { modelSelectionFromValue, selectedModelValue } from "./App.js";
+import { estimateContextTokensFromEvents, modelSelectionFromValue, selectedModelValue } from "./App.js";
 import { ProjectPickerMenu } from "./composer/ProjectPickerMenu.js";
 import { MemorySection } from "./settings/sections/MemorySection.js";
 import { ObservabilitySection } from "./settings/sections/ObservabilitySection.js";
@@ -180,6 +180,68 @@ const remoteProject: GuiProjectView = {
 };
 
 describe("GUI shell rendering contract", () => {
+  it("estimates context usage from current user assistant and tool context", () => {
+    const tokens = estimateContextTokensFromEvents([
+      {
+        type: "user_message",
+        id: "evt_1" as never,
+        parentId: null,
+        seq: 1 as never,
+        sessionId: "ses_1" as never,
+        clientId: "client_1" as never,
+        ts: 1,
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "user asks for implementation" }],
+        },
+      },
+      {
+        type: "assistant_message",
+        id: "evt_2" as never,
+        parentId: "evt_1" as never,
+        seq: 2 as never,
+        sessionId: "ses_1" as never,
+        clientId: "client_1" as never,
+        ts: 2,
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "assistant output also remains in context" }],
+          usage: { inputTokens: 12_000, outputTokens: 800, totalTokens: 12_800 },
+        },
+      },
+      {
+        type: "tool_result",
+        id: "evt_3" as never,
+        parentId: "evt_2" as never,
+        seq: 3 as never,
+        sessionId: "ses_1" as never,
+        clientId: "client_1" as never,
+        ts: 3,
+        message: {
+          role: "tool_result",
+          content: [{
+            type: "tool_result",
+            toolCallId: "call_1",
+            toolName: "Bash",
+            result: { content: [{ type: "text", text: "tool output counts too" }] },
+          }],
+        },
+      },
+      {
+        type: "turn_end",
+        seq: 4 as never,
+        sessionId: "ses_1" as never,
+        clientId: "client_1" as never,
+        ts: 4,
+        turnIndex: 1,
+        usage: { inputTokens: 18_000, outputTokens: 1_000, totalTokens: 19_000 },
+      },
+    ]);
+
+    expect(tokens).toBeGreaterThan(0);
+    expect(tokens).toBeLessThan(18_000);
+  });
+
   it("does not render disabled placeholder actions in the sidebar", () => {
     const html = renderToStaticMarkup(
       <Sidebar
@@ -296,6 +358,53 @@ describe("GUI shell rendering contract", () => {
 
     expect(html).toContain("workspace--no-topbar");
     expect(html).not.toContain('class="topbar"');
+  });
+
+  it("renders the context indicator in empty and active workspace composers", () => {
+    const contextUsage = {
+      usedTokens: 24_000,
+      totalTokens: 128_000,
+      autoCompactThreshold: 0.8,
+    };
+    const emptyHtml = renderToStaticMarkup(
+      <Workspace
+        selectedProject={localProject}
+        selectedSessionTitle={undefined}
+        hasActiveSession={false}
+        turns={[]}
+        message=""
+        onMessageChange={noop}
+        onSubmit={noop}
+        busy={false}
+        inFlight={false}
+        {...modelProps}
+        contextUsage={contextUsage}
+        error={null}
+        hostMessage={undefined}
+        onPickerOpen={noop}
+      />,
+    );
+    const activeHtml = renderToStaticMarkup(
+      <Workspace
+        selectedProject={localProject}
+        selectedSessionTitle="Active"
+        hasActiveSession={true}
+        turns={[]}
+        message=""
+        onMessageChange={noop}
+        onSubmit={noop}
+        busy={false}
+        inFlight={false}
+        {...modelProps}
+        contextUsage={contextUsage}
+        error={null}
+        hostMessage={undefined}
+        onPickerOpen={noop}
+      />,
+    );
+
+    expect(emptyHtml).toContain('data-testid="composer-context-indicator"');
+    expect(activeHtml).toContain('data-testid="composer-context-indicator"');
   });
 
   it("shows a stable fallback title for active sessions before title generation", () => {

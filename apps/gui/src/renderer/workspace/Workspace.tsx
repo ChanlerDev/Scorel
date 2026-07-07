@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { Turn } from "../chatbox/projector.js";
+import type { ComposerContextUsage } from "../composer/Composer.js";
 import type { GuiProjectView, GuiModelProfileView } from "../../shared/ipc.js";
 import { EmptyState } from "./EmptyState.js";
 import { SessionView } from "./SessionView.js";
@@ -20,6 +21,7 @@ export type WorkspaceProps = {
   selectedModelId: string;
   onModelChange(modelId: string): void;
   modelPickerDisabled?: boolean;
+  contextUsage?: ComposerContextUsage;
   error: string | null;
   hostMessage: string | undefined;
   onPickerOpen(anchor: DOMRect): void;
@@ -60,6 +62,7 @@ export function Workspace(props: WorkspaceProps) {
           selectedModelId={props.selectedModelId}
           onModelChange={props.onModelChange}
           modelPickerDisabled={props.modelPickerDisabled}
+          contextUsage={props.contextUsage}
           picker={props.picker}
         />
       ) : (
@@ -75,6 +78,7 @@ export function Workspace(props: WorkspaceProps) {
           selectedModelId={props.selectedModelId}
           onModelChange={props.onModelChange}
           modelPickerDisabled={props.modelPickerDisabled}
+          contextUsage={props.contextUsage}
           picker={props.picker}
         />
       )}

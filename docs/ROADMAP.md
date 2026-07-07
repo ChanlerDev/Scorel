@@ -143,6 +143,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Remote Control → WebUI �
 |---|---|---|---|
 | Background.1 | [`S0115`](spec/ship/S0115-async-bash-sessions.md) | Bash 支持 `wait_time` 转后台、`task_id` 轮询/写 stdin、`BashStop` 停止，并复用原 Bash result/artifact 逻辑。 | Done |
 | Background.2 | [`S0116`](spec/ship/S0116-background-bash-system-reminders.md) | 后台 Bash 完成后通过现有 `system_reminder` 注入结果，空闲时自动启动续跑，并避免按 `task_id` 重复读取已注入结果。 | Done |
+| GUI.1 | [`S0117`](spec/ship/S0117-gui-context-usage-indicator.md) | GUI composer 发送按钮旁显示 provider-reported context 使用圆圈，包含 hover 详情和 auto compact 阈值标记。 | In Progress |
 
 **Candidate scope**:
 
@@ -823,6 +824,8 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0113`](spec/ship/S0113-daemon-attach-lifetime.md) | Daemon attach lifetime | Done |
 | [`S0114`](spec/ship/S0114-dev-gui-host-owner.md) | Dev GUI Host owner | Done |
 | [`S0115`](spec/ship/S0115-async-bash-sessions.md) | Async Bash sessions | Done |
+| [`S0116`](spec/ship/S0116-background-bash-system-reminders.md) | Background Bash system reminders | Done |
+| [`S0117`](spec/ship/S0117-gui-context-usage-indicator.md) | Provider-reported GUI context usage indicator | In Progress |
 
 ---
 

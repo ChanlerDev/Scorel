@@ -10,6 +10,7 @@ import {
   type ProjectorState,
 } from "./chatbox/projector.js";
 import "./chatbox/tool-blocks/bootstrap.js";
+import type { ComposerContextUsage } from "./composer/Composer.js";
 import { Sidebar, projectKey } from "./shell/Sidebar.js";
 import { SettingsShell } from "./settings/SettingsShell.js";
 import { Workspace } from "./workspace/Workspace.js";
@@ -35,6 +36,7 @@ type ViewMode = "workspace" | "settings";
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 420;
 const SIDEBAR_DEFAULT_WIDTH = 278;
+const DEFAULT_CONTEXT_WINDOW = 200_000;
 
 const defaultMemorySettings = (): GuiMemorySettingsView => ({
   enabled: true,
@@ -113,6 +115,54 @@ export const modelSelectionFromValue = (value: string, profile: GuiModelProfileV
   return undefined;
 };
 
+export const estimateContextTokensFromEvents = (events: ScorelEvent[]): number => {
+  const texts: string[] = [];
+  for (const event of events) {
+    if (event.type === "compact") {
+      texts.splice(0, texts.length, event.summary);
+      continue;
+    }
+    texts.push(...contextEventText(event));
+  }
+  return estimateTextTokens(texts.join("\n"));
+};
+
+const estimateTextTokens = (value: string): number => Math.ceil(value.length / 3);
+
+const contextEventText = (event: ScorelEvent): string[] => {
+  if (event.type === "harness_item" && event.item.visibility !== "display") return [event.item.content];
+  if (event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result") {
+    return [contentText(event.message.content)];
+  }
+  return [];
+};
+
+const contentText = (content: unknown): string =>
+  Array.isArray(content)
+    ? content.map(contentBlockText).filter(Boolean).join("\n")
+    : unknownText(content);
+
+const contentBlockText = (block: unknown): string => {
+  if (!isRecord(block)) return unknownText(block);
+  if (block.type === "text" || block.type === "thinking") return typeof block.text === "string" ? block.text : "";
+  if (block.type === "system_reminder") return block.visibility === "display" ? "" : typeof block.text === "string" ? block.text : "";
+  if (block.type === "tool_call") return unknownText(block.args);
+  if (block.type === "tool_result") return unknownText(block.result);
+  return "";
+};
+
+const unknownText = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(unknownText).filter(Boolean).join("\n");
+  if (!isRecord(value)) return "";
+  if (Array.isArray(value.content)) return contentText(value.content);
+  return Object.values(value).map(unknownText).filter(Boolean).join("\n");
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 export function App() {
   const [view, setView] = useState<ViewMode>("workspace");
   const [hostState, setHostState] = useState<string>("starting");
@@ -124,6 +174,7 @@ export function App() {
   const [sessionsByProject, setSessionsByProject] = useState<Record<string, SessionSummary[]>>({});
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [projectorState, setProjectorState] = useState<ProjectorState>(emptyProjectorState());
+  const [contextEstimatedTokens, setContextEstimatedTokens] = useState<number>(0);
   const [busy, setBusy] = useState<boolean>(false);
   const [inFlight, setInFlight] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -148,6 +199,7 @@ export function App() {
   const currentSessionRef = useRef<string | null>(null);
   const projectorStateRef = useRef<ProjectorState>(emptyProjectorState());
   const pendingEventsRef = useRef<ScorelEvent[]>([]);
+  const sessionEventsRef = useRef<ScorelEvent[]>([]);
   const batcherRef = useRef<ReturnType<typeof createRafBatcher> | null>(null);
   const sessionsByProjectRef = useRef<Record<string, SessionSummary[]>>({});
   const loadingSessionsRef = useRef<Set<string>>(new Set());
@@ -174,6 +226,8 @@ export function App() {
   }, [flushPending]);
 
   const ingestEvent = useCallback((event: ScorelEvent): void => {
+    sessionEventsRef.current = [...sessionEventsRef.current, event];
+    setContextEstimatedTokens(estimateContextTokensFromEvents(sessionEventsRef.current));
     pendingEventsRef.current.push(event);
     const isTerminal =
       event.type === "message_end" ||
@@ -198,6 +252,15 @@ export function App() {
     () => view === "settings" ? selectedSettingsDevice : projectDeviceRef(selectedProject),
     [selectedProject, selectedSettingsDevice, view],
   );
+  const contextUsage = useMemo<ComposerContextUsage>(() => {
+    const selectedModel = modelProfile.models.find((model) => model.modelId === selectedModelId);
+    const providerModel = modelProfile.providerModels.find((model) => model.providerModelId === selectedModel?.providerModelId);
+    return {
+      usedTokens: contextEstimatedTokens,
+      totalTokens: selectedModel?.contextWindow ?? providerModel?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+      autoCompactThreshold: memorySettings.autoCompactThreshold,
+    };
+  }, [contextEstimatedTokens, memorySettings.autoCompactThreshold, modelProfile.models, modelProfile.providerModels, selectedModelId]);
 
   const selectedSessionTitle = useMemo(() => {
     if (!selectedProjectKey || !selectedSessionId) return undefined;
@@ -263,9 +326,11 @@ export function App() {
       next = projectEvent(next, event);
     }
     projectorStateRef.current = next;
+    sessionEventsRef.current = events;
     pendingEventsRef.current = [];
     batcherRef.current?.cancel();
     setProjectorState(next);
+    setContextEstimatedTokens(estimateContextTokensFromEvents(events));
   }, []);
 
   const detachCurrentSession = useCallback(async (): Promise<void> => {
@@ -466,6 +531,7 @@ export function App() {
     setSelectedSessionId(null);
     setInFlight(false);
     loadInitialEvents([]);
+    setContextEstimatedTokens(0);
     setError(null);
   }, [detachCurrentSession, loadInitialEvents, projects, selectedProject]);
 
@@ -650,6 +716,7 @@ export function App() {
         selectedModelId={selectedModelId}
         onModelChange={setSelectedModelId}
         modelPickerDisabled={Boolean(selectedSessionId && projectorState.turns.length > 0)}
+        contextUsage={contextUsage}
         error={error}
         hostMessage={hostMessage}
         onPickerOpen={openProjectPicker}

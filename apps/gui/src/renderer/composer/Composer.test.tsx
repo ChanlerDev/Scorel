@@ -22,6 +22,66 @@ afterEach(() => {
 });
 
 describe("Composer", () => {
+  it("shows context usage details in a tooltip while hovered", async () => {
+    const element = await renderComposerElement({
+      contextUsage: {
+        usedTokens: 80_000,
+        totalTokens: 100_000,
+        autoCompactThreshold: 0.9,
+      },
+    });
+
+    const indicator = element.querySelector('[data-testid="composer-context-indicator"]') as HTMLDivElement;
+    expect(indicator).toBeTruthy();
+    expect(indicator.getAttribute("aria-label")).toContain("Context used 80%");
+    expect(element.querySelector('[role="tooltip"]')).toBeNull();
+
+    await act(async () => {
+      indicator.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+
+    const tooltip = element.querySelector('[role="tooltip"]');
+    expect(tooltip?.textContent).toContain("80% 已用（剩余 20%）");
+    expect(tooltip?.textContent).toContain("已用 80,000 Token，共 100,000 Token");
+    expect(indicator.getAttribute("data-used-percent")).toBe("80");
+    expect(indicator.getAttribute("data-threshold-percent")).toBe("90");
+    expect(indicator.className).toContain("composer-context--warn");
+
+    await act(async () => {
+      indicator.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+    });
+    expect(element.querySelector('[role="tooltip"]')).toBeNull();
+  });
+
+  it("places the context indicator immediately before the send button", async () => {
+    const element = await renderComposerElement({
+      contextUsage: {
+        usedTokens: 20_000,
+        totalTokens: 100_000,
+        autoCompactThreshold: 0.8,
+      },
+      models: [{ modelId: "gpt", displayName: "GPT", providerModelId: "gpt", providerId: "openai", provider: "openai", id: "gpt", roles: ["standard"] }],
+      selectedModelId: "gpt",
+    });
+
+    const controls = Array.from(element.querySelector(".composer__right")?.children ?? []);
+    expect(controls.at(-2)?.getAttribute("data-testid")).toBe("composer-context-indicator");
+    expect(controls.at(-1)?.getAttribute("aria-label")).toBe("Send");
+  });
+
+  it("marks context usage as danger at the auto compact threshold", async () => {
+    const element = await renderComposerElement({
+      contextUsage: {
+        usedTokens: 91_000,
+        totalTokens: 100_000,
+        autoCompactThreshold: 0.9,
+      },
+    });
+
+    const indicator = element.querySelector('[data-testid="composer-context-indicator"]') as HTMLDivElement;
+    expect(indicator.className).toContain("composer-context--danger");
+  });
+
   it("does not submit or prevent default while an IME composition is active", async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const onSubmit = vi.fn();
@@ -70,6 +130,18 @@ describe("Composer", () => {
 });
 
 async function renderComposer(input: { onSubmit: () => void; inFlight?: boolean }): Promise<HTMLTextAreaElement> {
+  const element = await renderComposerElement(input);
+  return element.querySelector("textarea") as HTMLTextAreaElement;
+}
+
+async function renderComposerElement(input: {
+  onSubmit?: () => void;
+  inFlight?: boolean;
+  contextUsage?: Parameters<typeof Composer>[0]["contextUsage"];
+  models?: Parameters<typeof Composer>[0]["models"];
+  selectedModelId?: string;
+}): Promise<HTMLDivElement> {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -79,12 +151,15 @@ async function renderComposer(input: { onSubmit: () => void; inFlight?: boolean 
       <Composer
         value="ni"
         onChange={vi.fn()}
-        onSubmit={input.onSubmit}
+        onSubmit={input.onSubmit ?? vi.fn()}
         disabled={false}
         inFlight={input.inFlight ?? false}
+        contextUsage={input.contextUsage}
+        models={input.models}
+        selectedModelId={input.selectedModelId}
       />,
     );
   });
 
-  return container.querySelector("textarea") as HTMLTextAreaElement;
+  return container;
 }

@@ -1105,6 +1105,97 @@ a {
   cursor: not-allowed;
 }
 
+.composer-context {
+  --context-track: color-mix(in srgb, var(--color-border-strong) 70%, transparent);
+  --context-color: #ffffff;
+  --context-threshold-color: #0d0d0d;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--context-color);
+  position: relative;
+  outline: none;
+  cursor: default;
+}
+
+.composer-context:focus-visible {
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 65%, transparent);
+}
+
+.composer-context__ring {
+  width: 18px;
+  height: 18px;
+  display: block;
+  transform: rotate(-90deg);
+}
+
+.composer-context__track,
+.composer-context__zone,
+.composer-context__progress {
+  fill: none;
+  stroke-width: 3;
+}
+
+.composer-context__track {
+  stroke: var(--context-track);
+}
+
+.composer-context__zone {
+  stroke: var(--context-threshold-color);
+  stroke-dasharray: var(--context-zone-length) var(--context-zone-gap);
+  stroke-dashoffset: var(--context-zone-offset);
+}
+
+.composer-context__progress {
+  stroke: currentColor;
+  stroke-linecap: round;
+}
+
+.composer-context--warn {
+  --context-color: #f4b63f;
+}
+
+.composer-context--danger {
+  --context-color: var(--color-status-err);
+}
+
+.composer-context__tooltip {
+  position: absolute;
+  z-index: 30;
+  right: -12px;
+  bottom: calc(100% + 12px);
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  background: var(--color-surface-raised);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 28%);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.55;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.composer-context__tooltip-title,
+.composer-context__tooltip-threshold {
+  color: var(--color-text-muted);
+}
+
+.composer-context__tooltip-title {
+  margin-bottom: 2px;
+}
+
+.composer-context__tooltip-threshold {
+  margin-top: 3px;
+  font-size: 12px;
+}
+
 .composer__send {
   width: 34px;
   height: 34px;

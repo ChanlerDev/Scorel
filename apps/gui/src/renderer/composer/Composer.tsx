@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useRef } from "react";
+import { type CSSProperties, type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { ArrowUp } from "../icons/index.js";
 import type { GuiModelProfileView } from "../../shared/ipc.js";
@@ -14,9 +14,18 @@ export type ComposerProps = {
   onModelChange?(modelId: string): void;
   modelPickerDisabled?: boolean;
   onCancel?(): void;
+  contextUsage?: ComposerContextUsage;
 };
 
 const MAX_HEIGHT = 200;
+const PERCENT_FORMAT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+const TOKEN_FORMAT = new Intl.NumberFormat("en-US");
+
+export type ComposerContextUsage = {
+  usedTokens: number;
+  totalTokens: number;
+  autoCompactThreshold: number;
+};
 
 export function Composer({
   value,
@@ -29,6 +38,7 @@ export function Composer({
   onModelChange,
   modelPickerDisabled,
   onCancel,
+  contextUsage,
 }: ComposerProps) {
   void onCancel;
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -99,6 +109,7 @@ export function Composer({
               ))
             )}
           </select>
+          {contextUsage ? <ContextIndicator usage={contextUsage} /> : null}
           <button
             type="submit"
             className="composer__send"
@@ -112,3 +123,73 @@ export function Composer({
     </form>
   );
 }
+
+function ContextIndicator({ usage }: { usage: ComposerContextUsage }) {
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const tooltipId = useId();
+  const radius = 7;
+  const circumference = 2 * Math.PI * radius;
+  const totalTokens = Math.max(1, Math.floor(usage.totalTokens));
+  const usedTokens = Math.max(0, Math.floor(usage.usedTokens));
+  const threshold = clampRatio(usage.autoCompactThreshold);
+  const usedRatio = Math.min(1, usedTokens / totalTokens);
+  const remainingRatio = Math.max(0, 1 - usedRatio);
+  const usedPercentValue = Math.round(usedRatio * 100);
+  const thresholdPercentValue = Math.round(threshold * 100);
+  const compactZone = Math.max(0.01, 1 - threshold);
+  const state = usedRatio >= threshold ? "danger" : usedRatio >= Math.min(0.75, threshold * 0.9) ? "warn" : "normal";
+  const usedPercent = formatPercent(usedRatio);
+  const remainingPercent = formatPercent(remainingRatio);
+  const thresholdPercent = formatPercent(threshold);
+  const style = {
+    "--context-zone-offset": String(-circumference * threshold),
+    "--context-zone-length": String(circumference * compactZone),
+    "--context-zone-gap": String(circumference * (1 - compactZone)),
+  } as CSSProperties;
+
+  return (
+    <div
+      className={`composer-context composer-context--${state}`}
+      tabIndex={0}
+      aria-label={`Context used ${usedPercent}, ${remainingPercent} remaining, ${TOKEN_FORMAT.format(usedTokens)} of ${TOKEN_FORMAT.format(totalTokens)} tokens`}
+      aria-describedby={tooltipVisible ? tooltipId : undefined}
+      data-testid="composer-context-indicator"
+      data-used-percent={String(usedPercentValue)}
+      data-threshold-percent={String(thresholdPercentValue)}
+      style={style}
+      onMouseEnter={() => setTooltipVisible(true)}
+      onMouseLeave={() => setTooltipVisible(false)}
+      onFocus={() => setTooltipVisible(true)}
+      onBlur={() => setTooltipVisible(false)}
+    >
+      <svg className="composer-context__ring" viewBox="0 0 18 18" aria-hidden="true">
+        <circle className="composer-context__track" cx="9" cy="9" r={radius} />
+        <circle className="composer-context__zone" cx="9" cy="9" r={radius} />
+        <circle
+          className="composer-context__progress"
+          cx="9"
+          cy="9"
+          r={radius}
+          strokeDasharray={`${circumference * usedRatio} ${circumference * (1 - usedRatio)}`}
+        />
+      </svg>
+      {tooltipVisible ? (
+        <div id={tooltipId} className="composer-context__tooltip" role="tooltip">
+          <div className="composer-context__tooltip-title">上下文窗口：</div>
+          <div>{usedPercent} 已用（剩余 {remainingPercent}）</div>
+          <div>
+            已用 {TOKEN_FORMAT.format(usedTokens)} Token，共 {TOKEN_FORMAT.format(totalTokens)} Token
+          </div>
+          <div className="composer-context__tooltip-threshold">达到 {thresholdPercent} 时自动压缩</div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const clampRatio = (value: number): number => {
+  if (!Number.isFinite(value)) return 0.8;
+  return Math.min(0.99, Math.max(0.01, value));
+};
+
+const formatPercent = (ratio: number): string => `${PERCENT_FORMAT.format(Math.max(0, Math.min(1, ratio)) * 100)}%`;
