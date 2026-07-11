@@ -82,6 +82,32 @@ describe("Composer", () => {
     expect(indicator.className).toContain("composer-context--danger");
   });
 
+  it("shows provider usage as unavailable without fabricating a percentage", async () => {
+    const element = await renderComposerElement({
+      contextUsage: {
+        usedTokens: undefined,
+        totalTokens: 100_000,
+        autoCompactThreshold: 0.9,
+      },
+    });
+
+    const indicator = element.querySelector('[data-testid="composer-context-indicator"]') as HTMLDivElement;
+    expect(indicator).toBeTruthy();
+    expect(indicator.className).toContain("composer-context--unavailable");
+    expect(indicator.getAttribute("aria-label")).toBe("Context usage unavailable");
+    expect(indicator.getAttribute("data-used-percent")).toBeNull();
+
+    await act(async () => {
+      indicator.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+
+    const tooltip = element.querySelector('[role="tooltip"]');
+    expect(tooltip?.textContent).toContain("暂无 Provider 上下文用量");
+    expect(tooltip?.textContent).toContain("上下文窗口共 100,000 Token");
+    expect(tooltip?.textContent).not.toContain("0% 已用");
+    expect(tooltip?.textContent).not.toContain("已用 0 Token");
+  });
+
   it("does not submit or prevent default while an IME composition is active", async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const onSubmit = vi.fn();

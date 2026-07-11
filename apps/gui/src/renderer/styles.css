@@ -1162,6 +1162,14 @@ a {
   --context-color: var(--color-status-err);
 }
 
+.composer-context--unavailable {
+  --context-color: var(--color-text-muted);
+}
+
+.composer-context--unavailable .composer-context__progress {
+  display: none;
+}
+
 .composer-context__tooltip {
   position: absolute;
   z-index: 30;
