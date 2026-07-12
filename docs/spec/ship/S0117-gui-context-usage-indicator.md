@@ -85,6 +85,6 @@ Show provider-reported context usage beside the GUI send button so users can see
 
 ## Delivery State
 
-The current S0117 implementation commit delivers only the visual shell: the ring, hover tooltip, threshold marker, composer placement, and current component wiring. It is a partial implementation because its `usedTokens` value is still derived from renderer-side text-length estimation.
+The current S0117 implementation delivers the visual shell and an honest unavailable state: the ring, hover tooltip, threshold marker, composer placement, and missing-usage rendering no longer fabricate `0%` or `0 Token`.
 
-S0117 is complete only after the estimate is removed from the product path, provider-reported non-cache `usage.inputTokens + usage.outputTokens` drives the indicator, unavailable usage is represented honestly, daemon auto compact uses the aligned token source, and all acceptance tests above pass.
+S0117 remains in progress because the product path still derives `usedTokens` from renderer-side text-length estimation. It is complete only after the active-branch selector supplies the latest completed response's provider-reported non-cache `usage.inputTokens + usage.outputTokens`, daemon auto compact uses the same value, and the remaining acceptance tests pass.
