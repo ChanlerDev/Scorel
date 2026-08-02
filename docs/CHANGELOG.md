@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+## 0.0.12 - 2026-08-02
+
+### Highlights
+
+- Added a new 'max' reasoning effort option to the CLI and GUI, giving you finer control over model reasoning intensity.
+- Introduced a public eval template for running Terminal-Bench benchmarks with your own provider, including a launcher script and privacy scrubber.
+
+### Changes
+
+- CLI and GUI now support the 'max' reasoning effort value, sent to the provider as `reasoning_effort: "max"`.
+- Replaced the deprecated `@mariozechner/pi-ai` dependency with the maintained `@earendil-works/pi-ai` (from 0.73.1 to 0.83.0).
+- Added a public eval directory with a template `.env.example`, a launcher script (`run_terminal_bench.sh`), and a job scrubber (`scrub_harbor_job.py`) to remove API keys and base URLs before optional Harbor uploads.
+- The eval launcher defaults to Terminal-Bench 2.1, Daytona sandbox, 2 attempts, 3 concurrent trials, and 'max' reasoning, all configurable via the ignored `eval/.env` file.
+- Documentation updated to describe the new eval workflow, including quick start steps, manual Harbor invocation, and privacy boundaries.
+
+### Breaking Changes
+
+- The pi-ai dependency package was renamed from `@mariozechner/pi-ai` to `@earendil-works/pi-ai`. External code directly importing from the old package must update its imports.
+
+### Verification
+
+- Provider unit tests assert that `xhigh` and `max` are sent as distinct `reasoning_effort` payload values.
+- CLI integration tests verify that `--reasoning-effort max` is accepted, propagated into summaries, metadata, and trajectory output, and that invalid values are rejected with an updated error message.
+- GUI composer test checks that the picker includes the new 'max' option.
+- Harbor adapter and scrubber unit tests pass, including verification that scrubbing removes API key and base URL while preserving model identifiers.
+- Package build scripts and GUI runtime bundle tests updated to reference the new pi-ai package and pass.
+- The launch script validates required environment variables before running Harbor.
+
+### Internal
+
+- Upgraded pi-ai dependency to version 0.83.0, updating provider model resolution, streaming, and TypeBox usage.
+- Updated documentation and test infrastructure to support the new eval workflow and dependency changes.
+
 ## 0.0.11 - 2026-08-02
 
 ### Highlights

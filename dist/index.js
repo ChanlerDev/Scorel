@@ -1638,7 +1638,7 @@ import { mkdir, readFile as readFile2, rename, rm, stat, writeFile } from "node:
 import { userInfo } from "node:os";
 import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from "@earendil-works/pi-ai";
 var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, createBackgroundBashRegistry, projectBashTaskResult, waitForTask, stopTaskProcess, signalExitCode, signalNumber, bashResult, renderFullBashResult, writeBashArtifact, safeArtifactSegment, projectBashStreams, projectOutputStream, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord, shellQuote, shellCommandArgs, userShell, truncate, sliceBytes, textResult, byteLength, isExecError, errorMessage, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
 var init_coding_tools = __esm({
   "packages/core/src/tools/coding-tools.ts"() {
@@ -2863,7 +2863,7 @@ ${value}` };
 });
 
 // packages/core/src/tools/index.ts
-import { Type as Type2 } from "@mariozechner/pi-ai";
+import { Type as Type2 } from "@earendil-works/pi-ai";
 var defineTool, createSnipTool, parseSnipToolInput, isRecord2;
 var init_tools = __esm({
   "packages/core/src/tools/index.ts"() {
@@ -2908,7 +2908,7 @@ var init_tools = __esm({
 });
 
 // packages/core/src/channel/index.ts
-import { Type as Type3 } from "@mariozechner/pi-ai";
+import { Type as Type3 } from "@earendil-works/pi-ai";
 var createSendChannelMessageTool, parseSendChannelMessageInput, parseAttachments, optionalString2, isRecord3;
 var init_channel = __esm({
   "packages/core/src/channel/index.ts"() {
@@ -3217,7 +3217,7 @@ var init_instructions = __esm({
 import { appendFile, mkdir as mkdir2, readFile as readFile5, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
 import { join as join3 } from "node:path";
-import { Type as Type4 } from "@mariozechner/pi-ai";
+import { Type as Type4 } from "@earendil-works/pi-ai";
 var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord5, safeProjectId, isNodeErrorCode3;
 var init_memory = __esm({
   "packages/core/src/memory/index.ts"() {
@@ -4219,7 +4219,7 @@ var init_session = __esm({
       }
     };
     isConversationEvent = (event) => event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result" || event.type === "harness_item" || event.type === "compact";
-    isSelectedModelSummary = (value) => isRecord6(value) && typeof value.modelId === "string" && typeof value.providerId === "string" && typeof value.provider === "string" && typeof value.id === "string" && typeof value.displayName === "string" && (value.reasoningEffort === void 0 || value.reasoningEffort === "minimal" || value.reasoningEffort === "low" || value.reasoningEffort === "medium" || value.reasoningEffort === "high" || value.reasoningEffort === "xhigh");
+    isSelectedModelSummary = (value) => isRecord6(value) && typeof value.modelId === "string" && typeof value.providerId === "string" && typeof value.provider === "string" && typeof value.id === "string" && typeof value.displayName === "string" && (value.reasoningEffort === void 0 || value.reasoningEffort === "minimal" || value.reasoningEffort === "low" || value.reasoningEffort === "medium" || value.reasoningEffort === "high" || value.reasoningEffort === "xhigh" || value.reasoningEffort === "max");
     isInstructionSnapshot = (value) => {
       if (!isRecord6(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
         return false;
@@ -4895,19 +4895,41 @@ var init_observability = __esm({
 
 // packages/core/src/provider/pi-ai.ts
 import {
-  getModels,
-  streamSimple
-} from "@mariozechner/pi-ai";
-var DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW, DEFAULT_CUSTOM_MODEL_MAX_TOKENS, createPiAiProvider, resolvePiAiModel, toPiContext, toPiMessage, toPiAssistantBlock, fromPiAssistant, fromPiContentBlock, toPiTool, textContent, toolResultText, isSystemReminderContentBlock, stringMeta, toPiStopReason, fromPiStopReason, fromPiUsage;
+  lazyApi
+} from "@earendil-works/pi-ai";
+import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
+var DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW, DEFAULT_CUSTOM_MODEL_MAX_TOKENS, PI_AI_APIS, createPiAiProvider, resolvePiAiModel, toPiContext, toPiMessage, toPiAssistantBlock, fromPiAssistant, fromPiContentBlock, toPiTool, textContent, toolResultText, isSystemReminderContentBlock, stringMeta, toPiStopReason, fromPiStopReason, fromPiUsage;
 var init_pi_ai = __esm({
   "packages/core/src/provider/pi-ai.ts"() {
     "use strict";
     init_reminders();
     DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW = 2e5;
     DEFAULT_CUSTOM_MODEL_MAX_TOKENS = 64e3;
+    PI_AI_APIS = {
+      "anthropic-messages": lazyApi(() => import("@earendil-works/pi-ai/api/anthropic-messages")),
+      "azure-openai-responses": lazyApi(() => import("@earendil-works/pi-ai/api/azure-openai-responses")),
+      "bedrock-converse-stream": lazyApi(() => import("@earendil-works/pi-ai/api/bedrock-converse-stream")),
+      "google-generative-ai": lazyApi(() => import("@earendil-works/pi-ai/api/google-generative-ai")),
+      "google-vertex": lazyApi(() => import("@earendil-works/pi-ai/api/google-vertex")),
+      "mistral-conversations": lazyApi(() => import("@earendil-works/pi-ai/api/mistral-conversations")),
+      "openai-codex-responses": lazyApi(() => import("@earendil-works/pi-ai/api/openai-codex-responses")),
+      "openai-completions": lazyApi(() => import("@earendil-works/pi-ai/api/openai-completions")),
+      "openai-responses": lazyApi(() => import("@earendil-works/pi-ai/api/openai-responses"))
+    };
     createPiAiProvider = (options) => ({
       streamTurn: async function* ({ context, systemPrompt, tools, signal }) {
-        const stream = streamSimple(options.model, toPiContext(context, systemPrompt, tools), {
+        const model = options.reasoning === "max" || options.reasoning === "xhigh" ? {
+          ...options.model,
+          thinkingLevelMap: {
+            ...options.model.thinkingLevelMap,
+            [options.reasoning]: options.reasoning
+          }
+        } : options.model;
+        const streamSimple = PI_AI_APIS[model.api]?.streamSimple;
+        if (!streamSimple) {
+          throw new Error(`Unsupported pi-ai API: ${model.api}`);
+        }
+        const stream = streamSimple(model, toPiContext(context, systemPrompt, tools), {
           apiKey: options.apiKey,
           signal,
           ...options.reasoning ? { reasoning: options.reasoning } : {},
@@ -4939,7 +4961,7 @@ var init_pi_ai = __esm({
           ...config.api === "openai-completions" ? { compat: { supportsDeveloperRole: config.compat?.supportsDeveloperRole ?? false } } : {}
         };
       }
-      const model = getModels(config.provider).find((candidate) => candidate.id === config.id);
+      const model = getBuiltinModels(config.provider).find((candidate) => candidate.id === config.id);
       if (!model) {
         throw new Error(`Unknown pi-ai model: ${config.provider}/${config.id}`);
       }
@@ -5316,7 +5338,7 @@ import { existsSync as existsSync2 } from "node:fs";
 import { readdir as readdir2, readFile as readFile8, stat as stat2 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
 import { dirname as dirname6, join as join6, resolve as resolve4 } from "node:path";
-import { Type as Type5 } from "@mariozechner/pi-ai";
+import { Type as Type5 } from "@earendil-works/pi-ai";
 var scanSkillIndex, diffSkillIndex, hasSkillIndexDelta, renderSkillListing, renderSkillDelta, createSkillTool, projectSkillRoots, readSkillEntry, parseSkillMetadata, firstParagraph, parseSkillArgs, findGitRoot2, isNodeErrorCode4;
 var init_skills = __esm({
   "packages/core/src/skills/index.ts"() {
@@ -9522,7 +9544,7 @@ var init_src4 = __esm({
       }
       return selection.modelId || selection.role || selection.reasoningEffort ? selection : void 0;
     };
-    isReasoningEffort = (value) => value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh";
+    isReasoningEffort = (value) => value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
     latestSessionSelectedModel2 = (initial, events) => events.reduce(
       (selected, event) => event.type === "session_model_selected" ? event.selectedModel : selected,
       initial
@@ -12595,10 +12617,10 @@ var init_index = __esm({
       throw new Error("--output-format must be text, json, stream-json, or none");
     };
     parseReasoningEffort = (value) => {
-      if (value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh") {
+      if (value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") {
         return value;
       }
-      throw new Error("--reasoning-effort must be minimal, low, medium, high, or xhigh");
+      throw new Error("--reasoning-effort must be minimal, low, medium, high, xhigh, or max");
     };
     parsePositiveInteger = (value, flag) => {
       const parsed = Number(value);
@@ -12705,7 +12727,7 @@ var init_index = __esm({
           "                 [--output-format text|json|stream-json|none] [--summary <path>]",
           "                 [--provider <name>] [--api|--protocol <protocol>]",
           "                 [--base-url|--baseurl <url>] [--api-key|--apikey <key>] [--model <id>]",
-          "                 [--reasoning-effort minimal|low|medium|high|xhigh]",
+          "                 [--reasoning-effort minimal|low|medium|high|xhigh|max]",
           "       scorel attach --session <id> --remote <ws-url> --token <token>",
           "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
           "                        [--relay <relay-url> | --no-relay] [--replace]",
@@ -12748,7 +12770,7 @@ var init_index = __esm({
           "  --report-dir <path>",
           "  --quiet",
           "  --model <primary|standard|auxiliary|model-id>",
-          "  --reasoning-effort <minimal|low|medium|high|xhigh>",
+          "  --reasoning-effort <minimal|low|medium|high|xhigh|max>",
           "  --provider <name>",
           "  --api, --protocol <openai-completions|openai-responses|google-generative-ai|anthropic-messages>",
           "  --base-url, --baseurl <url>",
