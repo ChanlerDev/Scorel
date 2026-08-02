@@ -14,6 +14,7 @@ Harbor / Terminal-Bench adapter.
   - `medium`
   - `high`
   - `xhigh`
+  - `max`
 - Extend model selection so an optional effort is persisted in the resolved
   session model summary and restored with the session. Later model/effort
   changes are persisted as append-only `session_model_selected` events.
@@ -33,7 +34,8 @@ Harbor / Terminal-Bench adapter.
 
 - Choosing a non-default effort automatically.
 - Adding reasoning effort to persistent device config or model profiles.
-- Translating provider-specific effort names beyond pi-ai's existing mapping.
+- Translating provider-specific effort names beyond pi-ai's model capability
+  mappings.
 - Modifying Terminal-Bench datasets or uploading leaderboard submissions.
 - Publishing private provider endpoints, credentials, local eval jobs, or
   historical benchmark outputs.
@@ -48,7 +50,7 @@ Harbor / Terminal-Bench adapter.
 - A same-model effort change recreates the chat runtime.
 - Run summary, `scorel-metadata.json`, and `scorel-trajectory.json` identify the
   requested effort.
-- GUI shows Default plus all five effort values next to model selection.
+- GUI shows Default plus all six effort values next to model selection.
 - GUI disables effort selection for models without reasoning capability and
   does not send stale effort after switching to such a model.
 - Harbor accepts `--ak reasoning_effort=...`, forwards it to `scorel run`, and
@@ -80,7 +82,8 @@ Harbor / Terminal-Bench adapter.
 ## Risks And Boundaries
 
 - Provider support differs by model and API. Scorel only sends an explicit
-  effort; pi-ai remains responsible for provider-specific mapping.
+  effort; pi-ai remains responsible for provider-specific mapping. As of
+  S0119, pi-ai represents `xhigh` and `max` as distinct native levels.
 - Effort is distinct from the model's `reasoning` capability flag. GUI gates
   the control using capability metadata, while headless provider overrides mark
   the run-local model reasoning-capable when an effort is explicitly supplied.

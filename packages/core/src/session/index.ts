@@ -682,7 +682,8 @@ const isSelectedModelSummary = (value: unknown): boolean =>
     value.reasoningEffort === "low" ||
     value.reasoningEffort === "medium" ||
     value.reasoningEffort === "high" ||
-    value.reasoningEffort === "xhigh"
+    value.reasoningEffort === "xhigh" ||
+    value.reasoningEffort === "max"
   );
 
 const isInstructionSnapshot = (value: unknown): value is InstructionSnapshot => {

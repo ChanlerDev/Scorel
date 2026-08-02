@@ -26,12 +26,12 @@ class ScorelHarborAgentTest(unittest.IsolatedAsyncioTestCase):
             agent = ScorelAgent(
                 logs_dir=Path(directory),
                 model_name="example/model-id",
-                reasoning_effort="xhigh",
+                reasoning_effort="max",
                 **CONNECTION,
                 logger=logging.getLogger("scorel-eval-test"),
             )
         self.assertEqual(agent.model_id, "model-id")
-        self.assertEqual(agent.reasoning_effort, "xhigh")
+        self.assertEqual(agent.reasoning_effort, "max")
 
     def test_rejects_unknown_reasoning_effort(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

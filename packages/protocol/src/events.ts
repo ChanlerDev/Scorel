@@ -19,7 +19,7 @@ export type SessionMeta = {
 
 export type ModelRole = "primary" | "standard" | "auxiliary";
 
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 export type ModelSelectionInput = {
   modelId?: string;

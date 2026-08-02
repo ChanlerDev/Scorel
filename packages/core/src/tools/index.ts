@@ -1,4 +1,4 @@
-import { Type, type TSchema } from "@mariozechner/pi-ai";
+import { Type, type TSchema } from "@earendil-works/pi-ai";
 
 import type { ContentBlock, EventId } from "@scorel/protocol";
 

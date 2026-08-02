@@ -17,7 +17,7 @@ await build({
   platform: "node",
   format: "esm",
   target: "node22",
-  external: ["@mariozechner/pi-ai", "ws"],
+  external: ["@earendil-works/pi-ai", "ws"],
   sourcemap: true,
   logLevel: "info",
 });

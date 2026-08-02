@@ -16,7 +16,7 @@ from harbor.models.trial.paths import EnvironmentPaths
 from harbor.models.trial.result import AgentInfo, ModelInfo
 
 
-REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh"]
+REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"]
 PROVIDER_APIS = [
     "openai-completions",
     "openai-responses",

@@ -74,8 +74,8 @@ test("default GUI runtime bundle does not leave package-only bare imports", asyn
     });
 
     const bundled = await readFile(join(root, "runtime", "scorel.js"), "utf8");
-    assert.doesNotMatch(bundled, /from\s+["']@mariozechner\/pi-ai["']/);
-    assert.doesNotMatch(bundled, /require\(["']@mariozechner\/pi-ai["']\)/);
+    assert.doesNotMatch(bundled, /from\s+["']@earendil-works\/pi-ai["']/);
+    assert.doesNotMatch(bundled, /require\(["']@earendil-works\/pi-ai["']\)/);
     assert.doesNotMatch(bundled, /from\s+["']ws["']/);
     assert.doesNotMatch(bundled, /require\(["']ws["']\)/);
   } finally {

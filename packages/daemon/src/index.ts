@@ -4095,7 +4095,7 @@ const parseQueuedModelSelection = (value: unknown): ModelSelectionInput | undefi
 };
 
 const isReasoningEffort = (value: unknown): value is ReasoningEffort =>
-  value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh";
+  value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max";
 
 const latestSessionSelectedModel = (
   initial: SelectedModelSummary | undefined,

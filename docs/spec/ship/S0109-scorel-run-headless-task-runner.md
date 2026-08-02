@@ -25,7 +25,7 @@ The command must run through Scorel's existing embedded Host, daemon/client, run
   - `--report-dir <path>` (added by S0110 for benchmark-friendly reporting artifacts)
   - `--quiet`
   - `--model <role-or-id>`
-  - `--reasoning-effort <minimal|low|medium|high|xhigh>`
+  - `--reasoning-effort <minimal|low|medium|high|xhigh|max>`
   - `--provider <name>`
   - `--api <openai-completions|openai-responses|google-generative-ai|anthropic-messages>` / `--protocol <...>`
   - `--base-url <url>` / `--baseurl <url>`

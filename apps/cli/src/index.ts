@@ -1623,10 +1623,10 @@ const parseRunOutputFormat = (value: string): RunOutputFormat => {
 };
 
 const parseReasoningEffort = (value: string): ReasoningEffort => {
-  if (value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh") {
+  if (value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh" || value === "max") {
     return value;
   }
-  throw new Error("--reasoning-effort must be minimal, low, medium, high, or xhigh");
+  throw new Error("--reasoning-effort must be minimal, low, medium, high, xhigh, or max");
 };
 
 const parsePositiveInteger = (value: string, flag: string): number => {
@@ -1748,7 +1748,7 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
       "                 [--output-format text|json|stream-json|none] [--summary <path>]",
       "                 [--provider <name>] [--api|--protocol <protocol>]",
       "                 [--base-url|--baseurl <url>] [--api-key|--apikey <key>] [--model <id>]",
-      "                 [--reasoning-effort minimal|low|medium|high|xhigh]",
+      "                 [--reasoning-effort minimal|low|medium|high|xhigh|max]",
       "       scorel attach --session <id> --remote <ws-url> --token <token>",
       "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
       "                        [--relay <relay-url> | --no-relay] [--replace]",
@@ -1792,7 +1792,7 @@ const writeRunUsage = (output: NodeJS.WritableStream): void => {
       "  --report-dir <path>",
       "  --quiet",
       "  --model <primary|standard|auxiliary|model-id>",
-      "  --reasoning-effort <minimal|low|medium|high|xhigh>",
+      "  --reasoning-effort <minimal|low|medium|high|xhigh|max>",
       "  --provider <name>",
       "  --api, --protocol <openai-completions|openai-responses|google-generative-ai|anthropic-messages>",
       "  --base-url, --baseurl <url>",

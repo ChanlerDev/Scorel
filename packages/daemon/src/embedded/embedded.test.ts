@@ -3,7 +3,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 
 import { ScorelRuntime, defineTool, loadScorelConfig, loadScorelConfigProfile, type BackgroundBashDeliveryHooks, type RuntimeProvider, type RuntimeProviderTurn, type ScorelConfig } from "@scorel/core";

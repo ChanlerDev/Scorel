@@ -90,6 +90,7 @@ describe("Composer", () => {
     const picker = element.querySelector('[data-testid="composer-reasoning-effort-picker"]') as HTMLSelectElement;
     expect(picker.disabled).toBe(false);
     expect(picker.value).toBe("medium");
+    expect(Array.from(picker.options).map((option) => option.value)).toContain("max");
     await act(async () => {
       picker.value = "high";
       picker.dispatchEvent(new Event("change", { bubbles: true }));

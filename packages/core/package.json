@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@mariozechner/pi-ai": "0.73.1",
+    "@earendil-works/pi-ai": "0.83.0",
     "@scorel/protocol": "workspace:*"
   }
 }

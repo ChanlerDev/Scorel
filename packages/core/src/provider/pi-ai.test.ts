@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 
 import type { ScorelMessage } from "@scorel/protocol";
@@ -64,6 +64,39 @@ describe("model profile resolution", () => {
 });
 
 describe("createPiAiProvider", () => {
+  it.each(["xhigh", "max"] as const)("sends %s as a distinct provider reasoning effort", async (reasoning) => {
+    const server = await startOpenAiCompletionsServer();
+    const provider = createPiAiProvider({
+      model: resolvePiAiModel({
+        type: "custom",
+        provider: "scorel-test",
+        id: "reasoning-model",
+        baseUrl: server.baseUrl,
+        api: "openai-completions",
+        apiKey: "test-key",
+        contextWindow: 400000,
+        maxTokens: 128000,
+        reasoning: true,
+      }),
+      apiKey: "test-key",
+      reasoning,
+    });
+
+    try {
+      await collectProvider(provider.streamTurn({
+        context: [user("test reasoning")],
+        systemPrompt: undefined,
+        tools: [],
+        signal: new AbortController().signal,
+        options: {},
+      }));
+
+      expect(server.requests[0]).toMatchObject({ reasoning_effort: reasoning });
+    } finally {
+      await server.close();
+    }
+  });
+
   it("uses systemPrompt as a system message for custom OpenAI-compatible completions by default", async () => {
     const server = await startOpenAiCompletionsServer();
     const provider = createPiAiProvider({

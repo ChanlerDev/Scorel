@@ -51,7 +51,7 @@ interface SessionMeta {
   selectedModel?: {
     modelId: string;
     role?: "primary" | "standard" | "auxiliary";
-    reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+    reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
     providerId: string;
     provider: string;
     id: string;

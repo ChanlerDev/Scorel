@@ -301,7 +301,7 @@ describe("@scorel/app-cli", () => {
           "--model",
           "gpt-4o-mini",
           "--reasoning-effort",
-          "high",
+          "max",
           "--output-format",
           "none",
           "--summary",
@@ -346,11 +346,11 @@ describe("@scorel/app-cli", () => {
         providerModelId: "gpt-4o-mini",
         provider: "openai",
         api: "openai-completions",
-        reasoningEffort: "high",
+        reasoningEffort: "max",
       });
-      expect(summary.reasoningEffort).toBe("high");
-      expect(sessionHeader.meta.selectedModel).toMatchObject({ modelId: "gpt-4o-mini", reasoningEffort: "high" });
-      expect(server.requests[0]).toMatchObject({ reasoning_effort: "high" });
+      expect(summary.reasoningEffort).toBe("max");
+      expect(sessionHeader.meta.selectedModel).toMatchObject({ modelId: "gpt-4o-mini", reasoningEffort: "max" });
+      expect(server.requests[0]).toMatchObject({ reasoning_effort: "max" });
       expect(summary.cost).toMatchObject({
         known: true,
         currency: "USD",
@@ -371,14 +371,14 @@ describe("@scorel/app-cli", () => {
       expect(eventsText.trim().split("\n").some((line) => JSON.parse(line).type === "assistant_message")).toBe(true);
       expect(JSON.parse(metadataText)).toMatchObject({
         usage: { inputTokens: 1200, outputTokens: 800, totalTokens: 2000 },
-        reasoningEffort: "high",
-        model: { reasoningEffort: "high" },
+        reasoningEffort: "max",
+        model: { reasoningEffort: "max" },
         cost: { known: true },
       });
       expect(JSON.parse(trajectoryText)).toMatchObject({
         format: "scorel-run-trajectory-v1",
         sessionId: "ses_run_reporting",
-        reasoningEffort: "high",
+        reasoningEffort: "max",
       });
     } finally {
       await server.close();
@@ -868,7 +868,7 @@ describe("@scorel/app-cli", () => {
     );
 
     expect(result.code).toBe(2);
-    expect(result.stderr).toContain("--reasoning-effort must be minimal, low, medium, high, or xhigh");
+    expect(result.stderr).toContain("--reasoning-effort must be minimal, low, medium, high, xhigh, or max");
   });
 
   it("returns a runtime error and writes full events when the provider stops with error", async () => {

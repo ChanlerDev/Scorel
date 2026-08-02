@@ -5,7 +5,7 @@ import { userInfo } from "node:os";
 import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from "@earendil-works/pi-ai";
 
 import type { AgentTool, ToolResult } from "./index.js";
 import { defineTool } from "./index.js";

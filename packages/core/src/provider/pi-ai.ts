@@ -1,20 +1,21 @@
 import {
-  getModels,
-  streamSimple,
+  lazyApi,
   type Api,
   type Context,
-  type KnownProvider,
   type Message,
   type Model,
+  type ProviderStreams,
   type TextContent,
   type ThinkingContent,
   type Tool,
   type ToolCall,
   type Usage as PiUsage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
+import { getBuiltinModels, type BuiltinProvider } from "@earendil-works/pi-ai/providers/all";
 
 import type {
   ContentBlock,
+  ReasoningEffort,
   ScorelMessage,
   StopReason,
   SystemReminderContentBlock,
@@ -31,16 +32,41 @@ import type { AgentTool } from "../tools/index.js";
 export type PiAiProviderOptions = {
   model: Model<Api>;
   apiKey: string;
-  reasoning?: "minimal" | "low" | "medium" | "high" | "xhigh";
+  reasoning?: ReasoningEffort;
   onPayload?: (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
 };
 
 const DEFAULT_CUSTOM_MODEL_CONTEXT_WINDOW = 200_000;
 const DEFAULT_CUSTOM_MODEL_MAX_TOKENS = 64_000;
 
+const PI_AI_APIS: Partial<Record<Api, ProviderStreams>> = {
+  "anthropic-messages": lazyApi(() => import("@earendil-works/pi-ai/api/anthropic-messages")),
+  "azure-openai-responses": lazyApi(() => import("@earendil-works/pi-ai/api/azure-openai-responses")),
+  "bedrock-converse-stream": lazyApi(() => import("@earendil-works/pi-ai/api/bedrock-converse-stream")),
+  "google-generative-ai": lazyApi(() => import("@earendil-works/pi-ai/api/google-generative-ai")),
+  "google-vertex": lazyApi(() => import("@earendil-works/pi-ai/api/google-vertex")),
+  "mistral-conversations": lazyApi(() => import("@earendil-works/pi-ai/api/mistral-conversations")),
+  "openai-codex-responses": lazyApi(() => import("@earendil-works/pi-ai/api/openai-codex-responses")),
+  "openai-completions": lazyApi(() => import("@earendil-works/pi-ai/api/openai-completions")),
+  "openai-responses": lazyApi(() => import("@earendil-works/pi-ai/api/openai-responses")),
+};
+
 export const createPiAiProvider = (options: PiAiProviderOptions): RuntimeProvider => ({
   streamTurn: async function* ({ context, systemPrompt, tools, signal }) {
-    const stream = streamSimple(options.model, toPiContext(context, systemPrompt, tools), {
+    const model = options.reasoning === "max" || options.reasoning === "xhigh"
+      ? {
+          ...options.model,
+          thinkingLevelMap: {
+            ...options.model.thinkingLevelMap,
+            [options.reasoning]: options.reasoning,
+          },
+        }
+      : options.model;
+    const streamSimple = PI_AI_APIS[model.api]?.streamSimple;
+    if (!streamSimple) {
+      throw new Error(`Unsupported pi-ai API: ${model.api}`);
+    }
+    const stream = streamSimple(model, toPiContext(context, systemPrompt, tools), {
       apiKey: options.apiKey,
       signal,
       ...(options.reasoning ? { reasoning: options.reasoning } : {}),
@@ -78,7 +104,7 @@ export const resolvePiAiModel = (config: BuiltinPiAiModelConfig | CustomPiAiMode
     } satisfies Model<CustomPiAiApi>;
   }
 
-  const model = getModels(config.provider as KnownProvider).find((candidate) => candidate.id === config.id);
+  const model = getBuiltinModels(config.provider as BuiltinProvider).find((candidate) => candidate.id === config.id);
   if (!model) {
     throw new Error(`Unknown pi-ai model: ${config.provider}/${config.id}`);
   }
