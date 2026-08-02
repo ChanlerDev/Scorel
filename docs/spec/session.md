@@ -46,13 +46,23 @@ interface SessionHeader {
 
 interface SessionMeta {
   projectId: ProjectId;     // owning Host 中稳定的 Project 身份
-  name?: string;
   title?: string;
-  model: string;
-  thinkingLevel: "none" | "low" | "medium" | "high";
-  [key: string]: unknown;  // 可扩展
+  model?: string;
+  selectedModel?: {
+    modelId: string;
+    role?: "primary" | "standard" | "auxiliary";
+    reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh";
+    providerId: string;
+    provider: string;
+    id: string;
+    displayName: string;
+  };
 }
 ```
+
+`reasoningEffort` 是一次 session/run 的可复现运行参数，与 provider model 上的
+`reasoning: boolean` 能力标记不同。省略 effort 时 Scorel 不传显式值，并保留
+现有 pi-ai 默认行为。
 
 `sessionId` 是随机稳定身份，不承担用户可读命名。产品 UI / CLI 应优先展示 `title`、时间、project、short index；short index 只允许作为本机选择辅助，不作为跨 daemon 协议 ID。测试和调试路径可以显式传入 `--session <id>`，但默认新建 session 应由 daemon 生成随机 ID。
 

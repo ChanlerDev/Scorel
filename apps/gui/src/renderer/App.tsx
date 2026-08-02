@@ -29,6 +29,7 @@ import type {
   GuiRuntimeSettingsView,
   GuiSnapshot,
   GuiModelSelection,
+  GuiReasoningEffort,
 } from "../shared/ipc.js";
 
 type ViewMode = "workspace" | "settings";
@@ -109,11 +110,28 @@ export const selectedModelValue = (profile: GuiModelProfileView, current: string
   return profile.models[0]?.modelId || "";
 };
 
-export const modelSelectionFromValue = (value: string, profile: GuiModelProfileView): GuiModelSelection | undefined => {
+export const modelSelectionFromValue = (
+  value: string,
+  profile: GuiModelProfileView,
+  reasoningEffort: GuiReasoningEffort | "" = "",
+): GuiModelSelection | undefined => {
   if (!value) return undefined;
-  if (profile.models.some((model) => model.modelId === value)) return { modelId: value };
+  const model = profile.models.find((candidate) => candidate.modelId === value);
+  if (model) {
+    return {
+      modelId: value,
+      ...(model.reasoning === true && reasoningEffort ? { reasoningEffort } : {}),
+    };
+  }
   return undefined;
 };
+
+export const modelSelectionForMessage = (
+  sessionExists: boolean,
+  selectionChanged: boolean,
+  selection: GuiModelSelection | undefined,
+): GuiModelSelection | undefined =>
+  sessionExists && !selectionChanged ? undefined : selection;
 
 export const estimateContextTokensFromEvents = (events: ScorelEvent[]): number => {
   const texts: string[] = [];
@@ -190,6 +208,8 @@ export function App() {
     wechat: defaultExtensionSettings("wechat"),
   });
   const [selectedModelId, setSelectedModelId] = useState<string>("");
+  const [reasoningEffort, setReasoningEffort] = useState<GuiReasoningEffort | "">("");
+  const [modelSelectionChanged, setModelSelectionChanged] = useState<boolean>(false);
   const [pickerOpen, setPickerOpen] = useState<boolean>(false);
   const [pickerAnchor, setPickerAnchor] = useState<{ left: number; top: number } | undefined>(undefined);
   const [showAddRemote, setShowAddRemote] = useState<boolean>(false);
@@ -444,13 +464,18 @@ export function App() {
         if (!isCurrent()) return;
         setModelProfile(profile);
         setSelectedModelId((current) => {
-          return selectedModelValue(profile, current);
+          const selected = selectedModelValue(profile, current);
+          if (profile.models.find((model) => model.modelId === selected)?.reasoning !== true) {
+            setReasoningEffort("");
+          }
+          return selected;
         });
       })
       .catch((cause) => {
         if (!isCurrent()) return;
         setModelProfile(defaultModelProfile());
         setSelectedModelId("");
+        setReasoningEffort("");
         setError(cause instanceof Error ? cause.message : String(cause));
       });
     void window.scorel.getMemorySettings(activeConfigDevice)
@@ -496,6 +521,7 @@ export function App() {
     (key: string, sessionId: string): void => {
       setSelectedProjectKey(key);
       setSelectedSessionId(sessionId);
+      setModelSelectionChanged(false);
       const project = projects.find((candidate) => projectKey(candidate) === key);
       if (!project) return;
       loadInitialEvents([]);
@@ -529,6 +555,7 @@ export function App() {
       setSelectedProjectKey(projectKey(fallbackProject));
     }
     setSelectedSessionId(null);
+    setModelSelectionChanged(false);
     setInFlight(false);
     loadInitialEvents([]);
     setContextEstimatedTokens(0);
@@ -548,10 +575,15 @@ export function App() {
     setInFlight(true);
     try {
       let sessionId = selectedSessionId;
+      const selection = modelSelectionForMessage(
+        Boolean(sessionId),
+        modelSelectionChanged,
+        modelSelectionFromValue(selectedModelId, modelProfile, reasoningEffort),
+      );
       if (!sessionId) {
         sessionId = (await window.scorel.createSession(
           projectRef(targetProject),
-          modelSelectionFromValue(selectedModelId, modelProfile),
+          selection,
         )) as string;
         setSelectedSessionId(sessionId);
         await refreshSessionsForProject(targetProject);
@@ -561,8 +593,9 @@ export function App() {
         projectRef(targetProject),
         sessionId as SessionId,
         content,
-        modelSelectionFromValue(selectedModelId, modelProfile),
+        selection,
       );
+      setModelSelectionChanged(false);
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -575,6 +608,8 @@ export function App() {
     projects,
     selectedSessionId,
     selectedModelId,
+    reasoningEffort,
+    modelSelectionChanged,
     modelProfile,
     message,
     refreshSessionsForProject,
@@ -662,7 +697,11 @@ export function App() {
         onModelProfileChange={(profile) => {
           setModelProfile(profile);
           setSelectedModelId((current) => {
-            return selectedModelValue(profile, current);
+            const selected = selectedModelValue(profile, current);
+            if (profile.models.find((model) => model.modelId === selected)?.reasoning !== true) {
+              setReasoningEffort("");
+            }
+            return selected;
           });
         }}
         onMemoryChange={setMemorySettings}
@@ -714,7 +753,18 @@ export function App() {
         inFlight={inFlight}
         models={modelProfile.models}
         selectedModelId={selectedModelId}
-        onModelChange={setSelectedModelId}
+        onModelChange={(modelId) => {
+          setSelectedModelId(modelId);
+          setModelSelectionChanged(true);
+          if (modelProfile.models.find((model) => model.modelId === modelId)?.reasoning !== true) {
+            setReasoningEffort("");
+          }
+        }}
+        reasoningEffort={reasoningEffort}
+        onReasoningEffortChange={(effort) => {
+          setReasoningEffort(effort);
+          setModelSelectionChanged(true);
+        }}
         modelPickerDisabled={Boolean(selectedSessionId && projectorState.turns.length > 0)}
         contextUsage={contextUsage}
         error={error}

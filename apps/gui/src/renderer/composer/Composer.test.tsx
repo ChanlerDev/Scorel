@@ -69,6 +69,34 @@ describe("Composer", () => {
     expect(controls.at(-1)?.getAttribute("aria-label")).toBe("Send");
   });
 
+  it("enables reasoning effort only for reasoning-capable models", async () => {
+    const onReasoningEffortChange = vi.fn();
+    const element = await renderComposerElement({
+      models: [{
+        modelId: "gpt",
+        displayName: "GPT",
+        providerModelId: "gpt",
+        providerId: "openai",
+        provider: "openai",
+        id: "gpt",
+        roles: ["standard"],
+        reasoning: true,
+      }],
+      selectedModelId: "gpt",
+      reasoningEffort: "medium",
+      onReasoningEffortChange,
+    });
+
+    const picker = element.querySelector('[data-testid="composer-reasoning-effort-picker"]') as HTMLSelectElement;
+    expect(picker.disabled).toBe(false);
+    expect(picker.value).toBe("medium");
+    await act(async () => {
+      picker.value = "high";
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(onReasoningEffortChange).toHaveBeenCalledWith("high");
+  });
+
   it("marks context usage as danger at the auto compact threshold", async () => {
     const element = await renderComposerElement({
       contextUsage: {
@@ -166,6 +194,8 @@ async function renderComposerElement(input: {
   contextUsage?: Parameters<typeof Composer>[0]["contextUsage"];
   models?: Parameters<typeof Composer>[0]["models"];
   selectedModelId?: string;
+  reasoningEffort?: Parameters<typeof Composer>[0]["reasoningEffort"];
+  onReasoningEffortChange?: Parameters<typeof Composer>[0]["onReasoningEffortChange"];
 }): Promise<HTMLDivElement> {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement("div");
@@ -183,6 +213,8 @@ async function renderComposerElement(input: {
         contextUsage={input.contextUsage}
         models={input.models}
         selectedModelId={input.selectedModelId}
+        reasoningEffort={input.reasoningEffort}
+        onReasoningEffortChange={input.onReasoningEffortChange}
       />,
     );
   });

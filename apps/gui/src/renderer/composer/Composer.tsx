@@ -1,7 +1,7 @@
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { ArrowUp } from "../icons/index.js";
-import type { GuiModelProfileView } from "../../shared/ipc.js";
+import type { GuiModelProfileView, GuiReasoningEffort } from "../../shared/ipc.js";
 
 export type ComposerProps = {
   value: string;
@@ -12,6 +12,8 @@ export type ComposerProps = {
   models?: GuiModelProfileView["models"];
   selectedModelId?: string;
   onModelChange?(modelId: string): void;
+  reasoningEffort?: GuiReasoningEffort | "";
+  onReasoningEffortChange?(reasoningEffort: GuiReasoningEffort | ""): void;
   modelPickerDisabled?: boolean;
   onCancel?(): void;
   contextUsage?: ComposerContextUsage;
@@ -36,6 +38,8 @@ export function Composer({
   models = [],
   selectedModelId = "",
   onModelChange,
+  reasoningEffort = "",
+  onReasoningEffortChange,
   modelPickerDisabled,
   onCancel,
   contextUsage,
@@ -45,6 +49,7 @@ export function Composer({
   const composingRef = useRef(false);
   const empty = value.trim().length === 0;
   const canSubmit = !disabled && !empty && !inFlight;
+  const reasoningSupported = models.find((model) => model.modelId === selectedModelId)?.reasoning === true;
 
   const handleSubmit = useCallback(
     (event: FormEvent<HTMLFormElement>): void => {
@@ -108,6 +113,22 @@ export function Composer({
                 </option>
               ))
             )}
+          </select>
+          <select
+            className="composer__model-select composer__reasoning-select"
+            value={reasoningEffort}
+            disabled={disabled || modelPickerDisabled || !reasoningSupported}
+            onChange={(event) => onReasoningEffortChange?.(event.currentTarget.value as GuiReasoningEffort | "")}
+            aria-label="Reasoning Effort"
+            data-testid="composer-reasoning-effort-picker"
+            title={reasoningSupported ? "Reasoning Effort" : "Selected model does not support reasoning effort"}
+          >
+            <option value="">Default effort</option>
+            <option value="minimal">Minimal</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="xhigh">Extra high</option>
           </select>
           {contextUsage ? <ContextIndicator usage={contextUsage} /> : null}
           <button

@@ -300,6 +300,8 @@ describe("@scorel/app-cli", () => {
           "direct-secret-reporting",
           "--model",
           "gpt-4o-mini",
+          "--reasoning-effort",
+          "high",
           "--output-format",
           "none",
           "--summary",
@@ -319,12 +321,14 @@ describe("@scorel/app-cli", () => {
       const eventsText = await readFile(join(reportDir, "scorel-events.jsonl"), "utf8");
       const metadataText = await readFile(join(reportDir, "scorel-metadata.json"), "utf8");
       const trajectoryText = await readFile(join(reportDir, "scorel-trajectory.json"), "utf8");
+      const sessionHeader = JSON.parse((await readFile(join(stateDir, "sessions", "ses_run_reporting.jsonl"), "utf8")).split("\n")[0]!);
       const combinedReportText = [summaryText, reportSummaryText, eventsText, metadataText, trajectoryText].join("\n");
       expect(combinedReportText).not.toContain("direct-secret-reporting");
 
       const summary = JSON.parse(summaryText) as {
         usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
-        model?: { modelId?: string; providerModelId?: string; provider?: string; api?: string };
+        model?: { modelId?: string; providerModelId?: string; provider?: string; api?: string; reasoningEffort?: string };
+        reasoningEffort?: string;
         cost?: {
           known?: boolean;
           input?: number;
@@ -342,7 +346,11 @@ describe("@scorel/app-cli", () => {
         providerModelId: "gpt-4o-mini",
         provider: "openai",
         api: "openai-completions",
+        reasoningEffort: "high",
       });
+      expect(summary.reasoningEffort).toBe("high");
+      expect(sessionHeader.meta.selectedModel).toMatchObject({ modelId: "gpt-4o-mini", reasoningEffort: "high" });
+      expect(server.requests[0]).toMatchObject({ reasoning_effort: "high" });
       expect(summary.cost).toMatchObject({
         known: true,
         currency: "USD",
@@ -363,11 +371,14 @@ describe("@scorel/app-cli", () => {
       expect(eventsText.trim().split("\n").some((line) => JSON.parse(line).type === "assistant_message")).toBe(true);
       expect(JSON.parse(metadataText)).toMatchObject({
         usage: { inputTokens: 1200, outputTokens: 800, totalTokens: 2000 },
+        reasoningEffort: "high",
+        model: { reasoningEffort: "high" },
         cost: { known: true },
       });
       expect(JSON.parse(trajectoryText)).toMatchObject({
         format: "scorel-run-trajectory-v1",
         sessionId: "ses_run_reporting",
+        reasoningEffort: "high",
       });
     } finally {
       await server.close();
@@ -846,6 +857,18 @@ describe("@scorel/app-cli", () => {
     } finally {
       await server.close();
     }
+  });
+
+  it("rejects an invalid reasoning effort as a usage error", async () => {
+    const result = await runCliWithInput(
+      ["run", "--prompt", "test", "--reasoning-effort", "maximum"],
+      "",
+      undefined,
+      await mkdtemp(join(tmpdir(), "scorel-cli-run-invalid-effort-")),
+    );
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("--reasoning-effort must be minimal, low, medium, high, or xhigh");
   });
 
   it("returns a runtime error and writes full events when the provider stops with error", async () => {

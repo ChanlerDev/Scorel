@@ -1,4 +1,4 @@
-import type { ScorelEvent, Usage } from "@scorel/protocol";
+import type { ReasoningEffort, ScorelEvent, Usage } from "@scorel/protocol";
 
 export type RunReportingModel = {
   modelId?: string;
@@ -6,6 +6,7 @@ export type RunReportingModel = {
   provider?: string;
   api?: string;
   displayName?: string;
+  reasoningEffort?: ReasoningEffort;
 };
 
 export type RunCostEstimate = {

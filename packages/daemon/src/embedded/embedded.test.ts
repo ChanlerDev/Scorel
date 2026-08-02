@@ -112,6 +112,7 @@ const fixtureWithModelProfile = async () => {
   const projectsPath = join(root, "projects.json");
   await mkdir(sessionsDir);
   const runtimeSelections: string[] = [];
+  const runtimeReasoningEfforts: Array<string | undefined> = [];
   const host = new ScorelHost({
     sessionsDir,
     projectsPath,
@@ -120,12 +121,13 @@ const fixtureWithModelProfile = async () => {
     memoryHomeDir: root,
     createRuntime: async ({ selectedModel }) => {
       runtimeSelections.push(selectedModel?.modelId ?? "none");
+      runtimeReasoningEfforts.push(selectedModel?.reasoningEffort);
       return new ScorelRuntime({ provider });
     },
     now: () => 1_000,
   });
   await host.start();
-  return { root, sessionsDir, projectsPath, runtimeSelections, host };
+  return { root, sessionsDir, projectsPath, runtimeSelections, runtimeReasoningEfforts, host };
 };
 
 describe("ScorelHost + embedded transport", () => {
@@ -1977,11 +1979,12 @@ apiKey = "secret"
       type: "create_session",
       requestId: asRequestId("req_create"),
       sessionId: asSessionId("ses_model_restore"),
-      meta: { projectId: project.projectId, modelSelection: { modelId: "aux" } },
+      meta: { projectId: project.projectId, modelSelection: { modelId: "aux", reasoningEffort: "high" } },
     });
     await host.shutdown();
 
     const restoredSelections: string[] = [];
+    const restoredReasoningEfforts: Array<string | undefined> = [];
     const restored = new ScorelHost({
       sessionsDir,
       projectsPath,
@@ -1990,6 +1993,7 @@ apiKey = "secret"
       memoryHomeDir: root,
       createRuntime: async ({ selectedModel }) => {
         restoredSelections.push(selectedModel?.modelId ?? "none");
+        restoredReasoningEfforts.push(selectedModel?.reasoningEffort);
         return new ScorelRuntime({ provider });
       },
     });
@@ -2006,6 +2010,7 @@ apiKey = "secret"
     expect(header.meta.selectedModel).toMatchObject({
       modelId: "aux",
       displayName: "Aux Model",
+      reasoningEffort: "high",
     });
     expect(runtimeSelections).toEqual(["aux"]);
     expect(restoredSelections).toEqual([]);
@@ -2018,6 +2023,7 @@ apiKey = "secret"
     });
     await expect(sendResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
     expect(restoredSelections).toEqual(["aux", "aux"]);
+    expect(restoredReasoningEfforts).toEqual(["high", undefined]);
   });
 
   it("falls back to the current standard model when a restored session references a removed model", async () => {
@@ -2157,6 +2163,78 @@ apiKey = "secret"
 
     await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
     expect(runtimeSelections).toEqual(["main", "aux"]);
+  });
+
+  it("persists reasoning effort and rebuilds the runtime when effort changes for the same model", async () => {
+    const { root, sessionsDir, projectsPath, host, runtimeSelections, runtimeReasoningEfforts } = await fixtureWithModelProfile();
+    const repo = join(root, "repo");
+    await mkdir(repo);
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create_reasoning"),
+      sessionId: asSessionId("ses_reasoning_effort"),
+      meta: { projectId: project.projectId, title: "Manual title", modelSelection: { modelId: "aux", reasoningEffort: "low" } },
+    });
+
+    const header = JSON.parse((await readFile(join(sessionsDir, "ses_reasoning_effort.jsonl"), "utf8")).split("\n")[0]!);
+    expect(header.meta.selectedModel).toMatchObject({ modelId: "aux", reasoningEffort: "low" });
+
+    const response = waitForResponse(transport, "req_send_reasoning");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send_reasoning"),
+      sessionId: asSessionId("ses_reasoning_effort"),
+      content: "use more reasoning",
+      options: { modelSelection: { reasoningEffort: "high" } },
+    });
+
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    expect(runtimeSelections).toEqual(["aux", "aux"]);
+    expect(runtimeReasoningEfforts).toEqual(["low", "high"]);
+
+    const lines = (await readFile(join(sessionsDir, "ses_reasoning_effort.jsonl"), "utf8"))
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    expect(lines).toContainEqual(expect.objectContaining({
+      type: "session_model_selected",
+      selectedModel: expect.objectContaining({ modelId: "aux", reasoningEffort: "high" }),
+    }));
+    const summary = JSON.parse(await readFile(join(sessionsDir, "ses_reasoning_effort.summary.json"), "utf8"));
+    expect(summary.model).toMatchObject({ providerModelId: "aux", reasoningEffort: "high" });
+
+    await host.shutdown();
+    const restoredSelections: string[] = [];
+    const restoredReasoningEfforts: Array<string | undefined> = [];
+    const restored = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      modelProfile,
+      memoryHomeDir: root,
+      createRuntime: async ({ selectedModel }) => {
+        restoredSelections.push(selectedModel?.modelId ?? "none");
+        restoredReasoningEfforts.push(selectedModel?.reasoningEffort);
+        return new ScorelRuntime({ provider });
+      },
+    });
+    await restored.start();
+    const restoredTransport = createEmbeddedTransport(restored);
+    await restoredTransport.connect({ clientId: asClientId("client_restored_reasoning") });
+    const restoredResponse = waitForResponse(restoredTransport, "req_send_restored_reasoning");
+    await restoredTransport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send_restored_reasoning"),
+      sessionId: asSessionId("ses_reasoning_effort"),
+      content: "continue with persisted effort",
+    });
+    await expect(restoredResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+    expect(restoredSelections[0]).toBe("aux");
+    expect(restoredReasoningEfforts[0]).toBe("high");
   });
 
   it("generates a first-message session title with the auxiliary model", async () => {

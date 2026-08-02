@@ -5,7 +5,7 @@ import type { ComposerContextUsage } from "../composer/Composer.js";
 import { ProjectPickerPill } from "../composer/ProjectPickerPill.js";
 import { Transcript } from "../chatbox/Transcript.js";
 import type { Turn } from "../chatbox/projector.js";
-import type { GuiProjectView, GuiModelProfileView } from "../../shared/ipc.js";
+import type { GuiProjectView, GuiModelProfileView, GuiReasoningEffort } from "../../shared/ipc.js";
 
 export type SessionViewProps = {
   selectedProject: GuiProjectView | undefined;
@@ -19,6 +19,8 @@ export type SessionViewProps = {
   models: GuiModelProfileView["models"];
   selectedModelId: string;
   onModelChange(modelId: string): void;
+  reasoningEffort?: GuiReasoningEffort | "";
+  onReasoningEffortChange?(reasoningEffort: GuiReasoningEffort | ""): void;
   modelPickerDisabled?: boolean;
   contextUsage?: ComposerContextUsage;
   picker?: ReactNode;
@@ -36,6 +38,8 @@ export function SessionView({
   models,
   selectedModelId,
   onModelChange,
+  reasoningEffort,
+  onReasoningEffortChange,
   modelPickerDisabled,
   contextUsage,
   picker,
@@ -53,6 +57,8 @@ export function SessionView({
           models={models}
           selectedModelId={selectedModelId}
           onModelChange={onModelChange}
+          reasoningEffort={reasoningEffort}
+          onReasoningEffortChange={onReasoningEffortChange}
           modelPickerDisabled={modelPickerDisabled}
           contextUsage={contextUsage}
         />

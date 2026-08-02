@@ -12,6 +12,7 @@ import type {
   ProviderConnectionSummary,
   ProviderModelSummary,
   PersistentEvent,
+  ReasoningEffort,
   ScorelEvent,
   SessionId,
   SessionSummary,
@@ -72,7 +73,10 @@ export type GuiDeviceRef = {
 export type GuiModelSelection = {
   modelId?: string;
   role?: ModelRole;
+  reasoningEffort?: ReasoningEffort;
 };
+
+export type GuiReasoningEffort = ReasoningEffort;
 
 export type GuiModelProfileView = {
   providers: ProviderConnectionSummary[];

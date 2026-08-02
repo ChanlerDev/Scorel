@@ -111,6 +111,8 @@ describe("@scorel/protocol", () => {
           return input.message.role;
         case "session_title_updated":
           return input.title;
+        case "session_model_selected":
+          return input.selectedModel.modelId;
         case "instruction_snapshot":
           return input.snapshot.cwd;
         case "harness_item":

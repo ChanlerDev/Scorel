@@ -91,6 +91,7 @@ import {
   type ProjectId,
   type QueueItem,
   type QueueName,
+  type ReasoningEffort,
   type ScorelEvent,
   type SelectedModelSummary,
   type ProviderCatalogModelSummary,
@@ -452,7 +453,7 @@ export type RuntimeFactoryOptions = {
   config: ScorelConfig;
   sessionsDir?: string;
   sessionId?: SessionId;
-  modelSelection?: { modelId?: string; role?: "primary" | "standard" | "auxiliary" };
+  modelSelection?: ModelSelectionInput;
   includeTools?: boolean;
   rtkExecutable?: string;
   backgroundBash?: BackgroundBashDeliveryHooks;
@@ -532,6 +533,7 @@ export const createRealRuntime = async (options: RuntimeFactoryOptions): Promise
     provider: createPiAiProvider({
       model,
       apiKey: selection.config.apiKey,
+      reasoning: options.modelSelection?.reasoningEffort,
     }),
   });
   if (options.includeTools !== false) {
@@ -606,6 +608,7 @@ type PersistentEventInput =
   | Omit<Extract<PersistentEvent, { type: "assistant_message" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "tool_result" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "session_title_updated" }>, "seq">
+  | Omit<Extract<PersistentEvent, { type: "session_model_selected" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "instruction_snapshot" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "harness_item" }>, "seq">
   | Omit<Extract<PersistentEvent, { type: "compact" }>, "seq">
@@ -1097,7 +1100,7 @@ export class ScorelHost {
   ): Promise<ClientRequestMap["send_message"]["response"]> {
     this.#lastActiveWorkAt = this.#now();
     const sessionId = lane.session.header.sessionId;
-    await this.#selectChatRuntime(lane, input.modelSelection);
+    await this.#selectChatRuntime(lane, clientId, input.modelSelection);
     await this.#appendDiagnostic(sessionId, "send_message_started", {
       clientId,
       activeLeafId: lane.session.activeLeafId,
@@ -1200,7 +1203,7 @@ export class ScorelHost {
   async #runSystemReminderTurn(lane: SessionLane, clientId: ClientId, reminderEventId: EventId): Promise<void> {
     this.#lastActiveWorkAt = this.#now();
     const sessionId = lane.session.header.sessionId;
-    await this.#selectChatRuntime(lane, undefined);
+    await this.#selectChatRuntime(lane, clientId, undefined);
     await this.#appendDiagnostic(sessionId, "system_reminder_turn_started", {
       clientId,
       reminderEventId,
@@ -2624,7 +2627,10 @@ export class ScorelHost {
     }
     const loaded = await loadSession({ sessionsDir: this.#sessionsDir, sessionId });
     const project = await this.#resolveProject(sessionId, loaded.header.meta.projectId);
-    const selectedModel = await this.#selectedModelFromMeta(loaded.header.meta, project);
+    const selectedModel = await this.#selectedModelFromMeta({
+      ...loaded.header.meta,
+      selectedModel: latestSessionSelectedModel(loaded.header.meta.selectedModel, [...loaded.tree]),
+    }, project);
     const runtime = await this.#createRuntime({
       sessionId,
       project,
@@ -2801,15 +2807,29 @@ export class ScorelHost {
     return asEventId(userMessageId);
   }
 
-  async #selectChatRuntime(lane: SessionLane, modelSelection: ModelSelectionInput | undefined): Promise<void> {
+  async #selectChatRuntime(
+    lane: SessionLane,
+    clientId: ClientId,
+    modelSelection: ModelSelectionInput | undefined,
+  ): Promise<void> {
     if (!modelSelection) {
       return;
     }
+    const effectiveSelection =
+      modelSelection.reasoningEffort && !modelSelection.modelId && !modelSelection.role && lane.selectedModel
+        ? { ...modelSelection, modelId: lane.selectedModel.modelId }
+        : modelSelection;
     const selectedModel = await this.#selectedModelFromMeta(
-      { projectId: lane.project.projectId, modelSelection },
+      { projectId: lane.project.projectId, modelSelection: effectiveSelection },
       lane.project,
     );
-    if (!selectedModel || lane.selectedModel?.modelId === selectedModel.modelId) {
+    if (
+      !selectedModel
+      || (
+        lane.selectedModel?.modelId === selectedModel.modelId
+        && lane.selectedModel.reasoningEffort === selectedModel.reasoningEffort
+      )
+    ) {
       return;
     }
     lane.runtime = await this.#createRuntime({
@@ -2819,6 +2839,15 @@ export class ScorelHost {
       purpose: "chat",
       backgroundBash: this.#backgroundBashForSession(lane.session.header.sessionId),
     });
+    await this.#appendPersistent(lane, {
+      type: "session_model_selected",
+      id: asEventId(this.#createId()),
+      parentId: null,
+      sessionId: lane.session.header.sessionId,
+      clientId,
+      ts: this.#now(),
+      selectedModel,
+    });
     lane.selectedModel = selectedModel;
     this.#registerLaneTools(lane);
     await this.#appendDiagnostic(lane.session.header.sessionId, "chat_model_selected", {
@@ -2826,6 +2855,7 @@ export class ScorelHost {
       workDir: lane.project.workDir,
       selectedModelId: selectedModel.modelId,
       role: selectedModel.role,
+      reasoningEffort: selectedModel.reasoningEffort,
     });
   }
 
@@ -3515,9 +3545,13 @@ export class ScorelHost {
     const requestedSelection = "modelSelection" in meta ? meta.modelSelection : undefined;
     const selectionInput = persistedSelection
       ? config.models[persistedSelection.modelId]
-        ? { modelId: persistedSelection.modelId, role: persistedSelection.role }
+        ? {
+            modelId: persistedSelection.modelId,
+            role: persistedSelection.role,
+            reasoningEffort: persistedSelection.reasoningEffort,
+          }
         : persistedSelection.role
-          ? { role: persistedSelection.role }
+          ? { role: persistedSelection.role, reasoningEffort: persistedSelection.reasoningEffort }
           : undefined
       : requestedSelection;
     const selection = resolveModelSelection(
@@ -3528,6 +3562,7 @@ export class ScorelHost {
     return {
       modelId: selection.modelId,
       role: selection.role,
+      reasoningEffort: selectionInput?.reasoningEffort,
       providerId: selection.providerId,
       provider: model.provider,
       id: model.id,
@@ -4053,8 +4088,23 @@ const parseQueuedModelSelection = (value: unknown): ModelSelectionInput | undefi
   if (value.role === "primary" || value.role === "standard" || value.role === "auxiliary") {
     selection.role = value.role;
   }
-  return selection.modelId || selection.role ? selection : undefined;
+  if (isReasoningEffort(value.reasoningEffort)) {
+    selection.reasoningEffort = value.reasoningEffort;
+  }
+  return selection.modelId || selection.role || selection.reasoningEffort ? selection : undefined;
 };
+
+const isReasoningEffort = (value: unknown): value is ReasoningEffort =>
+  value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh";
+
+const latestSessionSelectedModel = (
+  initial: SelectedModelSummary | undefined,
+  events: PersistentEvent[],
+): SelectedModelSummary | undefined =>
+  events.reduce(
+    (selected, event) => event.type === "session_model_selected" ? event.selectedModel : selected,
+    initial,
+  );
 
 const imBindingKey = (extensionId: string, externalConversationId: string): string =>
   `${extensionId}:${externalConversationId}`;

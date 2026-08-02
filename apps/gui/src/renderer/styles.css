@@ -1095,6 +1095,10 @@ a {
   font-weight: 600;
 }
 
+.composer__reasoning-select {
+  max-width: 130px;
+}
+
 .composer__model-select:not(:disabled):hover {
   background: var(--color-surface-hover);
   color: var(--color-text);

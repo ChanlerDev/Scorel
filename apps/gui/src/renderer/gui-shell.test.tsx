@@ -6,7 +6,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GuiModelProfileView, GuiProjectView } from "../shared/ipc.js";
-import { estimateContextTokensFromEvents, modelSelectionFromValue, selectedModelValue } from "./App.js";
+import {
+  estimateContextTokensFromEvents,
+  modelSelectionForMessage,
+  modelSelectionFromValue,
+  selectedModelValue,
+} from "./App.js";
 import { ProjectPickerMenu } from "./composer/ProjectPickerMenu.js";
 import { MemorySection } from "./settings/sections/MemorySection.js";
 import { ObservabilitySection } from "./settings/sections/ObservabilitySection.js";
@@ -853,12 +858,24 @@ describe("GUI shell rendering contract", () => {
 
   it("normalizes composer model selections before creating sessions", () => {
     expect(modelSelectionFromValue("main", modelProfile)).toEqual({ modelId: "main" });
+    expect(modelSelectionFromValue("main", {
+      ...modelProfile,
+      models: modelProfile.models.map((model) => ({ ...model, reasoning: true })),
+    }, "high")).toEqual({ modelId: "main", reasoningEffort: "high" });
+    expect(modelSelectionFromValue("main", modelProfile, "high")).toEqual({ modelId: "main" });
     expect(modelSelectionFromValue("standard", modelProfile)).toBeUndefined();
     expect(modelSelectionFromValue("missing", modelProfile)).toBeUndefined();
     expect(selectedModelValue({
       ...modelProfile,
       roles: { primary: "primary", standard: "standard", auxiliary: "auxiliary" },
     }, "")).toBe("main");
+  });
+
+  it("does not overwrite an existing session's persisted model selection unless the user changes it", () => {
+    const selection = { modelId: "main", reasoningEffort: "high" as const };
+    expect(modelSelectionForMessage(true, false, selection)).toBeUndefined();
+    expect(modelSelectionForMessage(true, true, selection)).toEqual(selection);
+    expect(modelSelectionForMessage(false, false, selection)).toEqual(selection);
   });
 
   it("renders real memory settings controls", () => {

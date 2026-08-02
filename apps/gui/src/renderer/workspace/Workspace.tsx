@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import type { Turn } from "../chatbox/projector.js";
 import type { ComposerContextUsage } from "../composer/Composer.js";
-import type { GuiProjectView, GuiModelProfileView } from "../../shared/ipc.js";
+import type { GuiProjectView, GuiModelProfileView, GuiReasoningEffort } from "../../shared/ipc.js";
 import { EmptyState } from "./EmptyState.js";
 import { SessionView } from "./SessionView.js";
 import { Topbar } from "./Topbar.js";
@@ -20,6 +20,8 @@ export type WorkspaceProps = {
   models: GuiModelProfileView["models"];
   selectedModelId: string;
   onModelChange(modelId: string): void;
+  reasoningEffort?: GuiReasoningEffort | "";
+  onReasoningEffortChange?(reasoningEffort: GuiReasoningEffort | ""): void;
   modelPickerDisabled?: boolean;
   contextUsage?: ComposerContextUsage;
   error: string | null;
@@ -61,6 +63,8 @@ export function Workspace(props: WorkspaceProps) {
           models={props.models}
           selectedModelId={props.selectedModelId}
           onModelChange={props.onModelChange}
+          reasoningEffort={props.reasoningEffort}
+          onReasoningEffortChange={props.onReasoningEffortChange}
           modelPickerDisabled={props.modelPickerDisabled}
           contextUsage={props.contextUsage}
           picker={props.picker}
@@ -77,6 +81,8 @@ export function Workspace(props: WorkspaceProps) {
           models={props.models}
           selectedModelId={props.selectedModelId}
           onModelChange={props.onModelChange}
+          reasoningEffort={props.reasoningEffort}
+          onReasoningEffortChange={props.onReasoningEffortChange}
           modelPickerDisabled={props.modelPickerDisabled}
           contextUsage={props.contextUsage}
           picker={props.picker}

@@ -122,7 +122,9 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
           config: await loadScorelConfig({ cwd: project.workDir, ...configScope }),
           sessionsDir,
           sessionId,
-          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
+          modelSelection: selectedModel
+            ? { modelId: selectedModel.modelId, role: selectedModel.role, reasoningEffort: selectedModel.reasoningEffort }
+            : undefined,
           includeTools: purpose === "chat",
           backgroundBash,
         })),

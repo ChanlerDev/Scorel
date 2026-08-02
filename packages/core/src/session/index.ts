@@ -391,7 +391,10 @@ export const buildSessionObservationSummary = (session: JsonlSession): SessionOb
   const events = [...session.tree];
   const observation = buildObservation({
     events,
-    selectedModel: reportingModelFromSessionMeta(session.header.meta),
+    selectedModel: reportingModelFromSessionMeta(
+      session.header.meta,
+      latestSessionSelectedModel(session.header.meta.selectedModel, events),
+    ),
   });
   return {
     format: "scorel-session-observation-v1",
@@ -424,8 +427,10 @@ export const readSessionObservationSummary = async (
   return value;
 };
 
-const reportingModelFromSessionMeta = (meta: SessionMeta): RunReportingModel | undefined => {
-  const selected = meta.selectedModel;
+const reportingModelFromSessionMeta = (
+  meta: SessionMeta,
+  selected = meta.selectedModel,
+): RunReportingModel | undefined => {
   const model = {
     ...(stringValue(selected?.id ?? meta.model ?? selected?.modelId)
       ? { modelId: stringValue(selected?.id ?? meta.model ?? selected?.modelId) }
@@ -433,9 +438,19 @@ const reportingModelFromSessionMeta = (meta: SessionMeta): RunReportingModel | u
     ...(stringValue(selected?.modelId) ? { providerModelId: stringValue(selected?.modelId) } : {}),
     ...(stringValue(selected?.provider) ? { provider: stringValue(selected?.provider) } : {}),
     ...(stringValue(selected?.displayName) ? { displayName: stringValue(selected?.displayName) } : {}),
+    ...(selected?.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}),
   };
   return Object.values(model).some((value) => value !== undefined) ? model : undefined;
 };
+
+const latestSessionSelectedModel = (
+  initial: SessionMeta["selectedModel"],
+  events: PersistentEvent[],
+): SessionMeta["selectedModel"] =>
+  events.reduce(
+    (selected, event) => event.type === "session_model_selected" ? event.selectedModel : selected,
+    initial,
+  );
 
 const latestSessionTimestamp = (header: SessionHeader, events: PersistentEvent[]): number =>
   events.reduce((latest, event) => Math.max(latest, event.ts), header.meta.updatedAt ?? header.createdAt);
@@ -592,6 +607,7 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
     value.type !== "assistant_message" &&
     value.type !== "tool_result" &&
     value.type !== "session_title_updated" &&
+    value.type !== "session_model_selected" &&
     value.type !== "instruction_snapshot" &&
     value.type !== "harness_item" &&
     value.type !== "compact" &&
@@ -619,6 +635,9 @@ function assertTreeEvent(value: unknown): asserts value is PersistentEvent {
   }
   if (value.type === "session_title_updated" && !isSessionTitleUpdated(value)) {
     throw new SessionStoreError("invalid_event", "session_title_updated is missing title payload");
+  }
+  if (value.type === "session_model_selected" && !isSelectedModelSummary(value.selectedModel)) {
+    throw new SessionStoreError("invalid_event", "session_model_selected is missing selectedModel payload");
   }
   if (value.type === "instruction_snapshot" && !isInstructionSnapshot(value.snapshot)) {
     throw new SessionStoreError("invalid_event", "instruction_snapshot is missing snapshot payload");
@@ -649,6 +668,22 @@ const isConversationEvent = (event: PersistentEvent): event is ConversationPersi
   event.type === "tool_result" ||
   event.type === "harness_item" ||
   event.type === "compact";
+
+const isSelectedModelSummary = (value: unknown): boolean =>
+  isRecord(value) &&
+  typeof value.modelId === "string" &&
+  typeof value.providerId === "string" &&
+  typeof value.provider === "string" &&
+  typeof value.id === "string" &&
+  typeof value.displayName === "string" &&
+  (
+    value.reasoningEffort === undefined ||
+    value.reasoningEffort === "minimal" ||
+    value.reasoningEffort === "low" ||
+    value.reasoningEffort === "medium" ||
+    value.reasoningEffort === "high" ||
+    value.reasoningEffort === "xhigh"
+  );
 
 const isInstructionSnapshot = (value: unknown): value is InstructionSnapshot => {
   if (!isRecord(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {

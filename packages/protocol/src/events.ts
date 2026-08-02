@@ -19,9 +19,12 @@ export type SessionMeta = {
 
 export type ModelRole = "primary" | "standard" | "auxiliary";
 
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+
 export type ModelSelectionInput = {
   modelId?: string;
   role?: ModelRole;
+  reasoningEffort?: ReasoningEffort;
 };
 
 export type AvailableModelSummary = {
@@ -193,6 +196,7 @@ export type UpsertExtensionSettingsInput = {
 export type SelectedModelSummary = {
   modelId: string;
   role?: ModelRole;
+  reasoningEffort?: ReasoningEffort;
   providerId: string;
   provider: string;
   id: string;
@@ -242,6 +246,11 @@ export type SessionTitleUpdatedEvent = PersistentEventBase & {
     eventId: EventId;
     seq: Seq;
   };
+};
+
+export type SessionModelSelectedEvent = PersistentEventBase & {
+  type: "session_model_selected";
+  selectedModel: SelectedModelSummary;
 };
 
 export type InstructionSectionKind = "baseline" | "agents" | "memory" | "workspace" | "environment" | "time";
@@ -369,6 +378,7 @@ export type PersistentEvent =
   | AssistantMessageEvent
   | ToolResultEvent
   | SessionTitleUpdatedEvent
+  | SessionModelSelectedEvent
   | InstructionSnapshotEvent
   | HarnessItemEvent
   | CompactEvent

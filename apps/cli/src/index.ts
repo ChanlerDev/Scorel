@@ -50,6 +50,7 @@ import {
   type ModelSelectionInput,
   type PersistentEvent,
   type ProjectId,
+  type ReasoningEffort,
   type ScorelEvent,
   type SessionId,
 } from "@scorel/protocol";
@@ -145,6 +146,7 @@ type RunSummary = {
     totalTokens: number;
   };
   model?: RunReportingModel;
+  reasoningEffort?: ReasoningEffort;
   cost: RunCostEstimate;
   reports: Record<string, string>;
 };
@@ -847,7 +849,9 @@ export const runChat = async (options: ChatOptions, io: CliIo): Promise<number> 
       config: await loadProjectConfig(project),
       sessionsDir: options.sessionsDir,
       sessionId,
-      modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
+      modelSelection: selectedModel
+        ? { modelId: selectedModel.modelId, role: selectedModel.role, reasoningEffort: selectedModel.reasoningEffort }
+        : undefined,
       includeTools: purpose === "chat",
       backgroundBash,
     }),
@@ -925,6 +929,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
   const events: ScorelEvent[] = [];
   const prompt = await readRunPrompt(options, io);
   const runConfig = resolveRunConfig(options);
+  let reportingConfig: ScorelConfig | undefined;
   let reportingModel: RunReportingModel | undefined;
   const configScope = { scorelHomeDir: options.stateDir };
   const loadProjectConfig = async (project: { workDir: string }) =>
@@ -943,7 +948,9 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
       config: await loadProjectConfig(project),
       sessionsDir: options.sessionsDir,
       sessionId,
-      modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : undefined,
+      modelSelection: selectedModel
+        ? { modelId: selectedModel.modelId, role: selectedModel.role, reasoningEffort: selectedModel.reasoningEffort }
+        : undefined,
       includeTools: purpose === "chat",
       backgroundBash,
     }),
@@ -957,7 +964,8 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
     await daemon.start();
     const project = await daemon.registerProject(options.cwd);
     projectId = project.projectId;
-    reportingModel = runReportingModel(await loadProjectConfig(project), options.modelSelection);
+    reportingConfig = await loadProjectConfig(project);
+    reportingModel = runReportingModel(reportingConfig, options.modelSelection);
     await client.connect(options.sessionId);
     await loadOrCreateSession(client, options.sessionId, project.projectId, options.modelSelection);
     unsubscribe = client.subscribe((event) => {
@@ -973,6 +981,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
       : await withRunTimeout(send, options.timeoutMs, async () => {
         await client.cancel().catch(() => undefined);
       });
+    reportingModel = runReportingModelFromEvents(reportingConfig, reportingModel, events);
     const runtimeError = runErrorFromEvents(events);
     const summary = makeRunSummary({
       options,
@@ -992,6 +1001,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
     return runtimeError ? 1 : 0;
   } catch (cause) {
     const isTimeout = cause instanceof RunTimeoutError;
+    reportingModel = runReportingModelFromEvents(reportingConfig, reportingModel, events);
     const summary = makeRunSummary({
       options,
       startedAt,
@@ -1113,6 +1123,9 @@ const makeRunSummary = (input: {
     ...(input.events ? { events: input.events } : {}),
     usage: observation.usage,
     ...(observation.model ? { model: observation.model } : {}),
+    ...(input.options.modelSelection?.reasoningEffort
+      ? { reasoningEffort: input.options.modelSelection.reasoningEffort }
+      : {}),
     cost: observation.cost,
     reports,
   };
@@ -1182,6 +1195,7 @@ const runMetadata = (summary: RunSummary): Record<string, unknown> => ({
   elapsedMs: summary.elapsedMs,
   usage: summary.usage,
   model: summary.model,
+  reasoningEffort: summary.reasoningEffort,
   cost: summary.cost,
   reports: summary.reports,
 });
@@ -1193,6 +1207,7 @@ const runTrajectory = (summary: RunSummary): Record<string, unknown> => ({
   status: summary.status,
   usage: summary.usage,
   model: summary.model,
+  reasoningEffort: summary.reasoningEffort,
   cost: summary.cost,
   events: summary.events ?? [],
 });
@@ -1207,10 +1222,28 @@ const runReportingModel = (config: ScorelConfig, modelSelection: ModelSelectionI
       provider: model.provider,
       api: model.api,
       displayName: selection.displayName,
+      reasoningEffort: modelSelection?.reasoningEffort,
     };
   } catch {
-    return modelSelection?.modelId ? { modelId: modelSelection.modelId } : undefined;
+    return modelSelection?.modelId
+      ? { modelId: modelSelection.modelId, reasoningEffort: modelSelection.reasoningEffort }
+      : undefined;
   }
+};
+
+const runReportingModelFromEvents = (
+  config: ScorelConfig | undefined,
+  fallback: RunReportingModel | undefined,
+  events: ScorelEvent[],
+): RunReportingModel | undefined => {
+  if (!config) return fallback;
+  const selectedModel = events.reduce<Extract<PersistentEvent, { type: "session_model_selected" }>["selectedModel"] | undefined>(
+    (selected, event) => event.type === "session_model_selected" ? event.selectedModel : selected,
+    undefined,
+  );
+  return selectedModel
+    ? runReportingModel(config, { modelId: selectedModel.modelId, reasoningEffort: selectedModel.reasoningEffort })
+    : fallback;
 };
 
 const readRunPrompt = async (options: RunOptions, io: CliIo): Promise<string> => {
@@ -1259,6 +1292,7 @@ const resolveRunConfig = (options: RunOptions): ScorelConfig | undefined => {
         provider: providerId,
         id: availableModelId,
         displayName: availableModelId,
+        ...(options.modelSelection.reasoningEffort ? { reasoning: true } : {}),
       },
     },
     models: {
@@ -1514,7 +1548,18 @@ const parseRunOptions = (argv: string[], runOptions: CliRunOptions): RunOptions 
       continue;
     }
     if (arg === "--model") {
-      modelSelection = parseModelSelection(requireValue(argv, index, "--model"));
+      modelSelection = {
+        ...parseModelSelection(requireValue(argv, index, "--model")),
+        ...(modelSelection?.reasoningEffort ? { reasoningEffort: modelSelection.reasoningEffort } : {}),
+      };
+      index += 1;
+      continue;
+    }
+    if (arg === "--reasoning-effort") {
+      modelSelection = {
+        ...modelSelection,
+        reasoningEffort: parseReasoningEffort(requireValue(argv, index, "--reasoning-effort")),
+      };
       index += 1;
       continue;
     }
@@ -1575,6 +1620,13 @@ const parseRunOutputFormat = (value: string): RunOutputFormat => {
     return value;
   }
   throw new Error("--output-format must be text, json, stream-json, or none");
+};
+
+const parseReasoningEffort = (value: string): ReasoningEffort => {
+  if (value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh") {
+    return value;
+  }
+  throw new Error("--reasoning-effort must be minimal, low, medium, high, or xhigh");
 };
 
 const parsePositiveInteger = (value: string, flag: string): number => {
@@ -1696,6 +1748,7 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
       "                 [--output-format text|json|stream-json|none] [--summary <path>]",
       "                 [--provider <name>] [--api|--protocol <protocol>]",
       "                 [--base-url|--baseurl <url>] [--api-key|--apikey <key>] [--model <id>]",
+      "                 [--reasoning-effort minimal|low|medium|high|xhigh]",
       "       scorel attach --session <id> --remote <ws-url> --token <token>",
       "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
       "                        [--relay <relay-url> | --no-relay] [--replace]",
@@ -1739,6 +1792,7 @@ const writeRunUsage = (output: NodeJS.WritableStream): void => {
       "  --report-dir <path>",
       "  --quiet",
       "  --model <primary|standard|auxiliary|model-id>",
+      "  --reasoning-effort <minimal|low|medium|high|xhigh>",
       "  --provider <name>",
       "  --api, --protocol <openai-completions|openai-responses|google-generative-ai|anthropic-messages>",
       "  --base-url, --baseurl <url>",

@@ -5,3 +5,7 @@ apps/gui/.dist
 apps/gui/.runtime
 *.tsbuildinfo
 .vercel
+eval/.env
+eval/__pycache__/
+eval/jobs/
+eval/scorel_agent.py

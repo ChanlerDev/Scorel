@@ -826,6 +826,7 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0115`](spec/ship/S0115-async-bash-sessions.md) | Async Bash sessions | Done |
 | [`S0116`](spec/ship/S0116-background-bash-system-reminders.md) | Background Bash system reminders | Done |
 | [`S0117`](spec/ship/S0117-gui-context-usage-indicator.md) | Provider-reported GUI context usage indicator using non-cache input plus output | In Progress |
+| [`S0118`](spec/ship/S0118-reasoning-effort-eval-path.md) | Reasoning effort across CLI, GUI, runtime, reports, and Harbor eval | Done |
 
 ---
 
