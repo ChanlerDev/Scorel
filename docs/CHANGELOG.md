@@ -2,6 +2,61 @@
 
 ## Unreleased
 
+## 0.0.11 - 2026-08-02
+
+### Highlights
+
+- Added a first-class reasoning effort selector across CLI, GUI, session persistence, and evaluation reports.
+- Background Bash tasks now automatically deliver their final results via system reminders, and idle sessions get a continuation turn to process the completion.
+- Introduced async Bash sessions with background execution, polling, and stopping via task IDs.
+- Added a visual context usage indicator in the GUI composer.
+
+### Changes
+
+- Added a `--reasoning-effort` flag to `scorel run` with values minimal|low|medium|high|xhigh.
+- GUI composer now includes a Reasoning Effort dropdown, enabled only for reasoning-capable models.
+- Persisted session headers and session events record the chosen reasoning effort; restored sessions recreate the runtime accordingly.
+- Run summaries, scorel-metadata.json, and scorel-trajectory.json now include the requested reasoning effort.
+- Added a public-safe Harbor installed-agent adapter that forwards reasoning_effort and records it in metadata.
+- Background Bash tasks now automatically deliver results via system reminders when the model has moved on.
+- Idle sessions automatically start a new chat turn when a background Bash task completes.
+- When a background task result is delivered, polling with the same task_id returns a compact advisory instead of the full output.
+- Added async Bash sessions: long-running commands can run in the background, return a task_id, and be polled or stopped.
+- Added a visual context usage indicator in the GUI composer, showing a circular progress ring and tooltip.
+- Context usage indicator now shows an 'unavailable' state when provider usage data is missing, instead of fabricated zero values.
+- `pnpm gui` dev command now starts a development Host and launches the Electron GUI only after the Host is ready.
+- Fixed daemon start to poll the state file for readiness and fully detach the background host process.
+
+### Fixes
+
+- Fixed the composer context indicator to correctly render an 'unavailable' state when provider usage data is unavailable, instead of showing misleading 0% usage and tooltip.
+- Fixed daemon start to poll state file instead of reading stdout, and fully detach the background host process to avoid hanging pipes.
+
+### Breaking Changes
+
+- Bash tool no longer accepts timeout or maxOutputBytes arguments; existing calls using these will need to be updated.
+
+### Verification
+
+- CLI integration tests verify reasoning effort payload forwarding, session persistence, report fields, redaction, and invalid-effort usage error.
+- Daemon tests verify persistence of reasoning effort, runtime rebuild on same-model effort change, and restore of persisted effort.
+- GUI tests verify capability gating and model-selection normalization for reasoning effort.
+- Harbor adapter tests verify allowed/invalid effort and runtime-only provider agent kwargs.
+- Core unit tests verify that a delivered background Bash task returns an advisory while the reminder is visible and returns the real result again when the reminder is no longer visible.
+- Daemon embedded test verifies that a completion hook appends a runtime_notice harness item and that an idle runtime receives a follow-on provider turn containing the system_reminder.
+- New core tests cover synchronous Bash, long-running commands returning task_id, polling by task_id, stdin writing, BashStop, and artifact projection.
+- Daemon test verifies that background tool work counts as active host work.
+- Updated unit tests in composer and daemon CLI cover unavailable indicator and stdio detachment.
+- Added dev-gui tests covering command planning, Host readiness gating, environment injection, failure cleanup, and daemon restoration.
+
+### Internal
+
+- Updated S0117 spec to describe honest 'unavailable' indicator for provider context usage, replacing previous note about fabricating zero values.
+- Clarified in specs that GUI context usage indicator uses non-cached input plus output tokens, excluding cache tokens.
+- Added specification details for future system-reminder delivery of async Bash task results.
+- Updated S0115 spec to document read-only behavior of completed Bash tasks.
+- Added dev-gui test script wired into `pnpm test`.
+
 ## 0.0.10 - 2026-06-28
 
 ### Highlights

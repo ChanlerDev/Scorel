@@ -1633,13 +1633,13 @@ var init_config = __esm({
 
 // packages/core/src/tools/coding-tools.ts
 import { createHash, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { mkdir, readFile as readFile2, rename, rm, stat, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Type } from "@mariozechner/pi-ai";
-var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, bashResult, renderFullBashResult, writeBashArtifact, safeArtifactSegment, projectBashStreams, projectOutputStream, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord, shellQuote, shellCommandArgs, userShell, truncate, sliceBytes, textResult, byteLength, isTimeoutError, isExecError, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
+var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, createBackgroundBashRegistry, projectBashTaskResult, waitForTask, stopTaskProcess, signalExitCode, signalNumber, bashResult, renderFullBashResult, writeBashArtifact, safeArtifactSegment, projectBashStreams, projectOutputStream, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord, shellQuote, shellCommandArgs, userShell, truncate, sliceBytes, textResult, byteLength, isExecError, errorMessage, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
 var init_coding_tools = __esm({
   "packages/core/src/tools/coding-tools.ts"() {
     "use strict";
@@ -1654,12 +1654,12 @@ var init_coding_tools = __esm({
     createCodingTools = (options) => {
       const root = resolve(options.cwd);
       const state = { reads: /* @__PURE__ */ new Map(), todos: [] };
-      const defaultTimeoutMs = options.defaultTimeoutMs ?? 3e4;
-      const maxTimeoutMs = options.maxTimeoutMs ?? 12e4;
+      const defaultWaitMs = Math.max(0, (options.defaultWaitTimeSeconds ?? 60) * 1e3);
       const maxOutputBytes = options.maxOutputBytes ?? 16e3;
       const normalReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, READ_TOKEN_BUDGET_RATIO);
       const fullReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, FULL_READ_TOKEN_BUDGET_RATIO);
       const defaultShell = resolveDefaultShell(options.defaultShell);
+      const bashRegistry = createBackgroundBashRegistry({ delivery: options.backgroundBash });
       const resolveWorkspacePath = (input) => {
         if (input.length === 0) {
           throw new Error("path must not be empty");
@@ -1822,25 +1822,43 @@ String: ${input.old_string}`
         }),
         defineTool({
           name: "Bash",
-          description: "Execute a shell command in the workspace with timeout and output truncation.",
+          description: [
+            "Execute a shell command in the workspace.",
+            "If the command does not finish within wait_time seconds, it continues in the background and returns a task_id.",
+            "Call Bash again with task_id to wait for output; include command with task_id to write those exact bytes to stdin.",
+            "The command field is used both to start a new process and to send stdin to an existing background process.",
+            "Final output is returned using the normal Bash result format; oversized results are archived automatically."
+          ].join(" "),
           parameters: Type.Object({
-            command: Type.String(),
+            command: Type.Optional(Type.String()),
             cwd: Type.Optional(Type.String()),
-            timeout: Type.Optional(Type.Number()),
-            description: Type.Optional(Type.String()),
-            maxOutputBytes: Type.Optional(Type.Number())
+            task_id: Type.Optional(Type.String()),
+            wait_time: Type.Optional(Type.Number()),
+            description: Type.Optional(Type.String())
           }),
           execute: async (toolCallId, args, signal) => {
             const input = parseBashArgs(args);
+            const waitMs = input.waitTimeSeconds === void 0 ? defaultWaitMs : Math.max(0, input.waitTimeSeconds * 1e3);
+            const outputLimit = maxOutputBytes;
+            if (input.taskId) {
+              const result2 = await bashRegistry.interact({
+                taskId: input.taskId,
+                command: input.command,
+                waitMs,
+                outputLimit,
+                artifactDir: options.toolResultArtifacts?.dir,
+                toolCallId
+              });
+              return projectBashTaskResult(result2);
+            }
+            if (!input.command) {
+              throw new Error("Bash requires command when task_id is not provided");
+            }
             const commandCwd = input.cwd ? resolveWorkspacePath(input.cwd) : root;
-            const timeoutMs = Math.min(input.timeoutMs ?? defaultTimeoutMs, maxTimeoutMs);
-            const outputLimit = input.maxOutputBytes ?? maxOutputBytes;
             const rtk = options.tokenSaving?.rtk;
             const rtkCommand = await resolveRtkCommand(rtk, input.command);
             const command = rtkCommand.rewrittenCommand ?? input.command;
             const executionCommand = rtkCommand.executionCommand ?? input.command;
-            const executable = defaultShell;
-            const argv = shellCommandArgs(defaultShell, executionCommand);
             const rtkGainBefore = rtkCommand.applied && rtk?.executable ? await readRtkGain(rtk.executable, commandCwd) : void 0;
             const rtkResult = {
               enabled: rtk?.enabled === true,
@@ -1848,47 +1866,32 @@ String: ${input.old_string}`
               ...rtk?.executable ? { executable: rtk.executable } : {},
               ...rtkCommand.rewrittenCommand ? { rewrittenCommand: rtkCommand.rewrittenCommand } : {}
             };
-            try {
-              const result = await execFileAsync(executable, argv, {
-                cwd: commandCwd,
-                timeout: timeoutMs,
-                signal,
-                maxBuffer: Math.max(outputLimit * 4, 1024 * 1024)
-              });
-              const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : void 0;
-              return await bashResult({
-                exitCode: 0,
-                stdout: result.stdout,
-                stderr: result.stderr,
-                cwd: commandCwd,
-                outputLimit,
-                artifactDir: options.toolResultArtifacts?.dir,
-                toolCallId,
-                shell: defaultShell,
-                command,
-                rtk: withRtkSavings(rtkResult, rtkSavedTokens)
-              });
-            } catch (cause) {
-              if (isTimeoutError(cause)) {
-                throw new Error(`Bash command timed out after ${timeoutMs}ms`);
-              }
-              if (isExecError(cause)) {
-                const rtkSavedTokens = rtk?.executable ? await rtkSavedTokenDelta(rtk.executable, commandCwd, rtkGainBefore) : void 0;
-                return await bashResult({
-                  exitCode: typeof cause.code === "number" ? cause.code : 1,
-                  stdout: String(cause.stdout ?? ""),
-                  stderr: String(cause.stderr ?? cause.message),
-                  cwd: commandCwd,
-                  outputLimit,
-                  artifactDir: options.toolResultArtifacts?.dir,
-                  toolCallId,
-                  shell: defaultShell,
-                  command,
-                  rtk: withRtkSavings(rtkResult, rtkSavedTokens)
-                });
-              }
-              throw cause;
-            }
+            const result = await bashRegistry.start({
+              cwd: commandCwd,
+              waitMs,
+              outputLimit,
+              artifactDir: options.toolResultArtifacts?.dir,
+              toolCallId,
+              shell: defaultShell,
+              executionCommand,
+              displayCommand: command,
+              rtk: rtkResult,
+              rtkGainBefore,
+              signal
+            });
+            return projectBashTaskResult(result);
+          },
+          hasActiveWork: () => bashRegistry.hasActiveWork()
+        }),
+        defineTool({
+          name: "BashStop",
+          description: "Stop a background Bash task by task_id. Use this instead of killing the PID directly.",
+          parameters: Type.Object({
+            task_id: Type.String()
+          }),
+          execute: async (_toolCallId, args) => {
+            const input = expectRecord(args);
+            return bashRegistry.stop(expectString(input.task_id, "task_id"));
           }
         }),
         defineTool({
@@ -2037,10 +2040,10 @@ ${filenames.join("\n")}`,
     parseBashArgs = (args) => {
       const input = expectRecord(args);
       return {
-        command: expectString(input.command, "command"),
+        command: optionalString(input.command, "command"),
         cwd: optionalString(input.cwd, "cwd"),
-        timeoutMs: optionalNumber(input.timeoutMs ?? input.timeout, "timeout"),
-        maxOutputBytes: optionalNumber(input.maxOutputBytes, "maxOutputBytes"),
+        taskId: optionalString(input.task_id, "task_id"),
+        waitTimeSeconds: optionalNumber(input.wait_time, "wait_time"),
         description: optionalString(input.description, "description")
       };
     };
@@ -2280,6 +2283,235 @@ ${filenames.join("\n")}`,
         throw cause;
       }
     };
+    createBackgroundBashRegistry = (options = {}) => {
+      const tasks = /* @__PURE__ */ new Map();
+      const finishResult = async (task, toolCallId, outputLimit, artifactDir) => {
+        const rtkSavedTokens = task.rtk.executable ? await rtkSavedTokenDelta(task.rtk.executable, task.cwd, task.rtkGainBefore) : void 0;
+        const result = await bashResult({
+          exitCode: task.exitCode ?? 1,
+          stdout: task.stdout,
+          stderr: task.stderr,
+          cwd: task.cwd,
+          outputLimit,
+          artifactDir,
+          toolCallId,
+          shell: task.shell,
+          command: task.displayCommand,
+          pid: task.pid,
+          taskId: task.taskId,
+          rtk: withRtkSavings(task.rtk, rtkSavedTokens)
+        });
+        return {
+          ...result,
+          details: {
+            ...isRecord(result.details) ? result.details : {},
+            task_id: task.taskId,
+            pid: task.pid
+          }
+        };
+      };
+      const project = async (task, waitMs, toolCallId, outputLimit, artifactDir) => {
+        task.activeWaiters += 1;
+        try {
+          await waitForTask(task, waitMs);
+        } finally {
+          task.activeWaiters -= 1;
+        }
+        if (!task.completed) {
+          return { status: "running", taskId: task.taskId, pid: task.pid, cwd: task.cwd };
+        }
+        if (task.deliveryPromise) {
+          await task.deliveryPromise;
+        }
+        if (task.deliveredEventId && options.delivery?.isDeliveryVisible?.({ task_id: task.taskId, eventId: task.deliveredEventId })) {
+          return { status: "delivered", taskId: task.taskId, pid: task.pid, eventId: task.deliveredEventId };
+        }
+        return {
+          status: "completed",
+          taskId: task.taskId,
+          pid: task.pid,
+          result: await finishResult(task, toolCallId, outputLimit, artifactDir)
+        };
+      };
+      const maybeDeliver = (task) => {
+        if (!task.completed || !task.returnedRunning || task.activeWaiters > 0 || task.deliveryStarted || !options.delivery?.onComplete) {
+          return;
+        }
+        task.deliveryStarted = true;
+        task.deliveryPromise = finishResult(task, task.toolCallId, task.outputLimit, task.artifactDir).then((result) => options.delivery?.onComplete?.({
+          task_id: task.taskId,
+          pid: task.pid,
+          cwd: task.cwd,
+          result
+        })).then((delivery) => {
+          if (delivery?.eventId) {
+            task.deliveredEventId = delivery.eventId;
+          }
+        }).catch((cause) => {
+          task.deliveryStarted = false;
+          task.stderr += task.stderr ? `
+${errorMessage(cause)}` : errorMessage(cause);
+        });
+      };
+      const markCompleted = (task, exitCode, signal) => {
+        task.completed = true;
+        task.exitCode = exitCode;
+        task.exitSignal = signal;
+        maybeDeliver(task);
+      };
+      return {
+        hasActiveWork() {
+          return [...tasks.values()].some((task) => !task.completed);
+        },
+        async start(input) {
+          const taskId = `task_${randomUUID()}`;
+          const child = spawn(input.shell, shellCommandArgs(input.shell, input.executionCommand), {
+            cwd: input.cwd,
+            detached: true,
+            stdio: ["pipe", "pipe", "pipe"]
+          });
+          const task = {
+            taskId,
+            child,
+            pid: child.pid ?? -1,
+            cwd: input.cwd,
+            shell: input.shell,
+            displayCommand: input.displayCommand,
+            stdout: "",
+            stderr: "",
+            completed: false,
+            returnedRunning: false,
+            activeWaiters: 0,
+            deliveryStarted: false,
+            toolCallId: input.toolCallId,
+            outputLimit: input.outputLimit,
+            artifactDir: input.artifactDir,
+            rtk: input.rtk,
+            rtkGainBefore: input.rtkGainBefore
+          };
+          tasks.set(taskId, task);
+          child.stdout.on("data", (chunk) => {
+            task.stdout += chunk.toString();
+          });
+          child.stderr.on("data", (chunk) => {
+            task.stderr += chunk.toString();
+          });
+          child.once("close", (code, signal) => {
+            markCompleted(task, typeof code === "number" ? code : signalExitCode(signal), signal ?? void 0);
+          });
+          child.once("error", (error) => {
+            task.stderr += task.stderr ? `
+${error.message}` : error.message;
+            markCompleted(task, 1);
+          });
+          const abort = () => {
+            stopTaskProcess(task);
+          };
+          if (input.signal.aborted) {
+            abort();
+          } else {
+            input.signal.addEventListener("abort", abort, { once: true });
+          }
+          const result = await project(task, input.waitMs, input.toolCallId, input.outputLimit, input.artifactDir);
+          input.signal.removeEventListener("abort", abort);
+          if (result.status === "running") {
+            task.returnedRunning = true;
+            task.child.unref();
+            maybeDeliver(task);
+          }
+          return result;
+        },
+        async interact(input) {
+          const task = tasks.get(input.taskId);
+          if (!task) {
+            throw new Error(`Unknown Bash task: ${input.taskId}`);
+          }
+          if (input.command !== void 0) {
+            if (task.completed) {
+              throw new Error(`Bash task already completed: ${input.taskId}`);
+            }
+            task.child.stdin.write(input.command);
+          }
+          const result = await project(task, input.waitMs, input.toolCallId, input.outputLimit, input.artifactDir);
+          if (result.status === "running") {
+            task.returnedRunning = true;
+          }
+          return result;
+        },
+        async stop(taskId) {
+          const task = tasks.get(taskId);
+          if (!task) {
+            throw new Error(`Unknown Bash task: ${taskId}`);
+          }
+          if (!task.completed) {
+            stopTaskProcess(task);
+            await waitForTask(task, 1e3);
+          }
+          return textResult(`Bash task stopped: ${taskId}`, {
+            task_id: taskId,
+            pid: task.pid,
+            status: "stopped"
+          });
+        }
+      };
+    };
+    projectBashTaskResult = (result) => {
+      if (result.status === "completed") {
+        return result.result;
+      }
+      if (result.status === "delivered") {
+        return textResult(
+          [
+            `Bash task ${result.taskId} has already been injected through a system reminder.`,
+            "Do not read it again unless the user explicitly asks for the raw result."
+          ].join("\n"),
+          {
+            status: "delivered",
+            task_id: result.taskId,
+            pid: result.pid,
+            ...result.eventId ? { event_id: result.eventId } : {}
+          }
+        );
+      }
+      return textResult(`status: running
+task_id: ${result.taskId}
+pid: ${result.pid}`, {
+        status: "running",
+        task_id: result.taskId,
+        pid: result.pid,
+        cwd: result.cwd
+      });
+    };
+    waitForTask = (task, waitMs) => new Promise((resolve7) => {
+      if (task.completed || waitMs <= 0) {
+        resolve7();
+        return;
+      }
+      const timeout = setTimeout(resolve7, waitMs);
+      const onDone = () => {
+        clearTimeout(timeout);
+        resolve7();
+      };
+      task.child.once("close", onDone);
+      task.child.once("error", onDone);
+    });
+    stopTaskProcess = (task) => {
+      try {
+        if (task.pid > 0) {
+          process.kill(-task.pid, "SIGTERM");
+          return;
+        }
+      } catch {
+      }
+      task.child.kill("SIGTERM");
+    };
+    signalExitCode = (signal) => signal ? 128 + signalNumber(signal) : 1;
+    signalNumber = (signal) => {
+      if (signal === "SIGTERM") return 15;
+      if (signal === "SIGKILL") return 9;
+      if (signal === "SIGINT") return 2;
+      return 1;
+    };
     bashResult = async (input) => {
       const stdoutBytes = Buffer.byteLength(input.stdout);
       const stderrBytes = Buffer.byteLength(input.stderr);
@@ -2317,6 +2549,8 @@ ${stderr}`;
         } : {},
         ...input.shell ? { shell: input.shell } : {},
         ...input.command ? { command: input.command } : {},
+        ...input.pid ? { pid: input.pid } : {},
+        ...input.taskId ? { task_id: input.taskId } : {},
         ...input.rtk ? {
           rtk: {
             ...input.rtk,
@@ -2470,8 +2704,8 @@ ${value}` };
       details
     });
     byteLength = (value) => Buffer.byteLength(value);
-    isTimeoutError = (cause) => typeof cause === "object" && cause !== null && ("killed" in cause || "signal" in cause) && (cause.killed === true || cause.signal === "SIGTERM");
     isExecError = (cause) => cause instanceof Error && ("stdout" in cause || "stderr" in cause || "code" in cause);
+    errorMessage = (cause) => cause instanceof Error ? cause.message : String(cause);
     runRipgrep = async (args, target, cwd, signal) => {
       try {
         const result = await execFileAsync("rg", [...args, target], {
@@ -3556,7 +3790,7 @@ function assertTreeEvent(value) {
   if (value.type === "session_header") {
     throw new SessionStoreError("invalid_event", "Session header must be stored as the JSONL header line");
   }
-  if (value.type !== "user_message" && value.type !== "assistant_message" && value.type !== "tool_result" && value.type !== "session_title_updated" && value.type !== "instruction_snapshot" && value.type !== "harness_item" && value.type !== "compact" && value.type !== "context_control" && value.type !== "queue_update" && value.type !== "skill_index_snapshot" && value.type !== "skill_index_delta") {
+  if (value.type !== "user_message" && value.type !== "assistant_message" && value.type !== "tool_result" && value.type !== "session_title_updated" && value.type !== "session_model_selected" && value.type !== "instruction_snapshot" && value.type !== "harness_item" && value.type !== "compact" && value.type !== "context_control" && value.type !== "queue_update" && value.type !== "skill_index_snapshot" && value.type !== "skill_index_delta") {
     throw new SessionStoreError("invalid_event", "Unsupported session event type");
   }
   if (typeof value.id !== "string" || value.parentId !== null && typeof value.parentId !== "string" || typeof value.seq !== "number" || typeof value.clientId !== "string" || typeof value.ts !== "number") {
@@ -3567,6 +3801,9 @@ function assertTreeEvent(value) {
   }
   if (value.type === "session_title_updated" && !isSessionTitleUpdated(value)) {
     throw new SessionStoreError("invalid_event", "session_title_updated is missing title payload");
+  }
+  if (value.type === "session_model_selected" && !isSelectedModelSummary(value.selectedModel)) {
+    throw new SessionStoreError("invalid_event", "session_model_selected is missing selectedModel payload");
   }
   if (value.type === "instruction_snapshot" && !isInstructionSnapshot(value.snapshot)) {
     throw new SessionStoreError("invalid_event", "instruction_snapshot is missing snapshot payload");
@@ -3590,7 +3827,7 @@ function assertTreeEvent(value) {
     throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
   }
 }
-var snipUserMessageAlias, SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, sessionObservationSummaryFilePath, createSession, loadSession, buildSessionObservationSummary, writeSessionObservationSummary, reportingModelFromSessionMeta, latestSessionTimestamp, stringValue2, buildContext, hiddenContextEventIds, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isInstructionSnapshot, isHarnessItem, isCompactEvent, isContextControlEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, compactSummaryMessage, reminderKindFromHarness, reminderVisibilityFromHarness, reminderScopeFromHarness, cloneMessage, isRecord6;
+var snipUserMessageAlias, SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, sessionObservationSummaryFilePath, createSession, loadSession, buildSessionObservationSummary, writeSessionObservationSummary, reportingModelFromSessionMeta, latestSessionSelectedModel, latestSessionTimestamp, stringValue2, buildContext, hiddenContextEventIds, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isSelectedModelSummary, isInstructionSnapshot, isHarnessItem, isCompactEvent, isContextControlEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, compactSummaryMessage, reminderKindFromHarness, reminderVisibilityFromHarness, reminderScopeFromHarness, cloneMessage, isRecord6;
 var init_session = __esm({
   "packages/core/src/session/index.ts"() {
     "use strict";
@@ -3821,7 +4058,10 @@ var init_session = __esm({
       const events = [...session.tree];
       const observation = buildObservation({
         events,
-        selectedModel: reportingModelFromSessionMeta(session.header.meta)
+        selectedModel: reportingModelFromSessionMeta(
+          session.header.meta,
+          latestSessionSelectedModel(session.header.meta.selectedModel, events)
+        )
       });
       return {
         format: "scorel-session-observation-v1",
@@ -3844,16 +4084,20 @@ var init_session = __esm({
 `, "utf8");
       return summary;
     };
-    reportingModelFromSessionMeta = (meta) => {
-      const selected = meta.selectedModel;
+    reportingModelFromSessionMeta = (meta, selected = meta.selectedModel) => {
       const model = {
         ...stringValue2(selected?.id ?? meta.model ?? selected?.modelId) ? { modelId: stringValue2(selected?.id ?? meta.model ?? selected?.modelId) } : {},
         ...stringValue2(selected?.modelId) ? { providerModelId: stringValue2(selected?.modelId) } : {},
         ...stringValue2(selected?.provider) ? { provider: stringValue2(selected?.provider) } : {},
-        ...stringValue2(selected?.displayName) ? { displayName: stringValue2(selected?.displayName) } : {}
+        ...stringValue2(selected?.displayName) ? { displayName: stringValue2(selected?.displayName) } : {},
+        ...selected?.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}
       };
       return Object.values(model).some((value) => value !== void 0) ? model : void 0;
     };
+    latestSessionSelectedModel = (initial, events) => events.reduce(
+      (selected, event) => event.type === "session_model_selected" ? event.selectedModel : selected,
+      initial
+    );
     latestSessionTimestamp = (header, events) => events.reduce((latest, event) => Math.max(latest, event.ts), header.meta.updatedAt ?? header.createdAt);
     stringValue2 = (value) => typeof value === "string" && value.length > 0 ? value : void 0;
     buildContext = (tree, leafId) => {
@@ -3975,6 +4219,7 @@ var init_session = __esm({
       }
     };
     isConversationEvent = (event) => event.type === "user_message" || event.type === "assistant_message" || event.type === "tool_result" || event.type === "harness_item" || event.type === "compact";
+    isSelectedModelSummary = (value) => isRecord6(value) && typeof value.modelId === "string" && typeof value.providerId === "string" && typeof value.provider === "string" && typeof value.id === "string" && typeof value.displayName === "string" && (value.reasoningEffort === void 0 || value.reasoningEffort === "minimal" || value.reasoningEffort === "low" || value.reasoningEffort === "medium" || value.reasoningEffort === "high" || value.reasoningEffort === "xhigh");
     isInstructionSnapshot = (value) => {
       if (!isRecord6(value) || value.version !== 1 || typeof value.cwd !== "string" || !Array.isArray(value.sections)) {
         return false;
@@ -4894,6 +5139,9 @@ var init_runtime = __esm({
       unregisterTool(name) {
         this.#tools.delete(name);
       }
+      hasActiveToolWork() {
+        return [...this.#tools.values()].some((tool) => tool.hasActiveWork?.() === true);
+      }
       cancel() {
         this.#controller?.abort();
       }
@@ -5318,7 +5566,7 @@ var init_src3 = __esm({
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { mkdir as mkdir5, readFile as readFile9, readdir as readdir3, realpath, rename as rename2, stat as stat3, writeFile as writeFile5 } from "node:fs/promises";
 import { basename as basename2, dirname as dirname7, join as join7 } from "node:path";
-var ProjectRegistryError, ProjectRegistry, canonicalDirectory, sessionReferencesProject, sortProjects, isRegistryFile, isRecord7, isNodeError, errorMessage;
+var ProjectRegistryError, ProjectRegistry, canonicalDirectory, sessionReferencesProject, sortProjects, isRegistryFile, isRecord7, isNodeError, errorMessage2;
 var init_registry = __esm({
   "packages/daemon/src/projects/registry.ts"() {
     "use strict";
@@ -5418,7 +5666,7 @@ var init_registry = __esm({
           if (cause instanceof ProjectRegistryError) {
             throw cause;
           }
-          throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+          throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
         }
       }
       async #write(file) {
@@ -5429,7 +5677,7 @@ var init_registry = __esm({
 `, "utf8");
           await rename2(temporaryPath, this.#projectsPath);
         } catch (cause) {
-          throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+          throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
         }
       }
     };
@@ -5444,7 +5692,7 @@ var init_registry = __esm({
         if (cause instanceof ProjectRegistryError) {
           throw cause;
         }
-        throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+        throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
       }
     };
     sessionReferencesProject = async (sessionsDir, projectId) => {
@@ -5455,7 +5703,7 @@ var init_registry = __esm({
         if (isNodeError(cause, "ENOENT")) {
           return false;
         }
-        throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+        throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
       }
       for (const name of names) {
         if (!name.endsWith(".jsonl") || name.startsWith(".")) {
@@ -5469,7 +5717,7 @@ var init_registry = __esm({
           }
         } catch (cause) {
           if (!isNodeError(cause, "ENOENT")) {
-            throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+            throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
           }
         }
       }
@@ -5481,7 +5729,7 @@ var init_registry = __esm({
     );
     isRecord7 = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
     isNodeError = (cause, code) => cause instanceof Error && "code" in cause && cause.code === code;
-    errorMessage = (cause) => cause instanceof Error ? cause.message : String(cause);
+    errorMessage2 = (cause) => cause instanceof Error ? cause.message : String(cause);
   }
 });
 
@@ -5489,7 +5737,7 @@ var init_registry = __esm({
 import { homedir as homedir4 } from "node:os";
 import { dirname as dirname8, join as join8 } from "node:path";
 import { readdir as readdir4, realpath as realpath2, stat as stat4 } from "node:fs/promises";
-var listDirectories, directoryEntries, errorMessage2;
+var listDirectories, directoryEntries, errorMessage3;
 var init_directories = __esm({
   "packages/daemon/src/projects/directories.ts"() {
     "use strict";
@@ -5511,7 +5759,7 @@ var init_directories = __esm({
         if (cause instanceof ProjectRegistryError) {
           throw cause;
         }
-        throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
+        throw new ProjectRegistryError("filesystem_error", errorMessage3(cause));
       }
     };
     directoryEntries = async (path) => {
@@ -5532,7 +5780,7 @@ var init_directories = __esm({
       );
       return directories.filter((entry) => entry !== void 0).sort((left, right) => left.name.localeCompare(right.name) || left.path.localeCompare(right.path));
     };
-    errorMessage2 = (cause) => cause instanceof Error ? cause.message : String(cause);
+    errorMessage3 = (cause) => cause instanceof Error ? cause.message : String(cause);
   }
 });
 
@@ -5950,7 +6198,7 @@ import { basename as basename3, dirname as dirname9, join as join11, resolve as 
 import { pathToFileURL } from "node:url";
 import { promisify as promisify2 } from "node:util";
 import { WebSocketServer } from "ws";
-var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, snipUserMessageIdBlock, inputText, assistantText, messageText2, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger4, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord9, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
+var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, snipUserMessageIdBlock, inputText, assistantText, messageText2, toolResultText2, messageHasBackgroundBashReminder, isBackgroundBashReminderData, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger4, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, isReasoningEffort, latestSessionSelectedModel2, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord9, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
 var init_src4 = __esm({
   "packages/daemon/src/index.ts"() {
     "use strict";
@@ -6186,7 +6434,8 @@ var init_src4 = __esm({
       const runtime = new ScorelRuntime({
         provider: createPiAiProvider({
           model,
-          apiKey: selection.config.apiKey
+          apiKey: selection.config.apiKey,
+          reasoning: options.modelSelection?.reasoningEffort
         })
       });
       if (options.includeTools !== false) {
@@ -6199,7 +6448,8 @@ var init_src4 = __esm({
               enabled: options.config.runtime.tokenSavingRtk,
               executable: rtkExecutable
             }
-          }
+          },
+          backgroundBash: options.backgroundBash
         })) {
           runtime.registerTool(tool);
         }
@@ -6507,6 +6757,9 @@ var init_src4 = __esm({
           if (lane.runtime.running) {
             return true;
           }
+          if (lane.runtime.hasActiveToolWork()) {
+            return true;
+          }
           if (lane.session.tree.controlState.queues.follow_up.length > 0 || lane.session.tree.controlState.queues.steer.length > 0) {
             return true;
           }
@@ -6625,7 +6878,7 @@ var init_src4 = __esm({
       async #runUserTurn(lane, clientId, input) {
         this.#lastActiveWorkAt = this.#now();
         const sessionId = lane.session.header.sessionId;
-        await this.#selectChatRuntime(lane, input.modelSelection);
+        await this.#selectChatRuntime(lane, clientId, input.modelSelection);
         await this.#appendDiagnostic(sessionId, "send_message_started", {
           clientId,
           activeLeafId: lane.session.activeLeafId,
@@ -6675,18 +6928,7 @@ var init_src4 = __esm({
         lane.channelContext = input.channelContext;
         lane.snipClientId = clientId;
         try {
-          for await (const rawEvent of lane.runtime.executeTurn(
-            buildContext(lane.session.tree, userEvent.id),
-            renderSystemPrompt(instructionSnapshot),
-            {
-              refreshContext: async () => {
-                await this.#consumeSteer(lane, clientId, state);
-                return buildContext(lane.session.tree, lane.session.activeLeafId ?? state.parentId);
-              }
-            }
-          )) {
-            await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
-          }
+          await this.#executeRuntimeLoop(lane, clientId, state, userEvent.id, instructionSnapshot);
         } finally {
           lane.channelContext = void 0;
           lane.snipClientId = void 0;
@@ -6710,6 +6952,60 @@ var init_src4 = __esm({
         input.onComplete?.(result);
         return { ...result, status: "completed" };
       }
+      async #executeRuntimeLoop(lane, clientId, state, contextLeafId, instructionSnapshot) {
+        for await (const rawEvent of lane.runtime.executeTurn(
+          buildContext(lane.session.tree, contextLeafId),
+          renderSystemPrompt(instructionSnapshot),
+          {
+            refreshContext: async () => {
+              await this.#consumeSteer(lane, clientId, state);
+              return buildContext(lane.session.tree, lane.session.activeLeafId ?? state.parentId);
+            }
+          }
+        )) {
+          await this.#handleRuntimeEvent(lane, clientId, state, rawEvent);
+        }
+      }
+      async #runSystemReminderTurn(lane, clientId, reminderEventId) {
+        this.#lastActiveWorkAt = this.#now();
+        const sessionId = lane.session.header.sessionId;
+        await this.#selectChatRuntime(lane, clientId, void 0);
+        await this.#appendDiagnostic(sessionId, "system_reminder_turn_started", {
+          clientId,
+          reminderEventId,
+          selectedModelId: lane.selectedModel?.modelId
+        });
+        const instructionSnapshot = await this.#ensureInstructionSnapshot(lane, clientId);
+        await this.#syncSkillIndex(lane, clientId);
+        await this.#ensureMemoryHarness(lane, clientId);
+        await this.#syncMemoryTools(lane, clientId);
+        await this.#autoCompactIfNeeded(lane, clientId);
+        this.#syncChannelTool(lane, void 0);
+        const firstAssistantEventId = asEventId(this.#createId());
+        const state = {
+          parentId: reminderEventId,
+          assistantEventId: firstAssistantEventId,
+          finalAssistantEventId: firstAssistantEventId
+        };
+        try {
+          await this.#executeRuntimeLoop(lane, clientId, state, reminderEventId, instructionSnapshot);
+        } finally {
+          lane.runtime.unregisterTool("SendChannelMessage");
+        }
+        await this.#appendDiagnostic(sessionId, "system_reminder_turn_finished", {
+          clientId,
+          reminderEventId,
+          assistantEventId: state.finalAssistantEventId
+        });
+        this.#scheduleSessionMemoryUpdate(lane, clientId);
+        void this.#syncObservabilityAfterTurn(lane).catch((cause) => {
+          const error = cause instanceof Error ? cause : new Error(String(cause));
+          void this.#appendDiagnostic(sessionId, "observability_sync_failed", {
+            message: error.message,
+            stack: shortStack(error)
+          });
+        });
+      }
       async #syncObservabilityAfterTurn(lane) {
         const config = await this.#configForProject(lane.project.projectId);
         const results = await syncObservationAssetTargets({
@@ -6725,6 +7021,81 @@ var init_src4 = __esm({
             reason: result.reason
           });
         }
+      }
+      #backgroundBashForSession(sessionId) {
+        return {
+          onComplete: async (completion) => this.#handleBackgroundBashCompleted(sessionId, completion),
+          isDeliveryVisible: ({ task_id }) => this.#backgroundBashDeliveryVisible(sessionId, task_id)
+        };
+      }
+      async #handleBackgroundBashCompleted(sessionId, completion) {
+        const lane = this.#sessions.get(sessionId);
+        if (!lane) {
+          return void 0;
+        }
+        const clientId = asClientId("client_system");
+        const parentId = lane.session.activeLeafId;
+        if (!parentId) {
+          return void 0;
+        }
+        const resultText = toolResultText2(completion.result);
+        const event = await this.#appendPersistent(lane, {
+          type: "harness_item",
+          id: asEventId(this.#createId()),
+          parentId,
+          sessionId,
+          clientId,
+          ts: this.#now(),
+          item: {
+            kind: "runtime_notice",
+            origin: "system",
+            visibility: "hidden",
+            content: [
+              `Background Bash task completed: ${completion.task_id}`,
+              `pid: ${completion.pid}`,
+              `cwd: ${completion.cwd}`,
+              "",
+              resultText,
+              "",
+              "This Bash result has already been injected through a system reminder.",
+              "Do not call Bash with this task_id again unless the user explicitly asks for the raw result."
+            ].join("\n"),
+            data: {
+              type: "background_bash_completed",
+              task_id: completion.task_id,
+              pid: completion.pid,
+              cwd: completion.cwd
+            }
+          }
+        });
+        await this.#appendDiagnostic(sessionId, "background_bash_completed", {
+          clientId,
+          taskId: completion.task_id,
+          pid: completion.pid,
+          harnessEventId: event.id,
+          runtimeRunning: lane.runtime.running
+        });
+        if (!lane.runtime.running) {
+          lane.queue = lane.queue.then(() => this.#runSystemReminderTurn(lane, clientId, event.id));
+          void lane.queue.catch((cause) => {
+            const error = cause instanceof Error ? cause : new Error(String(cause));
+            void this.#appendDiagnostic(sessionId, "system_reminder_turn_failed", {
+              clientId,
+              reminderEventId: event.id,
+              message: error.message,
+              stack: shortStack(error)
+            });
+          });
+        }
+        return { eventId: event.id };
+      }
+      #backgroundBashDeliveryVisible(sessionId, taskId) {
+        const lane = this.#sessions.get(sessionId);
+        const leafId = lane?.session.activeLeafId;
+        if (!lane || !leafId) {
+          return false;
+        }
+        return buildContext(lane.session.tree, leafId).some((message) => messageHasBackgroundBashReminder(message, taskId));
       }
       #scheduleAfterUserMessageHooks(lane, clientId, userEvent) {
         const hooks = [
@@ -7885,8 +8256,17 @@ var init_src4 = __esm({
         }
         const loaded = await loadSession({ sessionsDir: this.#sessionsDir, sessionId });
         const project = await this.#resolveProject(sessionId, loaded.header.meta.projectId);
-        const selectedModel = await this.#selectedModelFromMeta(loaded.header.meta, project);
-        const runtime = await this.#createRuntime({ sessionId, project, selectedModel, purpose: "chat" });
+        const selectedModel = await this.#selectedModelFromMeta({
+          ...loaded.header.meta,
+          selectedModel: latestSessionSelectedModel2(loaded.header.meta.selectedModel, [...loaded.tree])
+        }, project);
+        const runtime = await this.#createRuntime({
+          sessionId,
+          project,
+          selectedModel,
+          purpose: "chat",
+          backgroundBash: this.#backgroundBashForSession(sessionId)
+        });
         await this.#appendDiagnostic(sessionId, "runtime_created", {
           projectId: project.projectId,
           workDir: project.workDir,
@@ -7938,7 +8318,13 @@ var init_src4 = __esm({
             }
           }
         });
-        const runtime = await this.#createRuntime({ sessionId, project, selectedModel, purpose: "chat" });
+        const runtime = await this.#createRuntime({
+          sessionId,
+          project,
+          selectedModel,
+          purpose: "chat",
+          backgroundBash: this.#backgroundBashForSession(sessionId)
+        });
         await this.#appendDiagnostic(sessionId, "runtime_created", {
           projectId: project.projectId,
           workDir: project.workDir,
@@ -8038,22 +8424,33 @@ var init_src4 = __esm({
         }
         return asEventId(userMessageId);
       }
-      async #selectChatRuntime(lane, modelSelection) {
+      async #selectChatRuntime(lane, clientId, modelSelection) {
         if (!modelSelection) {
           return;
         }
+        const effectiveSelection = modelSelection.reasoningEffort && !modelSelection.modelId && !modelSelection.role && lane.selectedModel ? { ...modelSelection, modelId: lane.selectedModel.modelId } : modelSelection;
         const selectedModel = await this.#selectedModelFromMeta(
-          { projectId: lane.project.projectId, modelSelection },
+          { projectId: lane.project.projectId, modelSelection: effectiveSelection },
           lane.project
         );
-        if (!selectedModel || lane.selectedModel?.modelId === selectedModel.modelId) {
+        if (!selectedModel || lane.selectedModel?.modelId === selectedModel.modelId && lane.selectedModel.reasoningEffort === selectedModel.reasoningEffort) {
           return;
         }
         lane.runtime = await this.#createRuntime({
           sessionId: lane.session.header.sessionId,
           project: lane.project,
           selectedModel,
-          purpose: "chat"
+          purpose: "chat",
+          backgroundBash: this.#backgroundBashForSession(lane.session.header.sessionId)
+        });
+        await this.#appendPersistent(lane, {
+          type: "session_model_selected",
+          id: asEventId(this.#createId()),
+          parentId: null,
+          sessionId: lane.session.header.sessionId,
+          clientId,
+          ts: this.#now(),
+          selectedModel
         });
         lane.selectedModel = selectedModel;
         this.#registerLaneTools(lane);
@@ -8061,7 +8458,8 @@ var init_src4 = __esm({
           projectId: lane.project.projectId,
           workDir: lane.project.workDir,
           selectedModelId: selectedModel.modelId,
-          role: selectedModel.role
+          role: selectedModel.role,
+          reasoningEffort: selectedModel.reasoningEffort
         });
       }
       #syncChannelTool(lane, channelContext) {
@@ -8680,7 +9078,11 @@ var init_src4 = __esm({
         }
         const persistedSelection = "selectedModel" in meta ? meta.selectedModel : void 0;
         const requestedSelection = "modelSelection" in meta ? meta.modelSelection : void 0;
-        const selectionInput = persistedSelection ? config.models[persistedSelection.modelId] ? { modelId: persistedSelection.modelId, role: persistedSelection.role } : persistedSelection.role ? { role: persistedSelection.role } : void 0 : requestedSelection;
+        const selectionInput = persistedSelection ? config.models[persistedSelection.modelId] ? {
+          modelId: persistedSelection.modelId,
+          role: persistedSelection.role,
+          reasoningEffort: persistedSelection.reasoningEffort
+        } : persistedSelection.role ? { role: persistedSelection.role, reasoningEffort: persistedSelection.reasoningEffort } : void 0 : requestedSelection;
         const selection = resolveModelSelection(
           config,
           selectionInput
@@ -8689,6 +9091,7 @@ var init_src4 = __esm({
         return {
           modelId: selection.modelId,
           role: selection.role,
+          reasoningEffort: selectionInput?.reasoningEffort,
           providerId: selection.providerId,
           provider: model.provider,
           id: model.id,
@@ -8888,6 +9291,22 @@ var init_src4 = __esm({
       }).filter(Boolean).join("\n").trim();
       return text || "(empty)";
     };
+    toolResultText2 = (result) => {
+      const text = result.content.map((block) => block.type === "text" ? block.text : "").filter(Boolean).join("\n").trim();
+      return text || "(empty Bash result)";
+    };
+    messageHasBackgroundBashReminder = (message, taskId) => message.content.some((block) => {
+      if (block.type === "system_reminder") {
+        return isBackgroundBashReminderData(block.data, taskId);
+      }
+      if (block.type !== "tool_result" || !isRecord9(block.result) || !Array.isArray(block.result.content)) {
+        return false;
+      }
+      return block.result.content.some(
+        (item) => isRecord9(item) && item.type === "system_reminder" && isBackgroundBashReminderData(item.data, taskId)
+      );
+    });
+    isBackgroundBashReminderData = (value, taskId) => isRecord9(value) && value.type === "background_bash_completed" && value.task_id === taskId;
     estimateScorelMessagesTokens = (messages) => estimateTextTokens(messages.map(messageText2).join("\n"));
     estimateTextTokens = (value) => Math.ceil(value.length / 3);
     compactLine2 = (value, maxChars) => value.replace(/\s+/g, " ").trim().slice(0, maxChars);
@@ -9098,8 +9517,16 @@ var init_src4 = __esm({
       if (value.role === "primary" || value.role === "standard" || value.role === "auxiliary") {
         selection.role = value.role;
       }
-      return selection.modelId || selection.role ? selection : void 0;
+      if (isReasoningEffort(value.reasoningEffort)) {
+        selection.reasoningEffort = value.reasoningEffort;
+      }
+      return selection.modelId || selection.role || selection.reasoningEffort ? selection : void 0;
     };
+    isReasoningEffort = (value) => value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh";
+    latestSessionSelectedModel2 = (initial, events) => events.reduce(
+      (selected, event) => event.type === "session_model_selected" ? event.selectedModel : selected,
+      initial
+    );
     imBindingKey = (extensionId, externalConversationId) => `${extensionId}:${externalConversationId}`;
     defaultBuiltinExtensionsDir = () => findBuiltinExtensionsDir([
       runtimeModuleDir(),
@@ -9341,11 +9768,11 @@ var init_update_cli = __esm({
 
 // apps/cli/src/daemon-cli.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn as spawn2 } from "node:child_process";
 import { homedir as homedir6 } from "node:os";
 import { dirname as dirname11, join as join14 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, START_READY_TIMEOUT_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runStartCommand, runServeCommand, startAutoUpdateLoop, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep, waitForDaemonReady, detachBackgroundDaemon, nodeEntrypointArgs, writeDaemonUsage;
+var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, START_READY_TIMEOUT_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runStartCommand, runServeCommand, startAutoUpdateLoop, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep, waitForDaemonStateReady, detachBackgroundDaemon, nodeEntrypointArgs, writeDaemonUsage;
 var init_daemon_cli = __esm({
   "apps/cli/src/daemon-cli.ts"() {
     "use strict";
@@ -9400,7 +9827,7 @@ var init_daemon_cli = __esm({
         return 0;
       }
       const cliEntrypoint = options.cliEntrypoint ?? fileURLToPath2(import.meta.url).replace(/daemon-cli\.ts$/, "index.ts");
-      const child = (options.spawn ?? spawn)(process.execPath, [
+      const child = (options.spawn ?? spawn2)(process.execPath, [
         ...nodeEntrypointArgs(cliEntrypoint),
         "host",
         "serve",
@@ -9419,19 +9846,19 @@ var init_daemon_cli = __esm({
         cwd: dirname11(cliEntrypoint),
         env: { ...process.env, ...options.env ?? {} },
         detached: true,
-        stdio: ["ignore", "pipe", "pipe"]
+        stdio: ["ignore", "ignore", "ignore"]
       });
+      let state;
       try {
-        await waitForDaemonReady(child, options.daemonReadyTimeoutMs ?? START_READY_TIMEOUT_MS);
+        state = await waitForDaemonStateReady(
+          child,
+          options.stateDir,
+          readState,
+          options.daemonReadyTimeoutMs ?? START_READY_TIMEOUT_MS
+        );
       } catch (cause) {
         options.error.write(`scorel daemon start error: ${cause.message}
 `);
-        child.kill("SIGTERM");
-        return 1;
-      }
-      const state = await readState(options.stateDir);
-      if (!state || daemonStateLiveness(state) !== "running") {
-        options.error.write("scorel daemon start error: daemon state missing after start\n");
         child.kill("SIGTERM");
         return 1;
       }
@@ -9486,13 +9913,14 @@ Use --replace to stop it and start a new one.
         scorelHomeDir: options.stateDir,
         loadConfig: async ({ project }) => loadScorelConfig({ cwd: project.workDir, ...configScope }),
         loadConfigProfile: async ({ project }) => loadScorelConfigProfile({ cwd: project.workDir, ...configScope }),
-        createRuntime: async ({ sessionId, project, selectedModel, purpose }) => createRealRuntime({
+        createRuntime: async ({ sessionId, project, selectedModel, purpose, backgroundBash }) => createRealRuntime({
           cwd: project.workDir,
           config: await loadScorelConfig({ cwd: project.workDir, ...configScope }),
           sessionsDir,
           sessionId,
-          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : void 0,
-          includeTools: purpose === "chat"
+          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role, reasoningEffort: selectedModel.reasoningEffort } : void 0,
+          includeTools: purpose === "chat",
+          backgroundBash
         })
       });
       await daemon.start();
@@ -9826,56 +10254,42 @@ Use --replace to stop it and start a new one.
     sleep = (ms) => new Promise((resolve7) => {
       setTimeout(resolve7, ms);
     });
-    waitForDaemonReady = (child, timeoutMs) => new Promise((resolveReady, rejectReady) => {
-      if (!child.stdout) {
-        rejectReady(new Error("daemon child has no stdout stream"));
-        return;
-      }
-      let buffer = "";
-      let stderrBuffer = "";
+    waitForDaemonStateReady = (child, stateDir, readState, timeoutMs) => new Promise((resolveReady, rejectReady) => {
       let settled = false;
-      const timer = setTimeout(() => {
+      const deadline = Date.now() + timeoutMs;
+      let timer;
+      const settle = (callback) => {
         if (settled) return;
         settled = true;
-        cleanup();
-        rejectReady(new Error("timed out waiting for daemon ready line"));
-      }, timeoutMs);
-      const onData = (chunk) => {
-        buffer += chunk.toString();
-        if (!buffer.includes("\n")) return;
-        if (buffer.includes("scorel daemon serving url=") || buffer.includes("scorel host serving url=")) {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          resolveReady();
+        if (timer) {
+          clearTimeout(timer);
         }
-        const newlineIndex = buffer.lastIndexOf("\n");
-        buffer = newlineIndex >= 0 ? buffer.slice(newlineIndex + 1) : buffer;
+        child.off("exit", onExit);
+        callback();
       };
-      const onStderr = (chunk) => {
-        stderrBuffer += chunk.toString();
+      const poll = async () => {
+        try {
+          const state = await readState(stateDir);
+          if (state && daemonStateLiveness(state) === "running") {
+            settle(() => resolveReady(state));
+            return;
+          }
+          if (Date.now() >= deadline) {
+            settle(() => rejectReady(new Error("timed out waiting for daemon state")));
+            return;
+          }
+          timer = setTimeout(() => void poll(), STOP_POLL_INTERVAL_MS);
+        } catch (cause) {
+          settle(() => rejectReady(cause instanceof Error ? cause : new Error(String(cause))));
+        }
       };
       const onExit = (code) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        const trimmed = stderrBuffer.trim();
-        const detail = trimmed ? `: ${trimmed}` : "";
-        rejectReady(new Error(`daemon exited before ready code=${code}${detail}`));
+        settle(() => rejectReady(new Error(`daemon exited before ready code=${code}`)));
       };
-      const cleanup = () => {
-        clearTimeout(timer);
-        child.stdout?.off("data", onData);
-        child.stderr?.off("data", onStderr);
-        child.off("exit", onExit);
-      };
-      child.stdout.on("data", onData);
-      child.stderr?.on("data", onStderr);
       child.once("exit", onExit);
+      void poll();
     });
     detachBackgroundDaemon = (child) => {
-      child.stdout?.destroy();
-      child.stderr?.destroy();
       child.unref();
     };
     nodeEntrypointArgs = (entrypoint) => entrypoint.endsWith(".ts") ? ["--import", "tsx", entrypoint] : [entrypoint];
@@ -10509,11 +10923,11 @@ var init_relay_server_cli = __esm({
 });
 
 // apps/cli/src/up-cli.ts
-import { spawn as spawn2 } from "node:child_process";
+import { spawn as spawn3 } from "node:child_process";
 import { homedir as homedir8 } from "node:os";
 import { dirname as dirname12, join as join17 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
-var DEFAULT_DAEMON_PORT, DEFAULT_WEBUI_PORT, DEFAULT_DAEMON_READY_TIMEOUT_MS, defaultStateDir3, defaultAttachSigint, runCliUp, parseUpFlags, requireValue4, waitForDaemonReady2, pipeWithPrefix, detachBackgroundDaemon2, nodeEntrypointArgs2, pipeStreamLines, once;
+var DEFAULT_DAEMON_PORT, DEFAULT_WEBUI_PORT, DEFAULT_DAEMON_READY_TIMEOUT_MS, defaultStateDir3, defaultAttachSigint, runCliUp, parseUpFlags, requireValue4, waitForDaemonReady, pipeWithPrefix, detachBackgroundDaemon2, nodeEntrypointArgs2, pipeStreamLines, once;
 var init_up_cli = __esm({
   "apps/cli/src/up-cli.ts"() {
     "use strict";
@@ -10537,7 +10951,7 @@ var init_up_cli = __esm({
       }
       const stateDir = options.stateDir ?? defaultStateDir3();
       const cliEntrypoint = options.cliEntrypoint ?? fileURLToPath3(import.meta.url).replace(/up-cli\.ts$/, "index.ts");
-      const spawnFn = options.spawn ?? spawn2;
+      const spawnFn = options.spawn ?? spawn3;
       const readState = options.readState ?? ((dir) => readLocalDaemonState({ stateDir: dir }));
       const attachSigint = options.attachSigint ?? defaultAttachSigint;
       const readyTimeout = options.daemonReadyTimeoutMs ?? DEFAULT_DAEMON_READY_TIMEOUT_MS;
@@ -10566,7 +10980,7 @@ var init_up_cli = __esm({
           stdio: ["ignore", "pipe", "pipe"]
         });
         try {
-          await waitForDaemonReady2(daemonChild, readyTimeout);
+          await waitForDaemonReady(daemonChild, readyTimeout);
         } catch (cause) {
           options.error.write(`scorel up error: ${cause.message}
 `);
@@ -10661,7 +11075,7 @@ var init_up_cli = __esm({
       }
       return value;
     };
-    waitForDaemonReady2 = (child, timeoutMs) => new Promise((resolveReady, rejectReady) => {
+    waitForDaemonReady = (child, timeoutMs) => new Promise((resolveReady, rejectReady) => {
       if (!child.stdout) {
         rejectReady(new Error("daemon child has no stdout stream"));
         return;
@@ -10753,7 +11167,7 @@ var init_up_cli = __esm({
 });
 
 // apps/cli/src/webui-cli.ts
-import { spawn as spawn3 } from "node:child_process";
+import { spawn as spawn4 } from "node:child_process";
 import { existsSync as existsSync4 } from "node:fs";
 import { dirname as dirname13, resolve as resolve6 } from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
@@ -10778,7 +11192,7 @@ var init_webui_cli = __esm({
         return 1;
       }
       const plan = buildWebUiSpawnPlan(flags, webuiAppDir);
-      const spawnFn = options.spawn ?? spawn3;
+      const spawnFn = options.spawn ?? spawn4;
       const child = spawnFn(plan.command, plan.argv, {
         cwd: plan.cwd,
         env: plan.env,
@@ -10881,7 +11295,7 @@ import { createInterface } from "node:readline/promises";
 import { homedir as homedir9 } from "node:os";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
 import { basename as basename4, dirname as dirname14, join as join18 } from "node:path";
-var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, runHeadless, renderRunEvent, renderRunFinal, writeJsonLine, RunTimeoutError, withRunTimeout, makeRunSummary, runErrorFromEvents, writeRunSummary, writeRunReports, runReportPaths, runMetadata, runTrajectory, runReportingModel, readRunPrompt, resolveRunConfig, stripTrailingSlashes3, runObserve, writeObservePayload, loadObserveConfig, createSigintHandler, loadOrCreateSession, parseChatOptions, parseRunOptions, parseRunOutputFormat, parsePositiveInteger, parseModelSelection, parseRunProviderApi, parseObserveOptions, parseObserveTarget, requireValue6, promptIfInteractive, writeUsage, writeRunUsage, writeObserveUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
+var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, runHeadless, renderRunEvent, renderRunFinal, writeJsonLine, RunTimeoutError, withRunTimeout, makeRunSummary, runErrorFromEvents, writeRunSummary, writeRunReports, runReportPaths, runMetadata, runTrajectory, runReportingModel, runReportingModelFromEvents, readRunPrompt, resolveRunConfig, stripTrailingSlashes3, runObserve, writeObservePayload, loadObserveConfig, createSigintHandler, loadOrCreateSession, parseChatOptions, parseRunOptions, parseRunOutputFormat, parseReasoningEffort, parsePositiveInteger, parseModelSelection, parseRunProviderApi, parseObserveOptions, parseObserveTarget, requireValue6, promptIfInteractive, writeUsage, writeRunUsage, writeObserveUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
 var init_index = __esm({
   async "apps/cli/src/index.ts"() {
     "use strict";
@@ -11478,13 +11892,14 @@ var init_index = __esm({
         scorelHomeDir: options.stateDir,
         loadConfig: async ({ project: project2 }) => loadProjectConfig(project2),
         loadConfigProfile: async ({ project: project2 }) => loadProjectConfigProfile(project2),
-        createRuntime: async ({ sessionId, project: project2, selectedModel, purpose }) => createRealRuntime({
+        createRuntime: async ({ sessionId, project: project2, selectedModel, purpose, backgroundBash }) => createRealRuntime({
           cwd: project2.workDir,
           config: await loadProjectConfig(project2),
           sessionsDir: options.sessionsDir,
           sessionId,
-          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : void 0,
-          includeTools: purpose === "chat"
+          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role, reasoningEffort: selectedModel.reasoningEffort } : void 0,
+          includeTools: purpose === "chat",
+          backgroundBash
         })
       });
       const client = new DaemonClient(createEmbeddedTransport(daemon), {
@@ -11558,6 +11973,7 @@ var init_index = __esm({
       const events = [];
       const prompt = await readRunPrompt(options, io);
       const runConfig = resolveRunConfig(options);
+      let reportingConfig;
       let reportingModel;
       const configScope = { scorelHomeDir: options.stateDir };
       const loadProjectConfig = async (project) => runConfig ?? options.config ?? await loadScorelConfig({ cwd: project.workDir, ...configScope });
@@ -11569,13 +11985,14 @@ var init_index = __esm({
         scorelHomeDir: options.stateDir,
         loadConfig: async ({ project }) => loadProjectConfig(project),
         loadConfigProfile: async ({ project }) => loadProjectConfigProfile(project),
-        createRuntime: async ({ sessionId, project, selectedModel, purpose }) => createRealRuntime({
+        createRuntime: async ({ sessionId, project, selectedModel, purpose, backgroundBash }) => createRealRuntime({
           cwd: project.workDir,
           config: await loadProjectConfig(project),
           sessionsDir: options.sessionsDir,
           sessionId,
-          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role } : void 0,
-          includeTools: purpose === "chat"
+          modelSelection: selectedModel ? { modelId: selectedModel.modelId, role: selectedModel.role, reasoningEffort: selectedModel.reasoningEffort } : void 0,
+          includeTools: purpose === "chat",
+          backgroundBash
         })
       });
       const client = new DaemonClient(createEmbeddedTransport(daemon), {
@@ -11586,7 +12003,8 @@ var init_index = __esm({
         await daemon.start();
         const project = await daemon.registerProject(options.cwd);
         projectId = project.projectId;
-        reportingModel = runReportingModel(await loadProjectConfig(project), options.modelSelection);
+        reportingConfig = await loadProjectConfig(project);
+        reportingModel = runReportingModel(reportingConfig, options.modelSelection);
         await client.connect(options.sessionId);
         await loadOrCreateSession(client, options.sessionId, project.projectId, options.modelSelection);
         unsubscribe = client.subscribe((event) => {
@@ -11600,6 +12018,7 @@ var init_index = __esm({
         const result = options.timeoutMs === void 0 ? await send : await withRunTimeout(send, options.timeoutMs, async () => {
           await client.cancel().catch(() => void 0);
         });
+        reportingModel = runReportingModelFromEvents(reportingConfig, reportingModel, events);
         const runtimeError = runErrorFromEvents(events);
         const summary = makeRunSummary({
           options,
@@ -11619,6 +12038,7 @@ var init_index = __esm({
         return runtimeError ? 1 : 0;
       } catch (cause) {
         const isTimeout = cause instanceof RunTimeoutError;
+        reportingModel = runReportingModelFromEvents(reportingConfig, reportingModel, events);
         const summary = makeRunSummary({
           options,
           startedAt,
@@ -11726,6 +12146,7 @@ var init_index = __esm({
         ...input.events ? { events: input.events } : {},
         usage: observation.usage,
         ...observation.model ? { model: observation.model } : {},
+        ...input.options.modelSelection?.reasoningEffort ? { reasoningEffort: input.options.modelSelection.reasoningEffort } : {},
         cost: observation.cost,
         reports
       };
@@ -11794,6 +12215,7 @@ var init_index = __esm({
       elapsedMs: summary.elapsedMs,
       usage: summary.usage,
       model: summary.model,
+      reasoningEffort: summary.reasoningEffort,
       cost: summary.cost,
       reports: summary.reports
     });
@@ -11804,6 +12226,7 @@ var init_index = __esm({
       status: summary.status,
       usage: summary.usage,
       model: summary.model,
+      reasoningEffort: summary.reasoningEffort,
       cost: summary.cost,
       events: summary.events ?? []
     });
@@ -11816,11 +12239,20 @@ var init_index = __esm({
           providerModelId: model.id,
           provider: model.provider,
           api: model.api,
-          displayName: selection.displayName
+          displayName: selection.displayName,
+          reasoningEffort: modelSelection?.reasoningEffort
         };
       } catch {
-        return modelSelection?.modelId ? { modelId: modelSelection.modelId } : void 0;
+        return modelSelection?.modelId ? { modelId: modelSelection.modelId, reasoningEffort: modelSelection.reasoningEffort } : void 0;
       }
+    };
+    runReportingModelFromEvents = (config, fallback, events) => {
+      if (!config) return fallback;
+      const selectedModel = events.reduce(
+        (selected, event) => event.type === "session_model_selected" ? event.selectedModel : selected,
+        void 0
+      );
+      return selectedModel ? runReportingModel(config, { modelId: selectedModel.modelId, reasoningEffort: selectedModel.reasoningEffort }) : fallback;
     };
     readRunPrompt = async (options, io) => {
       if (options.promptSource === "prompt-file") {
@@ -11866,7 +12298,8 @@ var init_index = __esm({
           [providerModelId]: {
             provider: providerId,
             id: availableModelId,
-            displayName: availableModelId
+            displayName: availableModelId,
+            ...options.modelSelection.reasoningEffort ? { reasoning: true } : {}
           }
         },
         models: {
@@ -12091,7 +12524,18 @@ var init_index = __esm({
           continue;
         }
         if (arg === "--model") {
-          modelSelection = parseModelSelection(requireValue6(argv, index, "--model"));
+          modelSelection = {
+            ...parseModelSelection(requireValue6(argv, index, "--model")),
+            ...modelSelection?.reasoningEffort ? { reasoningEffort: modelSelection.reasoningEffort } : {}
+          };
+          index += 1;
+          continue;
+        }
+        if (arg === "--reasoning-effort") {
+          modelSelection = {
+            ...modelSelection,
+            reasoningEffort: parseReasoningEffort(requireValue6(argv, index, "--reasoning-effort"))
+          };
           index += 1;
           continue;
         }
@@ -12149,6 +12593,12 @@ var init_index = __esm({
         return value;
       }
       throw new Error("--output-format must be text, json, stream-json, or none");
+    };
+    parseReasoningEffort = (value) => {
+      if (value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh") {
+        return value;
+      }
+      throw new Error("--reasoning-effort must be minimal, low, medium, high, or xhigh");
     };
     parsePositiveInteger = (value, flag) => {
       const parsed = Number(value);
@@ -12255,6 +12705,7 @@ var init_index = __esm({
           "                 [--output-format text|json|stream-json|none] [--summary <path>]",
           "                 [--provider <name>] [--api|--protocol <protocol>]",
           "                 [--base-url|--baseurl <url>] [--api-key|--apikey <key>] [--model <id>]",
+          "                 [--reasoning-effort minimal|low|medium|high|xhigh]",
           "       scorel attach --session <id> --remote <ws-url> --token <token>",
           "       scorel host start [--host <h>] [--port <p>] [--token <t>] [--project <dir>]",
           "                        [--relay <relay-url> | --no-relay] [--replace]",
@@ -12297,6 +12748,7 @@ var init_index = __esm({
           "  --report-dir <path>",
           "  --quiet",
           "  --model <primary|standard|auxiliary|model-id>",
+          "  --reasoning-effort <minimal|low|medium|high|xhigh>",
           "  --provider <name>",
           "  --api, --protocol <openai-completions|openai-responses|google-generative-ai|anthropic-messages>",
           "  --base-url, --baseurl <url>",
