@@ -33,6 +33,11 @@ SCOREL_EVAL_DATASET=${SCOREL_EVAL_DATASET:-terminal-bench/terminal-bench-2-1}
 SCOREL_EVAL_ENVIRONMENT=${SCOREL_EVAL_ENVIRONMENT:-daytona}
 SCOREL_EVAL_ATTEMPTS=${SCOREL_EVAL_ATTEMPTS:-2}
 SCOREL_EVAL_CONCURRENCY=${SCOREL_EVAL_CONCURRENCY:-3}
+SCOREL_EVAL_TIMEOUT_MULTIPLIER=${SCOREL_EVAL_TIMEOUT_MULTIPLIER:-4}
+SCOREL_EVAL_AGENT_TIMEOUT_MULTIPLIER=${SCOREL_EVAL_AGENT_TIMEOUT_MULTIPLIER:-4}
+SCOREL_EVAL_AGENT_SETUP_TIMEOUT_MULTIPLIER=${SCOREL_EVAL_AGENT_SETUP_TIMEOUT_MULTIPLIER:-2}
+SCOREL_EVAL_ENVIRONMENT_BUILD_TIMEOUT_MULTIPLIER=${SCOREL_EVAL_ENVIRONMENT_BUILD_TIMEOUT_MULTIPLIER:-3}
+SCOREL_EVAL_MAX_RETRIES=${SCOREL_EVAL_MAX_RETRIES:-2}
 SCOREL_EVAL_UPLOAD_PRIVATE=${SCOREL_EVAL_UPLOAD_PRIVATE:-false}
 SCOREL_EVAL_JOBS_DIR=${SCOREL_EVAL_JOBS_DIR:-"$EVAL_DIR/jobs"}
 
@@ -76,6 +81,11 @@ PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}" harbor run \
   --env "$SCOREL_EVAL_ENVIRONMENT" \
   --n-attempts "$SCOREL_EVAL_ATTEMPTS" \
   --n-concurrent "$SCOREL_EVAL_CONCURRENCY" \
+  --timeout-multiplier "$SCOREL_EVAL_TIMEOUT_MULTIPLIER" \
+  --agent-timeout-multiplier "$SCOREL_EVAL_AGENT_TIMEOUT_MULTIPLIER" \
+  --agent-setup-timeout-multiplier "$SCOREL_EVAL_AGENT_SETUP_TIMEOUT_MULTIPLIER" \
+  --environment-build-timeout-multiplier "$SCOREL_EVAL_ENVIRONMENT_BUILD_TIMEOUT_MULTIPLIER" \
+  --max-retries "$SCOREL_EVAL_MAX_RETRIES" \
   --jobs-dir "$RUN_DIR" \
   --yes
 RUN_STATUS=$?
@@ -83,11 +93,26 @@ set -e
 
 scrub_run
 
-if [[ "$RUN_STATUS" -eq 0 && "$SCOREL_EVAL_UPLOAD_PRIVATE" == true ]]; then
-  harbor upload "$RUN_DIR" --private --concurrency "$SCOREL_EVAL_CONCURRENCY" --yes
-elif [[ "$RUN_STATUS" -ne 0 && "$SCOREL_EVAL_UPLOAD_PRIVATE" == true ]]; then
-  printf 'Harbor failed with status %s; private upload skipped.\n' "$RUN_STATUS" >&2
+UPLOAD_STATUS=0
+if [[ "$SCOREL_EVAL_UPLOAD_PRIVATE" == true ]]; then
+  mapfile -t JOB_DIRS < <(
+    find "$RUN_DIR" -mindepth 1 -maxdepth 1 -type d \
+      -exec test -f '{}/config.json' ';' \
+      -exec test -f '{}/result.json' ';' \
+      -print
+  )
+  if [[ ${#JOB_DIRS[@]} -eq 0 ]]; then
+    printf 'No completed Harbor job directory found under %s; private upload skipped.\n' "$RUN_DIR" >&2
+    UPLOAD_STATUS=1
+  else
+    for JOB_DIR in "${JOB_DIRS[@]}"; do
+      harbor upload "$JOB_DIR" --private --concurrency "$SCOREL_EVAL_CONCURRENCY" --yes || UPLOAD_STATUS=$?
+    done
+  fi
 fi
 
 trap - EXIT
+if [[ "$UPLOAD_STATUS" -ne 0 ]]; then
+  exit "$UPLOAD_STATUS"
+fi
 exit "$RUN_STATUS"

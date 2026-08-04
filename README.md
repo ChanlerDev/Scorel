@@ -6,6 +6,12 @@ Scorel 是一个面向项目工作的 AI Agent Platform。
 
 当前重点是 coding agent：搜索、读文件、编辑文件、运行命令、记录任务进度、恢复历史会话，以及通过本地或远程入口继续控制同一个 Agent。
 
+## Benchmark
+
+| Benchmark | Scorel | Model | K | Cases | Trials | Mean reward | Pass@2 | Errors | Harbor |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Terminal-Bench 2.1 | v0.0.9 | GPT-5.5 | 2 | 89 | 178 | 70.22% | 78.65% | 3 | [Results](https://hub.harborframework.com/jobs/d5a9df2c-318c-4fd1-b9aa-b7afdab6854f) |
+
 ## Quick Start
 
 安装依赖：

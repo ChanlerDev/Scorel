@@ -16,9 +16,11 @@ chmod 600 eval/.env
 ```
 
 The launcher defaults to Terminal-Bench 2.1, Daytona, two attempts per task,
-three concurrent trials, and `max` reasoning. Every value is configurable in
-the ignored `eval/.env`. Set `SCOREL_EVAL_UPLOAD_PRIVATE=true` only when the
-completed, scrubbed job should be uploaded privately to Harbor.
+three concurrent trials, `max` reasoning, extended cloud-sandbox timeouts, and
+two Harbor retries. Every value is configurable in the ignored `eval/.env`.
+Set `SCOREL_EVAL_UPLOAD_PRIVATE=true` when the scrubbed job should be uploaded
+privately to Harbor. Errored jobs are uploaded too; only a failed privacy scrub
+or a missing Harbor job directory prevents upload.
 
 Daytona runs also require `DAYTONA_API_KEY`, or both `DAYTONA_JWT_TOKEN` and
 `DAYTONA_ORGANIZATION_ID`, in the private `eval/.env`. The launcher exports
@@ -75,6 +77,12 @@ the agent kwarg sends no explicit effort and preserves existing pi-ai default
 behavior. Scorel writes
 the selected value into its session header and run reports; the adapter also
 records it in Harbor `AgentContext.metadata` and ATIF agent steps.
+
+The default timeout multipliers allow up to 30 minutes for Daytona environment
+startup, 12 minutes for agent setup, and at least 60 minutes for agent
+execution. Scorel's own timeout is 55 minutes, leaving five minutes for report
+finalization, ATIF conversion, and artifact synchronization before the adapter
+command reaches its outer limit.
 
 For repeated local runs, keep secrets in ignored `eval/.env` rather than in a
 script. Copy the complete `.env.example` template, fill every required field,

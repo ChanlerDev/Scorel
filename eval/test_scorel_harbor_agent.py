@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock
 from harbor.models.agent.context import AgentContext
 
 from scorel_harbor_agent import (
+    AGENT_COMMAND_TIMEOUT_SEC,
+    SCOREL_TIMEOUT_MS,
     ScorelAgent,
     _model_id_from_harbor_model_name,
 )
@@ -71,6 +73,9 @@ class ScorelHarborAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--base-url https://llm.example.test/v1", command)
         self.assertIn("--api-key test-secret", command)
         self.assertIn("--reasoning-effort high", command)
+        self.assertIn(f"--timeout-ms {SCOREL_TIMEOUT_MS}", command)
+        self.assertEqual(call.kwargs["timeout_sec"], AGENT_COMMAND_TIMEOUT_SEC)
+        self.assertGreater(AGENT_COMMAND_TIMEOUT_SEC * 1000, SCOREL_TIMEOUT_MS)
         converter = command.split("<<'PY'\n", maxsplit=1)[1].split("\nPY\n", maxsplit=1)[0]
         compile(converter, "<scorel-trajectory-converter>", "exec")
 

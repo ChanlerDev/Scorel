@@ -23,6 +23,8 @@ PROVIDER_APIS = [
     "google-generative-ai",
     "anthropic-messages",
 ]
+SCOREL_TIMEOUT_MS = 3_300_000
+AGENT_COMMAND_TIMEOUT_SEC = 3_600
 
 
 class ScorelAgent(BaseInstalledAgent):
@@ -127,7 +129,7 @@ scorel run \
   --summary {shlex.quote(str(summary_path))} \
   --report-dir {shlex.quote(str(report_dir))} \
   --output-format none \
-  --timeout-ms 1800000 \
+  --timeout-ms {SCOREL_TIMEOUT_MS} \
   --provider {shlex.quote(self.provider)} \
   --api {shlex.quote(self.api)} \
   --base-url {shlex.quote(self.base_url)} \
@@ -192,7 +194,7 @@ exit "$CONVERTER_EXIT"
         result = await self.exec_as_agent(
             environment,
             command=command,
-            timeout_sec=1800,
+            timeout_sec=AGENT_COMMAND_TIMEOUT_SEC,
         )
         summary = _parse_summary(getattr(result, "stdout", ""))
         usage = summary.get("usage") if isinstance(summary.get("usage"), dict) else {}

@@ -1,8 +1,9 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from scrub_harbor_job import scrub_job
+from scrub_harbor_job import scrub_job, secrets_from_environment
 
 
 class ScrubHarborJobTest(unittest.TestCase):
@@ -30,6 +31,19 @@ class ScrubHarborJobTest(unittest.TestCase):
             self.assertNotIn("private-provider", scrubbed)
             self.assertNotIn("private-test-key", scrubbed)
             self.assertIn('"model":"example-model"', scrubbed)
+
+    def test_includes_optional_daytona_credentials_when_present(self) -> None:
+        environment = {
+            "SCOREL_EVAL_PROVIDER": "example-provider",
+            "SCOREL_EVAL_BASE_URL": "https://api.example.test/v1",
+            "SCOREL_EVAL_API_KEY": "fake-test-key",
+            "DAYTONA_API_KEY": "fake-daytona-key",
+        }
+        with patch.dict("os.environ", environment, clear=True):
+            secrets = secrets_from_environment()
+
+        self.assertIn(b"fake-daytona-key", secrets)
+        self.assertNotIn(b"DAYTONA_JWT_TOKEN", secrets)
 
 
 if __name__ == "__main__":

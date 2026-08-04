@@ -5,10 +5,15 @@ import sys
 from pathlib import Path
 
 
-REDACTIONS = {
+REQUIRED_REDACTIONS = {
     "SCOREL_EVAL_API_KEY": b"<redacted-api-key>",
     "SCOREL_EVAL_BASE_URL": b"<redacted-base-url>",
     "SCOREL_EVAL_PROVIDER": b"<redacted-provider>",
+}
+OPTIONAL_REDACTIONS = {
+    "DAYTONA_API_KEY": b"<redacted-daytona-api-key>",
+    "DAYTONA_JWT_TOKEN": b"<redacted-daytona-jwt-token>",
+    "DAYTONA_ORGANIZATION_ID": b"<redacted-daytona-organization-id>",
 }
 
 
@@ -36,11 +41,15 @@ def scrub_job(root: Path, secrets: dict[bytes, bytes]) -> int:
 
 def secrets_from_environment() -> dict[bytes, bytes]:
     secrets: dict[bytes, bytes] = {}
-    for name, replacement in REDACTIONS.items():
+    for name, replacement in REQUIRED_REDACTIONS.items():
         value = os.environ.get(name)
         if not value:
             raise RuntimeError(f"{name} is required")
         secrets[value.encode()] = replacement
+    for name, replacement in OPTIONAL_REDACTIONS.items():
+        value = os.environ.get(name)
+        if value:
+            secrets[value.encode()] = replacement
     return secrets
 
 
