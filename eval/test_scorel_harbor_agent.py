@@ -71,6 +71,8 @@ class ScorelHarborAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--base-url https://llm.example.test/v1", command)
         self.assertIn("--api-key test-secret", command)
         self.assertIn("--reasoning-effort high", command)
+        converter = command.split("<<'PY'\n", maxsplit=1)[1].split("\nPY\n", maxsplit=1)[0]
+        compile(converter, "<scorel-trajectory-converter>", "exec")
 
 
 if __name__ == "__main__":

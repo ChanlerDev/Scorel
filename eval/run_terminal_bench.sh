@@ -36,6 +36,17 @@ SCOREL_EVAL_CONCURRENCY=${SCOREL_EVAL_CONCURRENCY:-3}
 SCOREL_EVAL_UPLOAD_PRIVATE=${SCOREL_EVAL_UPLOAD_PRIVATE:-false}
 SCOREL_EVAL_JOBS_DIR=${SCOREL_EVAL_JOBS_DIR:-"$EVAL_DIR/jobs"}
 
+if [[ "$SCOREL_EVAL_ENVIRONMENT" == daytona ]]; then
+  if [[ -n ${DAYTONA_API_KEY:-} && ${DAYTONA_API_KEY} != replace-* ]]; then
+    export DAYTONA_API_KEY
+  elif [[ -n ${DAYTONA_JWT_TOKEN:-} && -n ${DAYTONA_ORGANIZATION_ID:-} ]]; then
+    export DAYTONA_JWT_TOKEN DAYTONA_ORGANIZATION_ID
+  else
+    printf 'Daytona requires DAYTONA_API_KEY or DAYTONA_JWT_TOKEN plus DAYTONA_ORGANIZATION_ID in %s.\n' "$ENV_FILE" >&2
+    exit 2
+  fi
+fi
+
 RUN_DIR="$SCOREL_EVAL_JOBS_DIR/$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 mkdir -p "$RUN_DIR"
 printf 'Harbor job directory: %s\n' "$RUN_DIR"
@@ -72,8 +83,10 @@ set -e
 
 scrub_run
 
-if [[ "$SCOREL_EVAL_UPLOAD_PRIVATE" == true ]]; then
+if [[ "$RUN_STATUS" -eq 0 && "$SCOREL_EVAL_UPLOAD_PRIVATE" == true ]]; then
   harbor upload "$RUN_DIR" --private --concurrency "$SCOREL_EVAL_CONCURRENCY" --yes
+elif [[ "$RUN_STATUS" -ne 0 && "$SCOREL_EVAL_UPLOAD_PRIVATE" == true ]]; then
+  printf 'Harbor failed with status %s; private upload skipped.\n' "$RUN_STATUS" >&2
 fi
 
 trap - EXIT

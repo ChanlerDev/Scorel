@@ -150,7 +150,7 @@ for event in source.get("events", []):
     message = event.get("message") or {{}}
     parts = message.get("content") or []
     if kind == "user_message":
-        text = "\n".join(part.get("text", "") for part in parts if isinstance(part, dict))
+        text = "\\n".join(part.get("text", "") for part in parts if isinstance(part, dict))
         steps.append({{"source": "user", "message": text or "[user message]"}})
     elif kind == "assistant_message":
         visible = []
@@ -159,9 +159,9 @@ for event in source.get("events", []):
             if not isinstance(part, dict): continue
             if part.get("type") == "thinking": reasoning.append(part.get("text", ""))
             elif part.get("type") == "text": visible.append(part.get("text", ""))
-        step = {{"source": "agent", "model_name": model_id, "message": "\n".join(visible) or "[assistant message]"}}
+        step = {{"source": "agent", "model_name": model_id, "message": "\\n".join(visible) or "[assistant message]"}}
         if effort: step["reasoning_effort"] = effort
-        if reasoning: step["reasoning_content"] = "\n".join(reasoning)
+        if reasoning: step["reasoning_content"] = "\\n".join(reasoning)
         steps.append(step)
 if not steps:
     steps = [{{"source": "system", "message": "Scorel produced no convertible trajectory events."}}]

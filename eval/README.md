@@ -20,6 +20,11 @@ three concurrent trials, and `max` reasoning. Every value is configurable in
 the ignored `eval/.env`. Set `SCOREL_EVAL_UPLOAD_PRIVATE=true` only when the
 completed, scrubbed job should be uploaded privately to Harbor.
 
+Daytona runs also require `DAYTONA_API_KEY`, or both `DAYTONA_JWT_TOKEN` and
+`DAYTONA_ORGANIZATION_ID`, in the private `eval/.env`. The launcher exports
+only those sandbox credentials required by Harbor; Scorel provider connection
+values continue to travel through agent kwargs and Scorel CLI flags.
+
 ## What the adapter provides
 
 `scorel_harbor_agent.py` is a Harbor installed-agent adapter. For every trial
