@@ -8,11 +8,18 @@ safe and convenient for other users to run with their own provider connection.
 
 ## Scope
 
-- Replace deprecated `@mariozechner/pi-ai` 0.73.1 with
-  `@earendil-works/pi-ai` 0.83.0.
+- Replace deprecated `@mariozechner/pi-ai` 0.73.1 with the current
+  `@earendil-works/pi-ai` 0.84.1 release.
 - Migrate model catalog lookup and API streaming to the maintained package's
   non-compat entrypoints.
 - Preserve `xhigh` and `max` as distinct Scorel values and provider payloads.
+- Retry one prematurely ended OpenAI-compatible reasoning stream before it
+  emits visible answer text; never accept a truncated stream as complete.
+- Use current official GPT-5.6 and Claude 5 prices, including cache writes and
+  GPT-5.6 per-request long-context tiers.
+- Terminate Background Bash process groups on ordinary Host shutdown while
+  preserving them only for the explicit headless verifier handoff.
+- Warn timed headless runs to finalize their best artifact before the deadline.
 - Publish an ignored `.env` workflow with a placeholder-only `.env.example`.
 - Publish a Terminal-Bench launcher with configurable dataset, sandbox,
   attempts, concurrency, model, protocol, and reasoning effort.
@@ -46,7 +53,7 @@ safe and convenient for other users to run with their own provider connection.
 ## Testing Requirements
 
 - Provider request tests assert distinct `xhigh` and `max` payload values.
-- Existing Scorel typecheck and tests pass against pi-ai 0.83.0.
+- Existing Scorel typecheck and tests pass against pi-ai 0.84.1.
 - Harbor adapter and scrubber unit tests pass.
 - Shell syntax, Python compilation, package build, and package smoke tests pass.
 - A scoped privacy scan covers every staged file before commit.
@@ -64,6 +71,9 @@ safe and convenient for other users to run with their own provider connection.
 
 - pi-ai 0.83.0 replaced its old global registry with explicit catalog and API
   entrypoints; Scorel must not depend on the temporary `/compat` entrypoint.
+- pi-ai 0.84.1 adds the current GPT-5.6 and Claude 5 catalogs and native `max`
+  mappings. A missing terminal `finish_reason` still represents a truncated
+  stream and must not be normalized into success.
 - Extended reasoning levels remain model/provider capabilities. Explicit
   Scorel `xhigh` and `max` selections preserve the requested provider value;
   provider rejection remains visible rather than silently changing the level.

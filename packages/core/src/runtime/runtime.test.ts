@@ -110,6 +110,73 @@ describe("ScorelRuntime", () => {
     ]);
   });
 
+  it("retries one premature stream end before visible text", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        if (attempts === 1) {
+          yield { type: "thinking_delta", delta: "incomplete" };
+          throw new Error("Stream ended without finish_reason");
+        }
+        yield { type: "thinking_delta", delta: "complete" };
+        yield { type: "text_delta", delta: "done" };
+        return assistantMessage("done");
+      },
+    };
+    const runtime = new ScorelRuntime({ provider });
+
+    const events = await collect(runtime);
+
+    expect(attempts).toBe(2);
+    expect(events).not.toContainEqual({ type: "turn_end", stopReason: "error" });
+    expect(events.at(-2)).toEqual({ type: "message_end", message: assistantMessage("done") });
+  });
+
+  it("retries a premature stream error result returned by an OpenAI-compatible provider", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        if (attempts === 1) {
+          yield { type: "thinking_delta", delta: "incomplete" };
+          return {
+            role: "assistant",
+            content: [{ type: "thinking", text: "incomplete" }],
+            stopReason: "error",
+            meta: {
+              api: "openai-completions",
+              errorMessage: "Stream ended without finish_reason",
+            },
+          } satisfies ScorelMessage;
+        }
+        return assistantMessage("recovered");
+      },
+    };
+
+    const events = await collect(new ScorelRuntime({ provider }));
+
+    expect(attempts).toBe(2);
+    expect(events.at(-2)).toEqual({ type: "message_end", message: assistantMessage("recovered") });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "error" }));
+  });
+
+  it("does not retry a premature stream end after visible text", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        yield { type: "text_delta", delta: "partial" };
+        throw new Error("Stream ended without finish_reason");
+      },
+    };
+
+    const events = await collect(new ScorelRuntime({ provider }));
+
+    expect(attempts).toBe(1);
+    expect(events).toContainEqual({ type: "turn_end", stopReason: "error" });
+  });
+
   it("cancels streaming without emitting an empty persistent message", async () => {
     let turn!: RuntimeProviderTurn;
     const provider: RuntimeProvider = {

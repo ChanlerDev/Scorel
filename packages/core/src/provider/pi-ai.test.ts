@@ -47,6 +47,15 @@ describe("model profile resolution", () => {
     ]);
   });
 
+  it.each([
+    ["openai", "gpt-5.6-luna"],
+    ["anthropic", "claude-opus-5"],
+  ] as const)("resolves current %s models with max reasoning support", (provider, id) => {
+    const model = resolvePiAiModel({ type: "builtin", provider, id, apiKey: "test-key" });
+
+    expect(model.thinkingLevelMap?.max).toBe("max");
+  });
+
   it("resolves custom models with manual context metadata", () => {
     const selection = resolveModelSelection(customProfile, { modelId: "aux" });
     const model = resolvePiAiModel(selection.config);

@@ -24,7 +24,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.83.0",
+    "@earendil-works/pi-ai": "0.84.1",
     "ws": "^8.21.0"
   },
   "scripts": {

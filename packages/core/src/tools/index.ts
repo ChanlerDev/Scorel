@@ -13,6 +13,7 @@ export type AgentTool = {
   parameters: TSchema;
   hasActiveWork?: () => boolean;
   detach?: () => void | Promise<void>;
+  terminate?: () => void | Promise<void>;
   execute: (
     toolCallId: string,
     args: unknown,

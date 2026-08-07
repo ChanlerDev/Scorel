@@ -366,7 +366,7 @@ describe("@scorel/app-cli", () => {
       expect(summary.cost).toMatchObject({
         known: true,
         currency: "USD",
-        pricingSource: "models.dev-api-2026-06-27",
+        pricingSource: "official-provider-pricing-2026-08-07",
         pricingModelId: "gpt-4o-mini",
       });
       expect(summary.cost?.total).toBeGreaterThan(0);

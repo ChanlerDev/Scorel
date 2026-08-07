@@ -34,9 +34,10 @@ export type RunPrice = {
   cacheReadUsdPerMillionTokens: number;
   cacheWriteUsdPerMillionTokens: number;
   pricingModelId: string;
+  longContext?: Omit<RunPrice, "pricingModelId" | "longContext"> & { inputTokensAbove: number };
 };
 
-export const SCOREL_PRICING_SOURCE = "models.dev-api-2026-06-27" as const;
+export const SCOREL_PRICING_SOURCE = "official-provider-pricing-2026-08-07" as const;
 
 const MODEL_PRICES: Record<string, RunPrice> = {
   ...modelPrices({
@@ -69,7 +70,13 @@ const MODEL_PRICES: Record<string, RunPrice> = {
     "gpt-5.5": [5, 30],
     "gpt-5.5-pro": [30, 180],
   }, { cacheReadMultiplier: 0.1, cacheWriteMultiplier: 0 }),
+  "gpt-5.6-sol": tieredPrice("gpt-5.6-sol", [5, 30, 0.5, 6.25], [10, 45, 1, 12.5]),
+  "gpt-5.6-terra": tieredPrice("gpt-5.6-terra", [2, 12, 0.2, 2.5], [4, 18, 0.4, 5]),
+  "gpt-5.6-luna": tieredPrice("gpt-5.6-luna", [0.2, 1.2, 0.02, 0.25], [0.4, 1.8, 0.04, 0.5]),
   ...modelPrices({
+    "claude-fable-5": [10, 50],
+    "claude-opus-5": [5, 25],
+    "claude-sonnet-5": [2, 10],
     "claude-haiku-4-5": [1, 5],
     "claude-haiku-4-5-20251001": [1, 5],
     "claude-sonnet-4-0": [3, 15],
@@ -148,7 +155,7 @@ export const buildObservation = (input: {
   return {
     usage,
     ...(model ? { model } : {}),
-    cost: estimateRunCost(usage, model),
+    cost: estimateEventCost(input.events, usage, model),
   };
 };
 
@@ -188,6 +195,44 @@ export const estimateRunCost = (usage: Required<Usage>, model: RunReportingModel
       reason: "unknown_model_price",
     };
   }
+  return costForUsage(usage, price);
+};
+
+const estimateEventCost = (
+  events: ScorelEvent[],
+  aggregate: Required<Usage>,
+  model: RunReportingModel | undefined,
+): RunCostEstimate => {
+  const price = modelPrice(model);
+  if (!price) {
+    return estimateRunCost(aggregate, model);
+  }
+  const usages = events.flatMap((event): Required<Usage>[] => {
+    const usage = event.type === "assistant_message" ? event.message.usage : event.type === "message_end" ? event.usage : undefined;
+    return usage ? [requiredUsage(usage)] : [];
+  });
+  if (usages.length === 0) {
+    return costForUsage(aggregate, price);
+  }
+  const costs = usages.map((usage) => costForUsage(usage, price));
+  return {
+    known: true,
+    currency: "USD",
+    input: costs.reduce((sum, cost) => sum + cost.input, 0),
+    output: costs.reduce((sum, cost) => sum + cost.output, 0),
+    cacheRead: costs.reduce((sum, cost) => sum + cost.cacheRead, 0),
+    cacheWrite: costs.reduce((sum, cost) => sum + cost.cacheWrite, 0),
+    total: costs.reduce((sum, cost) => sum + cost.total, 0),
+    pricingSource: SCOREL_PRICING_SOURCE,
+    pricingModelId: price.pricingModelId,
+  };
+};
+
+const costForUsage = (usage: Required<Usage>, basePrice: RunPrice): RunCostEstimate => {
+  const promptTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+  const price = basePrice.longContext && promptTokens > basePrice.longContext.inputTokensAbove
+    ? { ...basePrice, ...basePrice.longContext }
+    : basePrice;
   const input = (usage.inputTokens / 1_000_000) * price.inputUsdPerMillionTokens;
   const output = (usage.outputTokens / 1_000_000) * price.outputUsdPerMillionTokens;
   const cacheRead = (usage.cacheReadTokens / 1_000_000) * price.cacheReadUsdPerMillionTokens;
@@ -204,6 +249,14 @@ export const estimateRunCost = (usage: Required<Usage>, model: RunReportingModel
     pricingModelId: price.pricingModelId,
   };
 };
+
+const requiredUsage = (usage: Usage): Required<Usage> => ({
+  inputTokens: nonNegativeInteger(usage.inputTokens),
+  outputTokens: nonNegativeInteger(usage.outputTokens),
+  cacheReadTokens: nonNegativeInteger(usage.cacheReadTokens),
+  cacheWriteTokens: nonNegativeInteger(usage.cacheWriteTokens),
+  totalTokens: nonNegativeInteger(usage.totalTokens),
+});
 
 const modelPrice = (model: RunReportingModel | undefined): RunPrice | undefined => {
   for (const id of [model?.providerModelId, model?.modelId]) {
@@ -238,6 +291,29 @@ function modelPrices(
     };
   }
   return entries;
+}
+
+function tieredPrice(
+  modelId: string,
+  standard: [number, number, number, number],
+  longContext: [number, number, number, number],
+): RunPrice {
+  const [inputUsdPerMillionTokens, outputUsdPerMillionTokens, cacheReadUsdPerMillionTokens, cacheWriteUsdPerMillionTokens] = standard;
+  const [longInput, longOutput, longCacheRead, longCacheWrite] = longContext;
+  return {
+    inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens,
+    cacheReadUsdPerMillionTokens,
+    cacheWriteUsdPerMillionTokens,
+    pricingModelId: modelId,
+    longContext: {
+      inputTokensAbove: 272_000,
+      inputUsdPerMillionTokens: longInput,
+      outputUsdPerMillionTokens: longOutput,
+      cacheReadUsdPerMillionTokens: longCacheRead,
+      cacheWriteUsdPerMillionTokens: longCacheWrite,
+    },
+  };
 }
 
 const modelFromEvents = (events: ScorelEvent[]): RunReportingModel | undefined => {

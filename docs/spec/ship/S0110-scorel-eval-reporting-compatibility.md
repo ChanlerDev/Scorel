@@ -59,11 +59,11 @@ Cost is an estimate:
 - The built-in price table is a convenience for common official provider model ids.
 - Unknown, malformed, third-party-only, or ambiguous model ids must not receive fake prices.
 - Prices are static package data and may drift from provider billing. Reports must name the pricing source/version.
-- `models.dev-api-2026-06-27` stores USD-per-1M-token input/output prices keyed by model id from official provider entries.
+- `official-provider-pricing-2026-08-07` stores USD-per-1M-token input, output, cache-read, and 5-minute cache-write prices keyed by model id from official provider entries.
 - Price lookup is model-id only: Scorel first uses the provider-observed model id, then the selected Scorel model id. Provider identity is reported separately but does not participate in price matching.
 - If multiple official provider rows expose the same model id with different prices, the snapshot keeps one canonical model-id price rather than encoding provider-specific billing.
-- Tiered pricing is represented by the base tier only in this spec. Long-context tier handling belongs in a follow-up reporting/observability spec once usage can include the tiering inputs needed to choose the correct tier.
-- The snapshot includes current official GPT 5.x ids, Claude 4.x ids including Opus 4.6/4.7/4.8, DeepSeek V4 ids, GLM 5.x ids, and Gemini 3.x text-output ids from models.dev.
+- GPT-5.6 long-context pricing is selected per provider request when uncached input plus cache reads and writes exceed 272k tokens; costs are then summed across the run.
+- The snapshot includes current official GPT 5.x ids through GPT-5.6, Claude ids through Fable/Opus/Sonnet 5, DeepSeek V4 ids, GLM 5.x ids, and Gemini 3.x text-output ids.
 
 ## Not In Scope
 

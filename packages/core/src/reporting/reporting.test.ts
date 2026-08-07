@@ -50,7 +50,7 @@ describe("reporting", () => {
     expect(observation.cost).toMatchObject({
       known: true,
       currency: "USD",
-      pricingSource: "models.dev-api-2026-06-27",
+      pricingSource: "official-provider-pricing-2026-08-07",
       pricingModelId: "gpt-4o-mini",
     });
     expect(observation.cost.input).toBeGreaterThan(0);
@@ -93,7 +93,7 @@ describe("reporting", () => {
       cacheRead: 0,
       cacheWrite: 0,
       total: 0,
-      pricingSource: "models.dev-api-2026-06-27",
+      pricingSource: "official-provider-pricing-2026-08-07",
       reason: "unknown_model_price",
     });
   });
@@ -105,7 +105,7 @@ describe("reporting", () => {
           inputTokens: 1000,
           outputTokens: 1000,
           totalTokens: 2000,
-          provider: "chanleramp",
+          provider: "custom",
           api: "openai-completions",
           model: "gpt-5.4-mini",
         }),
@@ -113,7 +113,7 @@ describe("reporting", () => {
       selectedModel: {
         modelId: "gpt-5.4-mini",
         providerModelId: "gpt-5.4-mini",
-        provider: "chanleramp",
+        provider: "custom",
         api: "openai-completions",
       },
     });
@@ -157,6 +157,35 @@ describe("reporting", () => {
     expect(observation.cost.total).toBeCloseTo(0.0006, 12);
   });
 
+  it("uses reduced GPT-5.6 pricing and its per-request long-context tier", () => {
+    const short = assistantEvent({
+      inputTokens: 100_000,
+      outputTokens: 10_000,
+      totalTokens: 110_000,
+      provider: "openai",
+      api: "openai-responses",
+      model: "gpt-5.6-luna",
+    });
+    const long = assistantEvent({
+      inputTokens: 100_000,
+      outputTokens: 10_000,
+      totalTokens: 310_000,
+      provider: "openai",
+      api: "openai-responses",
+      model: "gpt-5.6-luna",
+    });
+    if (long.type === "assistant_message" && long.message.usage) {
+      long.message.usage.cacheReadTokens = 200_000;
+    }
+
+    const observation = buildRunObservation({ events: [short, long] });
+
+    expect(observation.cost.input).toBeCloseTo(0.06, 12);
+    expect(observation.cost.output).toBeCloseTo(0.03, 12);
+    expect(observation.cost.cacheRead).toBeCloseTo(0.008, 12);
+    expect(observation.cost.total).toBeCloseTo(0.098, 12);
+  });
+
   it("prices Anthropic cache writes at the published premium", () => {
     const event = assistantEvent({
       inputTokens: 1_000,
@@ -178,6 +207,23 @@ describe("reporting", () => {
     expect(observation.cost.cacheRead).toBeCloseTo(0.0003, 12);
     expect(observation.cost.cacheWrite).toBeCloseTo(0.00375, 12);
     expect(observation.cost.total).toBeCloseTo(0.01455, 12);
+  });
+
+  it("uses current Claude 5 pricing", () => {
+    const event = assistantEvent({
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      totalTokens: 2_000_000,
+      provider: "anthropic",
+      api: "anthropic-messages",
+      model: "claude-opus-5",
+    });
+
+    const observation = buildRunObservation({ events: [event] });
+
+    expect(observation.cost.input).toBe(5);
+    expect(observation.cost.output).toBe(25);
+    expect(observation.cost.total).toBe(30);
   });
 
   it("uses explicit DeepSeek cache-read pricing instead of a family multiplier", () => {
@@ -206,7 +252,7 @@ describe("reporting", () => {
           inputTokens: 1000,
           outputTokens: 1000,
           totalTokens: 2000,
-          provider: "chanleramp",
+          provider: "custom",
           api: "messages",
           model: "claude-opus-4-8",
         }),
@@ -214,7 +260,7 @@ describe("reporting", () => {
       selectedModel: {
         modelId: "claude-opus-4-8",
         providerModelId: "claude-opus-4-8",
-        provider: "chanleramp",
+        provider: "custom",
         api: "messages",
       },
     });

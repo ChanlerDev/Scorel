@@ -703,7 +703,7 @@ export class ScorelHost {
     await this.#startEnabledImExtensions();
   }
 
-  async shutdown(): Promise<void> {
+  async shutdown(options: { preserveBackgroundTasks?: boolean } = {}): Promise<void> {
     this.#shuttingDown = true;
     for (const schedule of this.#memoryDreams.values()) {
       if (schedule.timer) {
@@ -711,7 +711,13 @@ export class ScorelHost {
       }
     }
     this.#memoryDreams.clear();
-    await Promise.all([...this.#sessions.values()].map((lane) => lane.runtime.detachActiveToolWork()));
+    const lanes = [...this.#sessions.values()];
+    for (const lane of lanes) {
+      lane.runtime.cancel();
+    }
+    await Promise.all(lanes.map((lane) => options.preserveBackgroundTasks
+      ? lane.runtime.detachActiveToolWork()
+      : lane.runtime.terminateActiveToolWork()));
     await this.#stopImExtensions();
     this.#connections.clear();
     this.#hadClientConnection = false;
@@ -1044,6 +1050,9 @@ export class ScorelHost {
   }
 
   async #handleSendMessage(connection: Connection, request: ClientRequest<"send_message">): Promise<void> {
+    if (this.#shuttingDown) {
+      throw new Error("ScorelHost is shutting down");
+    }
     const lane = await this.#getLane(request.sessionId);
     if (lane.runtime.running) {
       const runningBehavior = request.options?.runningBehavior ?? "follow_up";
@@ -1053,6 +1062,9 @@ export class ScorelHost {
       }
       await this.#enqueueFollowUp(lane, connection, request);
       return;
+    }
+    if (request.options?.runningBehavior === "steer") {
+      throw new Error("Cannot steer an idle session");
     }
 
     lane.queue = lane.queue.then(async () => {
@@ -1102,9 +1114,16 @@ export class ScorelHost {
       onComplete?: (result: Required<Pick<ClientRequestMap["send_message"]["response"], "userEventId" | "assistantEventId">>) => void;
     },
   ): Promise<ClientRequestMap["send_message"]["response"]> {
+    if (this.#shuttingDown) {
+      throw new Error("ScorelHost is shutting down");
+    }
     this.#lastActiveWorkAt = this.#now();
     const sessionId = lane.session.header.sessionId;
     await this.#selectChatRuntime(lane, clientId, input.modelSelection);
+    if (this.#shuttingDown) {
+      await lane.runtime.terminateActiveToolWork();
+      throw new Error("ScorelHost is shutting down");
+    }
     await this.#appendDiagnostic(sessionId, "send_message_started", {
       clientId,
       activeLeafId: lane.session.activeLeafId,
@@ -1159,6 +1178,12 @@ export class ScorelHost {
     try {
       await this.#executeRuntimeLoop(lane, clientId, state, userEvent.id, instructionSnapshot);
     } finally {
+      if (lane.session.tree.controlState.queues.steer.length > 0) {
+        await this.#appendQueueRewrite(lane, "steer", [], {
+          clientId,
+          anchorEventId: state.parentId,
+        });
+      }
       lane.channelContext = undefined;
       lane.snipClientId = undefined;
       lane.runtime.unregisterTool("SendChannelMessage");
@@ -1205,9 +1230,16 @@ export class ScorelHost {
   }
 
   async #runSystemReminderTurn(lane: SessionLane, clientId: ClientId, reminderEventId: EventId): Promise<void> {
+    if (this.#shuttingDown) {
+      return;
+    }
     this.#lastActiveWorkAt = this.#now();
     const sessionId = lane.session.header.sessionId;
     await this.#selectChatRuntime(lane, clientId, undefined);
+    if (this.#shuttingDown) {
+      await lane.runtime.terminateActiveToolWork();
+      return;
+    }
     await this.#appendDiagnostic(sessionId, "system_reminder_turn_started", {
       clientId,
       reminderEventId,

@@ -82,6 +82,10 @@ export class ScorelRuntime {
     await Promise.all([...this.#tools.values()].map((tool) => tool.detach?.()));
   }
 
+  async terminateActiveToolWork(): Promise<void> {
+    await Promise.all([...this.#tools.values()].map((tool) => tool.terminate?.()));
+  }
+
   cancel(): void {
     this.#controller?.abort();
   }
@@ -158,52 +162,68 @@ export class ScorelRuntime {
 
     yield { type: "message_start", role: "assistant" };
 
-    try {
-      const stream = this.#provider.streamTurn({
-        context,
-        systemPrompt,
-        tools: [...this.#tools.values()],
-        signal,
-        options,
-      });
+    providerAttempts: for (let attempt = 0; ; attempt += 1) {
+      try {
+        const stream = this.#provider.streamTurn({
+          context,
+          systemPrompt,
+          tools: [...this.#tools.values()],
+          signal,
+          options,
+        });
 
-      while (true) {
-        if (signal.aborted) {
-          break;
-        }
-
-        const next = await stream.next();
-        if (next.done) {
-          const message = normalizeAssistantMessage(next.value, { thinking, text }, signal.aborted ? "cancelled" : "end_turn");
-          if (message) {
-            yield { type: "message_end", message };
+        while (true) {
+          if (signal.aborted) {
+            break;
           }
-          return { message, stopReason: message?.stopReason ?? "end_turn" };
+
+          const next = await stream.next();
+          if (next.done) {
+            const message = normalizeAssistantMessage(next.value, { thinking, text }, signal.aborted ? "cancelled" : "end_turn");
+            if (
+              attempt === 0
+              && thinking.length > 0
+              && text.length === 0
+              && !signal.aborted
+              && isPrematureStreamMessage(message)
+            ) {
+              thinking = "";
+              continue providerAttempts;
+            }
+            if (message) {
+              yield { type: "message_end", message };
+            }
+            return { message, stopReason: message?.stopReason ?? "end_turn" };
+          }
+
+          if (next.value.type === "text_delta") {
+            text += next.value.delta;
+            yield next.value;
+          } else if (next.value.type === "thinking_delta") {
+            thinking += next.value.delta;
+            yield next.value;
+          }
         }
 
-        if (next.value.type === "text_delta") {
-          text += next.value.delta;
-          yield next.value;
-        } else if (next.value.type === "thinking_delta") {
-          thinking += next.value.delta;
-          yield next.value;
+        const cancelledMessage = partialAssistantMessage({ thinking, text }, "cancelled");
+        if (cancelledMessage) {
+          yield { type: "message_end", message: cancelledMessage };
         }
+        return { stopReason: "cancelled" };
+      } catch (cause) {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        if (attempt === 0 && thinking.length > 0 && text.length === 0 && !signal.aborted && isPrematureStreamEnd(error)) {
+          thinking = "";
+          continue;
+        }
+        const partial = partialAssistantMessage({ thinking, text }, "error");
+        if (partial) {
+          yield { type: "message_end", message: partial };
+        }
+        yield { type: "error", error };
+        yield { type: "turn_end", stopReason: "error" };
+        return { finished: true };
       }
-
-      const cancelledMessage = partialAssistantMessage({ thinking, text }, "cancelled");
-      if (cancelledMessage) {
-        yield { type: "message_end", message: cancelledMessage };
-      }
-      return { stopReason: "cancelled" };
-    } catch (cause) {
-      const error = cause instanceof Error ? cause : new Error(String(cause));
-      const partial = partialAssistantMessage({ thinking, text }, "error");
-      if (partial) {
-        yield { type: "message_end", message: partial };
-      }
-      yield { type: "error", error };
-      yield { type: "turn_end", stopReason: "error" };
-      return { finished: true };
     }
   }
 
@@ -256,6 +276,15 @@ export class ScorelRuntime {
     };
   }
 }
+
+const isPrematureStreamEnd = (error: Error): boolean =>
+  error.message.includes("Stream ended without finish_reason");
+
+const isPrematureStreamMessage = (message: (ScorelMessage & { role: "assistant" }) | undefined): boolean =>
+  message?.stopReason === "error"
+  && message.meta?.api === "openai-completions"
+  && typeof message.meta.errorMessage === "string"
+  && message.meta.errorMessage.includes("Stream ended without finish_reason");
 
 const toolResultForContext = (result: ToolResult): ToolResult => ({
   content: result.content,

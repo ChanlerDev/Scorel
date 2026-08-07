@@ -47,6 +47,7 @@ export type BackgroundBashDeliveryHooks = {
 export type BackgroundBashRegistry = {
   hasActiveWork(): boolean;
   detach(): Promise<void>;
+  terminate(): Promise<void>;
   start(input: StartBashInput): Promise<BashTaskResult>;
   interact(input: InteractBashInput): Promise<BashTaskResult>;
   stop(taskId: string): Promise<ToolResult>;
@@ -426,6 +427,7 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
       },
       hasActiveWork: () => bashRegistry.hasActiveWork(),
       detach: () => bashRegistry.detach(),
+      terminate: () => bashRegistry.terminate(),
     }),
     defineTool({
       name: "BashStop",
@@ -995,7 +997,31 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
         }
       }
     },
+    async terminate() {
+      detaching = true;
+      await Promise.allSettled([...tasks.values()].flatMap((task) => task.deliveryPromise ? [task.deliveryPromise] : []));
+      const registered = [...tasks.values()];
+      for (const task of registered) {
+        if (processGroupExists(task.pid)) {
+          stopTaskProcess(task, "SIGTERM");
+        }
+      }
+      await Promise.all(registered.filter((task) => !task.completed).map((task) => waitForTask(task, 1_000)));
+      for (const task of registered) {
+        if (processGroupExists(task.pid)) {
+          stopTaskProcess(task, "SIGKILL");
+          await waitForProcessGroupExit(task.pid, 1_000);
+        }
+      }
+      tasks.clear();
+      if (logDir) {
+        rmSync(logDir, { recursive: true, force: true });
+      }
+    },
     async start(input) {
+      if (detaching) {
+        throw new Error("Bash registry is shutting down");
+      }
       const taskId = `task_${randomUUID()}`;
       logDir ??= mkdtempSync(join(tmpdir(), "scorel-bash-"));
       const stdoutPath = join(logDir, `${taskId}.stdout`);
@@ -1042,7 +1068,7 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
         markCompleted(task, 1);
       });
       const abort = () => {
-        stopTaskProcess(task);
+        stopTaskProcess(task, "SIGTERM");
       };
       if (input.signal.aborted) {
         abort();
@@ -1084,8 +1110,12 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
         throw new Error(`Unknown Bash task: ${taskId}`);
       }
       if (!task.completed) {
-        stopTaskProcess(task);
+        stopTaskProcess(task, "SIGTERM");
         await waitForTask(task, 1_000);
+      }
+      if (processGroupExists(task.pid)) {
+        stopTaskProcess(task, "SIGKILL");
+        await waitForProcessGroupExit(task.pid, 1_000);
       }
       return textResult(`Bash task stopped: ${taskId}`, {
         task_id: taskId,
@@ -1162,16 +1192,35 @@ const waitForTask = (task: BashTask, waitMs: number): Promise<void> =>
     task.child.once("error", onDone);
   });
 
-const stopTaskProcess = (task: BashTask): void => {
+const stopTaskProcess = (task: BashTask, signal: NodeJS.Signals): void => {
   try {
     if (task.pid > 0) {
-      process.kill(-task.pid, "SIGTERM");
+      process.kill(-task.pid, signal);
       return;
     }
   } catch {
     // Fall back to the direct child below.
   }
-  task.child.kill("SIGTERM");
+  task.child.kill(signal);
+};
+
+const processGroupExists = (pid: number): boolean => {
+  if (pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const waitForProcessGroupExit = async (pid: number, waitMs: number): Promise<void> => {
+  const deadline = Date.now() + waitMs;
+  while (processGroupExists(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 };
 
 const signalExitCode = (signal: NodeJS.Signals | null): number => signal ? 128 + signalNumber(signal) : 1;
