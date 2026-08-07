@@ -47,7 +47,6 @@ export type BackgroundBashDeliveryHooks = {
 export type BackgroundBashRegistry = {
   hasActiveWork(): boolean;
   detach(): Promise<void>;
-  terminate(): Promise<void>;
   start(input: StartBashInput): Promise<BashTaskResult>;
   interact(input: InteractBashInput): Promise<BashTaskResult>;
   stop(taskId: string): Promise<ToolResult>;
@@ -427,7 +426,6 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
       },
       hasActiveWork: () => bashRegistry.hasActiveWork(),
       detach: () => bashRegistry.detach(),
-      terminate: () => bashRegistry.terminate(),
     }),
     defineTool({
       name: "BashStop",
@@ -995,27 +993,6 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
         } catch {
           // Detached children retain their open file descriptors until they exit.
         }
-      }
-    },
-    async terminate() {
-      detaching = true;
-      await Promise.allSettled([...tasks.values()].flatMap((task) => task.deliveryPromise ? [task.deliveryPromise] : []));
-      const registered = [...tasks.values()];
-      for (const task of registered) {
-        if (processGroupExists(task.pid)) {
-          stopTaskProcess(task, "SIGTERM");
-        }
-      }
-      await Promise.all(registered.filter((task) => !task.completed).map((task) => waitForTask(task, 1_000)));
-      for (const task of registered) {
-        if (processGroupExists(task.pid)) {
-          stopTaskProcess(task, "SIGKILL");
-          await waitForProcessGroupExit(task.pid, 1_000);
-        }
-      }
-      tasks.clear();
-      if (logDir) {
-        rmSync(logDir, { recursive: true, force: true });
       }
     },
     async start(input) {

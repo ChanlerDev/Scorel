@@ -82,10 +82,6 @@ export class ScorelRuntime {
     await Promise.all([...this.#tools.values()].map((tool) => tool.detach?.()));
   }
 
-  async terminateActiveToolWork(): Promise<void> {
-    await Promise.all([...this.#tools.values()].map((tool) => tool.terminate?.()));
-  }
-
   cancel(): void {
     this.#controller?.abort();
   }

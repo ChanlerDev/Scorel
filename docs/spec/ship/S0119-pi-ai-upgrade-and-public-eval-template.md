@@ -17,9 +17,8 @@ safe and convenient for other users to run with their own provider connection.
   emits visible answer text; never accept a truncated stream as complete.
 - Use current official GPT-5.6 and Claude 5 prices, including cache writes and
   GPT-5.6 per-request long-context tiers.
-- Terminate Background Bash process groups on ordinary Host shutdown while
-  preserving them only for the explicit headless verifier handoff.
-- Warn timed headless runs to finalize their best artifact before the deadline.
+- Keep detached Background Bash process groups alive across Host shutdown so
+  long-running services remain available until they exit or are explicitly stopped.
 - Publish an ignored `.env` workflow with a placeholder-only `.env.example`.
 - Publish a Terminal-Bench launcher with configurable dataset, sandbox,
   attempts, concurrency, model, protocol, and reasoning effort.

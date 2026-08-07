@@ -961,8 +961,6 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
     clientId: asClientId("client_cli_run"),
   });
   let unsubscribe: (() => void) | undefined;
-  let finalizationTimer: NodeJS.Timeout | undefined;
-  let runInFlight = false;
 
   try {
     await daemon.start();
@@ -979,12 +977,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
       }
       renderRunEvent(options, io, event);
     });
-    runInFlight = true;
-    const send = client.sendMessage(prompt, options.modelSelection ? { modelSelection: options.modelSelection } : undefined)
-      .finally(() => {
-        runInFlight = false;
-      });
-    finalizationTimer = scheduleRunFinalizationReminder(client, options.timeoutMs, () => runInFlight);
+    const send = client.sendMessage(prompt, options.modelSelection ? { modelSelection: options.modelSelection } : undefined);
     const result = options.timeoutMs === undefined
       ? await send
       : await withRunTimeout(send, options.timeoutMs, async () => {
@@ -1029,35 +1022,10 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
     }
     return isTimeout ? 124 : 1;
   } finally {
-    if (finalizationTimer) {
-      clearTimeout(finalizationTimer);
-    }
     unsubscribe?.();
     client.disconnect();
-    await daemon.shutdown({ preserveBackgroundTasks: true });
+    await daemon.shutdown();
   }
-};
-
-const RUN_FINALIZATION_MARGIN_MS = 20 * 60 * 1_000;
-
-const scheduleRunFinalizationReminder = (
-  client: DaemonClient,
-  timeoutMs: number | undefined,
-  isRunInFlight: () => boolean,
-): NodeJS.Timeout | undefined => {
-  if (timeoutMs === undefined || timeoutMs <= RUN_FINALIZATION_MARGIN_MS) {
-    return undefined;
-  }
-  return setTimeout(() => {
-    if (!isRunInFlight()) {
-      return;
-    }
-    void client.sendMessage([
-      "The run deadline is in 20 minutes.",
-      "Stop starting new experiments or long-running background tasks.",
-      "Preserve the best valid artifact now, run only final checks that fit within the remaining time, and provide the final answer before the deadline.",
-    ].join(" "), { runningBehavior: "steer" }).catch(() => undefined);
-  }, timeoutMs - RUN_FINALIZATION_MARGIN_MS);
 };
 
 const renderRunEvent = (options: RunOptions, io: CliIo, event: ScorelEvent): void => {

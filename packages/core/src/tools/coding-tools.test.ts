@@ -458,24 +458,6 @@ describe("coding tools", () => {
     }
   });
 
-  it("terminates background Bash process groups during normal shutdown", async () => {
-    const cwd = await tempRoot();
-    const tools = createCodingTools({ cwd });
-    const bash = tools.find((tool) => tool.name === "Bash")!;
-    const started = await bash.execute(
-      "call_terminate_bash",
-      { command: `${JSON.stringify(process.execPath)} -e "setInterval(() => {}, 1000)"`, wait_time: 0.01 },
-      new AbortController().signal,
-      () => undefined,
-    );
-    const pid = (started.details as { pid?: number }).pid!;
-
-    await bash.terminate?.();
-
-    expect(bash.hasActiveWork?.()).toBe(false);
-    expect(() => process.kill(pid, 0)).toThrow();
-  });
-
   it("archives oversized Bash results while returning one budgeted head/tail projection", async () => {
     const cwd = await tempRoot();
     const artifactDir = join(cwd, ".scorel", "sessions", "ses_artifacts.artifacts");
