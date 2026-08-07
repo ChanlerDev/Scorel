@@ -9,7 +9,7 @@ import json
 import shlex
 from typing import Any, override
 
-from harbor.agents.installed.base import BaseInstalledAgent, CliFlag
+from harbor.agents.installed.base import BaseInstalledAgent, CliFlag, NonZeroAgentExitCodeError
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.trial.paths import EnvironmentPaths
@@ -23,8 +23,9 @@ PROVIDER_APIS = [
     "google-generative-ai",
     "anthropic-messages",
 ]
-SCOREL_TIMEOUT_MS = 3_300_000
-AGENT_COMMAND_TIMEOUT_SEC = 3_600
+SCOREL_TIMEOUT_MS = 10_800_000
+SCOREL_PROCESS_TIMEOUT_SEC = 11_100
+AGENT_COMMAND_TIMEOUT_SEC = 11_400
 
 
 class ScorelAgent(BaseInstalledAgent):
@@ -122,7 +123,7 @@ set -euo pipefail
 mkdir -p {shlex.quote(str(state_dir))} {shlex.quote(str(report_dir))} {shlex.quote(str(paths.agent_dir))}
 printf %s {shlex.quote(instruction_b64)} | base64 -d > {shlex.quote(str(state_dir / "instruction.txt"))}
 set +e
-scorel run \
+timeout --signal=TERM --kill-after=30s {SCOREL_PROCESS_TIMEOUT_SEC}s scorel run \
   --prompt-file {shlex.quote(str(state_dir / "instruction.txt"))} \
   --cwd "$PWD" \
   --state-dir {shlex.quote(str(state_dir))} \
@@ -144,8 +145,9 @@ import json, sys
 source_path, target_path, model_id, effort = sys.argv[1:]
 try:
     source = json.load(open(source_path, encoding="utf-8"))
-except (OSError, json.JSONDecodeError):
-    source = {{}}
+except (OSError, json.JSONDecodeError) as error:
+    print(f"Unable to read Scorel trajectory: {{error}}", file=sys.stderr)
+    raise SystemExit(1)
 steps = []
 for event in source.get("events", []):
     kind = event.get("type")
@@ -176,7 +178,8 @@ trajectory = {{
     "agent": {{"name": "scorel", "version": "unknown", "model_name": model_id, "extra": {{"reasoning_effort": effort or None}}}},
     "steps": steps,
     "final_metrics": {{
-        "total_prompt_tokens": usage.get("inputTokens"),
+        "total_prompt_tokens": (usage.get("inputTokens") or 0) + (usage.get("cacheReadTokens") or 0),
+        "total_cached_tokens": usage.get("cacheReadTokens"),
         "total_completion_tokens": usage.get("outputTokens"),
         "total_cost_usd": cost.get("total") if cost.get("known") is True else None,
         "total_steps": len(steps),
@@ -187,21 +190,29 @@ with open(target_path, "w", encoding="utf-8") as output:
 PY
 CONVERTER_EXIT=$?
 set -e
-cat {shlex.quote(str(summary_path))} 2>/dev/null || true
-if [ "$SCOREL_EXIT" -ne 0 ]; then exit "$SCOREL_EXIT"; fi
-exit "$CONVERTER_EXIT"
+python3 - {shlex.quote(str(summary_path))} "$SCOREL_EXIT" "$CONVERTER_EXIT" <<'PY'
+import json, sys
+summary_path, scorel_exit, converter_exit = sys.argv[1:]
+try:
+    summary = json.load(open(summary_path, encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    summary = {{}}
+print(json.dumps({{"summary": summary, "scorel_exit": int(scorel_exit), "converter_exit": int(converter_exit)}}))
+PY
 """
         result = await self.exec_as_agent(
             environment,
             command=command,
             timeout_sec=AGENT_COMMAND_TIMEOUT_SEC,
         )
-        summary = _parse_summary(getattr(result, "stdout", ""))
+        envelope = _parse_summary(getattr(result, "stdout", ""))
+        summary = envelope.get("summary") if isinstance(envelope.get("summary"), dict) else {}
         usage = summary.get("usage") if isinstance(summary.get("usage"), dict) else {}
         cost = summary.get("cost") if isinstance(summary.get("cost"), dict) else {}
-        context.n_input_tokens = int(usage.get("inputTokens") or 0)
+        cache_read_tokens = int(usage.get("cacheReadTokens") or 0)
+        context.n_input_tokens = int(usage.get("inputTokens") or 0) + cache_read_tokens
         context.n_output_tokens = int(usage.get("outputTokens") or 0)
-        context.n_cache_tokens = 0
+        context.n_cache_tokens = cache_read_tokens
         context.cost_usd = (
             float(cost.get("total") or 0) if cost.get("known") is True else 0.0
         )
@@ -212,8 +223,17 @@ exit "$CONVERTER_EXIT"
             "scorel_report_dir": str(report_dir),
             "scorel_trajectory_path": str(report_dir / "scorel-trajectory.json"),
             "harbor_trajectory_path": str(trajectory_path),
-            "return_code": getattr(result, "return_code", None),
+            "return_code": envelope.get("scorel_exit"),
+            "converter_return_code": envelope.get("converter_exit"),
         }
+        scorel_exit = int(envelope.get("scorel_exit") or 0)
+        converter_exit = int(envelope.get("converter_exit") or 0)
+        if summary.get("status") == "completed" and converter_exit == 0:
+            return
+        raise NonZeroAgentExitCodeError(
+            f"Scorel status is {summary.get('status')!r}; exited with code {scorel_exit}; "
+            f"trajectory converter exited with code {converter_exit}"
+        )
 
 
 def _parse_summary(output: str | bytes | None) -> dict[str, Any]:

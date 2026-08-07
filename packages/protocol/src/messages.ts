@@ -65,6 +65,8 @@ export type ContentBlock =
 export type Usage = {
   inputTokens?: number;
   outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
   totalTokens?: number;
 };
 

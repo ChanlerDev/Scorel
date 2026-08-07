@@ -668,6 +668,7 @@ export class ScorelHost {
   #hadClientConnection = false;
   #lastActiveWorkAt: number;
   #started = false;
+  #shuttingDown = false;
 
   constructor(options: ScorelHostOptions) {
     this.#sessionsDir = options.sessionsDir;
@@ -695,6 +696,7 @@ export class ScorelHost {
   }
 
   async start(): Promise<void> {
+    this.#shuttingDown = false;
     this.#started = true;
     await mkdir(this.#scorelHomeDir, { recursive: true });
     await this.#loadImBindings();
@@ -702,12 +704,14 @@ export class ScorelHost {
   }
 
   async shutdown(): Promise<void> {
+    this.#shuttingDown = true;
     for (const schedule of this.#memoryDreams.values()) {
       if (schedule.timer) {
         clearTimeout(schedule.timer);
       }
     }
     this.#memoryDreams.clear();
+    await Promise.all([...this.#sessions.values()].map((lane) => lane.runtime.detachActiveToolWork()));
     await this.#stopImExtensions();
     this.#connections.clear();
     this.#hadClientConnection = false;
@@ -1269,6 +1273,9 @@ export class ScorelHost {
     sessionId: SessionId,
     completion: BackgroundBashCompletion,
   ): Promise<{ eventId?: string } | void> {
+    if (this.#shuttingDown) {
+      return undefined;
+    }
     const lane = this.#sessions.get(sessionId);
     if (!lane) {
       return undefined;
@@ -1315,7 +1322,7 @@ export class ScorelHost {
       harnessEventId: event.id,
       runtimeRunning: lane.runtime.running,
     });
-    if (!lane.runtime.running) {
+    if (!this.#shuttingDown && !lane.runtime.running) {
       lane.queue = lane.queue.then(() => this.#runSystemReminderTurn(lane, clientId, event.id));
       void lane.queue.catch((cause) => {
         const error = cause instanceof Error ? cause : new Error(String(cause));

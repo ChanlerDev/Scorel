@@ -59,6 +59,8 @@ export type OtelDeltaPayload = {
   metrics: {
     inputTokens: number;
     outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
     totalTokens: number;
     eventCount: number;
   };
@@ -305,7 +307,7 @@ export const buildOtelDeltaPayload = (
       }
       return total;
     },
-    { inputTokens: 0, outputTokens: 0, totalTokens: 0, eventCount: events.length },
+    { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, eventCount: events.length },
   );
   const toSeq = events.reduce((max, event) => Math.max(max, Number(event.seq)), lastExportedSeq);
   return {
@@ -401,6 +403,8 @@ export const buildOtelSyncPayload = (
                 dataPoints: [
                   tokenDataPoint("input", metrics.inputTokens, timeUnixNano, asset.assetId),
                   tokenDataPoint("output", metrics.outputTokens, timeUnixNano, asset.assetId),
+                  tokenDataPoint("cache_read", metrics.cacheReadTokens, timeUnixNano, asset.assetId),
+                  tokenDataPoint("cache_write", metrics.cacheWriteTokens, timeUnixNano, asset.assetId),
                   tokenDataPoint("total", metrics.totalTokens, timeUnixNano, asset.assetId),
                 ],
               },
@@ -636,11 +640,13 @@ const langfuseTags = (asset: ObservationAsset): string[] => [
 const scorelRelease = (): string | undefined =>
   stringValue(process.env.SCOREL_RELEASE) ?? stringValue(process.env.npm_package_version);
 
-const usageDetailsFromUsage = (usage: Usage | undefined): { input: number; output: number; total: number } => {
+const usageDetailsFromUsage = (usage: Usage | undefined): { input: number; output: number; cache_read: number; cache_write: number; total: number } => {
   const normalized = normalizeUsage(usage);
   return {
     input: normalized.inputTokens,
     output: normalized.outputTokens,
+    cache_read: normalized.cacheReadTokens,
+    cache_write: normalized.cacheWriteTokens,
     total: normalized.totalTokens,
   };
 };
@@ -731,6 +737,8 @@ const otelEventAttributes = (event: PersistentEvent): OtelAttribute[] => [
     ? [
       intAttribute("scorel.usage.input_tokens", normalizeUsage(event.message.usage).inputTokens),
       intAttribute("scorel.usage.output_tokens", normalizeUsage(event.message.usage).outputTokens),
+      intAttribute("scorel.usage.cache_read_tokens", normalizeUsage(event.message.usage).cacheReadTokens),
+      intAttribute("scorel.usage.cache_write_tokens", normalizeUsage(event.message.usage).cacheWriteTokens),
       intAttribute("scorel.usage.total_tokens", normalizeUsage(event.message.usage).totalTokens),
     ]
     : []),
@@ -772,15 +780,20 @@ const boolAttribute = (key: string, value: boolean): OtelAttribute => ({
   value: { boolValue: value },
 });
 
-const addUsage = (total: { inputTokens: number; outputTokens: number; totalTokens: number }, usage: Usage | undefined): void => {
+const addUsage = (total: Required<Usage>, usage: Usage | undefined): void => {
   total.inputTokens += nonNegativeInteger(usage?.inputTokens);
   total.outputTokens += nonNegativeInteger(usage?.outputTokens);
+  total.cacheReadTokens += nonNegativeInteger(usage?.cacheReadTokens);
+  total.cacheWriteTokens += nonNegativeInteger(usage?.cacheWriteTokens);
   const totalTokens = nonNegativeInteger(usage?.totalTokens);
-  total.totalTokens += totalTokens > 0 ? totalTokens : nonNegativeInteger(usage?.inputTokens) + nonNegativeInteger(usage?.outputTokens);
+  total.totalTokens += totalTokens > 0
+    ? totalTokens
+    : nonNegativeInteger(usage?.inputTokens) + nonNegativeInteger(usage?.cacheReadTokens)
+      + nonNegativeInteger(usage?.cacheWriteTokens) + nonNegativeInteger(usage?.outputTokens);
 };
 
 const normalizeUsage = (usage: Usage | undefined): Required<Usage> => {
-  const normalized = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  const normalized = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
   addUsage(normalized, usage);
   return normalized;
 };

@@ -143,6 +143,8 @@ type RunSummary = {
   usage: {
     inputTokens: number;
     outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
     totalTokens: number;
   };
   model?: RunReportingModel;

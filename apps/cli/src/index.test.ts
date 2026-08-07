@@ -326,7 +326,13 @@ describe("@scorel/app-cli", () => {
       expect(combinedReportText).not.toContain("direct-secret-reporting");
 
       const summary = JSON.parse(summaryText) as {
-        usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+        usage?: {
+          inputTokens?: number;
+          outputTokens?: number;
+          cacheReadTokens?: number;
+          cacheWriteTokens?: number;
+          totalTokens?: number;
+        };
         model?: { modelId?: string; providerModelId?: string; provider?: string; api?: string; reasoningEffort?: string };
         reasoningEffort?: string;
         cost?: {
@@ -340,7 +346,13 @@ describe("@scorel/app-cli", () => {
         };
         reports?: Record<string, string>;
       };
-      expect(summary.usage).toEqual({ inputTokens: 1200, outputTokens: 800, totalTokens: 2000 });
+      expect(summary.usage).toEqual({
+        inputTokens: 1200,
+        outputTokens: 800,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        totalTokens: 2000,
+      });
       expect(summary.model).toMatchObject({
         modelId: "gpt-4o-mini",
         providerModelId: "gpt-4o-mini",

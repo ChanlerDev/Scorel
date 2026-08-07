@@ -60,7 +60,7 @@ describe("observability sync assets", () => {
       message: {
         role: "assistant",
         content: [{ type: "text", text: "hi" }],
-        usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 25, cacheWriteTokens: 5, totalTokens: 180 },
         meta: { model: "gpt-4o-mini", provider: "openai", api: "openai-completions" },
       },
     });
@@ -86,7 +86,7 @@ describe("observability sync assets", () => {
       input: [{ role: "user", content: "hello" }],
       output: "hi",
       model: "gpt-4o-mini",
-      usageDetails: { input: 100, output: 50, total: 150 },
+      usageDetails: { input: 100, output: 50, cache_read: 25, cache_write: 5, total: 180 },
       costDetails: expect.any(Object),
       environment: "development",
     });
@@ -198,7 +198,7 @@ describe("observability sync assets", () => {
       message: {
         role: "assistant",
         content: [{ type: "text", text: "package read" }],
-        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 7, cacheWriteTokens: 3 },
       },
     });
 
@@ -250,20 +250,34 @@ describe("observability sync assets", () => {
       message: {
         role: "assistant",
         content: [{ type: "text", text: "hi" }],
-        usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 7, cacheWriteTokens: 3 },
       },
     });
 
     const asset = buildObservationAsset(session);
     const firstDelta = buildOtelDeltaPayload(asset, { target: "otel", assetId: asset.assetId, lastExportedSeq: 0 });
     expect(firstDelta.events.map((event) => event.seq)).toEqual([1, 2]);
-    expect(firstDelta.metrics).toEqual({ inputTokens: 10, outputTokens: 5, totalTokens: 15, eventCount: 2 });
+    expect(firstDelta.metrics).toEqual({
+      inputTokens: 10,
+      outputTokens: 5,
+      cacheReadTokens: 7,
+      cacheWriteTokens: 3,
+      totalTokens: 25,
+      eventCount: 2,
+    });
     await writeObservabilitySyncState(stateDir, "otel", asset.assetId, firstDelta.nextState);
 
     const state = await readObservabilitySyncState(stateDir, "otel", asset.assetId);
     const secondDelta = buildOtelDeltaPayload(asset, state);
     expect(secondDelta.events).toEqual([]);
-    expect(secondDelta.metrics).toEqual({ inputTokens: 0, outputTokens: 0, totalTokens: 0, eventCount: 0 });
+    expect(secondDelta.metrics).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 0,
+      eventCount: 0,
+    });
   });
 
   it("represents OpenTelemetry deltas as traces, metrics, and logs without raw message content", async () => {

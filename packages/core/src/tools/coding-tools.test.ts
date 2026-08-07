@@ -431,6 +431,33 @@ describe("coding tools", () => {
     expect(stopped.details).toMatchObject({ task_id: taskId, status: "stopped" });
   });
 
+  it("detaches background Bash pipes without stopping the child process", async () => {
+    const cwd = await tempRoot();
+    const tools = createCodingTools({ cwd });
+    const bash = tools.find((tool) => tool.name === "Bash")!;
+    const started = await bash.execute(
+      "call_detach_bash",
+      { command: `${JSON.stringify(process.execPath)} -e "setInterval(() => console.log('still running'), 20)"`, wait_time: 0.01 },
+      new AbortController().signal,
+      () => undefined,
+    );
+    const pid = (started.details as { pid?: number }).pid!;
+
+    try {
+      await bash.detach?.();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      expect(bash.hasActiveWork?.()).toBe(false);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    } finally {
+      try {
+        process.kill(-pid, "SIGTERM");
+      } catch {
+        // The detached process may finish between the assertion and cleanup.
+      }
+    }
+  });
+
   it("archives oversized Bash results while returning one budgeted head/tail projection", async () => {
     const cwd = await tempRoot();
     const artifactDir = join(cwd, ".scorel", "sessions", "ses_artifacts.artifacts");

@@ -138,8 +138,8 @@ const toPiMessage = (message: ScorelMessage): Message[] => {
         usage: {
           input: message.usage?.inputTokens ?? 0,
           output: message.usage?.outputTokens ?? 0,
-          cacheRead: 0,
-          cacheWrite: 0,
+          cacheRead: message.usage?.cacheReadTokens ?? 0,
+          cacheWrite: message.usage?.cacheWriteTokens ?? 0,
           totalTokens: message.usage?.totalTokens ?? 0,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
         },
@@ -298,6 +298,8 @@ const fromPiUsage = (usage: PiUsage | undefined): Usage | undefined => {
   return {
     inputTokens: usage.input,
     outputTokens: usage.output,
+    cacheReadTokens: usage.cacheRead,
+    cacheWriteTokens: usage.cacheWrite,
     totalTokens: usage.totalTokens,
   };
 };

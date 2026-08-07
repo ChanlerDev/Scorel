@@ -14,6 +14,8 @@ export type RunCostEstimate = {
   currency: "USD";
   input: number;
   output: number;
+  cacheRead: number;
+  cacheWrite: number;
   total: number;
   pricingSource: typeof SCOREL_PRICING_SOURCE;
   pricingModelId?: string;
@@ -29,6 +31,8 @@ export type RunObservation = {
 export type RunPrice = {
   inputUsdPerMillionTokens: number;
   outputUsdPerMillionTokens: number;
+  cacheReadUsdPerMillionTokens: number;
+  cacheWriteUsdPerMillionTokens: number;
   pricingModelId: string;
 };
 
@@ -38,6 +42,8 @@ const MODEL_PRICES: Record<string, RunPrice> = {
   ...modelPrices({
     "gpt-4o-mini": [0.15, 0.6],
     "gpt-4o": [2.5, 10],
+  }, { cacheReadMultiplier: 0.5, cacheWriteMultiplier: 0 }),
+  ...modelPrices({
     "gpt-5": [1.25, 10],
     "gpt-5-chat-latest": [1.25, 10],
     "gpt-5-codex": [1.25, 10],
@@ -62,7 +68,7 @@ const MODEL_PRICES: Record<string, RunPrice> = {
     "gpt-5.4-pro": [30, 180],
     "gpt-5.5": [5, 30],
     "gpt-5.5-pro": [30, 180],
-  }),
+  }, { cacheReadMultiplier: 0.1, cacheWriteMultiplier: 0 }),
   ...modelPrices({
     "claude-haiku-4-5": [1, 5],
     "claude-haiku-4-5-20251001": [1, 5],
@@ -80,10 +86,13 @@ const MODEL_PRICES: Record<string, RunPrice> = {
     "claude-opus-4-6": [5, 25],
     "claude-opus-4-7": [5, 25],
     "claude-opus-4-8": [5, 25],
-  }),
+  }, { cacheReadMultiplier: 0.1, cacheWriteMultiplier: 1.25 }),
   ...modelPrices({
     "deepseek-v4-flash": [0.14, 0.28],
     "deepseek-v4-pro": [0.435, 0.87],
+  }, {
+    cacheReadPrices: { "deepseek-v4-flash": 0.0028, "deepseek-v4-pro": 0.003625 },
+    cacheWriteMultiplier: 0,
   }),
   ...modelPrices({
     "gemini-3-pro-preview": [2, 12],
@@ -93,7 +102,7 @@ const MODEL_PRICES: Record<string, RunPrice> = {
     "gemini-3.1-flash-lite": [0.25, 1.5],
     "gemini-3.1-flash-lite-preview": [0.25, 1.5],
     "gemini-3.5-flash": [1.5, 9],
-  }),
+  }, { cacheReadMultiplier: 0.1, cacheWriteMultiplier: 0 }),
   ...modelPrices({
     "glm-4.5": [0.6, 2.2],
     "glm-4.5-air": [0.2, 1.1],
@@ -109,6 +118,24 @@ const MODEL_PRICES: Record<string, RunPrice> = {
     "glm-5.2": [1.4, 4.4],
     "glm-5-turbo": [1.2, 4],
     "glm-5v-turbo": [1.2, 4],
+  }, {
+    cacheReadPrices: {
+      "glm-4.5": 0.11,
+      "glm-4.5-air": 0.03,
+      "glm-4.5-flash": 0,
+      "glm-4.5v": 0,
+      "glm-4.6": 0.11,
+      "glm-4.6v": 0,
+      "glm-4.7": 0.11,
+      "glm-4.7-flash": 0,
+      "glm-4.7-flashx": 0.01,
+      "glm-5": 0.2,
+      "glm-5.1": 0.26,
+      "glm-5.2": 0.26,
+      "glm-5-turbo": 0.24,
+      "glm-5v-turbo": 0.24,
+    },
+    cacheWriteMultiplier: 0,
   }),
 };
 
@@ -128,7 +155,7 @@ export const buildObservation = (input: {
 export const buildRunObservation = buildObservation;
 
 export const aggregateUsage = (events: ScorelEvent[]): Required<Usage> => {
-  const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+  const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
   for (const event of events) {
     const messageUsage = event.type === "assistant_message" ? event.message.usage : event.type === "message_end" ? event.usage : undefined;
     if (!messageUsage) {
@@ -136,10 +163,12 @@ export const aggregateUsage = (events: ScorelEvent[]): Required<Usage> => {
     }
     usage.inputTokens += nonNegativeInteger(messageUsage.inputTokens);
     usage.outputTokens += nonNegativeInteger(messageUsage.outputTokens);
+    usage.cacheReadTokens += nonNegativeInteger(messageUsage.cacheReadTokens);
+    usage.cacheWriteTokens += nonNegativeInteger(messageUsage.cacheWriteTokens);
     usage.totalTokens += nonNegativeInteger(messageUsage.totalTokens);
   }
-  if (usage.totalTokens === 0 && (usage.inputTokens > 0 || usage.outputTokens > 0)) {
-    usage.totalTokens = usage.inputTokens + usage.outputTokens;
+  if (usage.totalTokens === 0 && Object.values(usage).some((value) => value > 0)) {
+    usage.totalTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.outputTokens;
   }
   return usage;
 };
@@ -152,6 +181,8 @@ export const estimateRunCost = (usage: Required<Usage>, model: RunReportingModel
       currency: "USD",
       input: 0,
       output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
       total: 0,
       pricingSource: SCOREL_PRICING_SOURCE,
       reason: "unknown_model_price",
@@ -159,12 +190,16 @@ export const estimateRunCost = (usage: Required<Usage>, model: RunReportingModel
   }
   const input = (usage.inputTokens / 1_000_000) * price.inputUsdPerMillionTokens;
   const output = (usage.outputTokens / 1_000_000) * price.outputUsdPerMillionTokens;
+  const cacheRead = (usage.cacheReadTokens / 1_000_000) * price.cacheReadUsdPerMillionTokens;
+  const cacheWrite = (usage.cacheWriteTokens / 1_000_000) * price.cacheWriteUsdPerMillionTokens;
   return {
     known: true,
     currency: "USD",
     input,
     output,
-    total: input + output,
+    cacheRead,
+    cacheWrite,
+    total: input + output + cacheRead + cacheWrite,
     pricingSource: SCOREL_PRICING_SOURCE,
     pricingModelId: price.pricingModelId,
   };
@@ -183,10 +218,24 @@ const modelPrice = (model: RunReportingModel | undefined): RunPrice | undefined 
   return undefined;
 };
 
-function modelPrices(prices: Record<string, [number, number]>): Record<string, RunPrice> {
+function modelPrices(
+  prices: Record<string, [number, number]>,
+  cache: {
+    cacheReadMultiplier?: number;
+    cacheReadPrices?: Record<string, number>;
+    cacheWriteMultiplier: number;
+  },
+): Record<string, RunPrice> {
   const entries: Record<string, RunPrice> = {};
   for (const [modelId, [inputUsdPerMillionTokens, outputUsdPerMillionTokens]] of Object.entries(prices)) {
-    entries[modelId] = { inputUsdPerMillionTokens, outputUsdPerMillionTokens, pricingModelId: modelId };
+    entries[modelId] = {
+      inputUsdPerMillionTokens,
+      outputUsdPerMillionTokens,
+      cacheReadUsdPerMillionTokens: cache.cacheReadPrices?.[modelId]
+        ?? inputUsdPerMillionTokens * (cache.cacheReadMultiplier ?? 0),
+      cacheWriteUsdPerMillionTokens: inputUsdPerMillionTokens * cache.cacheWriteMultiplier,
+      pricingModelId: modelId,
+    };
   }
   return entries;
 }

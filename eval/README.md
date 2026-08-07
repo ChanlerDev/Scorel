@@ -79,10 +79,10 @@ the selected value into its session header and run reports; the adapter also
 records it in Harbor `AgentContext.metadata` and ATIF agent steps.
 
 The default timeout multipliers allow up to 30 minutes for Daytona environment
-startup, 12 minutes for agent setup, and at least 60 minutes for agent
-execution. Scorel's own timeout is 55 minutes, leaving five minutes for report
-finalization, ATIF conversion, and artifact synchronization before the adapter
-command reaches its outer limit.
+startup, 12 minutes for agent setup, and at least 3 hours for agent execution.
+Scorel's own timeout is 3 hours. A shell deadline stops lingering child
+processes after 3 hours 5 minutes, leaving five minutes for ATIF conversion and
+artifact synchronization before the adapter command reaches its outer limit.
 
 For repeated local runs, keep secrets in ignored `eval/.env` rather than in a
 script. Copy the complete `.env.example` template, fill every required field,

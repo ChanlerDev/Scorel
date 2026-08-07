@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { closeSync, mkdtempSync, openSync, rmSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { userInfo } from "node:os";
-import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
+import { tmpdir, userInfo } from "node:os";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { Type } from "@earendil-works/pi-ai";
@@ -45,6 +46,7 @@ export type BackgroundBashDeliveryHooks = {
 
 export type BackgroundBashRegistry = {
   hasActiveWork(): boolean;
+  detach(): Promise<void>;
   start(input: StartBashInput): Promise<BashTaskResult>;
   interact(input: InteractBashInput): Promise<BashTaskResult>;
   stop(taskId: string): Promise<ToolResult>;
@@ -423,6 +425,7 @@ export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
         return projectBashTaskResult(result);
       },
       hasActiveWork: () => bashRegistry.hasActiveWork(),
+      detach: () => bashRegistry.detach(),
     }),
     defineTool({
       name: "BashStop",
@@ -879,15 +882,21 @@ const atomicWriteFile = async (path: string, content: string): Promise<void> => 
 
 export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBashDeliveryHooks } = {}): BackgroundBashRegistry => {
   const tasks = new Map<string, BashTask>();
+  let logDir: string | undefined;
+  let detaching = false;
 
   const finishResult = async (task: BashTask, toolCallId: string, outputLimit: number, artifactDir?: string): Promise<ToolResult> => {
+    const [stdout, fileStderr] = await Promise.all([
+      readFile(task.stdoutPath, "utf-8").catch(() => ""),
+      readFile(task.stderrPath, "utf-8").catch(() => ""),
+    ]);
     const rtkSavedTokens = task.rtk.executable
       ? await rtkSavedTokenDelta(task.rtk.executable, task.cwd, task.rtkGainBefore)
       : undefined;
     const result = await bashResult({
       exitCode: task.exitCode ?? 1,
-      stdout: task.stdout,
-      stderr: task.stderr,
+      stdout,
+      stderr: [fileStderr, task.internalStderr].filter(Boolean).join("\n"),
       cwd: task.cwd,
       outputLimit,
       artifactDir,
@@ -933,12 +942,12 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
   };
 
   const maybeDeliver = (task: BashTask): void => {
-    if (!task.completed || !task.returnedRunning || task.activeWaiters > 0 || task.deliveryStarted || !options.delivery?.onComplete) {
+    if (detaching || !task.completed || !task.returnedRunning || task.activeWaiters > 0 || task.deliveryStarted || !options.delivery?.onComplete) {
       return;
     }
     task.deliveryStarted = true;
     task.deliveryPromise = finishResult(task, task.toolCallId, task.outputLimit, task.artifactDir)
-      .then((result) => options.delivery?.onComplete?.({
+      .then((result) => detaching ? undefined : options.delivery?.onComplete?.({
         task_id: task.taskId,
         pid: task.pid,
         cwd: task.cwd,
@@ -951,7 +960,7 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
       })
       .catch((cause) => {
         task.deliveryStarted = false;
-        task.stderr += task.stderr ? `\n${errorMessage(cause)}` : errorMessage(cause);
+        task.internalStderr += task.internalStderr ? `\n${errorMessage(cause)}` : errorMessage(cause);
       });
   };
 
@@ -966,13 +975,44 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
     hasActiveWork() {
       return [...tasks.values()].some((task) => !task.completed);
     },
+    async detach() {
+      detaching = true;
+      await Promise.allSettled([...tasks.values()].flatMap((task) => task.deliveryPromise ? [task.deliveryPromise] : []));
+      for (const task of tasks.values()) {
+        if (task.completed) {
+          continue;
+        }
+        task.child.removeAllListeners();
+        task.child.stdin?.destroy();
+        task.child.unref();
+      }
+      tasks.clear();
+      if (logDir) {
+        try {
+          rmSync(logDir, { recursive: true, force: true });
+        } catch {
+          // Detached children retain their open file descriptors until they exit.
+        }
+      }
+    },
     async start(input) {
       const taskId = `task_${randomUUID()}`;
-      const child = spawn(input.shell, shellCommandArgs(input.shell, input.executionCommand), {
-        cwd: input.cwd,
-        detached: true,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      logDir ??= mkdtempSync(join(tmpdir(), "scorel-bash-"));
+      const stdoutPath = join(logDir, `${taskId}.stdout`);
+      const stderrPath = join(logDir, `${taskId}.stderr`);
+      const stdoutFd = openSync(stdoutPath, "w");
+      const stderrFd = openSync(stderrPath, "w");
+      let child: ChildProcess;
+      try {
+        child = spawn(input.shell, shellCommandArgs(input.shell, input.executionCommand), {
+          cwd: input.cwd,
+          detached: true,
+          stdio: ["pipe", stdoutFd, stderrFd],
+        });
+      } finally {
+        closeSync(stdoutFd);
+        closeSync(stderrFd);
+      }
       const task: BashTask = {
         taskId,
         child,
@@ -980,8 +1020,9 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
         cwd: input.cwd,
         shell: input.shell,
         displayCommand: input.displayCommand,
-        stdout: "",
-        stderr: "",
+        stdoutPath,
+        stderrPath,
+        internalStderr: "",
         completed: false,
         returnedRunning: false,
         activeWaiters: 0,
@@ -993,17 +1034,11 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
         rtkGainBefore: input.rtkGainBefore,
       };
       tasks.set(taskId, task);
-      child.stdout.on("data", (chunk) => {
-        task.stdout += chunk.toString();
-      });
-      child.stderr.on("data", (chunk) => {
-        task.stderr += chunk.toString();
-      });
       child.once("close", (code, signal) => {
         markCompleted(task, typeof code === "number" ? code : signalExitCode(signal), signal ?? undefined);
       });
       child.once("error", (error) => {
-        task.stderr += task.stderr ? `\n${error.message}` : error.message;
+        task.internalStderr += task.internalStderr ? `\n${error.message}` : error.message;
         markCompleted(task, 1);
       });
       const abort = () => {
@@ -1031,6 +1066,9 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
       if (input.command !== undefined) {
         if (task.completed) {
           throw new Error(`Bash task already completed: ${input.taskId}`);
+        }
+        if (!task.child.stdin) {
+          throw new Error(`Bash task stdin is unavailable: ${input.taskId}`);
         }
         task.child.stdin.write(input.command);
       }
@@ -1060,13 +1098,14 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
 
 type BashTask = {
   taskId: string;
-  child: ChildProcessWithoutNullStreams;
+  child: ChildProcess;
   pid: number;
   cwd: string;
   shell: string;
   displayCommand: string;
-  stdout: string;
-  stderr: string;
+  stdoutPath: string;
+  stderrPath: string;
+  internalStderr: string;
   completed: boolean;
   returnedRunning: boolean;
   activeWaiters: number;
