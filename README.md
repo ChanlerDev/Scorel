@@ -11,6 +11,7 @@ Scorel 是一个面向项目工作的 AI Agent Platform。
 | Benchmark | Scorel | Model | K | Cases | Trials | Mean reward | Pass@2 | Errors | Harbor |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
 | Terminal-Bench 2.1 | v0.0.9 | GPT-5.5 | 2 | 89 | 178 | 70.22% | 78.65% | 3 | [Results](https://hub.harborframework.com/jobs/d5a9df2c-318c-4fd1-b9aa-b7afdab6854f) |
+| Terminal-Bench 2.1 | v0.0.12 | DeepSeek V4 Flash | 1 | 89 | 89 | 78.65% | — | 2 | [Results](https://hub.harborframework.com/jobs/b34732f7-722c-4159-a6eb-c7ca598fbafc) |
 
 ## Quick Start
 
