@@ -998,6 +998,13 @@ describe("ScorelHost + embedded transport", () => {
       const rootMemory = await readFile(join(root, ".scorel", "memory", "MEMORY.md"), "utf8");
       return rootMemory.includes("messages assembly");
     });
+    // The memory files are written before the dream's final state update, so wait
+    // for the dream-state.json to reflect completion before querying the status.
+    await waitUntil(async () => {
+      const dreamState = await readFile(join(root, ".scorel", "memory", "projects", project.projectId, "dream-state.json"), "utf8");
+      const parsed = JSON.parse(dreamState) as { running?: boolean; dirty?: boolean };
+      return parsed.running === false && parsed.dirty === false;
+    });
     const completedStatus = waitForResponse(transport, "req_dream_status_completed");
     await transport.send({
       type: "get_memory_status",
