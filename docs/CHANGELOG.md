@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+## 0.0.13 - 2026-08-18
+
+### Highlights
+
+- Added Task and TaskStop subagent tools, enabling nested agents with isolated context and background execution.
+- Improved reliability of background tasks and usage reporting with cache token tracking and detach behavior on shutdown.
+
+### Changes
+
+- Added the Task tool (sync or background) and TaskStop tool for managing subagents.
+- Restructured session storage into per-session directories with an append-only event log and tool-results folder.
+- Updated pricing for GPT-5.6 and Claude 5 models, plus cache cost handling.
+- Background Bash process groups are now preserved across host shutdown for long-running services.
+- Headless CLI runs now send a finalization reminder 20 minutes before the timeout.
+
+### Fixes
+
+- Fixed a race condition in an embedded daemon test by waiting for dream-state completion.
+- Fixed loss of background tasks during shutdown by detaching them instead of killing.
+- Fixed premature stream termination in OpenAI-compatible reasoning streams with retry logic.
+- Improved reliability of evaluation uploads by uploading errored jobs and adding retries.
+
+### Breaking Changes
+
+- Session storage layout changed from flat files to directories ({sessionId}/events.jsonl).
+- Tool artifact storage changed to {sessionId}/tool-results/{random6char}.txt.
+- Removed the 'steer' running behavior; messages to idle sessions now follow default behavior.
+- Headless runs no longer receive a finalization reminder (removed in one change).
+
+### Verification
+
+- Tests added for Task/TaskStop and subagent storage paths.
+- Unit tests for pricing and cache token handling.
+- Tests for background process detach behavior.
+- Eval agent timeout and upload tests updated.
+
+### Internal
+
+- Added Orbit lifecycle hooks for Amp and switched to Grok 4.6 workspace mode.
+- Added a Grok 4.5 workspace plugin for Amp development.
+- Updated README with Terminal-Bench 2.1 benchmark result.
+
 ## 0.0.12 - 2026-08-02
 
 ### Highlights

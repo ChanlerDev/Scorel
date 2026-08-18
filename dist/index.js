@@ -1632,14 +1632,15 @@ var init_config = __esm({
 });
 
 // packages/core/src/tools/coding-tools.ts
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFile, spawn } from "node:child_process";
+import { closeSync, mkdtempSync, openSync, rmSync } from "node:fs";
 import { mkdir, readFile as readFile2, rename, rm, stat, writeFile } from "node:fs/promises";
-import { userInfo } from "node:os";
-import { basename, dirname, extname, isAbsolute, relative, resolve } from "node:path";
+import { tmpdir, userInfo } from "node:os";
+import { basename, dirname, extname, isAbsolute, join as join2, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Type } from "@earendil-works/pi-ai";
-var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, createBackgroundBashRegistry, projectBashTaskResult, waitForTask, stopTaskProcess, signalExitCode, signalNumber, bashResult, renderFullBashResult, writeBashArtifact, safeArtifactSegment, projectBashStreams, projectOutputStream, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord, shellQuote, shellCommandArgs, userShell, truncate, sliceBytes, textResult, byteLength, isExecError, errorMessage, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
+var execFileAsync, DEFAULT_SEARCH_LIMIT, DEFAULT_GREP_LIMIT, DEFAULT_READ_LIMIT, DEFAULT_CONTEXT_WINDOW, READ_TOKEN_BUDGET_RATIO, FULL_READ_TOKEN_BUDGET_RATIO, createCodingTools, parseReadArgs, parseWriteArgs, parseEditArgs, parseBashArgs, parseGlobArgs, parseGrepArgs, parseTodoWriteArgs, parseTodoItem, expectRecord, expectPath, expectString, optionalString, optionalNumber, optionalBoolean, snapshotFile, sameSnapshot, exists, isWithin, linesOf, IMAGE_EXTENSIONS, DOCUMENT_EXTENSIONS, BINARY_EXTENSIONS, assertReadableFileKind, assertTextBuffer, selectCompleteLinesWithinBudget, estimateTokens, renderReadLines, readTokenBudget, completeRanges, hasCompleteCoverage, mergeRanges, countOccurrences, atomicWriteFile, createBackgroundBashRegistry, projectBashTaskResult, waitForTask, stopTaskProcess, processGroupExists, waitForProcessGroupExit, signalExitCode, signalNumber, bashResult, renderFullBashResult, writeBashArtifact, shortToolResultId, projectBashStreams, projectOutputStream, resolveDefaultShell, resolveRtkCommand, rtkRewriteResult, executableRewriteCommand, readRtkGain, rtkSavedTokenDelta, withRtkSavings, nonNegativeInteger, isRecord, shellQuote, shellCommandArgs, userShell, truncate, sliceBytes, textResult, byteLength, isExecError, errorMessage, runRipgrep, splitOutput, vcsExcludes, grepArgs, splitGlobPatterns, paginate, toWorkspaceRelative, relativizeGrepLine, relativizeCountLine, sortPathsByMtime, formatPaginatedText, formatLimitSuffix, parseCountLines;
 var init_coding_tools = __esm({
   "packages/core/src/tools/coding-tools.ts"() {
     "use strict";
@@ -1654,7 +1655,7 @@ var init_coding_tools = __esm({
     createCodingTools = (options) => {
       const root = resolve(options.cwd);
       const state = { reads: /* @__PURE__ */ new Map(), todos: [] };
-      const defaultWaitMs = Math.max(0, (options.defaultWaitTimeSeconds ?? 60) * 1e3);
+      const defaultWaitMs = Math.max(0, (options.defaultWaitTimeSeconds ?? DEFAULT_BACKGROUND_WAIT_SECONDS) * 1e3);
       const maxOutputBytes = options.maxOutputBytes ?? 16e3;
       const normalReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, READ_TOKEN_BUDGET_RATIO);
       const fullReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, FULL_READ_TOKEN_BUDGET_RATIO);
@@ -1881,7 +1882,8 @@ String: ${input.old_string}`
             });
             return projectBashTaskResult(result);
           },
-          hasActiveWork: () => bashRegistry.hasActiveWork()
+          hasActiveWork: () => bashRegistry.hasActiveWork(),
+          detach: () => bashRegistry.detach()
         }),
         defineTool({
           name: "BashStop",
@@ -2285,12 +2287,18 @@ ${filenames.join("\n")}`,
     };
     createBackgroundBashRegistry = (options = {}) => {
       const tasks = /* @__PURE__ */ new Map();
+      let logDir;
+      let detaching = false;
       const finishResult = async (task, toolCallId, outputLimit, artifactDir) => {
+        const [stdout, fileStderr] = await Promise.all([
+          readFile2(task.stdoutPath, "utf-8").catch(() => ""),
+          readFile2(task.stderrPath, "utf-8").catch(() => "")
+        ]);
         const rtkSavedTokens = task.rtk.executable ? await rtkSavedTokenDelta(task.rtk.executable, task.cwd, task.rtkGainBefore) : void 0;
         const result = await bashResult({
           exitCode: task.exitCode ?? 1,
-          stdout: task.stdout,
-          stderr: task.stderr,
+          stdout,
+          stderr: [fileStderr, task.internalStderr].filter(Boolean).join("\n"),
           cwd: task.cwd,
           outputLimit,
           artifactDir,
@@ -2334,11 +2342,11 @@ ${filenames.join("\n")}`,
         };
       };
       const maybeDeliver = (task) => {
-        if (!task.completed || !task.returnedRunning || task.activeWaiters > 0 || task.deliveryStarted || !options.delivery?.onComplete) {
+        if (detaching || !task.completed || !task.returnedRunning || task.activeWaiters > 0 || task.deliveryStarted || !options.delivery?.onComplete) {
           return;
         }
         task.deliveryStarted = true;
-        task.deliveryPromise = finishResult(task, task.toolCallId, task.outputLimit, task.artifactDir).then((result) => options.delivery?.onComplete?.({
+        task.deliveryPromise = finishResult(task, task.toolCallId, task.outputLimit, task.artifactDir).then((result) => detaching ? void 0 : options.delivery?.onComplete?.({
           task_id: task.taskId,
           pid: task.pid,
           cwd: task.cwd,
@@ -2349,7 +2357,7 @@ ${filenames.join("\n")}`,
           }
         }).catch((cause) => {
           task.deliveryStarted = false;
-          task.stderr += task.stderr ? `
+          task.internalStderr += task.internalStderr ? `
 ${errorMessage(cause)}` : errorMessage(cause);
         });
       };
@@ -2363,13 +2371,49 @@ ${errorMessage(cause)}` : errorMessage(cause);
         hasActiveWork() {
           return [...tasks.values()].some((task) => !task.completed);
         },
+        async detach() {
+          detaching = true;
+          const running = [...tasks.values()].filter((task) => !task.completed);
+          await Promise.allSettled(running.map(async (task) => {
+            stopTaskProcess(task, "SIGTERM");
+            await waitForTask(task, 1e3);
+            if (processGroupExists(task.pid)) {
+              stopTaskProcess(task, "SIGKILL");
+              await waitForProcessGroupExit(task.pid, 1e3);
+            }
+            task.child.removeAllListeners();
+            task.child.stdin?.destroy();
+          }));
+          await Promise.allSettled([...tasks.values()].flatMap((task) => task.deliveryPromise ? [task.deliveryPromise] : []));
+          tasks.clear();
+          if (logDir) {
+            try {
+              rmSync(logDir, { recursive: true, force: true });
+            } catch {
+            }
+          }
+        },
         async start(input) {
+          if (detaching) {
+            throw new Error("Bash registry is shutting down");
+          }
           const taskId = `task_${randomUUID()}`;
-          const child = spawn(input.shell, shellCommandArgs(input.shell, input.executionCommand), {
-            cwd: input.cwd,
-            detached: true,
-            stdio: ["pipe", "pipe", "pipe"]
-          });
+          logDir ??= mkdtempSync(join2(tmpdir(), "scorel-bash-"));
+          const stdoutPath = join2(logDir, `${taskId}.stdout`);
+          const stderrPath = join2(logDir, `${taskId}.stderr`);
+          const stdoutFd = openSync(stdoutPath, "w");
+          const stderrFd = openSync(stderrPath, "w");
+          let child;
+          try {
+            child = spawn(input.shell, shellCommandArgs(input.shell, input.executionCommand), {
+              cwd: input.cwd,
+              detached: true,
+              stdio: ["pipe", stdoutFd, stderrFd]
+            });
+          } finally {
+            closeSync(stdoutFd);
+            closeSync(stderrFd);
+          }
           const task = {
             taskId,
             child,
@@ -2377,8 +2421,9 @@ ${errorMessage(cause)}` : errorMessage(cause);
             cwd: input.cwd,
             shell: input.shell,
             displayCommand: input.displayCommand,
-            stdout: "",
-            stderr: "",
+            stdoutPath,
+            stderrPath,
+            internalStderr: "",
             completed: false,
             returnedRunning: false,
             activeWaiters: 0,
@@ -2390,22 +2435,16 @@ ${errorMessage(cause)}` : errorMessage(cause);
             rtkGainBefore: input.rtkGainBefore
           };
           tasks.set(taskId, task);
-          child.stdout.on("data", (chunk) => {
-            task.stdout += chunk.toString();
-          });
-          child.stderr.on("data", (chunk) => {
-            task.stderr += chunk.toString();
-          });
           child.once("close", (code, signal) => {
             markCompleted(task, typeof code === "number" ? code : signalExitCode(signal), signal ?? void 0);
           });
           child.once("error", (error) => {
-            task.stderr += task.stderr ? `
+            task.internalStderr += task.internalStderr ? `
 ${error.message}` : error.message;
             markCompleted(task, 1);
           });
           const abort = () => {
-            stopTaskProcess(task);
+            stopTaskProcess(task, "SIGTERM");
           };
           if (input.signal.aborted) {
             abort();
@@ -2430,6 +2469,9 @@ ${error.message}` : error.message;
             if (task.completed) {
               throw new Error(`Bash task already completed: ${input.taskId}`);
             }
+            if (!task.child.stdin) {
+              throw new Error(`Bash task stdin is unavailable: ${input.taskId}`);
+            }
             task.child.stdin.write(input.command);
           }
           const result = await project(task, input.waitMs, input.toolCallId, input.outputLimit, input.artifactDir);
@@ -2444,8 +2486,12 @@ ${error.message}` : error.message;
             throw new Error(`Unknown Bash task: ${taskId}`);
           }
           if (!task.completed) {
-            stopTaskProcess(task);
+            stopTaskProcess(task, "SIGTERM");
             await waitForTask(task, 1e3);
+          }
+          if (processGroupExists(task.pid)) {
+            stopTaskProcess(task, "SIGKILL");
+            await waitForProcessGroupExit(task.pid, 1e3);
           }
           return textResult(`Bash task stopped: ${taskId}`, {
             task_id: taskId,
@@ -2495,15 +2541,32 @@ pid: ${result.pid}`, {
       task.child.once("close", onDone);
       task.child.once("error", onDone);
     });
-    stopTaskProcess = (task) => {
+    stopTaskProcess = (task, signal) => {
       try {
         if (task.pid > 0) {
-          process.kill(-task.pid, "SIGTERM");
+          process.kill(-task.pid, signal);
           return;
         }
       } catch {
       }
-      task.child.kill("SIGTERM");
+      task.child.kill(signal);
+    };
+    processGroupExists = (pid) => {
+      if (pid <= 0) {
+        return false;
+      }
+      try {
+        process.kill(-pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    waitForProcessGroupExit = async (pid, waitMs) => {
+      const deadline = Date.now() + waitMs;
+      while (processGroupExists(pid) && Date.now() < deadline) {
+        await new Promise((resolve7) => setTimeout(resolve7, 20));
+      }
     };
     signalExitCode = (signal) => signal ? 128 + signalNumber(signal) : 1;
     signalNumber = (signal) => {
@@ -2566,14 +2629,14 @@ stdout:
 ${input.stdout}
 stderr:
 ${input.stderr}`;
-    writeBashArtifact = async (artifactDir, toolCallId, content) => {
-      const directory = resolve(artifactDir, safeArtifactSegment(toolCallId));
-      await mkdir(directory, { recursive: true });
-      const path = resolve(directory, "result.txt");
+    writeBashArtifact = async (artifactDir, _toolCallId, content) => {
+      await mkdir(artifactDir, { recursive: true });
+      const id = shortToolResultId();
+      const path = resolve(artifactDir, `${id}.txt`);
       await writeFile(path, content, { encoding: "utf8", mode: 384 });
       return path;
     };
-    safeArtifactSegment = (value) => value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120) || "tool_call";
+    shortToolResultId = () => randomBytes(3).toString("hex");
     projectBashStreams = (stdout, stderr, maxBytes) => {
       const streams = [
         { label: "stdout", value: stdout },
@@ -2862,13 +2925,345 @@ ${value}` };
   }
 });
 
-// packages/core/src/tools/index.ts
+// packages/core/src/tools/subagent-tools.ts
 import { Type as Type2 } from "@earendil-works/pi-ai";
-var defineTool, createSnipTool, parseSnipToolInput, isRecord2;
+var createSubagentTools, finalAssistantText, terminalResult, isTerminal, waitForSnapshot, sleep, parseTaskArgs, textResult2, expectRecord2, expectString2;
+var init_subagent_tools = __esm({
+  "packages/core/src/tools/subagent-tools.ts"() {
+    "use strict";
+    init_tools();
+    createSubagentTools = (options) => {
+      const defaultWaitMs = Math.max(
+        0,
+        (options.defaultWaitTimeSeconds ?? DEFAULT_BACKGROUND_WAIT_SECONDS) * 1e3
+      );
+      const returnedRunning = /* @__PURE__ */ new Set();
+      const delivered = /* @__PURE__ */ new Map();
+      const activeWaiters = /* @__PURE__ */ new Map();
+      const trackWaiter = (taskId, delta) => {
+        const next = (activeWaiters.get(taskId) ?? 0) + delta;
+        if (next <= 0) {
+          activeWaiters.delete(taskId);
+        } else {
+          activeWaiters.set(taskId, next);
+        }
+      };
+      const maybeDeliver = (snapshot) => {
+        if (!returnedRunning.has(snapshot.taskId) || activeWaiters.has(snapshot.taskId) || delivered.has(snapshot.taskId) || !options.delivery?.onComplete) {
+          return;
+        }
+        if (snapshot.status !== "completed" && snapshot.status !== "failed" && snapshot.status !== "cancelled") {
+          return;
+        }
+        delivered.set(snapshot.taskId, void 0);
+        void options.delivery.onComplete({
+          task_id: snapshot.taskId,
+          child_session_id: snapshot.childSessionId,
+          description: snapshot.description,
+          status: snapshot.status,
+          result: snapshot.finalResult ?? snapshot.errorMessage ?? ""
+        }).then((delivery) => {
+          delivered.set(snapshot.taskId, delivery?.eventId);
+        }).catch(() => {
+          delivered.delete(snapshot.taskId);
+        });
+      };
+      const projectResult = (result) => {
+        if (result.status === "delivered") {
+          return textResult2(
+            [
+              `Subagent task ${result.taskId} has already been injected through a system reminder.`,
+              "Do not read it again unless the user explicitly asks for the raw result."
+            ].join("\n"),
+            {
+              status: "delivered",
+              task_id: result.taskId,
+              child_session_id: result.childSessionId,
+              description: result.description,
+              ...result.eventId ? { event_id: result.eventId } : {}
+            }
+          );
+        }
+        if (result.status === "completed") {
+          return textResult2(result.result, {
+            status: "completed",
+            task_id: result.taskId,
+            child_session_id: result.childSessionId,
+            description: result.description
+          });
+        }
+        if (result.status === "failed") {
+          return textResult2(result.errorMessage, {
+            status: "failed",
+            task_id: result.taskId,
+            ...result.childSessionId ? { child_session_id: result.childSessionId } : {},
+            description: result.description
+          });
+        }
+        if (result.status === "cancelled") {
+          return textResult2(result.result ?? `Subagent cancelled: ${result.taskId}`, {
+            status: "cancelled",
+            task_id: result.taskId,
+            ...result.childSessionId ? { child_session_id: result.childSessionId } : {},
+            description: result.description
+          });
+        }
+        return textResult2(
+          [
+            "status: running",
+            `task_id: ${result.taskId}`,
+            `child_session_id: ${result.childSessionId}`,
+            `description: ${result.description}`
+          ].join("\n"),
+          {
+            status: "running",
+            task_id: result.taskId,
+            child_session_id: result.childSessionId,
+            description: result.description
+          }
+        );
+      };
+      return [
+        defineTool({
+          name: "Task",
+          description: [
+            "Run a nested subagent with an isolated context window for a focused multi-step subtask.",
+            "The subagent starts from a fresh user message (your prompt) and does not inherit the parent conversation.",
+            "It gets coding tools in the same project workspace.",
+            "If the subagent does not finish within wait_time seconds, it continues in the background and returns a task_id.",
+            "Call Task again with task_id to wait (same wait_time semantics) for the final result.",
+            "Completed results always return only the subagent's last assistant message content \u2014 never the full child transcript.",
+            "Do not use nested Task tools inside a subagent (depth is limited to 1)."
+          ].join(" "),
+          parameters: Type2.Object({
+            prompt: Type2.Optional(Type2.String()),
+            description: Type2.Optional(Type2.String()),
+            wait_time: Type2.Optional(Type2.Number()),
+            task_id: Type2.Optional(Type2.String()),
+            role: Type2.Optional(Type2.Union([
+              Type2.Literal("primary"),
+              Type2.Literal("standard"),
+              Type2.Literal("auxiliary")
+            ]))
+          }),
+          execute: async (_toolCallId, args, signal) => {
+            const input = parseTaskArgs(args);
+            const waitMs = input.waitTimeSeconds === void 0 ? defaultWaitMs : Math.max(0, input.waitTimeSeconds * 1e3);
+            if (input.taskId) {
+              const existing = options.runner.get(input.taskId);
+              if (!existing) {
+                throw new Error(`Unknown Task: ${input.taskId}`);
+              }
+              if (delivered.has(input.taskId) && options.delivery?.isDeliveryVisible?.({
+                task_id: input.taskId,
+                eventId: delivered.get(input.taskId)
+              })) {
+                return projectResult({
+                  status: "delivered",
+                  taskId: existing.taskId,
+                  childSessionId: existing.childSessionId,
+                  description: existing.description,
+                  eventId: delivered.get(input.taskId)
+                });
+              }
+              trackWaiter(input.taskId, 1);
+              try {
+                const snapshot = await waitForSnapshot(options.runner, input.taskId, waitMs, signal);
+                if (!isTerminal(snapshot.status)) {
+                  returnedRunning.add(snapshot.taskId);
+                  return projectResult({
+                    status: "running",
+                    taskId: snapshot.taskId,
+                    childSessionId: snapshot.childSessionId,
+                    description: snapshot.description
+                  });
+                }
+                return projectResult(terminalResult(snapshot));
+              } finally {
+                trackWaiter(input.taskId, -1);
+                const latest = options.runner.get(input.taskId);
+                if (latest) {
+                  maybeDeliver(latest);
+                }
+              }
+            }
+            if (!input.prompt) {
+              throw new Error("Task requires prompt when task_id is not provided");
+            }
+            if (!input.description) {
+              throw new Error("Task requires description when starting a new subagent");
+            }
+            const started = await options.runner.start({
+              prompt: input.prompt,
+              description: input.description,
+              role: input.role ?? "standard",
+              signal,
+              onUpdate: (snapshot) => {
+                if (isTerminal(snapshot.status)) {
+                  maybeDeliver(snapshot);
+                }
+              }
+            });
+            trackWaiter(started.taskId, 1);
+            try {
+              const snapshot = await Promise.race([
+                started.done,
+                sleep(waitMs, signal).then(() => started.snapshot())
+              ]);
+              if (!isTerminal(snapshot.status)) {
+                returnedRunning.add(snapshot.taskId);
+                void started.done.then((finalSnapshot) => maybeDeliver(finalSnapshot));
+                return projectResult({
+                  status: "running",
+                  taskId: snapshot.taskId,
+                  childSessionId: snapshot.childSessionId,
+                  description: snapshot.description
+                });
+              }
+              return projectResult(terminalResult(snapshot));
+            } finally {
+              trackWaiter(started.taskId, -1);
+              const latest = options.runner.get(started.taskId);
+              if (latest) {
+                maybeDeliver(latest);
+              }
+            }
+          },
+          hasActiveWork: () => options.runner.hasActiveWork(),
+          detach: () => options.runner.detach()
+        }),
+        defineTool({
+          name: "TaskStop",
+          description: "Stop a running subagent by task_id. Prefer this over attempting to cancel child processes directly.",
+          parameters: Type2.Object({
+            task_id: Type2.String()
+          }),
+          execute: async (_toolCallId, args) => {
+            const input = expectRecord2(args);
+            const taskId = expectString2(input.task_id, "task_id");
+            const snapshot = await options.runner.stop(taskId);
+            return textResult2(`Subagent stopped: ${taskId}`, {
+              status: snapshot.status,
+              task_id: snapshot.taskId,
+              child_session_id: snapshot.childSessionId,
+              description: snapshot.description,
+              ...snapshot.finalResult ? { result: snapshot.finalResult } : {}
+            });
+          }
+        })
+      ];
+    };
+    finalAssistantText = (messages) => {
+      for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (message?.role !== "assistant") {
+          continue;
+        }
+        const text = message.content.filter((block) => block.type === "text").map((block) => block.text).join("").trim();
+        if (text) {
+          return text;
+        }
+      }
+      return void 0;
+    };
+    terminalResult = (snapshot) => {
+      if (snapshot.status === "completed") {
+        return {
+          status: "completed",
+          taskId: snapshot.taskId,
+          childSessionId: snapshot.childSessionId,
+          description: snapshot.description,
+          result: snapshot.finalResult ?? ""
+        };
+      }
+      if (snapshot.status === "cancelled") {
+        return {
+          status: "cancelled",
+          taskId: snapshot.taskId,
+          childSessionId: snapshot.childSessionId,
+          description: snapshot.description,
+          result: snapshot.finalResult
+        };
+      }
+      return {
+        status: "failed",
+        taskId: snapshot.taskId,
+        childSessionId: snapshot.childSessionId,
+        description: snapshot.description,
+        errorMessage: snapshot.errorMessage ?? "Subagent failed"
+      };
+    };
+    isTerminal = (status) => status === "completed" || status === "failed" || status === "cancelled";
+    waitForSnapshot = async (runner, taskId, waitMs, signal) => {
+      const startedAt = Date.now();
+      while (true) {
+        const snapshot = runner.get(taskId);
+        if (!snapshot) {
+          throw new Error(`Unknown Task: ${taskId}`);
+        }
+        if (isTerminal(snapshot.status) || waitMs <= 0 || Date.now() - startedAt >= waitMs || signal.aborted) {
+          return snapshot;
+        }
+        await sleep(Math.min(50, waitMs), signal);
+      }
+    };
+    sleep = (ms, signal) => new Promise((resolve7, reject) => {
+      if (ms <= 0) {
+        resolve7();
+        return;
+      }
+      if (signal?.aborted) {
+        reject(new Error("aborted"));
+        return;
+      }
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve7();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(new Error("aborted"));
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    parseTaskArgs = (args) => {
+      const input = expectRecord2(args);
+      return {
+        ...typeof input.prompt === "string" ? { prompt: input.prompt } : {},
+        ...typeof input.description === "string" ? { description: input.description } : {},
+        ...typeof input.task_id === "string" ? { taskId: input.task_id } : {},
+        ...typeof input.wait_time === "number" ? { waitTimeSeconds: input.wait_time } : {},
+        ...input.role === "primary" || input.role === "standard" || input.role === "auxiliary" ? { role: input.role } : {}
+      };
+    };
+    textResult2 = (text, details) => ({
+      content: [{ type: "text", text }],
+      ...details === void 0 ? {} : { details }
+    });
+    expectRecord2 = (value) => {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        throw new Error("expected object args");
+      }
+      return value;
+    };
+    expectString2 = (value, name) => {
+      if (typeof value !== "string" || value.length === 0) {
+        throw new Error(`${name} must be a non-empty string`);
+      }
+      return value;
+    };
+  }
+});
+
+// packages/core/src/tools/index.ts
+import { Type as Type3 } from "@earendil-works/pi-ai";
+var DEFAULT_BACKGROUND_WAIT_SECONDS, defineTool, createSnipTool, parseSnipToolInput, isRecord2;
 var init_tools = __esm({
   "packages/core/src/tools/index.ts"() {
     "use strict";
     init_coding_tools();
+    init_subagent_tools();
+    DEFAULT_BACKGROUND_WAIT_SECONDS = 120;
     defineTool = (tool) => tool;
     createSnipTool = (options) => defineTool({
       name: "snip",
@@ -2878,9 +3273,9 @@ var init_tools = __esm({
         "The session JSONL evidence is preserved; the hidden turn disappears from the next context build.",
         "Input: { userMessageId: string, reason?: string }."
       ].join(" "),
-      parameters: Type2.Object({
-        userMessageId: Type2.String(),
-        reason: Type2.Optional(Type2.String())
+      parameters: Type3.Object({
+        userMessageId: Type3.String(),
+        reason: Type3.Optional(Type3.String())
       }),
       execute: async (_toolCallId, args) => {
         const input = parseSnipToolInput(args);
@@ -2908,7 +3303,7 @@ var init_tools = __esm({
 });
 
 // packages/core/src/channel/index.ts
-import { Type as Type3 } from "@earendil-works/pi-ai";
+import { Type as Type4 } from "@earendil-works/pi-ai";
 var createSendChannelMessageTool, parseSendChannelMessageInput, parseAttachments, optionalString2, isRecord3;
 var init_channel = __esm({
   "packages/core/src/channel/index.ts"() {
@@ -2917,17 +3312,17 @@ var init_channel = __esm({
     createSendChannelMessageTool = (options) => defineTool({
       name: "SendChannelMessage",
       description: "Send a text reply to the current IM channel conversation. Do not provide raw platform user ids or group ids.",
-      parameters: Type3.Object({
-        text: Type3.Optional(Type3.String()),
-        attachments: Type3.Optional(Type3.Array(Type3.Object({
-          type: Type3.Union([Type3.Literal("image"), Type3.Literal("file")]),
-          path: Type3.Optional(Type3.String()),
-          url: Type3.Optional(Type3.String()),
-          mimeType: Type3.Optional(Type3.String()),
-          caption: Type3.Optional(Type3.String())
+      parameters: Type4.Object({
+        text: Type4.Optional(Type4.String()),
+        attachments: Type4.Optional(Type4.Array(Type4.Object({
+          type: Type4.Union([Type4.Literal("image"), Type4.Literal("file")]),
+          path: Type4.Optional(Type4.String()),
+          url: Type4.Optional(Type4.String()),
+          mimeType: Type4.Optional(Type4.String()),
+          caption: Type4.Optional(Type4.String())
         }))),
-        channel: Type3.Optional(Type3.String()),
-        target: Type3.Optional(Type3.Literal("current"))
+        channel: Type4.Optional(Type4.String()),
+        target: Type4.Optional(Type4.Literal("current"))
       }),
       execute: async (_toolCallId, args) => {
         const input = parseSendChannelMessageInput(args);
@@ -3081,7 +3476,7 @@ var init_extensions = __esm({
 import { existsSync } from "node:fs";
 import { readdir, readFile as readFile4 } from "node:fs/promises";
 import { homedir, platform, release } from "node:os";
-import { dirname as dirname3, join as join2, resolve as resolve3 } from "node:path";
+import { dirname as dirname3, join as join3, resolve as resolve3 } from "node:path";
 var BASELINE_PROMPT, buildInstructionSnapshot, renderSystemPrompt, section, discoverAgentsSources, projectAgentsPaths, findGitRoot, renderAgentsBlock, renderWorkspaceBlock, renderEnvironmentBlock, renderTimeBlock, isNodeErrorCode2;
 var init_instructions = __esm({
   "packages/core/src/instructions/index.ts"() {
@@ -3132,7 +3527,7 @@ var init_instructions = __esm({
     });
     discoverAgentsSources = async (options) => {
       const projectFiles = projectAgentsPaths(options.cwd, options.homeDir);
-      const globalPath = join2(options.homeDir, ".scorel", "AGENTS.md");
+      const globalPath = join3(options.homeDir, ".scorel", "AGENTS.md");
       const candidates = [...projectFiles.map((path) => ({ path, scope: "project" })), { path: globalPath, scope: "global_user" }];
       const sources = [];
       for (const candidate of candidates) {
@@ -3160,7 +3555,7 @@ var init_instructions = __esm({
       let current = cwd;
       while (true) {
         if (current !== homeDir) {
-          paths.push(join2(current, "AGENTS.md"));
+          paths.push(join3(current, "AGENTS.md"));
         }
         if (current === stopAt || current === dirname3(current)) {
           break;
@@ -3176,7 +3571,7 @@ var init_instructions = __esm({
     findGitRoot = (cwd) => {
       let current = cwd;
       while (true) {
-        if (existsSync(join2(current, ".git"))) {
+        if (existsSync(join3(current, ".git"))) {
           return current;
         }
         const next = dirname3(current);
@@ -3216,8 +3611,8 @@ var init_instructions = __esm({
 // packages/core/src/memory/index.ts
 import { appendFile, mkdir as mkdir2, readFile as readFile5, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir as homedir2 } from "node:os";
-import { join as join3 } from "node:path";
-import { Type as Type4 } from "@earendil-works/pi-ai";
+import { join as join4 } from "node:path";
+import { Type as Type5 } from "@earendil-works/pi-ai";
 var memoryDate, scorelMemoryPaths, scorelSessionMemoryPaths, buildMemoryContext, renderMemoryHarness, appendDailyEntry, createAppendDailyTool, renderDailyEntry, readMemoryDreamState, writeMemoryDreamState, readSessionMemory, writeSessionMemory, renderSessionMemory, ensureMemoryFiles, ensureFile, readOptional, trimForContext, compactLine, renderList, renderBullets, normalizeMarkdownFile, parseAppendDailyInput, validateAppendDailyInput, isLowSignalSummary, containsNormalizedDailyEntry, normalizeDailyText, requireString3, optionalStringArray, optionalNumber2, optionalString3, parseLastFailure, isRecord5, safeProjectId, isNodeErrorCode3;
 var init_memory = __esm({
   "packages/core/src/memory/index.ts"() {
@@ -3229,28 +3624,28 @@ var init_memory = __esm({
       const now = options.now ?? Date.now;
       const today = memoryDate(now());
       const yesterday = memoryDate(now() - 24 * 60 * 60 * 1e3);
-      const rootDir = join3(home, ".scorel", "memory");
-      const projectDir = join3(rootDir, "projects", safeProjectId(options.projectId));
-      const dailyDir = join3(projectDir, "daily");
+      const rootDir = join4(home, ".scorel", "memory");
+      const projectDir = join4(rootDir, "projects", safeProjectId(options.projectId));
+      const dailyDir = join4(projectDir, "daily");
       return {
         rootDir,
-        rootMemoryPath: join3(rootDir, "MEMORY.md"),
+        rootMemoryPath: join4(rootDir, "MEMORY.md"),
         projectDir,
-        projectMemoryPath: join3(projectDir, "MEMORY.md"),
+        projectMemoryPath: join4(projectDir, "MEMORY.md"),
         dailyDir,
-        todayDailyPath: join3(dailyDir, `${today}.md`),
-        yesterdayDailyPath: join3(dailyDir, `${yesterday}.md`),
-        dreamStatePath: join3(projectDir, "dream-state.json"),
+        todayDailyPath: join4(dailyDir, `${today}.md`),
+        yesterdayDailyPath: join4(dailyDir, `${yesterday}.md`),
+        dreamStatePath: join4(projectDir, "dream-state.json"),
         today,
         yesterday
       };
     };
     scorelSessionMemoryPaths = (options) => {
       const home = options.homeDir ?? homedir2();
-      const sessionsDir = join3(home, ".scorel", "context", "session-memory", safeProjectId(options.projectId));
+      const sessionsDir = join4(home, ".scorel", "context", "session-memory", safeProjectId(options.projectId));
       return {
         sessionsDir,
-        sessionMemoryPath: join3(sessionsDir, `${safeProjectId(options.sessionId)}.md`)
+        sessionMemoryPath: join4(sessionsDir, `${safeProjectId(options.sessionId)}.md`)
       };
     };
     buildMemoryContext = async (options) => {
@@ -3307,13 +3702,13 @@ var init_memory = __esm({
         "Use this once near the end of a completed user turn when there is progress, a decision, or a follow-up worth preserving.",
         "Do not include secrets, raw logs, speculation, or facts that should be re-read from the repository."
       ].join(" "),
-      parameters: Type4.Object({
-        summary: Type4.String(),
-        completed: Type4.Optional(Type4.Array(Type4.String())),
-        decisions: Type4.Optional(Type4.Array(Type4.String())),
-        followUps: Type4.Optional(Type4.Array(Type4.String())),
-        memoryCandidates: Type4.Optional(Type4.Array(Type4.String())),
-        evidence: Type4.Optional(Type4.Array(Type4.String()))
+      parameters: Type5.Object({
+        summary: Type5.String(),
+        completed: Type5.Optional(Type5.Array(Type5.String())),
+        decisions: Type5.Optional(Type5.Array(Type5.String())),
+        followUps: Type5.Optional(Type5.Array(Type5.String())),
+        memoryCandidates: Type5.Optional(Type5.Array(Type5.String())),
+        evidence: Type5.Optional(Type5.Array(Type5.String()))
       }),
       execute: async (_toolCallId, args) => {
         const input = parseAppendDailyInput(args);
@@ -3541,22 +3936,48 @@ var init_memory = __esm({
 });
 
 // packages/core/src/reporting/index.ts
-function modelPrices(prices) {
+function modelPrices(prices, cache) {
   const entries = {};
   for (const [modelId, [inputUsdPerMillionTokens, outputUsdPerMillionTokens]] of Object.entries(prices)) {
-    entries[modelId] = { inputUsdPerMillionTokens, outputUsdPerMillionTokens, pricingModelId: modelId };
+    entries[modelId] = {
+      inputUsdPerMillionTokens,
+      outputUsdPerMillionTokens,
+      cacheReadUsdPerMillionTokens: cache.cacheReadPrices?.[modelId] ?? inputUsdPerMillionTokens * (cache.cacheReadMultiplier ?? 0),
+      cacheWriteUsdPerMillionTokens: inputUsdPerMillionTokens * cache.cacheWriteMultiplier,
+      pricingModelId: modelId
+    };
   }
   return entries;
 }
-var SCOREL_PRICING_SOURCE, MODEL_PRICES, buildObservation, buildRunObservation, aggregateUsage, estimateRunCost, modelPrice, modelFromEvents, mergeModel, stringValue, nonNegativeInteger2;
+function tieredPrice(modelId, standard, longContext) {
+  const [inputUsdPerMillionTokens, outputUsdPerMillionTokens, cacheReadUsdPerMillionTokens, cacheWriteUsdPerMillionTokens] = standard;
+  const [longInput, longOutput, longCacheRead, longCacheWrite] = longContext;
+  return {
+    inputUsdPerMillionTokens,
+    outputUsdPerMillionTokens,
+    cacheReadUsdPerMillionTokens,
+    cacheWriteUsdPerMillionTokens,
+    pricingModelId: modelId,
+    longContext: {
+      inputTokensAbove: 272e3,
+      inputUsdPerMillionTokens: longInput,
+      outputUsdPerMillionTokens: longOutput,
+      cacheReadUsdPerMillionTokens: longCacheRead,
+      cacheWriteUsdPerMillionTokens: longCacheWrite
+    }
+  };
+}
+var SCOREL_PRICING_SOURCE, MODEL_PRICES, buildObservation, buildRunObservation, aggregateUsage, estimateRunCost, estimateEventCost, costForUsage, requiredUsage, modelPrice, modelFromEvents, mergeModel, stringValue, nonNegativeInteger2;
 var init_reporting = __esm({
   "packages/core/src/reporting/index.ts"() {
     "use strict";
-    SCOREL_PRICING_SOURCE = "models.dev-api-2026-06-27";
+    SCOREL_PRICING_SOURCE = "official-provider-pricing-2026-08-07";
     MODEL_PRICES = {
       ...modelPrices({
         "gpt-4o-mini": [0.15, 0.6],
-        "gpt-4o": [2.5, 10],
+        "gpt-4o": [2.5, 10]
+      }, { cacheReadMultiplier: 0.5, cacheWriteMultiplier: 0 }),
+      ...modelPrices({
         "gpt-5": [1.25, 10],
         "gpt-5-chat-latest": [1.25, 10],
         "gpt-5-codex": [1.25, 10],
@@ -3581,8 +4002,14 @@ var init_reporting = __esm({
         "gpt-5.4-pro": [30, 180],
         "gpt-5.5": [5, 30],
         "gpt-5.5-pro": [30, 180]
-      }),
+      }, { cacheReadMultiplier: 0.1, cacheWriteMultiplier: 0 }),
+      "gpt-5.6-sol": tieredPrice("gpt-5.6-sol", [5, 30, 0.5, 6.25], [10, 45, 1, 12.5]),
+      "gpt-5.6-terra": tieredPrice("gpt-5.6-terra", [2, 12, 0.2, 2.5], [4, 18, 0.4, 5]),
+      "gpt-5.6-luna": tieredPrice("gpt-5.6-luna", [0.2, 1.2, 0.02, 0.25], [0.4, 1.8, 0.04, 0.5]),
       ...modelPrices({
+        "claude-fable-5": [10, 50],
+        "claude-opus-5": [5, 25],
+        "claude-sonnet-5": [2, 10],
         "claude-haiku-4-5": [1, 5],
         "claude-haiku-4-5-20251001": [1, 5],
         "claude-sonnet-4-0": [3, 15],
@@ -3599,10 +4026,13 @@ var init_reporting = __esm({
         "claude-opus-4-6": [5, 25],
         "claude-opus-4-7": [5, 25],
         "claude-opus-4-8": [5, 25]
-      }),
+      }, { cacheReadMultiplier: 0.1, cacheWriteMultiplier: 1.25 }),
       ...modelPrices({
         "deepseek-v4-flash": [0.14, 0.28],
         "deepseek-v4-pro": [0.435, 0.87]
+      }, {
+        cacheReadPrices: { "deepseek-v4-flash": 28e-4, "deepseek-v4-pro": 3625e-6 },
+        cacheWriteMultiplier: 0
       }),
       ...modelPrices({
         "gemini-3-pro-preview": [2, 12],
@@ -3612,7 +4042,7 @@ var init_reporting = __esm({
         "gemini-3.1-flash-lite": [0.25, 1.5],
         "gemini-3.1-flash-lite-preview": [0.25, 1.5],
         "gemini-3.5-flash": [1.5, 9]
-      }),
+      }, { cacheReadMultiplier: 0.1, cacheWriteMultiplier: 0 }),
       ...modelPrices({
         "glm-4.5": [0.6, 2.2],
         "glm-4.5-air": [0.2, 1.1],
@@ -3628,6 +4058,24 @@ var init_reporting = __esm({
         "glm-5.2": [1.4, 4.4],
         "glm-5-turbo": [1.2, 4],
         "glm-5v-turbo": [1.2, 4]
+      }, {
+        cacheReadPrices: {
+          "glm-4.5": 0.11,
+          "glm-4.5-air": 0.03,
+          "glm-4.5-flash": 0,
+          "glm-4.5v": 0,
+          "glm-4.6": 0.11,
+          "glm-4.6v": 0,
+          "glm-4.7": 0.11,
+          "glm-4.7-flash": 0,
+          "glm-4.7-flashx": 0.01,
+          "glm-5": 0.2,
+          "glm-5.1": 0.26,
+          "glm-5.2": 0.26,
+          "glm-5-turbo": 0.24,
+          "glm-5v-turbo": 0.24
+        },
+        cacheWriteMultiplier: 0
       })
     };
     buildObservation = (input) => {
@@ -3636,12 +4084,12 @@ var init_reporting = __esm({
       return {
         usage,
         ...model ? { model } : {},
-        cost: estimateRunCost(usage, model)
+        cost: estimateEventCost(input.events, usage, model)
       };
     };
     buildRunObservation = buildObservation;
     aggregateUsage = (events) => {
-      const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
       for (const event of events) {
         const messageUsage = event.type === "assistant_message" ? event.message.usage : event.type === "message_end" ? event.usage : void 0;
         if (!messageUsage) {
@@ -3649,10 +4097,12 @@ var init_reporting = __esm({
         }
         usage.inputTokens += nonNegativeInteger2(messageUsage.inputTokens);
         usage.outputTokens += nonNegativeInteger2(messageUsage.outputTokens);
+        usage.cacheReadTokens += nonNegativeInteger2(messageUsage.cacheReadTokens);
+        usage.cacheWriteTokens += nonNegativeInteger2(messageUsage.cacheWriteTokens);
         usage.totalTokens += nonNegativeInteger2(messageUsage.totalTokens);
       }
-      if (usage.totalTokens === 0 && (usage.inputTokens > 0 || usage.outputTokens > 0)) {
-        usage.totalTokens = usage.inputTokens + usage.outputTokens;
+      if (usage.totalTokens === 0 && Object.values(usage).some((value) => value > 0)) {
+        usage.totalTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.outputTokens;
       }
       return usage;
     };
@@ -3664,23 +4114,66 @@ var init_reporting = __esm({
           currency: "USD",
           input: 0,
           output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
           total: 0,
           pricingSource: SCOREL_PRICING_SOURCE,
           reason: "unknown_model_price"
         };
       }
+      return costForUsage(usage, price);
+    };
+    estimateEventCost = (events, aggregate, model) => {
+      const price = modelPrice(model);
+      if (!price) {
+        return estimateRunCost(aggregate, model);
+      }
+      const usages = events.flatMap((event) => {
+        const usage = event.type === "assistant_message" ? event.message.usage : event.type === "message_end" ? event.usage : void 0;
+        return usage ? [requiredUsage(usage)] : [];
+      });
+      if (usages.length === 0) {
+        return costForUsage(aggregate, price);
+      }
+      const costs = usages.map((usage) => costForUsage(usage, price));
+      return {
+        known: true,
+        currency: "USD",
+        input: costs.reduce((sum, cost) => sum + cost.input, 0),
+        output: costs.reduce((sum, cost) => sum + cost.output, 0),
+        cacheRead: costs.reduce((sum, cost) => sum + cost.cacheRead, 0),
+        cacheWrite: costs.reduce((sum, cost) => sum + cost.cacheWrite, 0),
+        total: costs.reduce((sum, cost) => sum + cost.total, 0),
+        pricingSource: SCOREL_PRICING_SOURCE,
+        pricingModelId: price.pricingModelId
+      };
+    };
+    costForUsage = (usage, basePrice) => {
+      const promptTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+      const price = basePrice.longContext && promptTokens > basePrice.longContext.inputTokensAbove ? { ...basePrice, ...basePrice.longContext } : basePrice;
       const input = usage.inputTokens / 1e6 * price.inputUsdPerMillionTokens;
       const output = usage.outputTokens / 1e6 * price.outputUsdPerMillionTokens;
+      const cacheRead = usage.cacheReadTokens / 1e6 * price.cacheReadUsdPerMillionTokens;
+      const cacheWrite = usage.cacheWriteTokens / 1e6 * price.cacheWriteUsdPerMillionTokens;
       return {
         known: true,
         currency: "USD",
         input,
         output,
-        total: input + output,
+        cacheRead,
+        cacheWrite,
+        total: input + output + cacheRead + cacheWrite,
         pricingSource: SCOREL_PRICING_SOURCE,
         pricingModelId: price.pricingModelId
       };
     };
+    requiredUsage = (usage) => ({
+      inputTokens: nonNegativeInteger2(usage.inputTokens),
+      outputTokens: nonNegativeInteger2(usage.outputTokens),
+      cacheReadTokens: nonNegativeInteger2(usage.cacheReadTokens),
+      cacheWriteTokens: nonNegativeInteger2(usage.cacheWriteTokens),
+      totalTokens: nonNegativeInteger2(usage.totalTokens)
+    });
     modelPrice = (model) => {
       for (const id of [model?.providerModelId, model?.modelId]) {
         if (!id) {
@@ -3782,7 +4275,7 @@ ${text}
 // packages/core/src/session/index.ts
 import { createHash as createHash2 } from "node:crypto";
 import { appendFile as appendFile2, mkdir as mkdir3, readFile as readFile6, writeFile as writeFile3 } from "node:fs/promises";
-import { dirname as dirname4, join as join4 } from "node:path";
+import { dirname as dirname4, join as join5 } from "node:path";
 function assertTreeEvent(value) {
   if (!isRecord6(value)) {
     throw new SessionStoreError("invalid_event", "Event must be an object");
@@ -3827,7 +4320,7 @@ function assertTreeEvent(value) {
     throw new SessionStoreError("invalid_event", "skill_index_delta is missing delta payload");
   }
 }
-var snipUserMessageAlias, SessionStoreError, SessionTree, JsonlSession, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, sessionObservationSummaryFilePath, createSession, loadSession, buildSessionObservationSummary, writeSessionObservationSummary, reportingModelFromSessionMeta, latestSessionSelectedModel, latestSessionTimestamp, stringValue2, buildContext, hiddenContextEventIds, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isSelectedModelSummary, isInstructionSnapshot, isHarnessItem, isCompactEvent, isContextControlEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, compactSummaryMessage, reminderKindFromHarness, reminderVisibilityFromHarness, reminderScopeFromHarness, cloneMessage, isRecord6;
+var snipUserMessageAlias, SessionStoreError, SessionTree, JsonlSession, sessionRootPath, sessionFilePath, sessionLogFilePath, sessionArtifactsDirPath, sessionObservationSummaryFilePath, sessionSubagentsDirPath, createSession, loadSession, buildSessionObservationSummary, writeSessionObservationSummary, reportingModelFromSessionMeta, latestSessionSelectedModel, latestSessionTimestamp, stringValue2, buildContext, hiddenContextEventIds, retainedMessagesBeforeCompact, isRetainedContextStart, parseJsonLine, parseHeader, parseSessionEvent, validateSessionMatch, isConversationEvent, isSelectedModelSummary, isInstructionSnapshot, isHarnessItem, isCompactEvent, isContextControlEvent, isQueueUpdate, isSessionTitleUpdated, isSkillIndexSnapshot, isSkillIndexDelta, isSkillIndexEntry, appendHarnessItemToContext, compactSummaryMessage, reminderKindFromHarness, reminderVisibilityFromHarness, reminderScopeFromHarness, cloneMessage, isRecord6;
 var init_session = __esm({
   "packages/core/src/session/index.ts"() {
     "use strict";
@@ -4021,13 +4514,16 @@ var init_session = __esm({
         return Promise.resolve();
       }
     };
-    sessionFilePath = (sessionsDir, sessionId) => join4(sessionsDir, `${sessionId}.jsonl`);
-    sessionLogFilePath = (sessionsDir, sessionId) => join4(sessionsDir, `${sessionId}.log`);
-    sessionArtifactsDirPath = (sessionsDir, sessionId) => join4(sessionsDir, `${sessionId}.artifacts`);
-    sessionObservationSummaryFilePath = (sessionsDir, sessionId) => join4(sessionsDir, `${sessionId}.summary.json`);
+    sessionRootPath = (sessionsDir, sessionId) => join5(sessionsDir, String(sessionId));
+    sessionFilePath = (sessionsDir, sessionId) => join5(sessionRootPath(sessionsDir, sessionId), "events.jsonl");
+    sessionLogFilePath = (sessionsDir, sessionId) => join5(sessionRootPath(sessionsDir, sessionId), "session.log");
+    sessionArtifactsDirPath = (sessionsDir, sessionId) => join5(sessionRootPath(sessionsDir, sessionId), "tool-results");
+    sessionObservationSummaryFilePath = (sessionsDir, sessionId) => join5(sessionRootPath(sessionsDir, sessionId), "summary.json");
+    sessionSubagentsDirPath = (sessionsDir, parentSessionId) => join5(sessionRootPath(sessionsDir, parentSessionId), "sub-agents");
     createSession = async ({ sessionsDir, header }) => {
       const validHeader = parseHeader(header);
-      await mkdir3(sessionsDir, { recursive: true });
+      const root = sessionRootPath(sessionsDir, validHeader.sessionId);
+      await mkdir3(root, { recursive: true });
       const filePath = sessionFilePath(sessionsDir, validHeader.sessionId);
       await writeFile3(filePath, `${JSON.stringify(validHeader)}
 `, { encoding: "utf8", flag: "wx" });
@@ -4079,7 +4575,8 @@ var init_session = __esm({
     };
     writeSessionObservationSummary = async (session) => {
       const summary = buildSessionObservationSummary(session);
-      const summaryPath = sessionObservationSummaryFilePath(dirname4(session.filePath), session.header.sessionId);
+      const summaryPath = join5(dirname4(session.filePath), "summary.json");
+      await mkdir3(dirname4(summaryPath), { recursive: true });
       await writeFile3(summaryPath, `${JSON.stringify(summary, null, 2)}
 `, "utf8");
       return summary;
@@ -4329,7 +4826,7 @@ var init_session = __esm({
 // packages/core/src/observability/index.ts
 import { createHash as createHash3 } from "node:crypto";
 import { mkdir as mkdir4, readFile as readFile7, writeFile as writeFile4 } from "node:fs/promises";
-import { dirname as dirname5, join as join5 } from "node:path";
+import { dirname as dirname5, join as join6 } from "node:path";
 import process2 from "node:process";
 var buildObservationAsset, buildLangfuseSyncPayload, buildOtelDeltaPayload, buildOtelSyncPayload, syncObservationAssetTargets, uploadLangfusePayload, uploadOtelPayload, observabilitySyncStateFilePath, readObservabilitySyncState, writeObservabilitySyncState, stableAssetId, postOtelJson, stripTrailingSlashes2, safeJson, truncateForError, stableLangfuseId, revisionEnvelopeId, shortHash, stableOtelHex, isoFromMillis, unixNanoFromMillis, langfuseTurns, messageInput, turnInputMessages, turnOutput, langfuseTags, scorelRelease, usageDetailsFromUsage, costDetailsFromSummary, prorateCost, toolCallsFromContent, toolResultBlock, matchingToolCallInput, parentGenerationId, safeObservationValue, otelResourceAttributes, otelEventAttributes, otelSpanKind, toolResultIsError, tokenDataPoint, stringAttribute, intAttribute, boolAttribute, addUsage, normalizeUsage, nonNegativeInteger3, stringValue3, displayMessageText, messageText;
 var init_observability = __esm({
@@ -4485,7 +4982,7 @@ var init_observability = __esm({
           }
           return total;
         },
-        { inputTokens: 0, outputTokens: 0, totalTokens: 0, eventCount: events.length }
+        { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, eventCount: events.length }
       );
       const toSeq = events.reduce((max, event) => Math.max(max, Number(event.seq)), lastExportedSeq);
       return {
@@ -4576,6 +5073,8 @@ var init_observability = __esm({
                     dataPoints: [
                       tokenDataPoint("input", metrics.inputTokens, timeUnixNano, asset.assetId),
                       tokenDataPoint("output", metrics.outputTokens, timeUnixNano, asset.assetId),
+                      tokenDataPoint("cache_read", metrics.cacheReadTokens, timeUnixNano, asset.assetId),
+                      tokenDataPoint("cache_write", metrics.cacheWriteTokens, timeUnixNano, asset.assetId),
                       tokenDataPoint("total", metrics.totalTokens, timeUnixNano, asset.assetId)
                     ]
                   }
@@ -4672,7 +5171,7 @@ var init_observability = __esm({
       await postOtelJson(`${endpoint}/v1/metrics`, input.payload.metrics);
       await postOtelJson(`${endpoint}/v1/logs`, input.payload.logs);
     };
-    observabilitySyncStateFilePath = (stateDir, target, assetId) => join5(stateDir, "observability-sync", target, `${shortHash(assetId)}.json`);
+    observabilitySyncStateFilePath = (stateDir, target, assetId) => join6(stateDir, "observability-sync", target, `${shortHash(assetId)}.json`);
     readObservabilitySyncState = async (stateDir, target, assetId) => {
       try {
         const content = await readFile7(observabilitySyncStateFilePath(stateDir, target, assetId), "utf8");
@@ -4759,6 +5258,8 @@ var init_observability = __esm({
       return {
         input: normalized.inputTokens,
         output: normalized.outputTokens,
+        cache_read: normalized.cacheReadTokens,
+        cache_write: normalized.cacheWriteTokens,
         total: normalized.totalTokens
       };
     };
@@ -4830,6 +5331,8 @@ var init_observability = __esm({
       ...event.type === "assistant_message" ? [
         intAttribute("scorel.usage.input_tokens", normalizeUsage(event.message.usage).inputTokens),
         intAttribute("scorel.usage.output_tokens", normalizeUsage(event.message.usage).outputTokens),
+        intAttribute("scorel.usage.cache_read_tokens", normalizeUsage(event.message.usage).cacheReadTokens),
+        intAttribute("scorel.usage.cache_write_tokens", normalizeUsage(event.message.usage).cacheWriteTokens),
         intAttribute("scorel.usage.total_tokens", normalizeUsage(event.message.usage).totalTokens)
       ] : [],
       ...event.type === "tool_result" ? [boolAttribute("scorel.tool.is_error", toolResultIsError(event))] : []
@@ -4862,11 +5365,13 @@ var init_observability = __esm({
     addUsage = (total, usage) => {
       total.inputTokens += nonNegativeInteger3(usage?.inputTokens);
       total.outputTokens += nonNegativeInteger3(usage?.outputTokens);
+      total.cacheReadTokens += nonNegativeInteger3(usage?.cacheReadTokens);
+      total.cacheWriteTokens += nonNegativeInteger3(usage?.cacheWriteTokens);
       const totalTokens = nonNegativeInteger3(usage?.totalTokens);
-      total.totalTokens += totalTokens > 0 ? totalTokens : nonNegativeInteger3(usage?.inputTokens) + nonNegativeInteger3(usage?.outputTokens);
+      total.totalTokens += totalTokens > 0 ? totalTokens : nonNegativeInteger3(usage?.inputTokens) + nonNegativeInteger3(usage?.cacheReadTokens) + nonNegativeInteger3(usage?.cacheWriteTokens) + nonNegativeInteger3(usage?.outputTokens);
     };
     normalizeUsage = (usage) => {
-      const normalized = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+      const normalized = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0 };
       addUsage(normalized, usage);
       return normalized;
     };
@@ -4993,8 +5498,8 @@ var init_pi_ai = __esm({
             usage: {
               input: message.usage?.inputTokens ?? 0,
               output: message.usage?.outputTokens ?? 0,
-              cacheRead: 0,
-              cacheWrite: 0,
+              cacheRead: message.usage?.cacheReadTokens ?? 0,
+              cacheWrite: message.usage?.cacheWriteTokens ?? 0,
               totalTokens: message.usage?.totalTokens ?? 0,
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
             },
@@ -5134,6 +5639,8 @@ var init_pi_ai = __esm({
       return {
         inputTokens: usage.input,
         outputTokens: usage.output,
+        cacheReadTokens: usage.cacheRead,
+        cacheWriteTokens: usage.cacheWrite,
         totalTokens: usage.totalTokens
       };
     };
@@ -5141,7 +5648,7 @@ var init_pi_ai = __esm({
 });
 
 // packages/core/src/runtime/index.ts
-var ScorelRuntime, toolResultForContext, normalizeAssistantMessage, isAssistantMessage, partialAssistantMessage;
+var ScorelRuntime, isPrematureStreamEnd, isPrematureStreamMessage, toolResultForContext, normalizeAssistantMessage, isAssistantMessage, partialAssistantMessage;
 var init_runtime = __esm({
   "packages/core/src/runtime/index.ts"() {
     "use strict";
@@ -5163,6 +5670,9 @@ var init_runtime = __esm({
       }
       hasActiveToolWork() {
         return [...this.#tools.values()].some((tool) => tool.hasActiveWork?.() === true);
+      }
+      async detachActiveToolWork() {
+        await Promise.all([...this.#tools.values()].map((tool) => tool.detach?.()));
       }
       cancel() {
         this.#controller?.abort();
@@ -5216,48 +5726,58 @@ var init_runtime = __esm({
         let text = "";
         let thinking = "";
         yield { type: "message_start", role: "assistant" };
-        try {
-          const stream = this.#provider.streamTurn({
-            context,
-            systemPrompt,
-            tools: [...this.#tools.values()],
-            signal,
-            options
-          });
-          while (true) {
-            if (signal.aborted) {
-              break;
-            }
-            const next = await stream.next();
-            if (next.done) {
-              const message = normalizeAssistantMessage(next.value, { thinking, text }, signal.aborted ? "cancelled" : "end_turn");
-              if (message) {
-                yield { type: "message_end", message };
+        providerAttempts: for (let attempt = 0; ; attempt += 1) {
+          try {
+            const stream = this.#provider.streamTurn({
+              context,
+              systemPrompt,
+              tools: [...this.#tools.values()],
+              signal,
+              options
+            });
+            while (true) {
+              if (signal.aborted) {
+                break;
               }
-              return { message, stopReason: message?.stopReason ?? "end_turn" };
+              const next = await stream.next();
+              if (next.done) {
+                const message = normalizeAssistantMessage(next.value, { thinking, text }, signal.aborted ? "cancelled" : "end_turn");
+                if (attempt === 0 && thinking.length > 0 && text.length === 0 && !signal.aborted && isPrematureStreamMessage(message)) {
+                  thinking = "";
+                  continue providerAttempts;
+                }
+                if (message) {
+                  yield { type: "message_end", message };
+                }
+                return { message, stopReason: message?.stopReason ?? "end_turn" };
+              }
+              if (next.value.type === "text_delta") {
+                text += next.value.delta;
+                yield next.value;
+              } else if (next.value.type === "thinking_delta") {
+                thinking += next.value.delta;
+                yield next.value;
+              }
             }
-            if (next.value.type === "text_delta") {
-              text += next.value.delta;
-              yield next.value;
-            } else if (next.value.type === "thinking_delta") {
-              thinking += next.value.delta;
-              yield next.value;
+            const cancelledMessage = partialAssistantMessage({ thinking, text }, "cancelled");
+            if (cancelledMessage) {
+              yield { type: "message_end", message: cancelledMessage };
             }
+            return { stopReason: "cancelled" };
+          } catch (cause) {
+            const error = cause instanceof Error ? cause : new Error(String(cause));
+            if (attempt === 0 && thinking.length > 0 && text.length === 0 && !signal.aborted && isPrematureStreamEnd(error)) {
+              thinking = "";
+              continue;
+            }
+            const partial = partialAssistantMessage({ thinking, text }, "error");
+            if (partial) {
+              yield { type: "message_end", message: partial };
+            }
+            yield { type: "error", error };
+            yield { type: "turn_end", stopReason: "error" };
+            return { finished: true };
           }
-          const cancelledMessage = partialAssistantMessage({ thinking, text }, "cancelled");
-          if (cancelledMessage) {
-            yield { type: "message_end", message: cancelledMessage };
-          }
-          return { stopReason: "cancelled" };
-        } catch (cause) {
-          const error = cause instanceof Error ? cause : new Error(String(cause));
-          const partial = partialAssistantMessage({ thinking, text }, "error");
-          if (partial) {
-            yield { type: "message_end", message: partial };
-          }
-          yield { type: "error", error };
-          yield { type: "turn_end", stopReason: "error" };
-          return { finished: true };
         }
       }
       async *#executeTool(toolCall, signal) {
@@ -5302,6 +5822,8 @@ var init_runtime = __esm({
         };
       }
     };
+    isPrematureStreamEnd = (error) => error.message.includes("Stream ended without finish_reason");
+    isPrematureStreamMessage = (message) => message?.stopReason === "error" && message.meta?.api === "openai-completions" && typeof message.meta.errorMessage === "string" && message.meta.errorMessage.includes("Stream ended without finish_reason");
     toolResultForContext = (result) => ({
       content: result.content
     });
@@ -5337,8 +5859,8 @@ import { createHash as createHash4 } from "node:crypto";
 import { existsSync as existsSync2 } from "node:fs";
 import { readdir as readdir2, readFile as readFile8, stat as stat2 } from "node:fs/promises";
 import { homedir as homedir3 } from "node:os";
-import { dirname as dirname6, join as join6, resolve as resolve4 } from "node:path";
-import { Type as Type5 } from "@earendil-works/pi-ai";
+import { dirname as dirname6, join as join7, resolve as resolve4 } from "node:path";
+import { Type as Type6 } from "@earendil-works/pi-ai";
 var scanSkillIndex, diffSkillIndex, hasSkillIndexDelta, renderSkillListing, renderSkillDelta, createSkillTool, projectSkillRoots, readSkillEntry, parseSkillMetadata, firstParagraph, parseSkillArgs, findGitRoot2, isNodeErrorCode4;
 var init_skills = __esm({
   "packages/core/src/skills/index.ts"() {
@@ -5349,7 +5871,7 @@ var init_skills = __esm({
       const homeDir = resolve4(options.homeDir ?? homedir3());
       const roots = [
         ...projectSkillRoots(cwd, homeDir),
-        { path: join6(homeDir, ".scorel", "skills"), scope: "user", priority: 0 },
+        { path: join7(homeDir, ".scorel", "skills"), scope: "user", priority: 0 },
         ...(options.extensionSkillRoots ?? []).map((root, index) => ({
           path: root.path,
           scope: "extension",
@@ -5370,7 +5892,7 @@ var init_skills = __esm({
         for (const child of children.sort()) {
           const entry = await readSkillEntry({
             name: child,
-            skillPath: join6(root.path, child, "SKILL.md"),
+            skillPath: join7(root.path, child, "SKILL.md"),
             scope: root.scope,
             priority: root.priority
           });
@@ -5429,9 +5951,9 @@ var init_skills = __esm({
     createSkillTool = (options) => defineTool({
       name: "Skill",
       description: "Load the full SKILL.md instructions for an available session-indexed skill by name.",
-      parameters: Type5.Object({
-        name: Type5.String(),
-        args: Type5.Optional(Type5.String())
+      parameters: Type6.Object({
+        name: Type6.String(),
+        args: Type6.Optional(Type6.String())
       }),
       execute: async (_toolCallId, args) => {
         const input = parseSkillArgs(args);
@@ -5460,7 +5982,7 @@ var init_skills = __esm({
       let current = cwd;
       while (true) {
         if (current !== homeDir) {
-          roots.push(join6(current, ".scorel", "skills"));
+          roots.push(join7(current, ".scorel", "skills"));
         }
         if (current === stopAt || current === dirname6(current)) {
           break;
@@ -5549,7 +6071,7 @@ var init_skills = __esm({
     findGitRoot2 = (cwd) => {
       let current = cwd;
       while (true) {
-        if (existsSync2(join6(current, ".git"))) {
+        if (existsSync2(join7(current, ".git"))) {
           return current;
         }
         const next = dirname6(current);
@@ -5587,7 +6109,7 @@ var init_src3 = __esm({
 // packages/daemon/src/projects/registry.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { mkdir as mkdir5, readFile as readFile9, readdir as readdir3, realpath, rename as rename2, stat as stat3, writeFile as writeFile5 } from "node:fs/promises";
-import { basename as basename2, dirname as dirname7, join as join7 } from "node:path";
+import { basename as basename2, dirname as dirname7, join as join8 } from "node:path";
 var ProjectRegistryError, ProjectRegistry, canonicalDirectory, sessionReferencesProject, sortProjects, isRegistryFile, isRecord7, isNodeError, errorMessage2;
 var init_registry = __esm({
   "packages/daemon/src/projects/registry.ts"() {
@@ -5728,18 +6250,37 @@ var init_registry = __esm({
         throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
       }
       for (const name of names) {
-        if (!name.endsWith(".jsonl") || name.startsWith(".")) {
+        if (name.startsWith(".")) {
           continue;
         }
+        const entryPath = join8(sessionsDir, name);
+        let entryIsDirectory = false;
+        let entryIsFile = false;
         try {
-          const firstLine = (await readFile9(join7(sessionsDir, name), "utf8")).split(/\r?\n/, 1)[0];
-          const parsed = firstLine ? JSON.parse(firstLine) : void 0;
-          if (isRecord7(parsed) && isRecord7(parsed.meta) && parsed.meta.projectId === projectId) {
-            return true;
-          }
+          const info = await stat3(entryPath);
+          entryIsDirectory = info.isDirectory();
+          entryIsFile = info.isFile();
         } catch (cause) {
-          if (!isNodeError(cause, "ENOENT")) {
-            throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
+          if (isNodeError(cause, "ENOENT")) {
+            continue;
+          }
+          throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
+        }
+        const candidates = [
+          ...entryIsDirectory ? [join8(entryPath, "events.jsonl")] : [],
+          ...entryIsFile && name.endsWith(".jsonl") ? [entryPath] : []
+        ];
+        for (const filePath of candidates) {
+          try {
+            const firstLine = (await readFile9(filePath, "utf8")).split(/\r?\n/, 1)[0];
+            const parsed = firstLine ? JSON.parse(firstLine) : void 0;
+            if (isRecord7(parsed) && isRecord7(parsed.meta) && parsed.meta.projectId === projectId && parsed.meta.kind !== "subagent") {
+              return true;
+            }
+          } catch (cause) {
+            if (!isNodeError(cause, "ENOENT") && !isNodeError(cause, "ENOTDIR")) {
+              throw new ProjectRegistryError("filesystem_error", errorMessage2(cause));
+            }
           }
         }
       }
@@ -5757,7 +6298,7 @@ var init_registry = __esm({
 
 // packages/daemon/src/projects/directories.ts
 import { homedir as homedir4 } from "node:os";
-import { dirname as dirname8, join as join8 } from "node:path";
+import { dirname as dirname8, join as join9 } from "node:path";
 import { readdir as readdir4, realpath as realpath2, stat as stat4 } from "node:fs/promises";
 var listDirectories, directoryEntries, errorMessage3;
 var init_directories = __esm({
@@ -5788,7 +6329,7 @@ var init_directories = __esm({
       const entries = await readdir4(path, { withFileTypes: true });
       const directories = await Promise.all(
         entries.map(async (entry) => {
-          const candidate = join8(path, entry.name);
+          const candidate = join9(path, entry.name);
           if (!entry.isDirectory() && !entry.isSymbolicLink()) {
             return void 0;
           }
@@ -5807,9 +6348,9 @@ var init_directories = __esm({
 });
 
 // packages/daemon/src/projects/sessions.ts
-import { readFile as readFile10, readdir as readdir5 } from "node:fs/promises";
-import { join as join9 } from "node:path";
-var listSessionSummaries, readSummary, tailSeq, latestTitle, clampLimit, parseRecord, isRecord8, isNodeError2;
+import { readFile as readFile10, readdir as readdir5, stat as stat5 } from "node:fs/promises";
+import { join as join10 } from "node:path";
+var listSessionSummaries, readSessionEntry, readSummary, tailSeq, latestTitle, clampLimit, parseRecord, isRecord8, isNodeError2;
 var init_sessions = __esm({
   "packages/daemon/src/projects/sessions.ts"() {
     "use strict";
@@ -5825,16 +6366,35 @@ var init_sessions = __esm({
         throw cause;
       }
       const sessions = (await Promise.all(
-        names.filter((name) => name.endsWith(".jsonl") && !name.startsWith(".")).map((name) => readSummary(join9(sessionsDir, name), overrides))
+        names.filter((name) => !name.startsWith(".")).map((name) => readSessionEntry(sessionsDir, name, overrides))
       )).filter((session) => session !== void 0).filter((session) => filter.projectId === void 0 || session.projectId === filter.projectId).sort((left, right) => right.updatedAt - left.updatedAt || String(left.sessionId).localeCompare(String(right.sessionId)));
       return sessions.slice(0, clampLimit(filter.limit));
+    };
+    readSessionEntry = async (sessionsDir, name, overrides) => {
+      const entryPath = join10(sessionsDir, name);
+      let entryStat;
+      try {
+        entryStat = await stat5(entryPath);
+      } catch (cause) {
+        if (isNodeError2(cause, "ENOENT")) {
+          return void 0;
+        }
+        throw cause;
+      }
+      if (entryStat.isDirectory()) {
+        return readSummary(join10(entryPath, "events.jsonl"), overrides);
+      }
+      if (entryStat.isFile() && name.endsWith(".jsonl")) {
+        return readSummary(entryPath, overrides);
+      }
+      return void 0;
     };
     readSummary = async (filePath, overrides) => {
       let content;
       try {
         content = await readFile10(filePath, "utf8");
       } catch (cause) {
-        if (isNodeError2(cause, "ENOENT")) {
+        if (isNodeError2(cause, "ENOENT") || isNodeError2(cause, "ENOTDIR")) {
           return void 0;
         }
         throw cause;
@@ -5842,6 +6402,9 @@ var init_sessions = __esm({
       const lines = content.split(/\r?\n/).filter(Boolean);
       const header = parseRecord(lines[0]);
       if (header?.version !== 1 || typeof header.sessionId !== "string" || typeof header.createdAt !== "number" || !isRecord8(header.meta) || typeof header.meta.projectId !== "string") {
+        return void 0;
+      }
+      if (header.meta.kind === "subagent") {
         return void 0;
       }
       const override = overrides?.get(header.sessionId);
@@ -5891,14 +6454,14 @@ var init_sessions = __esm({
 // packages/daemon/src/relay/auth.ts
 import { randomUUID as randomUUID3 } from "node:crypto";
 import { mkdir as mkdir6, readFile as readFile11, writeFile as writeFile6 } from "node:fs/promises";
-import { join as join10 } from "node:path";
+import { join as join11 } from "node:path";
 var hostDeviceIdentityPath, hostRelayAuthPath, loadOrCreateHostDeviceIdentity, readHostDeviceIdentity, readHostRelayAuth, authorizeRelayClient, isRelayClientAuthorized, emptyAuthFile;
 var init_auth = __esm({
   "packages/daemon/src/relay/auth.ts"() {
     "use strict";
     init_src();
-    hostDeviceIdentityPath = (stateDir) => join10(stateDir, "device.json");
-    hostRelayAuthPath = (stateDir) => join10(stateDir, "relay-auth.json");
+    hostDeviceIdentityPath = (stateDir) => join11(stateDir, "device.json");
+    hostRelayAuthPath = (stateDir) => join11(stateDir, "relay-auth.json");
     loadOrCreateHostDeviceIdentity = async (options) => {
       const existing = await readHostDeviceIdentity(options.stateDir);
       if (existing) {
@@ -6216,11 +6779,11 @@ import { execFile as execFile2 } from "node:child_process";
 import { existsSync as existsSync3 } from "node:fs";
 import { appendFile as appendFile3, mkdir as mkdir7, readFile as readFile12, readdir as readdir6, rename as rename3, rm as rm2, writeFile as writeFile7 } from "node:fs/promises";
 import { userInfo as userInfo2 } from "node:os";
-import { basename as basename3, dirname as dirname9, join as join11, resolve as resolve5 } from "node:path";
+import { basename as basename3, dirname as dirname9, join as join12, resolve as resolve5 } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify as promisify2 } from "node:util";
 import { WebSocketServer } from "ws";
-var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, snipUserMessageIdBlock, inputText, assistantText, messageText2, toolResultText2, messageHasBackgroundBashReminder, isBackgroundBashReminderData, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger4, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, isReasoningEffort, latestSessionSelectedModel2, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord9, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
+var daemonPackageName, SESSION_MEMORY_COMPACT_WAIT_MS, AUTO_COMPACT_RETAINED_EVENTS, execFileAsync2, localDaemonStateFile, createLocalDaemonState, readLocalDaemonState, removeLocalDaemonState, markDaemonStopped, daemonStateLiveness, defaultIsPidAlive, startRemoteDaemonWebSocketServer, startScorelHostWebSocketServer, closeWebSocketServer, createRealRuntime, ScorelHost, isMissingConfigError, createEmbeddedTransport, isNodeErrorCode5, wireErrorCode, hasContinuousCoverage, countContentBlocks, normalizeContent, snipUserMessageIdBlock, inputText, assistantText, messageText2, toolResultText2, messageHasBackgroundBashReminder, isBackgroundBashReminderData, messageHasSubagentReminder, isSubagentReminderData, estimateScorelMessagesTokens, estimateTextTokens, compactLine2, parseSessionMemoryJson, stringArray, disabledMemorySettings, detectRtk, ensureRtkAvailable, emptyRuntimeStats, readRuntimeStats, writeRuntimeStats, parseRuntimeStats, parseRuntimeStatsBuckets, addRtkSavings, addRuntimeStatsBucket, rtkSavingsFromToolResult, nonNegativeInteger4, resolveDefaultShell2, shellCommandArgs2, userShell2, runtimeChannelContextFromWire, parseQueuedChannelContext, parseQueuedModelSelection, isReasoningEffort, latestSessionSelectedModel2, imBindingKey, defaultBuiltinExtensionsDir, runtimeModuleDir, findBuiltinExtensionsDir, isSteerMessage, stripImCommandPrefix, isRecord9, parseMemoryUpdate, normalizeMarkdownFile2, sanitizeSessionTitle, shortStack, formatDiagnosticLine, formatDiagnosticValue;
 var init_src4 = __esm({
   "packages/daemon/src/index.ts"() {
     "use strict";
@@ -6236,7 +6799,7 @@ var init_src4 = __esm({
     SESSION_MEMORY_COMPACT_WAIT_MS = 5e3;
     AUTO_COMPACT_RETAINED_EVENTS = 8;
     execFileAsync2 = promisify2(execFile2);
-    localDaemonStateFile = (stateDir) => join11(stateDir, "daemon.json");
+    localDaemonStateFile = (stateDir) => join12(stateDir, "daemon.json");
     createLocalDaemonState = async (options) => {
       const state = {
         host: options.host,
@@ -6464,7 +7027,7 @@ var init_src4 = __esm({
         for (const tool of createCodingTools({
           cwd: options.cwd,
           contextWindow: model.contextWindow,
-          ...options.sessionsDir && options.sessionId ? { toolResultArtifacts: { dir: sessionArtifactsDirPath(options.sessionsDir, options.sessionId) } } : {},
+          ...options.toolResultArtifactsDir ? { toolResultArtifacts: { dir: options.toolResultArtifactsDir } } : options.sessionsDir && options.sessionId ? { toolResultArtifacts: { dir: sessionArtifactsDirPath(options.sessionsDir, options.sessionId) } } : {},
           tokenSaving: {
             rtk: {
               enabled: options.config.runtime.tokenSavingRtk,
@@ -6507,6 +7070,7 @@ var init_src4 = __esm({
       #hadClientConnection = false;
       #lastActiveWorkAt;
       #started = false;
+      #shuttingDown = false;
       constructor(options) {
         this.#sessionsDir = options.sessionsDir;
         this.#deviceId = options.deviceId;
@@ -6532,18 +7096,24 @@ var init_src4 = __esm({
         });
       }
       async start() {
+        this.#shuttingDown = false;
         this.#started = true;
         await mkdir7(this.#scorelHomeDir, { recursive: true });
         await this.#loadImBindings();
         await this.#startEnabledImExtensions();
       }
       async shutdown() {
+        this.#shuttingDown = true;
         for (const schedule of this.#memoryDreams.values()) {
           if (schedule.timer) {
             clearTimeout(schedule.timer);
           }
         }
         this.#memoryDreams.clear();
+        for (const lane of this.#sessions.values()) {
+          lane.runtime.cancel();
+        }
+        await Promise.all([...this.#sessions.values()].map((lane) => lane.runtime.detachActiveToolWork()));
         await this.#stopImExtensions();
         this.#connections.clear();
         this.#hadClientConnection = false;
@@ -7051,6 +7621,9 @@ var init_src4 = __esm({
         };
       }
       async #handleBackgroundBashCompleted(sessionId, completion) {
+        if (this.#shuttingDown) {
+          return void 0;
+        }
         const lane = this.#sessions.get(sessionId);
         if (!lane) {
           return void 0;
@@ -7097,7 +7670,7 @@ var init_src4 = __esm({
           harnessEventId: event.id,
           runtimeRunning: lane.runtime.running
         });
-        if (!lane.runtime.running) {
+        if (!this.#shuttingDown && !lane.runtime.running) {
           lane.queue = lane.queue.then(() => this.#runSystemReminderTurn(lane, clientId, event.id));
           void lane.queue.catch((cause) => {
             const error = cause instanceof Error ? cause : new Error(String(cause));
@@ -8376,6 +8949,356 @@ var init_src4 = __esm({
             snip: async (input) => this.#snipUserTurn(lane, input.userMessageId, input.reason)
           })
         );
+        if (!lane.isSubagent) {
+          if (!lane.subagents) {
+            lane.subagents = this.#createSubagentRunner(lane);
+          }
+          for (const tool of createSubagentTools({
+            runner: lane.subagents,
+            delivery: this.#subagentDeliveryForSession(lane.session.header.sessionId)
+          })) {
+            lane.runtime.registerTool(tool);
+          }
+        }
+      }
+      #createSubagentRunner(parentLane) {
+        const tasks = /* @__PURE__ */ new Map();
+        const parentSessionId = parentLane.session.header.sessionId;
+        const snapshotOf = (task) => ({
+          taskId: task.taskId,
+          childSessionId: task.childSessionId,
+          description: task.description,
+          status: task.status,
+          prompt: task.prompt,
+          role: task.role,
+          events: [...task.events],
+          lastSeq: task.lastSeq,
+          ...task.finalResult !== void 0 ? { finalResult: task.finalResult } : {},
+          ...task.errorMessage !== void 0 ? { errorMessage: task.errorMessage } : {}
+        });
+        const finish = (task, status, extra) => {
+          if (task.settled) {
+            return snapshotOf(task);
+          }
+          task.status = status;
+          if (extra?.result !== void 0) {
+            task.finalResult = extra.result;
+          }
+          if (extra?.errorMessage !== void 0) {
+            task.errorMessage = extra.errorMessage;
+          }
+          if (task.finalResult === void 0 && status === "completed") {
+            const leafId = task.lane.session.activeLeafId;
+            if (leafId) {
+              task.finalResult = finalAssistantText(buildContext(task.lane.session.tree, leafId));
+            }
+          }
+          task.settled = true;
+          const snapshot = snapshotOf(task);
+          task.resolveDone(snapshot);
+          return snapshot;
+        };
+        const pushEvent = (task, event) => {
+          const seq = event.seq ?? task.lastSeq + 1;
+          task.lastSeq = Math.max(task.lastSeq, seq);
+          task.events.push({ ...event, seq });
+        };
+        return {
+          hasActiveWork: () => [...tasks.values()].some((task) => task.status === "queued" || task.status === "running"),
+          detach: async () => {
+            await Promise.allSettled([...tasks.values()].map(async (task) => {
+              await task.stop();
+              await task.lane.runtime.detachActiveToolWork();
+            }));
+          },
+          get: (taskId) => {
+            const task = tasks.get(taskId);
+            return task ? snapshotOf(task) : void 0;
+          },
+          stop: async (taskId) => {
+            const task = tasks.get(taskId);
+            if (!task) {
+              throw new Error(`Unknown Task: ${taskId}`);
+            }
+            await task.stop();
+            return snapshotOf(task);
+          },
+          start: async (input) => {
+            const taskId = `task_${this.#createId()}`;
+            const childSessionId = asSessionId(`ses_sub_${this.#createId()}`);
+            const controller = new AbortController();
+            const childSessionsDir = sessionSubagentsDirPath(this.#sessionsDir, parentSessionId);
+            const selectedModel = await this.#selectedModelFromMeta({
+              projectId: parentLane.project.projectId,
+              modelSelection: { role: input.role }
+            }, parentLane.project);
+            const childSession = await createSession({
+              sessionsDir: childSessionsDir,
+              header: {
+                version: 1,
+                sessionId: childSessionId,
+                deviceId: this.#deviceId,
+                createdAt: this.#now(),
+                meta: {
+                  projectId: parentLane.project.projectId,
+                  kind: "subagent",
+                  parentSessionId,
+                  taskId,
+                  description: input.description,
+                  title: input.description,
+                  ...selectedModel ? {
+                    model: selectedModel.displayName,
+                    selectedModel
+                  } : {}
+                }
+              }
+            });
+            const childRuntime = await this.#createRuntime({
+              sessionId: childSessionId,
+              project: parentLane.project,
+              selectedModel,
+              purpose: "chat",
+              includeSubagentTools: false,
+              toolResultArtifactsDir: join12(childSessionsDir, String(childSessionId), "tool-results"),
+              backgroundBash: this.#backgroundBashForSession(childSessionId)
+            });
+            const childLane = {
+              session: childSession,
+              project: parentLane.project,
+              runtime: childRuntime,
+              ...selectedModel ? { selectedModel } : {},
+              queue: Promise.resolve(),
+              appendQueue: Promise.resolve(),
+              followUpWaiters: /* @__PURE__ */ new Map(),
+              isSubagent: true
+            };
+            childLane.runtime.registerTool(
+              createSkillTool({
+                getEntry: (name) => childLane.session.tree.controlState.skillIndex[name],
+                listNames: () => Object.keys(childLane.session.tree.controlState.skillIndex).sort()
+              })
+            );
+            this.#sessions.set(childSessionId, childLane);
+            this.#seqs.set(childSessionId, Number(childSession.currentSeq));
+            let resolveDone;
+            const done = new Promise((resolve7) => {
+              resolveDone = resolve7;
+            });
+            const task = {
+              taskId,
+              childSessionId,
+              description: input.description,
+              prompt: input.prompt,
+              role: input.role,
+              status: "queued",
+              lane: childLane,
+              controller,
+              events: [],
+              lastSeq: 0,
+              settled: false,
+              done,
+              resolveDone,
+              stop: async () => {
+                if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
+                  return;
+                }
+                controller.abort();
+                childLane.runtime.cancel();
+                finish(task, "cancelled", {
+                  result: task.finalResult ?? "Subagent cancelled before completion."
+                });
+              }
+            };
+            tasks.set(taskId, task);
+            pushEvent(task, {
+              type: "user_message",
+              role: "user",
+              text: input.prompt
+            });
+            const run = async () => {
+              task.status = "running";
+              input.onUpdate?.(snapshotOf(task));
+              try {
+                await this.#appendDiagnostic(parentSessionId, "subagent_started", {
+                  taskId,
+                  childSessionId,
+                  description: input.description,
+                  role: input.role
+                });
+                const instructionSnapshot = await this.#ensureInstructionSnapshot(childLane, asClientId("client_subagent"));
+                await this.#syncSkillIndex(childLane, asClientId("client_subagent"));
+                const userEventId = asEventId(this.#createId());
+                const userEvent = await this.#appendPersistent(childLane, {
+                  type: "user_message",
+                  id: userEventId,
+                  // Control events (instruction_snapshot / skill_index) may already occupy null parentId.
+                  parentId: childLane.session.activeLeafId,
+                  sessionId: childSessionId,
+                  clientId: asClientId("client_subagent"),
+                  ts: this.#now(),
+                  message: {
+                    role: "user",
+                    content: [{ type: "text", text: input.prompt }]
+                  }
+                });
+                const state = {
+                  parentId: userEvent.id,
+                  assistantEventId: asEventId(this.#createId()),
+                  finalAssistantEventId: asEventId(this.#createId())
+                };
+                for await (const rawEvent of childLane.runtime.executeTurn(
+                  buildContext(childLane.session.tree, userEvent.id),
+                  renderSystemPrompt(instructionSnapshot),
+                  {
+                    refreshContext: async () => buildContext(childLane.session.tree, childLane.session.activeLeafId ?? state.parentId)
+                  }
+                )) {
+                  if (controller.signal.aborted) {
+                    break;
+                  }
+                  if (rawEvent.type === "message_end" && rawEvent.message.role === "assistant") {
+                    const text = rawEvent.message.content.filter((block) => block.type === "text").map((block) => block.text).join("").trim();
+                    if (text) {
+                      pushEvent(task, { type: "assistant_message", role: "assistant", text });
+                      task.finalResult = text;
+                      input.onUpdate?.(snapshotOf(task));
+                    }
+                  }
+                  if (rawEvent.type === "tool_execution_end") {
+                    const text = toolResultText2(rawEvent.result);
+                    pushEvent(task, {
+                      type: "tool_result",
+                      toolName: rawEvent.toolName,
+                      isError: rawEvent.isError,
+                      text: text.slice(0, 4e3)
+                    });
+                    input.onUpdate?.(snapshotOf(task));
+                  }
+                  await this.#handleRuntimeEvent(childLane, asClientId("client_subagent"), state, rawEvent);
+                }
+                if (task.settled) {
+                  return;
+                }
+                if (controller.signal.aborted) {
+                  finish(task, "cancelled", { result: task.finalResult ?? "Subagent cancelled before completion." });
+                  return;
+                }
+                const leafId = childLane.session.activeLeafId;
+                const result = leafId ? finalAssistantText(buildContext(childLane.session.tree, leafId)) ?? task.finalResult ?? "" : task.finalResult ?? "";
+                finish(task, "completed", { result });
+                await this.#appendDiagnostic(parentSessionId, "subagent_completed", {
+                  taskId,
+                  childSessionId,
+                  status: "completed"
+                });
+                input.onUpdate?.(snapshotOf(task));
+              } catch (cause) {
+                if (task.settled) {
+                  return;
+                }
+                if (controller.signal.aborted) {
+                  finish(task, "cancelled", { result: task.finalResult ?? "Subagent cancelled before completion." });
+                  return;
+                }
+                const errorMessage4 = cause instanceof Error ? cause.message : String(cause);
+                finish(task, "failed", { errorMessage: errorMessage4 });
+                await this.#appendDiagnostic(parentSessionId, "subagent_failed", {
+                  taskId,
+                  childSessionId,
+                  message: errorMessage4
+                });
+                input.onUpdate?.(snapshotOf(task));
+              }
+            };
+            void run();
+            return {
+              taskId,
+              childSessionId,
+              done: task.done,
+              stop: () => task.stop(),
+              snapshot: () => snapshotOf(task)
+            };
+          }
+        };
+      }
+      #subagentDeliveryForSession(sessionId) {
+        return {
+          onComplete: async (completion) => this.#handleSubagentCompleted(sessionId, completion),
+          isDeliveryVisible: ({ task_id }) => this.#subagentDeliveryVisible(sessionId, task_id)
+        };
+      }
+      async #handleSubagentCompleted(sessionId, completion) {
+        if (this.#shuttingDown) {
+          return void 0;
+        }
+        const lane = this.#sessions.get(sessionId);
+        if (!lane || lane.isSubagent) {
+          return void 0;
+        }
+        const clientId = asClientId("client_system");
+        const parentId = lane.session.activeLeafId;
+        if (!parentId) {
+          return void 0;
+        }
+        const event = await this.#appendPersistent(lane, {
+          type: "harness_item",
+          id: asEventId(this.#createId()),
+          parentId,
+          sessionId,
+          clientId,
+          ts: this.#now(),
+          item: {
+            kind: "runtime_notice",
+            origin: "system",
+            visibility: "hidden",
+            content: [
+              `Subagent task completed: ${completion.task_id}`,
+              `child_session_id: ${completion.child_session_id}`,
+              `description: ${completion.description}`,
+              `status: ${completion.status}`,
+              "",
+              completion.result,
+              "",
+              "This subagent result has already been injected through a system reminder.",
+              "Do not call Task with this task_id again unless the user explicitly asks for the raw result."
+            ].join("\n"),
+            data: {
+              type: "subagent_completed",
+              task_id: completion.task_id,
+              child_session_id: completion.child_session_id,
+              description: completion.description,
+              status: completion.status
+            }
+          }
+        });
+        await this.#appendDiagnostic(sessionId, "subagent_completed_notice", {
+          clientId,
+          taskId: completion.task_id,
+          childSessionId: completion.child_session_id,
+          harnessEventId: event.id,
+          runtimeRunning: lane.runtime.running
+        });
+        if (!this.#shuttingDown && !lane.runtime.running) {
+          lane.queue = lane.queue.then(() => this.#runSystemReminderTurn(lane, clientId, event.id));
+          void lane.queue.catch((cause) => {
+            const error = cause instanceof Error ? cause : new Error(String(cause));
+            void this.#appendDiagnostic(sessionId, "system_reminder_turn_failed", {
+              clientId,
+              reminderEventId: event.id,
+              message: error.message,
+              stack: shortStack(error)
+            });
+          });
+        }
+        return { eventId: event.id };
+      }
+      #subagentDeliveryVisible(sessionId, taskId) {
+        const lane = this.#sessions.get(sessionId);
+        const leafId = lane?.session.activeLeafId;
+        if (!lane || !leafId) {
+          return false;
+        }
+        return buildContext(lane.session.tree, leafId).some((message) => messageHasSubagentReminder(message, taskId));
       }
       async #snipUserTurn(lane, userMessageId, reason) {
         const leafId = lane.session.activeLeafId;
@@ -8585,7 +9508,7 @@ var init_src4 = __esm({
       async #discoverExtensionManifests() {
         const roots = [
           this.#builtinExtensionsDir,
-          join11(this.#scorelHomeDir, "extensions")
+          join12(this.#scorelHomeDir, "extensions")
         ];
         const manifests = /* @__PURE__ */ new Map();
         for (const root of roots) {
@@ -8599,7 +9522,7 @@ var init_src4 = __esm({
             throw cause;
           }
           for (const child of children.sort()) {
-            const manifestPath = join11(root, child, "scorel.extension.json");
+            const manifestPath = join12(root, child, "scorel.extension.json");
             try {
               const manifest = await loadExtensionManifest(manifestPath);
               manifests.set(manifest.id, manifest);
@@ -8686,7 +9609,7 @@ var init_src4 = __esm({
         return binding;
       }
       async #ensureDefaultWorkspaceProject() {
-        const workspace = join11(this.#scorelHomeDir, "workspace");
+        const workspace = join12(this.#scorelHomeDir, "workspace");
         await mkdir7(workspace, { recursive: true });
         return this.registerProject(workspace);
       }
@@ -8715,7 +9638,7 @@ var init_src4 = __esm({
 `, "utf8");
       }
       #imBindingsPath() {
-        return join11(this.#scorelHomeDir, "channels", "im-bindings.json");
+        return join12(this.#scorelHomeDir, "channels", "im-bindings.json");
       }
       async #loadUserConfigProfile(options = {}) {
         try {
@@ -8734,7 +9657,7 @@ var init_src4 = __esm({
       #configWriteTarget() {
         return {
           configDir: this.#scorelHomeDir,
-          configPath: join11(this.#scorelHomeDir, "config.toml"),
+          configPath: join12(this.#scorelHomeDir, "config.toml"),
           workDir: this.#userHomeDir
         };
       }
@@ -9024,7 +9947,7 @@ var init_src4 = __esm({
         };
       }
       async #handleUpsertExtensionSettings(request) {
-        const configPath = join11(this.#scorelHomeDir, "config.toml");
+        const configPath = join12(this.#scorelHomeDir, "config.toml");
         let existingConfigText;
         try {
           existingConfigText = await readFile12(configPath, "utf8");
@@ -9179,18 +10102,19 @@ var init_src4 = __esm({
           sessionId,
           ...fields
         });
-        await mkdir7(this.#sessionsDir, { recursive: true });
-        await appendFile3(sessionLogFilePath(this.#sessionsDir, sessionId), `${line}
+        const logPath = sessionLogFilePath(this.#sessionsDir, sessionId);
+        await mkdir7(dirname9(logPath), { recursive: true });
+        await appendFile3(logPath, `${line}
 `, "utf8");
       }
       async #appendHostDiagnostic(event, fields = {}) {
         const line = formatDiagnosticLine({ ts: this.#now(), level: "info", event, ...fields });
         await mkdir7(this.#sessionsDir, { recursive: true });
-        await appendFile3(join11(this.#sessionsDir, "host.log"), `${line}
+        await appendFile3(join12(this.#sessionsDir, "host.log"), `${line}
 `, "utf8");
       }
       #runtimeStatsPath() {
-        return join11(this.#scorelHomeDir, "runtime-stats.json");
+        return join12(this.#scorelHomeDir, "runtime-stats.json");
       }
       async #recordRtkSavings(input) {
         const updateTask = this.#runtimeStatsQueue.then(async () => {
@@ -9329,6 +10253,18 @@ var init_src4 = __esm({
       );
     });
     isBackgroundBashReminderData = (value, taskId) => isRecord9(value) && value.type === "background_bash_completed" && value.task_id === taskId;
+    messageHasSubagentReminder = (message, taskId) => message.content.some((block) => {
+      if (block.type === "system_reminder") {
+        return isSubagentReminderData(block.data, taskId);
+      }
+      if (block.type !== "tool_result" || !isRecord9(block.result) || !Array.isArray(block.result.content)) {
+        return false;
+      }
+      return block.result.content.some(
+        (item) => isRecord9(item) && item.type === "system_reminder" && isSubagentReminderData(item.data, taskId)
+      );
+    });
+    isSubagentReminderData = (value, taskId) => isRecord9(value) && value.type === "subagent_completed" && value.task_id === taskId;
     estimateScorelMessagesTokens = (messages) => estimateTextTokens(messages.map(messageText2).join("\n"));
     estimateTextTokens = (value) => Math.ceil(value.length / 3);
     compactLine2 = (value, maxChars) => value.replace(/\s+/g, " ").trim().slice(0, maxChars);
@@ -9415,7 +10351,7 @@ var init_src4 = __esm({
     };
     writeRuntimeStats = async (path, stats) => {
       await mkdir7(dirname9(path), { recursive: true });
-      const tempPath = join11(dirname9(path), `.runtime-stats-${process.pid}-${Date.now()}.tmp`);
+      const tempPath = join12(dirname9(path), `.runtime-stats-${process.pid}-${Date.now()}.tmp`);
       try {
         await writeFile7(tempPath, `${JSON.stringify(stats, null, 2)}
 `, "utf8");
@@ -9564,7 +10500,7 @@ var init_src4 = __esm({
       for (const start of starts) {
         let current = resolve5(start);
         while (true) {
-          const candidate = join11(current, "extensions", "builtin");
+          const candidate = join12(current, "extensions", "builtin");
           if (existsSync3(candidate)) {
             return candidate;
           }
@@ -9575,7 +10511,7 @@ var init_src4 = __esm({
           current = next;
         }
       }
-      return join11(starts[0] ?? process.cwd(), "extensions", "builtin");
+      return join12(starts[0] ?? process.cwd(), "extensions", "builtin");
     };
     isSteerMessage = (text) => /^\/(?:steer|interrupt)\b/i.test(text.trim());
     stripImCommandPrefix = (text) => text.trim().replace(/^\/(?:steer|interrupt)\s*/i, "").trim() || text;
@@ -9615,7 +10551,7 @@ var init_src4 = __esm({
 
 // apps/cli/src/relay-cli.ts
 import { homedir as homedir5 } from "node:os";
-import { join as join12 } from "node:path";
+import { join as join13 } from "node:path";
 var DEFAULT_SCOREL_RELAY_URL, DEFAULT_SCOREL_WEBUI_URL, defaultStateDir, runCliPair, resolveDefaultRelayUrl, parsePairFlags, requireValue, writePairUsage;
 var init_relay_cli = __esm({
   "apps/cli/src/relay-cli.ts"() {
@@ -9623,7 +10559,7 @@ var init_relay_cli = __esm({
     init_src4();
     DEFAULT_SCOREL_RELAY_URL = "wss://scorel-relay.chanler.dev";
     DEFAULT_SCOREL_WEBUI_URL = "https://scorel.chanler.dev";
-    defaultStateDir = () => join12(homedir5(), ".scorel");
+    defaultStateDir = () => join13(homedir5(), ".scorel");
     runCliPair = async (argv, options) => {
       let flags;
       try {
@@ -9687,7 +10623,7 @@ var init_relay_cli = __esm({
 // apps/cli/src/update-cli.ts
 import { execFile as execFileCallback } from "node:child_process";
 import { readFile as readFile13 } from "node:fs/promises";
-import { dirname as dirname10, join as join13 } from "node:path";
+import { dirname as dirname10, join as join14 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify as promisify3 } from "node:util";
 var SCOREL_PACKAGE_NAME, AUTO_UPDATE_INTERVAL_MS, ACTIVE_WORK_STALE_MS, execFileAsync3, compareSemver, shouldRunAutoUpdate, createNpmPackageUpdater, readInstalledScorelVersion, runCliUpdate, writeUpdateUsage, parseSemver;
@@ -9734,9 +10670,9 @@ var init_update_cli = __esm({
     readInstalledScorelVersion = async () => {
       const here = dirname10(fileURLToPath(import.meta.url));
       for (const candidate of [
-        join13(here, "..", "package.json"),
-        join13(here, "..", "..", "package.json"),
-        join13(process.cwd(), "package.json")
+        join14(here, "..", "package.json"),
+        join14(here, "..", "..", "package.json"),
+        join14(process.cwd(), "package.json")
       ]) {
         try {
           const parsed = JSON.parse(await readFile13(candidate, "utf8"));
@@ -9792,9 +10728,9 @@ var init_update_cli = __esm({
 import { randomUUID as randomUUID4 } from "node:crypto";
 import { spawn as spawn2 } from "node:child_process";
 import { homedir as homedir6 } from "node:os";
-import { dirname as dirname11, join as join14 } from "node:path";
+import { dirname as dirname11, join as join15 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
-var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, START_READY_TIMEOUT_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runStartCommand, runServeCommand, startAutoUpdateLoop, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep, waitForDaemonStateReady, detachBackgroundDaemon, nodeEntrypointArgs, writeDaemonUsage;
+var DEFAULT_HOST, DEFAULT_PORT, STOP_POLL_INTERVAL_MS, STOP_GRACE_MS, START_READY_TIMEOUT_MS, defaultStateDir2, isLoopbackHost, formatTimestamp, runCliDaemon, runStartCommand, runServeCommand, startAutoUpdateLoop, stopRunningDaemon, runStatusCommand, runStopCommand, runResetCommand, formatStatusLine, parseServeFlags, parseStatusFlags, requireValue2, sleep2, waitForDaemonStateReady, detachBackgroundDaemon, nodeEntrypointArgs, writeDaemonUsage;
 var init_daemon_cli = __esm({
   "apps/cli/src/daemon-cli.ts"() {
     "use strict";
@@ -9806,7 +10742,7 @@ var init_daemon_cli = __esm({
     STOP_POLL_INTERVAL_MS = 200;
     STOP_GRACE_MS = 5e3;
     START_READY_TIMEOUT_MS = 3e4;
-    defaultStateDir2 = () => join14(homedir6(), ".scorel");
+    defaultStateDir2 = () => join15(homedir6(), ".scorel");
     isLoopbackHost = (host) => host === "127.0.0.1" || host === "::1" || host === "localhost";
     formatTimestamp = (epochMs) => new Date(epochMs).toISOString();
     runCliDaemon = async (argv, options) => {
@@ -9928,7 +10864,7 @@ Use --replace to stop it and start a new one.
       const sessionsDir = options.sessionsDir ?? scorelSessionsDir(homedir6());
       const daemon = new ScorelHost({
         sessionsDir,
-        projectsPath: join14(options.stateDir, "projects.json"),
+        projectsPath: join15(options.stateDir, "projects.json"),
         deviceId: identity.deviceId,
         deviceDisplayName: identity.displayName,
         ...flags.launchIntent === "attached" ? { onLastClientDisconnect: () => requestStop("last-client-disconnected") } : {},
@@ -10096,7 +11032,7 @@ Use --replace to stop it and start a new one.
       }
       const deadline = Date.now() + STOP_GRACE_MS;
       while (Date.now() < deadline) {
-        await sleep(STOP_POLL_INTERVAL_MS);
+        await sleep2(STOP_POLL_INTERVAL_MS);
         const refreshed = await readLocalDaemonState({ stateDir: options.stateDir });
         if (!refreshed || refreshed.stoppedAt !== null || daemonStateLiveness(refreshed) !== "running") {
           return;
@@ -10151,7 +11087,7 @@ Use --replace to stop it and start a new one.
       }
       const deadline = Date.now() + STOP_GRACE_MS;
       while (Date.now() < deadline) {
-        await sleep(STOP_POLL_INTERVAL_MS);
+        await sleep2(STOP_POLL_INTERVAL_MS);
         const refreshed = await readLocalDaemonState({ stateDir: options.stateDir });
         if (!refreshed) {
           break;
@@ -10273,7 +11209,7 @@ Use --replace to stop it and start a new one.
       }
       return value;
     };
-    sleep = (ms) => new Promise((resolve7) => {
+    sleep2 = (ms) => new Promise((resolve7) => {
       setTimeout(resolve7, ms);
     });
     waitForDaemonStateReady = (child, stateDir, readState, timeoutMs) => new Promise((resolveReady, rejectReady) => {
@@ -10523,7 +11459,7 @@ var init_routing = __esm({
 
 // apps/relay/src/store.ts
 import { mkdir as mkdir8, readFile as readFile14, writeFile as writeFile8 } from "node:fs/promises";
-import { join as join15 } from "node:path";
+import { join as join16 } from "node:path";
 var FileRelayStore, emptyStoreFile;
 var init_store = __esm({
   "apps/relay/src/store.ts"() {
@@ -10533,7 +11469,7 @@ var init_store = __esm({
       #now;
       #queue = Promise.resolve();
       constructor(options) {
-        this.#filePath = join15(options.dataDir, "relay-store.json");
+        this.#filePath = join16(options.dataDir, "relay-store.json");
         this.#now = options.now ?? Date.now;
       }
       async upsertDevice(record) {
@@ -10576,7 +11512,7 @@ var init_store = __esm({
         this.#queue = this.#queue.then(async () => {
           const file = await this.#read();
           mutator(file);
-          await mkdir8(join15(this.#filePath, ".."), { recursive: true });
+          await mkdir8(join16(this.#filePath, ".."), { recursive: true });
           await writeFile8(this.#filePath, `${JSON.stringify(file, null, 2)}
 `);
         });
@@ -10837,7 +11773,7 @@ var init_library = __esm({
 
 // apps/cli/src/relay-server-cli.ts
 import { homedir as homedir7 } from "node:os";
-import { join as join16 } from "node:path";
+import { join as join17 } from "node:path";
 var DEFAULT_HOST2, DEFAULT_PORT2, runCliRelay, runRelayServe, parseRelayServeFlags, waitForStop, requireValue3, writeRelayUsage;
 var init_relay_server_cli = __esm({
   "apps/cli/src/relay-server-cli.ts"() {
@@ -10889,7 +11825,7 @@ var init_relay_server_cli = __esm({
     parseRelayServeFlags = (argv) => {
       let host = DEFAULT_HOST2;
       let port = DEFAULT_PORT2;
-      let dataDir = join16(homedir7(), ".scorel", "relay");
+      let dataDir = join17(homedir7(), ".scorel", "relay");
       for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
         if (arg === "--host") {
@@ -10947,7 +11883,7 @@ var init_relay_server_cli = __esm({
 // apps/cli/src/up-cli.ts
 import { spawn as spawn3 } from "node:child_process";
 import { homedir as homedir8 } from "node:os";
-import { dirname as dirname12, join as join17 } from "node:path";
+import { dirname as dirname12, join as join18 } from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 var DEFAULT_DAEMON_PORT, DEFAULT_WEBUI_PORT, DEFAULT_DAEMON_READY_TIMEOUT_MS, defaultStateDir3, defaultAttachSigint, runCliUp, parseUpFlags, requireValue4, waitForDaemonReady, pipeWithPrefix, detachBackgroundDaemon2, nodeEntrypointArgs2, pipeStreamLines, once;
 var init_up_cli = __esm({
@@ -10957,7 +11893,7 @@ var init_up_cli = __esm({
     DEFAULT_DAEMON_PORT = 7777;
     DEFAULT_WEBUI_PORT = 3e3;
     DEFAULT_DAEMON_READY_TIMEOUT_MS = 3e4;
-    defaultStateDir3 = () => join17(homedir8(), ".scorel");
+    defaultStateDir3 = () => join18(homedir8(), ".scorel");
     defaultAttachSigint = (listener) => {
       process.on("SIGINT", listener);
       return () => process.off("SIGINT", listener);
@@ -11316,7 +12252,7 @@ import { appendFile as appendFile4, mkdir as mkdir9, readFile as readFile15, rea
 import { createInterface } from "node:readline/promises";
 import { homedir as homedir9 } from "node:os";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
-import { basename as basename4, dirname as dirname14, join as join18 } from "node:path";
+import { basename as basename4, dirname as dirname14, join as join19 } from "node:path";
 var cliAppName, cliClientDependency, cliDaemonDependency, defaultSessionsDir, defaultStateDir4, runCli, runProject, runLogs, runAttach, attachCacheScope, attachCacheFilePath, attachDiagnosticsFilePath, findAttachDiagnosticsFilePath, stateDirFromSessionsDir, AttachDiagnostics, readAttachCache, writeAttachCache, emptyAttachCacheSnapshot, mergePersistentEvents, highestSeq, highestCachedStreamSeq, updateAttachCacheSnapshot, removeCompletedTransients, isCachedTransientMessage, AsyncInputQueue, parseAttachOptions, parseLogsOptions, runChat, runHeadless, renderRunEvent, renderRunFinal, writeJsonLine, RunTimeoutError, withRunTimeout, makeRunSummary, runErrorFromEvents, writeRunSummary, writeRunReports, runReportPaths, runMetadata, runTrajectory, runReportingModel, runReportingModelFromEvents, readRunPrompt, resolveRunConfig, stripTrailingSlashes3, runObserve, writeObservePayload, loadObserveConfig, createSigintHandler, loadOrCreateSession, parseChatOptions, parseRunOptions, parseRunOutputFormat, parseReasoningEffort, parsePositiveInteger, parseModelSelection, parseRunProviderApi, parseObserveOptions, parseObserveTarget, requireValue6, promptIfInteractive, writeUsage, writeRunUsage, writeObserveUsage, writeProjectUsage, writeEventError, writeToolResult, redactDiagnosticFields, formatDiagnosticLine2, formatDiagnosticValue2, AttachEventRenderer, blocksToText, isCliEntrypoint;
 var init_index = __esm({
   async "apps/cli/src/index.ts"() {
@@ -11335,7 +12271,7 @@ var init_index = __esm({
     cliClientDependency = clientPackageName;
     cliDaemonDependency = daemonPackageName;
     defaultSessionsDir = () => scorelSessionsDir(homedir9());
-    defaultStateDir4 = () => join18(homedir9(), ".scorel");
+    defaultStateDir4 = () => join19(homedir9(), ".scorel");
     runCli = async (argv, io = { input: process.stdin, output: process.stdout, error: process.stderr }, runOptions = {}) => {
       const [command, ...rest] = argv;
       if (command === "--version" || command === "-v" || command === "version") {
@@ -11504,7 +12440,7 @@ var init_index = __esm({
       }
     };
     runLogs = async (options, io) => {
-      const filePath = options.attach ? await findAttachDiagnosticsFilePath(io.stateDir, options.sessionId, options.remoteUrl) : join18(io.sessionsDir, `${options.sessionId}.log`);
+      const filePath = options.attach ? await findAttachDiagnosticsFilePath(io.stateDir, options.sessionId, options.remoteUrl) : sessionLogFilePath(io.sessionsDir, options.sessionId);
       let content;
       try {
         content = await readFile15(filePath, "utf8");
@@ -11661,17 +12597,17 @@ var init_index = __esm({
     };
     attachCacheFilePath = (stateDir, scope, sessionId) => {
       const scopeKey = createHash5("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
-      return join18(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
+      return join19(stateDir, "attach-cache", scopeKey, `${sessionId}.json`);
     };
     attachDiagnosticsFilePath = (stateDir, scope, sessionId) => {
       const scopeKey = createHash5("sha256").update(`${scope.kind}\0${scope.locator}`).digest("hex").slice(0, 24);
-      return join18(stateDir, "attach-cache", scopeKey, `${sessionId}.log`);
+      return join19(stateDir, "attach-cache", scopeKey, `${sessionId}.log`);
     };
     findAttachDiagnosticsFilePath = async (stateDir, sessionId, _remoteUrl) => {
-      const root = join18(stateDir, "attach-cache");
+      const root = join19(stateDir, "attach-cache");
       const scopes = await readdir7(root).catch(() => []);
       for (const scope of scopes) {
-        const candidate = join18(root, scope, `${sessionId}.log`);
+        const candidate = join19(root, scope, `${sessionId}.log`);
         try {
           await readFile15(candidate, "utf8");
           return candidate;
@@ -11679,7 +12615,7 @@ var init_index = __esm({
           continue;
         }
       }
-      return join18(root, "__missing__", `${sessionId}.log`);
+      return join19(root, "__missing__", `${sessionId}.log`);
     };
     stateDirFromSessionsDir = (sessionsDir) => {
       if (!sessionsDir) {
@@ -11909,7 +12845,7 @@ var init_index = __esm({
       const loadProjectConfigProfile = async (project2) => options.config ?? await loadScorelConfigProfile({ cwd: project2.workDir, ...configScope });
       const daemon = new ScorelHost({
         sessionsDir: options.sessionsDir,
-        projectsPath: join18(options.stateDir, "projects.json"),
+        projectsPath: join19(options.stateDir, "projects.json"),
         deviceId: asDeviceId("device_local"),
         scorelHomeDir: options.stateDir,
         loadConfig: async ({ project: project2 }) => loadProjectConfig(project2),
@@ -12002,7 +12938,7 @@ var init_index = __esm({
       const loadProjectConfigProfile = async (project) => runConfig ?? options.config ?? await loadScorelConfigProfile({ cwd: project.workDir, ...configScope });
       const daemon = new ScorelHost({
         sessionsDir: options.sessionsDir,
-        projectsPath: join18(options.stateDir, "projects.json"),
+        projectsPath: join19(options.stateDir, "projects.json"),
         deviceId: asDeviceId("device_local"),
         scorelHomeDir: options.stateDir,
         loadConfig: async ({ project }) => loadProjectConfig(project),
@@ -12158,7 +13094,7 @@ var init_index = __esm({
         cwd: input.options.cwd,
         stateDir: input.options.stateDir,
         sessionsDir: input.options.sessionsDir,
-        sessionJsonl: join18(input.options.sessionsDir, `${input.options.sessionId}.jsonl`),
+        sessionJsonl: sessionFilePath(input.options.sessionsDir, input.options.sessionId),
         outputFormat: input.options.outputFormat,
         elapsedMs: Date.now() - input.startedAt,
         exitReason: input.exitReason,
@@ -12204,26 +13140,26 @@ var init_index = __esm({
         return;
       }
       await mkdir9(reportDir, { recursive: true });
-      await writeFile9(join18(reportDir, "scorel-summary.json"), `${JSON.stringify(summary, null, 2)}
+      await writeFile9(join19(reportDir, "scorel-summary.json"), `${JSON.stringify(summary, null, 2)}
 `);
-      await writeFile9(join18(reportDir, "scorel-events.jsonl"), summary.events?.map((event) => JSON.stringify(event)).join("\n").concat("\n") ?? "");
-      await writeFile9(join18(reportDir, "scorel-metadata.json"), `${JSON.stringify(runMetadata(summary), null, 2)}
+      await writeFile9(join19(reportDir, "scorel-events.jsonl"), summary.events?.map((event) => JSON.stringify(event)).join("\n").concat("\n") ?? "");
+      await writeFile9(join19(reportDir, "scorel-metadata.json"), `${JSON.stringify(runMetadata(summary), null, 2)}
 `);
-      await writeFile9(join18(reportDir, "scorel-trajectory.json"), `${JSON.stringify(runTrajectory(summary), null, 2)}
+      await writeFile9(join19(reportDir, "scorel-trajectory.json"), `${JSON.stringify(runTrajectory(summary), null, 2)}
 `);
     };
     runReportPaths = (options) => {
       const reports = {
-        sessionJsonl: join18(options.sessionsDir, `${options.sessionId}.jsonl`),
+        sessionJsonl: sessionFilePath(options.sessionsDir, options.sessionId),
         sessionSummary: sessionObservationSummaryFilePath(options.sessionsDir, options.sessionId),
         diagnosticsLog: sessionLogFilePath(options.sessionsDir, options.sessionId),
         sessionFilesDir: sessionArtifactsDirPath(options.sessionsDir, options.sessionId)
       };
       if (options.reportDir) {
-        reports.summary = join18(options.reportDir, "scorel-summary.json");
-        reports.events = join18(options.reportDir, "scorel-events.jsonl");
-        reports.trajectory = join18(options.reportDir, "scorel-trajectory.json");
-        reports.metadata = join18(options.reportDir, "scorel-metadata.json");
+        reports.summary = join19(options.reportDir, "scorel-summary.json");
+        reports.events = join19(options.reportDir, "scorel-events.jsonl");
+        reports.trajectory = join19(options.reportDir, "scorel-trajectory.json");
+        reports.metadata = join19(options.reportDir, "scorel-metadata.json");
       }
       return reports;
     };
@@ -12593,7 +13529,7 @@ var init_index = __esm({
         throw new Error("scorel run requires exactly one prompt source");
       }
       const resolvedStateDir = stateDir ?? stateDirFromSessionsDir(sessionsDir);
-      const resolvedSessionsDir = sessionsDir ?? join18(resolvedStateDir, "sessions");
+      const resolvedSessionsDir = sessionsDir ?? join19(resolvedStateDir, "sessions");
       return {
         ...promptSources[0],
         sessionId,
@@ -12687,7 +13623,7 @@ var init_index = __esm({
         throw new Error("--target is required");
       }
       const resolvedStateDir = stateDir ?? stateDirFromSessionsDir(sessionsDir);
-      const resolvedSessionsDir = sessionsDir ?? join18(resolvedStateDir, "sessions");
+      const resolvedSessionsDir = sessionsDir ?? join19(resolvedStateDir, "sessions");
       return {
         command: "sync",
         sessionId,
