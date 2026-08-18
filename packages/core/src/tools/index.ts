@@ -2,6 +2,9 @@ import { Type, type TSchema } from "@earendil-works/pi-ai";
 
 import type { ContentBlock, EventId } from "@scorel/protocol";
 
+/** Shared default wait window for Bash and Task background tools (seconds). */
+export const DEFAULT_BACKGROUND_WAIT_SECONDS = 120;
+
 export type ToolResult = {
   content: ContentBlock[];
   details?: unknown;
@@ -12,6 +15,10 @@ export type AgentTool = {
   description: string;
   parameters: TSchema;
   hasActiveWork?: () => boolean;
+  /**
+   * Host shutdown hook: stop background work owned by this tool.
+   * Must not leave orphan processes after the Host exits.
+   */
   detach?: () => void | Promise<void>;
   execute: (
     toolCallId: string,
@@ -63,6 +70,7 @@ export const createSnipTool = (options: {
   });
 
 export * from "./coding-tools.js";
+export * from "./subagent-tools.js";
 
 const parseSnipToolInput = (args: unknown): SnipToolInput => {
   if (!isRecord(args) || typeof args.userMessageId !== "string") {

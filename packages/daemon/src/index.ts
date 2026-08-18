@@ -23,10 +23,12 @@ import {
   createSendChannelMessageTool,
   createSkillTool,
   createSnipTool,
+  createSubagentTools,
   createSystemReminderBlock,
   diffSkillIndex,
   createPiAiProvider,
   createSession,
+  finalAssistantText,
   hasSkillIndexDelta,
   listAvailableModels,
   listProviderConnections,
@@ -51,6 +53,7 @@ import {
   scanSkillIndex,
   sessionArtifactsDirPath,
   sessionLogFilePath,
+  sessionSubagentsDirPath,
   snipUserMessageAlias,
   scorelSessionsDir,
   scorelMemoryPaths,
@@ -64,6 +67,12 @@ import {
   type ScorelConfigProfile,
   type JsonlSession,
   type RawRuntimeEvent,
+  type SubagentCompletion,
+  type SubagentDeliveryHooks,
+  type SubagentRunner,
+  type SubagentSnapshot,
+  type SubagentStatus,
+  type SubagentThreadEvent,
 } from "@scorel/core";
 import {
   asClientId,
@@ -106,6 +115,7 @@ import {
   type ClientRequestMap,
   type ChannelContext,
   type MemoryStatus,
+  type ModelRole,
   type ModelSelectionInput,
   type ExtensionSettings,
   type MemorySettings,
@@ -455,8 +465,13 @@ export type RuntimeFactoryOptions = {
   sessionId?: SessionId;
   modelSelection?: ModelSelectionInput;
   includeTools?: boolean;
+  /** Nested Task tools are parent-only; child subagent runtimes omit them. */
+  includeSubagentTools?: boolean;
   rtkExecutable?: string;
   backgroundBash?: BackgroundBashDeliveryHooks;
+  subagent?: SubagentDeliveryHooks;
+  /** When set, coding-tool artifacts write under this directory instead of the default session artifacts path. */
+  toolResultArtifactsDir?: string;
 };
 
 export type ScorelHostOptions = {
@@ -475,6 +490,10 @@ export type ScorelHostOptions = {
     selectedModel?: SelectedModelSummary;
     purpose: "chat" | "title" | "memory";
     backgroundBash?: BackgroundBashDeliveryHooks;
+    includeSubagentTools?: boolean;
+    subagent?: SubagentDeliveryHooks;
+    /** When set, coding-tool artifacts write under this directory instead of the default session artifacts path. */
+    toolResultArtifactsDir?: string;
   }) => Promise<ScorelRuntime>;
   memoryHomeDir?: string;
   onSessionListChanged?: (change: { projectId: ProjectId; sessionId: SessionId }) => void;
@@ -540,7 +559,9 @@ export const createRealRuntime = async (options: RuntimeFactoryOptions): Promise
     for (const tool of createCodingTools({
       cwd: options.cwd,
       contextWindow: model.contextWindow,
-      ...(options.sessionsDir && options.sessionId
+      ...(options.toolResultArtifactsDir
+        ? { toolResultArtifacts: { dir: options.toolResultArtifactsDir } }
+        : options.sessionsDir && options.sessionId
         ? { toolResultArtifacts: { dir: sessionArtifactsDirPath(options.sessionsDir, options.sessionId) } }
         : {}),
       tokenSaving: {
@@ -567,6 +588,29 @@ type SessionLane = {
   followUpWaiters: Map<string, { connection: Connection; request: ClientRequest<"send_message"> }>;
   channelContext?: RuntimeChannelContext;
   snipClientId?: ClientId;
+  /** Parent-session-owned subagent registry. Absent on child subagent lanes. */
+  subagents?: SubagentRunner;
+  /** True for nested subagent lanes; they must not register Task tools. */
+  isSubagent?: boolean;
+};
+
+type HostSubagentTask = {
+  taskId: string;
+  childSessionId: SessionId;
+  description: string;
+  prompt: string;
+  role: ModelRole;
+  status: SubagentStatus;
+  lane: SessionLane;
+  controller: AbortController;
+  events: SubagentThreadEvent[];
+  lastSeq: number;
+  settled: boolean;
+  finalResult?: string;
+  errorMessage?: string;
+  done: Promise<SubagentSnapshot>;
+  resolveDone: (snapshot: SubagentSnapshot) => void;
+  stop: () => Promise<void>;
 };
 
 type RuntimeChannelContext = ChannelContext & {
@@ -711,6 +755,11 @@ export class ScorelHost {
       }
     }
     this.#memoryDreams.clear();
+    // Cancel in-flight model turns, then terminate background tool work (Bash / Task).
+    // Host exit must not leave orphan background processes behind.
+    for (const lane of this.#sessions.values()) {
+      lane.runtime.cancel();
+    }
     await Promise.all([...this.#sessions.values()].map((lane) => lane.runtime.detachActiveToolWork()));
     await this.#stopImExtensions();
     this.#connections.clear();
@@ -2736,6 +2785,385 @@ export class ScorelHost {
         snip: async (input) => this.#snipUserTurn(lane, input.userMessageId, input.reason),
       }),
     );
+    if (!lane.isSubagent) {
+      if (!lane.subagents) {
+        lane.subagents = this.#createSubagentRunner(lane);
+      }
+      for (const tool of createSubagentTools({
+        runner: lane.subagents,
+        delivery: this.#subagentDeliveryForSession(lane.session.header.sessionId),
+      })) {
+        lane.runtime.registerTool(tool);
+      }
+    }
+  }
+
+  #createSubagentRunner(parentLane: SessionLane): SubagentRunner {
+    const tasks = new Map<string, HostSubagentTask>();
+    const parentSessionId = parentLane.session.header.sessionId;
+
+    const snapshotOf = (task: HostSubagentTask): SubagentSnapshot => ({
+      taskId: task.taskId,
+      childSessionId: task.childSessionId,
+      description: task.description,
+      status: task.status,
+      prompt: task.prompt,
+      role: task.role,
+      events: [...task.events],
+      lastSeq: task.lastSeq,
+      ...(task.finalResult !== undefined ? { finalResult: task.finalResult } : {}),
+      ...(task.errorMessage !== undefined ? { errorMessage: task.errorMessage } : {}),
+    });
+
+    const finish = (task: HostSubagentTask, status: SubagentStatus, extra?: { result?: string; errorMessage?: string }): SubagentSnapshot => {
+      if (task.settled) {
+        return snapshotOf(task);
+      }
+      task.status = status;
+      if (extra?.result !== undefined) {
+        task.finalResult = extra.result;
+      }
+      if (extra?.errorMessage !== undefined) {
+        task.errorMessage = extra.errorMessage;
+      }
+      if (task.finalResult === undefined && status === "completed") {
+        const leafId = task.lane.session.activeLeafId;
+        if (leafId) {
+          task.finalResult = finalAssistantText(buildContext(task.lane.session.tree, leafId));
+        }
+      }
+      task.settled = true;
+      const snapshot = snapshotOf(task);
+      task.resolveDone(snapshot);
+      return snapshot;
+    };
+
+    const pushEvent = (task: HostSubagentTask, event: Omit<SubagentThreadEvent, "seq"> & { seq?: number }): void => {
+      const seq = event.seq ?? task.lastSeq + 1;
+      task.lastSeq = Math.max(task.lastSeq, seq);
+      task.events.push({ ...event, seq });
+    };
+
+    return {
+      hasActiveWork: () => [...tasks.values()].some((task) => task.status === "queued" || task.status === "running"),
+      detach: async () => {
+        // Host shutdown: stop every subagent turn and kill nested background tools.
+        await Promise.allSettled([...tasks.values()].map(async (task) => {
+          await task.stop();
+          await task.lane.runtime.detachActiveToolWork();
+        }));
+      },
+      get: (taskId) => {
+        const task = tasks.get(taskId);
+        return task ? snapshotOf(task) : undefined;
+      },
+      stop: async (taskId) => {
+        const task = tasks.get(taskId);
+        if (!task) {
+          throw new Error(`Unknown Task: ${taskId}`);
+        }
+        await task.stop();
+        return snapshotOf(task);
+      },
+      start: async (input) => {
+        const taskId = `task_${this.#createId()}`;
+        const childSessionId = asSessionId(`ses_sub_${this.#createId()}`);
+        const controller = new AbortController();
+        const childSessionsDir = sessionSubagentsDirPath(this.#sessionsDir, parentSessionId);
+        const selectedModel = await this.#selectedModelFromMeta({
+          projectId: parentLane.project.projectId,
+          modelSelection: { role: input.role },
+        }, parentLane.project);
+        // Child session is a full session root under parent/sub-agents/{childId}/events.jsonl
+        const childSession = await createSession({
+          sessionsDir: childSessionsDir,
+          header: {
+            version: 1,
+            sessionId: childSessionId,
+            deviceId: this.#deviceId,
+            createdAt: this.#now(),
+            meta: {
+              projectId: parentLane.project.projectId,
+              kind: "subagent",
+              parentSessionId,
+              taskId,
+              description: input.description,
+              title: input.description,
+              ...(selectedModel
+                ? {
+                    model: selectedModel.displayName,
+                    selectedModel,
+                  }
+                : {}),
+            },
+          },
+        });
+        const childRuntime = await this.#createRuntime({
+          sessionId: childSessionId,
+          project: parentLane.project,
+          selectedModel,
+          purpose: "chat",
+          includeSubagentTools: false,
+          toolResultArtifactsDir: join(childSessionsDir, String(childSessionId), "tool-results"),
+          backgroundBash: this.#backgroundBashForSession(childSessionId),
+        });
+        const childLane: SessionLane = {
+          session: childSession,
+          project: parentLane.project,
+          runtime: childRuntime,
+          ...(selectedModel ? { selectedModel } : {}),
+          queue: Promise.resolve(),
+          appendQueue: Promise.resolve(),
+          followUpWaiters: new Map(),
+          isSubagent: true,
+        };
+        // Child lanes intentionally skip Task tools (depth 1).
+        childLane.runtime.registerTool(
+          createSkillTool({
+            getEntry: (name) => childLane.session.tree.controlState.skillIndex[name],
+            listNames: () => Object.keys(childLane.session.tree.controlState.skillIndex).sort(),
+          }),
+        );
+        this.#sessions.set(childSessionId, childLane);
+        this.#seqs.set(childSessionId, Number(childSession.currentSeq));
+
+        let resolveDone!: (snapshot: SubagentSnapshot) => void;
+        const done = new Promise<SubagentSnapshot>((resolve) => {
+          resolveDone = resolve;
+        });
+
+        const task: HostSubagentTask = {
+          taskId,
+          childSessionId,
+          description: input.description,
+          prompt: input.prompt,
+          role: input.role,
+          status: "queued",
+          lane: childLane,
+          controller,
+          events: [],
+          lastSeq: 0,
+          settled: false,
+          done,
+          resolveDone,
+          stop: async () => {
+            if (task.status === "completed" || task.status === "failed" || task.status === "cancelled") {
+              return;
+            }
+            controller.abort();
+            childLane.runtime.cancel();
+            finish(task, "cancelled", {
+              result: task.finalResult ?? "Subagent cancelled before completion.",
+            });
+          },
+        };
+        tasks.set(taskId, task);
+
+        pushEvent(task, {
+          type: "user_message",
+          role: "user",
+          text: input.prompt,
+        });
+
+        const run = async (): Promise<void> => {
+          task.status = "running";
+          input.onUpdate?.(snapshotOf(task));
+          try {
+            await this.#appendDiagnostic(parentSessionId, "subagent_started", {
+              taskId,
+              childSessionId,
+              description: input.description,
+              role: input.role,
+            });
+            const instructionSnapshot = await this.#ensureInstructionSnapshot(childLane, asClientId("client_subagent"));
+            await this.#syncSkillIndex(childLane, asClientId("client_subagent"));
+            const userEventId = asEventId(this.#createId());
+            const userEvent = await this.#appendPersistent(childLane, {
+              type: "user_message",
+              id: userEventId,
+              // Control events (instruction_snapshot / skill_index) may already occupy null parentId.
+              parentId: childLane.session.activeLeafId,
+              sessionId: childSessionId,
+              clientId: asClientId("client_subagent"),
+              ts: this.#now(),
+              message: {
+                role: "user",
+                content: [{ type: "text", text: input.prompt }],
+              },
+            });
+            const state: RuntimeEventState = {
+              parentId: userEvent.id,
+              assistantEventId: asEventId(this.#createId()),
+              finalAssistantEventId: asEventId(this.#createId()),
+            };
+            for await (const rawEvent of childLane.runtime.executeTurn(
+              buildContext(childLane.session.tree, userEvent.id),
+              renderSystemPrompt(instructionSnapshot),
+              {
+                refreshContext: async () =>
+                  buildContext(childLane.session.tree, childLane.session.activeLeafId ?? state.parentId),
+              },
+            )) {
+              if (controller.signal.aborted) {
+                break;
+              }
+              if (rawEvent.type === "message_end" && rawEvent.message.role === "assistant") {
+                const text = rawEvent.message.content
+                  .filter((block): block is { type: "text"; text: string } => block.type === "text")
+                  .map((block) => block.text)
+                  .join("")
+                  .trim();
+                if (text) {
+                  pushEvent(task, { type: "assistant_message", role: "assistant", text });
+                  task.finalResult = text;
+                  input.onUpdate?.(snapshotOf(task));
+                }
+              }
+              if (rawEvent.type === "tool_execution_end") {
+                const text = toolResultText(rawEvent.result);
+                pushEvent(task, {
+                  type: "tool_result",
+                  toolName: rawEvent.toolName,
+                  isError: rawEvent.isError,
+                  text: text.slice(0, 4_000),
+                });
+                input.onUpdate?.(snapshotOf(task));
+              }
+              await this.#handleRuntimeEvent(childLane, asClientId("client_subagent"), state, rawEvent);
+            }
+            if (task.settled) {
+              return;
+            }
+            if (controller.signal.aborted) {
+              finish(task, "cancelled", { result: task.finalResult ?? "Subagent cancelled before completion." });
+              return;
+            }
+            const leafId = childLane.session.activeLeafId;
+            const result = leafId
+              ? finalAssistantText(buildContext(childLane.session.tree, leafId)) ?? task.finalResult ?? ""
+              : task.finalResult ?? "";
+            finish(task, "completed", { result });
+            await this.#appendDiagnostic(parentSessionId, "subagent_completed", {
+              taskId,
+              childSessionId,
+              status: "completed",
+            });
+            input.onUpdate?.(snapshotOf(task));
+          } catch (cause) {
+            if (task.settled) {
+              return;
+            }
+            if (controller.signal.aborted) {
+              finish(task, "cancelled", { result: task.finalResult ?? "Subagent cancelled before completion." });
+              return;
+            }
+            const errorMessage = cause instanceof Error ? cause.message : String(cause);
+            finish(task, "failed", { errorMessage });
+            await this.#appendDiagnostic(parentSessionId, "subagent_failed", {
+              taskId,
+              childSessionId,
+              message: errorMessage,
+            });
+            input.onUpdate?.(snapshotOf(task));
+          }
+        };
+
+        void run();
+
+        return {
+          taskId,
+          childSessionId,
+          done: task.done,
+          stop: () => task.stop(),
+          snapshot: () => snapshotOf(task),
+        };
+      },
+    };
+  }
+
+  #subagentDeliveryForSession(sessionId: SessionId): SubagentDeliveryHooks {
+    return {
+      onComplete: async (completion) => this.#handleSubagentCompleted(sessionId, completion),
+      isDeliveryVisible: ({ task_id }) => this.#subagentDeliveryVisible(sessionId, task_id),
+    };
+  }
+
+  async #handleSubagentCompleted(
+    sessionId: SessionId,
+    completion: SubagentCompletion,
+  ): Promise<{ eventId?: string } | void> {
+    if (this.#shuttingDown) {
+      return undefined;
+    }
+    const lane = this.#sessions.get(sessionId);
+    if (!lane || lane.isSubagent) {
+      return undefined;
+    }
+    const clientId = asClientId("client_system");
+    const parentId = lane.session.activeLeafId;
+    if (!parentId) {
+      return undefined;
+    }
+    const event = await this.#appendPersistent(lane, {
+      type: "harness_item",
+      id: asEventId(this.#createId()),
+      parentId,
+      sessionId,
+      clientId,
+      ts: this.#now(),
+      item: {
+        kind: "runtime_notice",
+        origin: "system",
+        visibility: "hidden",
+        content: [
+          `Subagent task completed: ${completion.task_id}`,
+          `child_session_id: ${completion.child_session_id}`,
+          `description: ${completion.description}`,
+          `status: ${completion.status}`,
+          "",
+          completion.result,
+          "",
+          "This subagent result has already been injected through a system reminder.",
+          "Do not call Task with this task_id again unless the user explicitly asks for the raw result.",
+        ].join("\n"),
+        data: {
+          type: "subagent_completed",
+          task_id: completion.task_id,
+          child_session_id: completion.child_session_id,
+          description: completion.description,
+          status: completion.status,
+        },
+      },
+    });
+    await this.#appendDiagnostic(sessionId, "subagent_completed_notice", {
+      clientId,
+      taskId: completion.task_id,
+      childSessionId: completion.child_session_id,
+      harnessEventId: event.id,
+      runtimeRunning: lane.runtime.running,
+    });
+    if (!this.#shuttingDown && !lane.runtime.running) {
+      lane.queue = lane.queue.then(() => this.#runSystemReminderTurn(lane, clientId, event.id));
+      void lane.queue.catch((cause) => {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        void this.#appendDiagnostic(sessionId, "system_reminder_turn_failed", {
+          clientId,
+          reminderEventId: event.id,
+          message: error.message,
+          stack: shortStack(error),
+        });
+      });
+    }
+    return { eventId: event.id };
+  }
+
+  #subagentDeliveryVisible(sessionId: SessionId, taskId: string): boolean {
+    const lane = this.#sessions.get(sessionId);
+    const leafId = lane?.session.activeLeafId;
+    if (!lane || !leafId) {
+      return false;
+    }
+    return buildContext(lane.session.tree, leafId).some((message) => messageHasSubagentReminder(message, taskId));
   }
 
   async #snipUserTurn(
@@ -3643,8 +4071,9 @@ export class ScorelHost {
       sessionId,
       ...fields,
     });
-    await mkdir(this.#sessionsDir, { recursive: true });
-    await appendFile(sessionLogFilePath(this.#sessionsDir, sessionId), `${line}\n`, "utf8");
+    const logPath = sessionLogFilePath(this.#sessionsDir, sessionId);
+    await mkdir(dirname(logPath), { recursive: true });
+    await appendFile(logPath, `${line}\n`, "utf8");
   }
 
   async #appendHostDiagnostic(event: string, fields: Record<string, unknown> = {}): Promise<void> {
@@ -3834,6 +4263,24 @@ const messageHasBackgroundBashReminder = (message: ScorelMessage, taskId: string
 
 const isBackgroundBashReminderData = (value: unknown, taskId: string): boolean =>
   isRecord(value) && value.type === "background_bash_completed" && value.task_id === taskId;
+
+const messageHasSubagentReminder = (message: ScorelMessage, taskId: string): boolean =>
+  message.content.some((block) => {
+    if (block.type === "system_reminder") {
+      return isSubagentReminderData(block.data, taskId);
+    }
+    if (block.type !== "tool_result" || !isRecord(block.result) || !Array.isArray(block.result.content)) {
+      return false;
+    }
+    return block.result.content.some((item) =>
+      isRecord(item) &&
+      item.type === "system_reminder" &&
+      isSubagentReminderData(item.data, taskId)
+    );
+  });
+
+const isSubagentReminderData = (value: unknown, taskId: string): boolean =>
+  isRecord(value) && value.type === "subagent_completed" && value.task_id === taskId;
 
 const estimateScorelMessagesTokens = (messages: ScorelMessage[]): number =>
   estimateTextTokens(messages.map(messageText).join("\n"));

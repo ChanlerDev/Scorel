@@ -11,11 +11,12 @@ When a tool result is too large, Scorel should preserve the full result as a ses
 - Add a session-owned artifact path for oversized tool results:
 
 ```text
-~/.scorel/sessions/{sessionId}.artifacts/{toolCallId}/result.txt
+~/.scorel/sessions/{sessionId}/tool-results/{shortId}.txt
 ```
 
+- `shortId` is a random 6-char hex token unique within the session directory (not derived from toolCallId).
 - Start with `Bash` stdout/stderr because it is the highest-risk long-output source.
-- Preserve the full command result in `result.txt`, including exit code, cwd, stdout, and stderr.
+- Preserve the full command result in `{shortId}.txt`, including exit code, cwd, stdout, and stderr.
 - Return a compact tool result containing:
   - exit code;
   - cwd;

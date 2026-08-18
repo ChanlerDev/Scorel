@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { closeSync, mkdtempSync, openSync, rmSync } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { Type } from "@earendil-works/pi-ai";
 
 import type { AgentTool, ToolResult } from "./index.js";
-import { defineTool } from "./index.js";
+import { DEFAULT_BACKGROUND_WAIT_SECONDS, defineTool } from "./index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -46,6 +46,7 @@ export type BackgroundBashDeliveryHooks = {
 
 export type BackgroundBashRegistry = {
   hasActiveWork(): boolean;
+  /** Host shutdown: terminate all background Bash process groups. */
   detach(): Promise<void>;
   start(input: StartBashInput): Promise<BashTaskResult>;
   interact(input: InteractBashInput): Promise<BashTaskResult>;
@@ -179,7 +180,7 @@ const FULL_READ_TOKEN_BUDGET_RATIO = 0.1;
 export const createCodingTools = (options: CodingToolsOptions): AgentTool[] => {
   const root = resolve(options.cwd);
   const state: CodingToolsState = { reads: new Map(), todos: [] };
-  const defaultWaitMs = Math.max(0, (options.defaultWaitTimeSeconds ?? 60) * 1_000);
+  const defaultWaitMs = Math.max(0, (options.defaultWaitTimeSeconds ?? DEFAULT_BACKGROUND_WAIT_SECONDS) * 1_000);
   const maxOutputBytes = options.maxOutputBytes ?? 16_000;
   const normalReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, READ_TOKEN_BUDGET_RATIO);
   const fullReadTokens = options.maxReadTokens ?? readTokenBudget(options.contextWindow, FULL_READ_TOKEN_BUDGET_RATIO);
@@ -976,22 +977,26 @@ export const createBackgroundBashRegistry = (options: { delivery?: BackgroundBas
       return [...tasks.values()].some((task) => !task.completed);
     },
     async detach() {
+      // Host is going away: kill background process groups instead of unref-orphaning them.
       detaching = true;
-      await Promise.allSettled([...tasks.values()].flatMap((task) => task.deliveryPromise ? [task.deliveryPromise] : []));
-      for (const task of tasks.values()) {
-        if (task.completed) {
-          continue;
+      const running = [...tasks.values()].filter((task) => !task.completed);
+      await Promise.allSettled(running.map(async (task) => {
+        stopTaskProcess(task, "SIGTERM");
+        await waitForTask(task, 1_000);
+        if (processGroupExists(task.pid)) {
+          stopTaskProcess(task, "SIGKILL");
+          await waitForProcessGroupExit(task.pid, 1_000);
         }
         task.child.removeAllListeners();
         task.child.stdin?.destroy();
-        task.child.unref();
-      }
+      }));
+      await Promise.allSettled([...tasks.values()].flatMap((task) => task.deliveryPromise ? [task.deliveryPromise] : []));
       tasks.clear();
       if (logDir) {
         try {
           rmSync(logDir, { recursive: true, force: true });
         } catch {
-          // Detached children retain their open file descriptors until they exit.
+          // Best-effort cleanup of temporary bash log dirs.
         }
       }
     },
@@ -1280,16 +1285,21 @@ const bashResult = async (input: {
 const renderFullBashResult = (input: { exitCode: number; cwd: string; stdout: string; stderr: string }): string =>
   `exitCode: ${input.exitCode}\ncwd: ${input.cwd}\nstdout:\n${input.stdout}\nstderr:\n${input.stderr}`;
 
-const writeBashArtifact = async (artifactDir: string, toolCallId: string, content: string): Promise<string> => {
-  const directory = resolve(artifactDir, safeArtifactSegment(toolCallId));
-  await mkdir(directory, { recursive: true });
-  const path = resolve(directory, "result.txt");
+/**
+ * Oversized tool results live under the session-owned tool-results dir as short
+ * flat files. The id is session-local only (not a global identity), so a random
+ * 6-char base32-ish token is enough.
+ */
+const writeBashArtifact = async (artifactDir: string, _toolCallId: string, content: string): Promise<string> => {
+  await mkdir(artifactDir, { recursive: true });
+  const id = shortToolResultId();
+  const path = resolve(artifactDir, `${id}.txt`);
   await writeFile(path, content, { encoding: "utf8", mode: 0o600 });
   return path;
 };
 
-const safeArtifactSegment = (value: string): string =>
-  value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120) || "tool_call";
+/** Random 6-char session-local tool-result id (lowercase hex). */
+const shortToolResultId = (): string => randomBytes(3).toString("hex");
 
 const projectBashStreams = (
   stdout: string,

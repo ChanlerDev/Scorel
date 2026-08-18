@@ -439,7 +439,7 @@ describe("ScorelHost + embedded transport", () => {
     );
     expect(daily).toContain("记住这个项目的 memory 设计方向");
 
-    const sessionFile = await readFile(join(root, "sessions", "ses_memory.jsonl"), "utf8");
+    const sessionFile = await readFile(join(root, "sessions", "ses_memory", "events.jsonl"), "utf8");
     expect(sessionFile).toContain('"type":"harness_item"');
     expect(sessionFile).toContain('"kind":"memory"');
     expect(sessionFile).toContain('"toolName":"AppendDaily"');
@@ -525,7 +525,7 @@ describe("ScorelHost + embedded transport", () => {
     });
     await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
 
-    const sessionFile = await readFile(join(sessionsDir, "ses_snip.jsonl"), "utf8");
+    const sessionFile = await readFile(join(sessionsDir, "ses_snip", "events.jsonl"), "utf8");
     expect(sessionFile).toContain('"type":"context_control"');
     expect(sessionFile).toContain('"operation":"hide_user_turn"');
     expect(sessionFile).toContain('"toolName":"snip"');
@@ -636,7 +636,7 @@ describe("ScorelHost + embedded transport", () => {
     });
     await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
 
-    const sessionFile = await readFile(join(root, "sessions", "ses_memory_once.jsonl"), "utf8");
+    const sessionFile = await readFile(join(root, "sessions", "ses_memory_once", "events.jsonl"), "utf8");
     const memoryHarnesses = sessionFile
       .split(/\r?\n/)
       .filter(Boolean)
@@ -765,7 +765,7 @@ describe("ScorelHost + embedded transport", () => {
     });
     await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
 
-    const sessionFile = await readFile(join(root, "sessions", "ses_compact.jsonl"), "utf8");
+    const sessionFile = await readFile(join(root, "sessions", "ses_compact", "events.jsonl"), "utf8");
     expect(sessionFile).toContain('"type":"compact"');
     expect(sessionFile).toContain("Ready compact summary from background session memory");
     expect(sessionFile.indexOf('"type":"compact"')).toBeLessThan(sessionFile.lastIndexOf('"type":"user_message"'));
@@ -836,7 +836,7 @@ describe("ScorelHost + embedded transport", () => {
     });
     await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
 
-    const sessionFile = await readFile(join(root, "sessions", "ses_foreground_compact.jsonl"), "utf8");
+    const sessionFile = await readFile(join(root, "sessions", "ses_foreground_compact", "events.jsonl"), "utf8");
     expect(sessionFile).toContain('"type":"compact"');
     expect(sessionFile).toContain("Foreground compact summary from auxiliary.");
   });
@@ -910,7 +910,7 @@ describe("ScorelHost + embedded transport", () => {
     });
     await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
 
-    const sessionFile = await readFile(join(root, "sessions", "ses_inflight_compact.jsonl"), "utf8");
+    const sessionFile = await readFile(join(root, "sessions", "ses_inflight_compact", "events.jsonl"), "utf8");
     expect(sessionFile).toContain('"type":"compact"');
     expect(sessionFile).toContain("Foreground compact while session memory update is still running.");
   }, 10_000);
@@ -1091,7 +1091,7 @@ describe("ScorelHost + embedded transport", () => {
     const workspace = await realpath(join(scorelHomeDir, "workspace"));
     expect((await host.listProjects()).some((project) => project.workDir === workspace)).toBe(true);
 
-    const sessionFile = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
+    const sessionFile = await readFile(join(sessionsDir, sessionId, "events.jsonl"), "utf8");
     expect(sessionFile).toContain('"kind":"channel_context"');
     expect(sessionFile).toContain('"channel":"loopback"');
     expect(sessionFile).toContain('"scope":"extension"');
@@ -1959,7 +1959,7 @@ apiKey = "secret"
       meta: { projectId: project.projectId },
     });
 
-    const header = JSON.parse((await readFile(join(sessionsDir, "ses_model_default.jsonl"), "utf8")).split("\n")[0]!);
+    const header = JSON.parse((await readFile(join(sessionsDir, "ses_model_default", "events.jsonl"), "utf8")).split("\n")[0]!);
     expect(header.meta.selectedModel).toMatchObject({
       modelId: "main",
       role: "standard",
@@ -2006,7 +2006,7 @@ apiKey = "secret"
       sessionId: asSessionId("ses_model_restore"),
     });
 
-    const header = JSON.parse((await readFile(join(sessionsDir, "ses_model_restore.jsonl"), "utf8")).split("\n")[0]!);
+    const header = JSON.parse((await readFile(join(sessionsDir, "ses_model_restore", "events.jsonl"), "utf8")).split("\n")[0]!);
     expect(header.meta.selectedModel).toMatchObject({
       modelId: "aux",
       displayName: "Aux Model",
@@ -2180,7 +2180,7 @@ apiKey = "secret"
       meta: { projectId: project.projectId, title: "Manual title", modelSelection: { modelId: "aux", reasoningEffort: "low" } },
     });
 
-    const header = JSON.parse((await readFile(join(sessionsDir, "ses_reasoning_effort.jsonl"), "utf8")).split("\n")[0]!);
+    const header = JSON.parse((await readFile(join(sessionsDir, "ses_reasoning_effort", "events.jsonl"), "utf8")).split("\n")[0]!);
     expect(header.meta.selectedModel).toMatchObject({ modelId: "aux", reasoningEffort: "low" });
 
     const response = waitForResponse(transport, "req_send_reasoning");
@@ -2196,7 +2196,7 @@ apiKey = "secret"
     expect(runtimeSelections).toEqual(["aux", "aux"]);
     expect(runtimeReasoningEfforts).toEqual(["low", "high"]);
 
-    const lines = (await readFile(join(sessionsDir, "ses_reasoning_effort.jsonl"), "utf8"))
+    const lines = (await readFile(join(sessionsDir, "ses_reasoning_effort", "events.jsonl"), "utf8"))
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line));
@@ -2204,7 +2204,7 @@ apiKey = "secret"
       type: "session_model_selected",
       selectedModel: expect.objectContaining({ modelId: "aux", reasoningEffort: "high" }),
     }));
-    const summary = JSON.parse(await readFile(join(sessionsDir, "ses_reasoning_effort.summary.json"), "utf8"));
+    const summary = JSON.parse(await readFile(join(sessionsDir, "ses_reasoning_effort", "summary.json"), "utf8"));
     expect(summary.model).toMatchObject({ providerModelId: "aux", reasoningEffort: "high" });
 
     await host.shutdown();
@@ -2261,7 +2261,7 @@ apiKey = "secret"
 
     let events: { type: string; title?: string; source?: string; model?: { modelId?: string } }[] = [];
     await waitUntil(async () => {
-      const lines = (await readFile(join(sessionsDir, "ses_title.jsonl"), "utf8")).trim().split("\n");
+      const lines = (await readFile(join(sessionsDir, "ses_title", "events.jsonl"), "utf8")).trim().split("\n");
       events = lines.slice(1).map((line) => JSON.parse(line) as { type: string; title?: string; source?: string; model?: { modelId?: string } });
       return events.some((event) => event.type === "session_title_updated");
     });
@@ -2315,7 +2315,7 @@ apiKey = "secret"
     });
     await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
 
-    const file = await readFile(join(sessionsDir, "ses_explicit_title.jsonl"), "utf8");
+    const file = await readFile(join(sessionsDir, "ses_explicit_title", "events.jsonl"), "utf8");
     expect(file).not.toContain("session_title_updated");
     expect(runtimeSelections[0]).toBe("main");
   });
@@ -2364,7 +2364,7 @@ apiKey = "secret"
     });
     await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
     expect(restoredProjects).toEqual([project]);
-    const header = JSON.parse((await readFile(join(sessionsDir, "ses_restart.jsonl"), "utf8")).split("\n")[0]!);
+    const header = JSON.parse((await readFile(join(sessionsDir, "ses_restart", "events.jsonl"), "utf8")).split("\n")[0]!);
     expect(header.meta).toEqual({ projectId: project.projectId });
   });
 
@@ -2411,7 +2411,7 @@ apiKey = "secret"
     });
     await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
 
-    const lines = (await readFile(join(sessionsDir, "ses_instruction.jsonl"), "utf8")).trim().split("\n");
+    const lines = (await readFile(join(sessionsDir, "ses_instruction", "events.jsonl"), "utf8")).trim().split("\n");
     const events = lines.slice(1).map((line) => JSON.parse(line) as { type: string; snapshot?: unknown });
     expect(events.map((event) => event.type).slice(0, 4)).toEqual([
       "instruction_snapshot",
@@ -2479,7 +2479,7 @@ apiKey = "secret"
     releases[1]!.resolve();
     await expect(secondResponse).resolves.toMatchObject({ type: "response", requestType: "send_message" });
 
-    const events = (await readFile(join(sessionsDir, "ses_follow.jsonl"), "utf8"))
+    const events = (await readFile(join(sessionsDir, "ses_follow", "events.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .slice(1)
@@ -2534,7 +2534,7 @@ apiKey = "secret"
 
     let eventsBeforeRelease: Array<{ type: string }> = [];
     for (let i = 0; i < 50; i += 1) {
-      eventsBeforeRelease = (await readFile(join(sessionsDir, "ses_accepted.jsonl"), "utf8"))
+      eventsBeforeRelease = (await readFile(join(sessionsDir, "ses_accepted", "events.jsonl"), "utf8"))
         .trim()
         .split("\n")
         .filter(Boolean)
@@ -2554,13 +2554,13 @@ apiKey = "secret"
       data: { status: "completed", userEventId: expect.any(String), assistantEventId: expect.any(String) },
     });
     for (let i = 0; i < 50; i += 1) {
-      const text = await readFile(join(sessionsDir, "ses_accepted.jsonl"), "utf8");
+      const text = await readFile(join(sessionsDir, "ses_accepted", "events.jsonl"), "utf8");
       if (text.includes("\"assistant_message\"")) {
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    expect(await readFile(join(sessionsDir, "ses_accepted.jsonl"), "utf8")).toContain("\"assistant_message\"");
+    expect(await readFile(join(sessionsDir, "ses_accepted", "events.jsonl"), "utf8")).toContain("\"assistant_message\"");
   });
 
   it("queues a running steer request separately from follow-up", async () => {
@@ -2619,7 +2619,7 @@ apiKey = "secret"
       requestType: "send_message",
       data: { status: "queued", queue: "steer", queueItemId: expect.any(String) },
     });
-    const events = (await readFile(join(sessionsDir, "ses_steer.jsonl"), "utf8"))
+    const events = (await readFile(join(sessionsDir, "ses_steer", "events.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .slice(1)
@@ -2674,7 +2674,7 @@ apiKey = "secret"
     });
     await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
 
-    const events = (await readFile(join(sessionsDir, "ses_skills.jsonl"), "utf8"))
+    const events = (await readFile(join(sessionsDir, "ses_skills", "events.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .slice(1)
@@ -2698,6 +2698,107 @@ apiKey = "secret"
       scope: "session",
     });
     expect(providerTurns[0]?.tools.map((tool) => tool.name)).toContain("Skill");
+  });
+
+  it("runs Task subagents under parent/sub-agents, excludes them from list_sessions, and returns last assistant only", async () => {
+    const root = await mkdtemp(join(tmpdir(), "scorel-host-subagent-"));
+    const sessionsDir = join(root, "sessions");
+    const projectsPath = join(root, "projects.json");
+    const repo = join(root, "repo");
+    await mkdir(repo, { recursive: true });
+    await mkdir(sessionsDir);
+    const providerTurns: RuntimeProviderTurn[] = [];
+    const host = new ScorelHost({
+      sessionsDir,
+      projectsPath,
+      deviceId: asDeviceId("device_test"),
+      createRuntime: async (options) => {
+        const runtime = new ScorelRuntime({
+          provider: {
+            streamTurn: async function* (turn) {
+              providerTurns.push(turn);
+              // Child subagent runtimes have no Task tools; parent has them after registerLaneTools.
+              if (!turn.tools.some((tool) => tool.name === "Task")) {
+                return assistantMessage("child found the answer");
+              }
+              const taskTool = turn.tools.find((tool) => tool.name === "Task");
+              if (taskTool && providerTurns.filter((entry) => entry.tools.some((tool) => tool.name === "Task")).length === 1) {
+                // First parent turn: call Task and wait for completion.
+                return {
+                  role: "assistant",
+                  content: [{
+                    type: "tool_call",
+                    toolCallId: "call_task_1",
+                    toolName: "Task",
+                    args: {
+                      prompt: "find the answer",
+                      description: "Find answer",
+                      wait_time: 2,
+                    },
+                  }],
+                  stopReason: "tool_call",
+                };
+              }
+              return assistantMessage(`parent ok ${providerTurns.length}`);
+            },
+          },
+        });
+        return runtime;
+      },
+      now: () => 1_000,
+      createId: (() => {
+        let n = 0;
+        return () => {
+          n += 1;
+          return `id_${n}`;
+        };
+      })(),
+    });
+    await host.start();
+    const project = await host.registerProject(repo);
+    const transport = createEmbeddedTransport(host);
+    await transport.connect({ clientId: asClientId("client_test") });
+    await transport.send({
+      type: "create_session",
+      requestId: asRequestId("req_create"),
+      sessionId: asSessionId("ses_subagent_parent"),
+      meta: { projectId: project.projectId },
+    });
+    const response = waitForResponse(transport, "req_send");
+    await transport.send({
+      type: "send_message",
+      requestId: asRequestId("req_send"),
+      sessionId: asSessionId("ses_subagent_parent"),
+      content: "use a subagent",
+    });
+    await expect(response).resolves.toMatchObject({ type: "response", requestType: "send_message" });
+
+    const parentEvents = (await readFile(join(sessionsDir, "ses_subagent_parent", "events.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .slice(1)
+      .map((line) => JSON.parse(line) as {
+        type: string;
+        message?: { content?: Array<{ type?: string; result?: { details?: { child_session_id?: string; status?: string }; content?: Array<{ text?: string }> } }> };
+      });
+    const toolResult = parentEvents.find((event) => event.type === "tool_result");
+    const resultBlock = toolResult?.message?.content?.find((block) => block.type === "tool_result");
+    expect(resultBlock?.result?.details?.status).toBe("completed");
+    const childSessionId = resultBlock?.result?.details?.child_session_id;
+    expect(childSessionId).toMatch(/^ses_sub_/);
+    expect(typeof childSessionId).toBe("string");
+    expect(await readFile(join(sessionsDir, "ses_subagent_parent", "sub-agents", childSessionId as string, "events.jsonl"), "utf8")).toContain("child found the answer");
+
+    const listResponse = waitForResponse(transport, "req_list");
+    await transport.send({
+      type: "list_sessions",
+      requestId: asRequestId("req_list"),
+      projectId: project.projectId,
+    });
+    const listed = await listResponse as { type: string; data?: { sessions?: Array<{ sessionId: string }> } };
+    expect(listed.type).toBe("response");
+    expect(listed.data?.sessions?.map((session) => session.sessionId)).toEqual(["ses_subagent_parent"]);
+    expect(listed.data?.sessions?.some((session) => session.sessionId === childSessionId)).toBe(false);
   });
 
   it("injects completed background Bash output as a system reminder and starts an idle continuation", async () => {
@@ -2766,7 +2867,7 @@ apiKey = "secret"
     });
     expect(backgroundBash?.isDeliveryVisible?.({ task_id: "task_finished", eventId: delivery?.eventId })).toBe(true);
 
-    const events = (await readFile(join(sessionsDir, "ses_background_bash.jsonl"), "utf8"))
+    const events = (await readFile(join(sessionsDir, "ses_background_bash", "events.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .slice(1)

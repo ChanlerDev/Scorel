@@ -100,8 +100,9 @@ describe("ProjectRegistry", () => {
     const workspace = join(root, "workspace");
     await mkdir(workspace);
     const project = await registry.register(workspace);
+    await mkdir(join(sessionsDir, "ses_1"), { recursive: true });
     await writeFile(
-      join(sessionsDir, "ses_1.jsonl"),
+      join(sessionsDir, "ses_1", "events.jsonl"),
       `${JSON.stringify({
         version: 1,
         sessionId: "ses_1",

@@ -165,7 +165,7 @@ describe("daemon protocol boundary", () => {
     });
 
     const hostLog = await readFile(join(sessionsDir, "host.log"), "utf8");
-    const sessionLog = await readFile(join(sessionsDir, "ses_diag.log"), "utf8");
+    const sessionLog = await readFile(join(sessionsDir, "ses_diag", "session.log"), "utf8");
     expect(hostLog).toContain("event=project_registered");
     expect(sessionLog).toContain("event=project_resolved");
     expect(sessionLog).toContain("event=runtime_created");
@@ -274,7 +274,7 @@ describe("daemon protocol boundary", () => {
       requestType: "rewrite_queue",
       data: { sessionId: "ses_queue", queue: "follow_up", items: [item] },
     });
-    const events = (await readFile(join(sessionsDir, "ses_queue.jsonl"), "utf8"))
+    const events = (await readFile(join(sessionsDir, "ses_queue", "events.jsonl"), "utf8"))
       .trim()
       .split("\n")
       .slice(1)

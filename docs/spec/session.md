@@ -22,11 +22,17 @@ Scorel 不把会话当做"可丢的上下文"，而当做**资产**。资产的�
 ### 2.1 文件结构
 
 ```
-~/.scorel/sessions/{sessionId}.jsonl
+~/.scorel/sessions/{sessionId}/events.jsonl
+~/.scorel/sessions/{sessionId}/session.log
+~/.scorel/sessions/{sessionId}/summary.json
+~/.scorel/sessions/{sessionId}/tool-results/{shortId}.txt
+~/.scorel/sessions/{parentSessionId}/sub-agents/{childSessionId}/events.jsonl
 ```
 
-- 第 0 行：SessionHeader
-- 第 1+ 行：PersistentEvent（每行一个 JSON）
+- `events.jsonl` 是 append-only **event log**（不是 transcript）：第 0 行 SessionHeader，第 1+ 行 PersistentEvent；可变模型、compact、queue 等控制事件都落在这里，可据此重建整个会话
+- Nested subagent sessions（S0120）写在 parent 的 `sub-agents/` 下，布局与普通 session 相同，`meta.kind = "subagent"`，不进入 `list_sessions`
+- `tool-results/` 保存被 trim 的超大 tool 完整结果；文件名为 session 内随机 6 位短 id（如 `a1b2c3.txt`），不是全局身份
+- 默认模型侧只拿回 subagent 最后一条 assistant message content，不把 child event log 灌回 parent 上下文
 
 ### 2.2 SessionHeader
 
@@ -119,11 +125,11 @@ If the cache stores transient stream state, it must be explicitly separate from 
 Each daemon-owned session may also have a sibling plain-text diagnostics log:
 
 ```text
-~/.scorel/sessions/{sessionId}.jsonl
-~/.scorel/sessions/{sessionId}.log
+~/.scorel/sessions/{sessionId}/events.jsonl
+~/.scorel/sessions/{sessionId}/session.log
 ```
 
-The `.log` file is append-only operational evidence, not replay state. It is written by the daemon that owns the session JSONL and stays on that machine. Remote attach must not copy daemon diagnostics into local attach cache.
+`session.log` is append-only operational diagnostics, not replay state. Replay / rebuild uses `events.jsonl`. Remote attach must not copy daemon diagnostics into local attach cache.
 
 Each log line is human-readable and grep-friendly:
 

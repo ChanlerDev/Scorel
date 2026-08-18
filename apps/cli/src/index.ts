@@ -18,6 +18,7 @@ import {
   resolveModelSelection,
   resolvePiAiModel,
   sessionArtifactsDirPath,
+  sessionFilePath,
   sessionObservationSummaryFilePath,
   sessionLogFilePath,
   uploadLangfusePayload,
@@ -337,7 +338,7 @@ const runLogs = async (
 ): Promise<number> => {
   const filePath = options.attach
     ? await findAttachDiagnosticsFilePath(io.stateDir, options.sessionId, options.remoteUrl)
-    : join(io.sessionsDir, `${options.sessionId}.log`);
+    : sessionLogFilePath(io.sessionsDir, options.sessionId);
   let content: string;
   try {
     content = await readFile(filePath, "utf8");
@@ -1115,7 +1116,7 @@ const makeRunSummary = (input: {
     cwd: input.options.cwd,
     stateDir: input.options.stateDir,
     sessionsDir: input.options.sessionsDir,
-    sessionJsonl: join(input.options.sessionsDir, `${input.options.sessionId}.jsonl`),
+    sessionJsonl: sessionFilePath(input.options.sessionsDir, input.options.sessionId),
     outputFormat: input.options.outputFormat,
     elapsedMs: Date.now() - input.startedAt,
     exitReason: input.exitReason,
@@ -1173,7 +1174,7 @@ const writeRunReports = async (reportDir: string | undefined, summary: RunSummar
 
 const runReportPaths = (options: RunOptions): Record<string, string> => {
   const reports: Record<string, string> = {
-    sessionJsonl: join(options.sessionsDir, `${options.sessionId}.jsonl`),
+    sessionJsonl: sessionFilePath(options.sessionsDir, options.sessionId),
     sessionSummary: sessionObservationSummaryFilePath(options.sessionsDir, options.sessionId),
     diagnosticsLog: sessionLogFilePath(options.sessionsDir, options.sessionId),
     sessionFilesDir: sessionArtifactsDirPath(options.sessionsDir, options.sessionId),

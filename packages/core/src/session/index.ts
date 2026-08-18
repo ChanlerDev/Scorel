@@ -338,21 +338,68 @@ export class JsonlSession {
   }
 }
 
+/**
+ * Per-session directory layout:
+ *
+ *   {sessionsDir}/{sessionId}/events.jsonl     append-only event log (rebuildable session)
+ *   {sessionsDir}/{sessionId}/session.log      diagnostics
+ *   {sessionsDir}/{sessionId}/summary.json     derived observation cache
+ *   {sessionsDir}/{sessionId}/tool-results/    oversized tool payloads (short ids)
+ *   {sessionsDir}/{sessionId}/sub-agents/{childSessionId}/...
+ */
+export const sessionRootPath = (sessionsDir: string, sessionId: SessionId): string =>
+  join(sessionsDir, String(sessionId));
+
 export const sessionFilePath = (sessionsDir: string, sessionId: SessionId): string =>
-  join(sessionsDir, `${sessionId}.jsonl`);
+  join(sessionRootPath(sessionsDir, sessionId), "events.jsonl");
 
 export const sessionLogFilePath = (sessionsDir: string, sessionId: SessionId): string =>
-  join(sessionsDir, `${sessionId}.log`);
+  join(sessionRootPath(sessionsDir, sessionId), "session.log");
 
 export const sessionArtifactsDirPath = (sessionsDir: string, sessionId: SessionId): string =>
-  join(sessionsDir, `${sessionId}.artifacts`);
+  join(sessionRootPath(sessionsDir, sessionId), "tool-results");
 
 export const sessionObservationSummaryFilePath = (sessionsDir: string, sessionId: SessionId): string =>
-  join(sessionsDir, `${sessionId}.summary.json`);
+  join(sessionRootPath(sessionsDir, sessionId), "summary.json");
+
+/** Parent-owned directory for nested subagent sessions. */
+export const sessionSubagentsDirPath = (sessionsDir: string, parentSessionId: SessionId): string =>
+  join(sessionRootPath(sessionsDir, parentSessionId), "sub-agents");
+
+export const subagentSessionRootPath = (
+  sessionsDir: string,
+  parentSessionId: SessionId,
+  childSessionId: SessionId,
+): string => join(sessionSubagentsDirPath(sessionsDir, parentSessionId), String(childSessionId));
+
+export const subagentSessionFilePath = (
+  sessionsDir: string,
+  parentSessionId: SessionId,
+  childSessionId: SessionId,
+): string => join(subagentSessionRootPath(sessionsDir, parentSessionId, childSessionId), "events.jsonl");
+
+export const subagentSessionLogFilePath = (
+  sessionsDir: string,
+  parentSessionId: SessionId,
+  childSessionId: SessionId,
+): string => join(subagentSessionRootPath(sessionsDir, parentSessionId, childSessionId), "session.log");
+
+export const subagentSessionArtifactsDirPath = (
+  sessionsDir: string,
+  parentSessionId: SessionId,
+  childSessionId: SessionId,
+): string => join(subagentSessionRootPath(sessionsDir, parentSessionId, childSessionId), "tool-results");
+
+export const subagentSessionObservationSummaryFilePath = (
+  sessionsDir: string,
+  parentSessionId: SessionId,
+  childSessionId: SessionId,
+): string => join(subagentSessionRootPath(sessionsDir, parentSessionId, childSessionId), "summary.json");
 
 export const createSession = async ({ sessionsDir, header }: CreateSessionOptions): Promise<JsonlSession> => {
   const validHeader = parseHeader(header);
-  await mkdir(sessionsDir, { recursive: true });
+  const root = sessionRootPath(sessionsDir, validHeader.sessionId);
+  await mkdir(root, { recursive: true });
   const filePath = sessionFilePath(sessionsDir, validHeader.sessionId);
   await writeFile(filePath, `${JSON.stringify(validHeader)}\n`, { encoding: "utf8", flag: "wx" });
   const session = new JsonlSession(filePath, validHeader);
@@ -415,7 +462,9 @@ export const buildSessionObservationSummary = (session: JsonlSession): SessionOb
 
 export const writeSessionObservationSummary = async (session: JsonlSession): Promise<SessionObservationSummary> => {
   const summary = buildSessionObservationSummary(session);
-  const summaryPath = sessionObservationSummaryFilePath(dirname(session.filePath), session.header.sessionId);
+  // events.jsonl lives at {sessionRoot}/events.jsonl; summary is a sibling cache.
+  const summaryPath = join(dirname(session.filePath), "summary.json");
+  await mkdir(dirname(summaryPath), { recursive: true });
   await writeFile(summaryPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
   return summary;
 };

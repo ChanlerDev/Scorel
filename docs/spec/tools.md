@@ -74,7 +74,23 @@ M2 落地七个用户可见工具，语义参考 Claude Code 的基础 coding �
 - `Bash` 负责构建、测试、Git 状态、项目脚本等命令型工作。
 - 多步骤 coding task 用 `TodoWrite` 记录当前计划和状态；CLI 必须能展示这些变化。
 
-**M2 之后再扩展**：`LS`、Web、LSP、notebook、subagent、MCP 动态工具等能力在基础 coding loop 稳定后再补齐。
+**后续扩展**：`LS`、Web、LSP、notebook、MCP 动态工具等能力在基础 coding loop 稳定后再补齐。
+
+### 3.1 Subagent 工具（S0120）
+
+| 工具 | 说明 | 执行模式 |
+|------|------|---------|
+| `Task` | 启动隔离上下文的 nested subagent，或按 `task_id` 等待/查询 | sequential / async |
+| `TaskStop` | 停止后台 subagent | sequential |
+
+语义对齐后台 Bash：
+
+- 默认 `wait_time` 为 **120 秒**，与 Bash 共用 `DEFAULT_BACKGROUND_WAIT_SECONDS`。
+- `wait_time` 控制当前工具调用等待窗口，不限制 subagent 生命周期；按 `task_id` 查询时同样支持等待。
+- 超时后返回 `task_id` + `child_session_id`；完成后只返回 **最后一条 assistant message content**，不回灌 child event log。
+- subagent 启动时只写入一条 user message（`prompt`），不继承 parent 对话。
+- child session 写在 `{parentSessionId}/sub-agents/{childSessionId}/`，不进入 `list_sessions`。
+- 嵌套深度 v1 限制为 1：child runtime 不注册 Task 工具。
 
 ---
 
@@ -166,7 +182,7 @@ interface McpServerConfig {
 - **权限审批（PermissionPolicy）**：默认全允许，后期补黑名单 / 询问 / 拒绝规则
 - MCP 启动时加载
 - MCP Tier 2 按需加载
-- Subagent 工具（工具内 `new Agent()` 递归调用，隔离上下文）
+- 自定义 agent 定义库、更深嵌套 subagent、worktree 隔离
 
 ---
 

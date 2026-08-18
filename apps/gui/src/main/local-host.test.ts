@@ -40,7 +40,7 @@ describe("GUI local Host service", () => {
       const sessionId = await service.createLocalSession(project.projectId);
 
       await expect(stat(join(scorelHomeDir, "projects.json"))).resolves.toMatchObject({ isFile: expect.any(Function) });
-      await expect(stat(join(scorelHomeDir, "sessions", `${sessionId}.jsonl`))).resolves.toMatchObject({ isFile: expect.any(Function) });
+      await expect(stat(join(scorelHomeDir, "sessions", sessionId, "events.jsonl"))).resolves.toMatchObject({ isFile: expect.any(Function) });
       await expect(stat(join(scorelHomeDir, "gui", "projects.json"))).rejects.toMatchObject({ code: "ENOENT" });
       await expect(stat(join(scorelHomeDir, "gui", "sessions"))).rejects.toMatchObject({ code: "ENOENT" });
     } finally {

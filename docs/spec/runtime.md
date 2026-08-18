@@ -244,7 +244,8 @@ interface RuntimeBridge {
 **延后**
 - 工具并行执行优化（初期串行安全优先）
 - Runtime 资源限制（timeout per-turn、token budget）
-- Subagent 工具（递归调用隔离上下文）
+- 更深嵌套 subagent（当前 depth=1）
+- 工具并行执行以外的跨 session 调度策略
 
 ---
 

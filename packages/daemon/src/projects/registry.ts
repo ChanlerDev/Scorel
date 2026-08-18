@@ -165,18 +165,42 @@ const sessionReferencesProject = async (sessionsDir: string, projectId: ProjectI
     throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
   }
   for (const name of names) {
-    if (!name.endsWith(".jsonl") || name.startsWith(".")) {
+    if (name.startsWith(".")) {
       continue;
     }
+    const entryPath = join(sessionsDir, name);
+    let entryIsDirectory = false;
+    let entryIsFile = false;
     try {
-      const firstLine = (await readFile(join(sessionsDir, name), "utf8")).split(/\r?\n/, 1)[0];
-      const parsed = firstLine ? (JSON.parse(firstLine) as unknown) : undefined;
-      if (isRecord(parsed) && isRecord(parsed.meta) && parsed.meta.projectId === projectId) {
-        return true;
-      }
+      const info = await stat(entryPath);
+      entryIsDirectory = info.isDirectory();
+      entryIsFile = info.isFile();
     } catch (cause) {
-      if (!isNodeError(cause, "ENOENT")) {
-        throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+      if (isNodeError(cause, "ENOENT")) {
+        continue;
+      }
+      throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+    }
+    const candidates = [
+      ...(entryIsDirectory ? [join(entryPath, "events.jsonl")] : []),
+      ...(entryIsFile && name.endsWith(".jsonl") ? [entryPath] : []),
+    ];
+    for (const filePath of candidates) {
+      try {
+        const firstLine = (await readFile(filePath, "utf8")).split(/\r?\n/, 1)[0];
+        const parsed = firstLine ? (JSON.parse(firstLine) as unknown) : undefined;
+        if (
+          isRecord(parsed) &&
+          isRecord(parsed.meta) &&
+          parsed.meta.projectId === projectId &&
+          parsed.meta.kind !== "subagent"
+        ) {
+          return true;
+        }
+      } catch (cause) {
+        if (!isNodeError(cause, "ENOENT") && !isNodeError(cause, "ENOTDIR")) {
+          throw new ProjectRegistryError("filesystem_error", errorMessage(cause));
+        }
       }
     }
   }

@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import { asProjectId, asSeq, asSessionId, type ProjectId, type SessionSummary } from "@scorel/protocol";
@@ -22,14 +22,43 @@ export const listSessionSummaries = async (
   const sessions = (
     await Promise.all(
       names
-        .filter((name) => name.endsWith(".jsonl") && !name.startsWith("."))
-        .map((name) => readSummary(join(sessionsDir, name), overrides)),
+        .filter((name) => !name.startsWith("."))
+        .map((name) => readSessionEntry(sessionsDir, name, overrides)),
     )
   )
     .filter((session): session is SessionSummary => session !== undefined)
     .filter((session) => filter.projectId === undefined || session.projectId === filter.projectId)
     .sort((left, right) => right.updatedAt - left.updatedAt || String(left.sessionId).localeCompare(String(right.sessionId)));
   return sessions.slice(0, clampLimit(filter.limit));
+};
+
+const readSessionEntry = async (
+  sessionsDir: string,
+  name: string,
+  overrides?: SessionSummaryOverrides,
+): Promise<SessionSummary | undefined> => {
+  const entryPath = join(sessionsDir, name);
+  let entryStat;
+  try {
+    entryStat = await stat(entryPath);
+  } catch (cause) {
+    if (isNodeError(cause, "ENOENT")) {
+      return undefined;
+    }
+    throw cause;
+  }
+
+  // New layout: {sessionsDir}/{sessionId}/events.jsonl
+  if (entryStat.isDirectory()) {
+    return readSummary(join(entryPath, "events.jsonl"), overrides);
+  }
+
+  // Legacy flat layout: {sessionsDir}/{sessionId}.jsonl
+  if (entryStat.isFile() && name.endsWith(".jsonl")) {
+    return readSummary(entryPath, overrides);
+  }
+
+  return undefined;
 };
 
 const readSummary = async (
@@ -40,7 +69,7 @@ const readSummary = async (
   try {
     content = await readFile(filePath, "utf8");
   } catch (cause) {
-    if (isNodeError(cause, "ENOENT")) {
+    if (isNodeError(cause, "ENOENT") || isNodeError(cause, "ENOTDIR")) {
       return undefined;
     }
     throw cause;
@@ -54,6 +83,10 @@ const readSummary = async (
     !isRecord(header.meta) ||
     typeof header.meta.projectId !== "string"
   ) {
+    return undefined;
+  }
+  // Nested subagent sessions must not appear in product listings.
+  if (header.meta.kind === "subagent") {
     return undefined;
   }
   const override = overrides?.get(header.sessionId);

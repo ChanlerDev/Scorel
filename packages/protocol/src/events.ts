@@ -15,6 +15,11 @@ export type SessionMeta = {
   selectedModel?: SelectedModelSummary;
   createdAt?: number;
   updatedAt?: number;
+  /** Nested subagent sessions are excluded from top-level session listings. */
+  kind?: "chat" | "subagent";
+  parentSessionId?: SessionId;
+  taskId?: string;
+  description?: string;
 };
 
 export type ModelRole = "primary" | "standard" | "auxiliary";

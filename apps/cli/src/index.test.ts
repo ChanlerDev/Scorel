@@ -97,8 +97,9 @@ describe("@scorel/app-cli", () => {
 
   it("prints a local session diagnostics log with tail support", async () => {
     const sessionsDir = await mkdtemp(join(tmpdir(), "scorel-cli-logs-"));
+    await mkdir(join(sessionsDir, "ses_logs"), { recursive: true });
     await writeFile(
-      join(sessionsDir, "ses_logs.log"),
+      join(sessionsDir, "ses_logs", "session.log"),
       [
         "ts=1 level=info event=session_created sessionId=ses_logs",
         "ts=2 level=info event=send_message_started sessionId=ses_logs",
@@ -250,16 +251,16 @@ describe("@scorel/app-cli", () => {
       expect(stdout).toMatchObject({
         status: "completed",
         result: "Run command response.",
-        sessionJsonl: join(sessionsDir, "ses_run_test.jsonl"),
+        sessionJsonl: join(sessionsDir, "ses_run_test", "events.jsonl"),
       });
       const summary = JSON.parse(await readFile(summaryPath, "utf8")) as { status: string; sessionId: string; cwd: string; sessionJsonl: string };
       expect(summary).toMatchObject({
         status: "completed",
         sessionId: "ses_run_test",
         cwd: workspaceDir,
-        sessionJsonl: join(sessionsDir, "ses_run_test.jsonl"),
+        sessionJsonl: join(sessionsDir, "ses_run_test", "events.jsonl"),
       });
-      const jsonl = await readFile(join(sessionsDir, "ses_run_test.jsonl"), "utf8");
+      const jsonl = await readFile(join(sessionsDir, "ses_run_test", "events.jsonl"), "utf8");
       expect(jsonl).toContain("complete one task");
       expect(jsonl).toContain("Run command response.");
     } finally {
@@ -321,7 +322,7 @@ describe("@scorel/app-cli", () => {
       const eventsText = await readFile(join(reportDir, "scorel-events.jsonl"), "utf8");
       const metadataText = await readFile(join(reportDir, "scorel-metadata.json"), "utf8");
       const trajectoryText = await readFile(join(reportDir, "scorel-trajectory.json"), "utf8");
-      const sessionHeader = JSON.parse((await readFile(join(stateDir, "sessions", "ses_run_reporting.jsonl"), "utf8")).split("\n")[0]!);
+      const sessionHeader = JSON.parse((await readFile(join(stateDir, "sessions", "ses_run_reporting", "events.jsonl"), "utf8")).split("\n")[0]!);
       const combinedReportText = [summaryText, reportSummaryText, eventsText, metadataText, trajectoryText].join("\n");
       expect(combinedReportText).not.toContain("direct-secret-reporting");
 
@@ -375,10 +376,10 @@ describe("@scorel/app-cli", () => {
         events: join(reportDir, "scorel-events.jsonl"),
         trajectory: join(reportDir, "scorel-trajectory.json"),
         metadata: join(reportDir, "scorel-metadata.json"),
-        sessionJsonl: join(stateDir, "sessions", "ses_run_reporting.jsonl"),
-        sessionSummary: join(stateDir, "sessions", "ses_run_reporting.summary.json"),
-        diagnosticsLog: join(stateDir, "sessions", "ses_run_reporting.log"),
-        sessionFilesDir: join(stateDir, "sessions", "ses_run_reporting.artifacts"),
+        sessionJsonl: join(stateDir, "sessions", "ses_run_reporting", "events.jsonl"),
+        sessionSummary: join(stateDir, "sessions", "ses_run_reporting", "summary.json"),
+        diagnosticsLog: join(stateDir, "sessions", "ses_run_reporting", "session.log"),
+        sessionFilesDir: join(stateDir, "sessions", "ses_run_reporting", "tool-results"),
       });
       expect(eventsText.trim().split("\n").some((line) => JSON.parse(line).type === "assistant_message")).toBe(true);
       expect(JSON.parse(metadataText)).toMatchObject({
@@ -790,7 +791,7 @@ describe("@scorel/app-cli", () => {
 
       expect(result.code, result.stderr).toBe(0);
       expect(result.stdout).toBe("");
-      const jsonl = await readFile(join(stateDir, "sessions", "ses_run_file.jsonl"), "utf8");
+      const jsonl = await readFile(join(stateDir, "sessions", "ses_run_file", "events.jsonl"), "utf8");
       expect(jsonl).toContain("read from file");
     } finally {
       await server.close();
@@ -924,7 +925,7 @@ describe("@scorel/app-cli", () => {
         error: { message: "Provider finish_reason: content_filter" },
       });
       expect(summary.events?.some((event) => event.type === "assistant_message")).toBe(true);
-      const log = await readFile(join(stateDir, "sessions", "ses_run_provider_error.log"), "utf8");
+      const log = await readFile(join(stateDir, "sessions", "ses_run_provider_error", "session.log"), "utf8");
       expect(log).toContain("errorMessage=\"Provider finish_reason: content_filter\"");
     } finally {
       await server.close();
@@ -1863,7 +1864,7 @@ describe("@scorel/app-cli", () => {
       expect(second.stderr).toContain("resumed session ses_cli_real_coding_alpha");
       expect(second.stdout).toContain("Resume sees completed work.");
 
-      const jsonl = await readFile(join(sessionsDir, `${sessionId}.jsonl`), "utf8");
+      const jsonl = await readFile(join(sessionsDir, sessionId, "events.jsonl"), "utf8");
       const lines = jsonl.trim().split("\n").map((line) => JSON.parse(line));
       const toolNames = lines
         .filter((line) => line.type === "tool_result")

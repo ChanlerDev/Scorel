@@ -103,6 +103,7 @@ This keeps the two delivery paths from double-counting the same output in model 
 ## Risks And Boundaries
 
 - Background processes can outlive the immediate model turn. They must remain attached to a `task_id` and be stoppable through `BashStop`.
+- Host shutdown must terminate background Bash process groups (SIGTERM then SIGKILL). Orphaning via unref is not allowed on Host exit.
 - Returning PIDs is useful for diagnosis but must not become the primary control contract.
 - Background stdout/stderr can contain secrets. Final output continues to use the existing Bash result/artifact projection rules.
 - Runtime replacement for model switching can reset per-runtime tool state. A future generic task registry may move this state to the session lane if background tasks need to survive runtime recreation.

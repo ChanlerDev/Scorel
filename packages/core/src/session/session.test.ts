@@ -21,8 +21,14 @@ import {
   createSession,
   loadSession,
   readSessionObservationSummary,
+  sessionArtifactsDirPath,
+  sessionFilePath,
   sessionObservationSummaryFilePath,
   sessionLogFilePath,
+  sessionSubagentsDirPath,
+  subagentSessionArtifactsDirPath,
+  subagentSessionFilePath,
+  subagentSessionLogFilePath,
   SessionStoreError,
 } from "./index.js";
 
@@ -252,10 +258,28 @@ const instructionSnapshotEvent = (id: string, seq: number): PersistentEvent => (
 const tempRoot = () => mkdtemp(join(tmpdir(), "scorel-session-"));
 
 describe("session core", () => {
-  it("derives diagnostics log path beside the session JSONL", async () => {
+  it("derives per-session directory layout paths", async () => {
     const sessionsDir = await tempRoot();
 
-    expect(sessionLogFilePath(sessionsDir, sessionId)).toBe(join(sessionsDir, "ses_test.log"));
+    expect(sessionFilePath(sessionsDir, sessionId)).toBe(join(sessionsDir, "ses_test", "events.jsonl"));
+    expect(sessionLogFilePath(sessionsDir, sessionId)).toBe(join(sessionsDir, "ses_test", "session.log"));
+    expect(sessionArtifactsDirPath(sessionsDir, sessionId)).toBe(join(sessionsDir, "ses_test", "tool-results"));
+    expect(sessionObservationSummaryFilePath(sessionsDir, sessionId)).toBe(join(sessionsDir, "ses_test", "summary.json"));
+  });
+
+  it("derives nested subagent session paths under parent/sub-agents", async () => {
+    const sessionsDir = await tempRoot();
+    const child = asSessionId("ses_sub_child");
+    expect(sessionSubagentsDirPath(sessionsDir, sessionId)).toBe(join(sessionsDir, "ses_test", "sub-agents"));
+    expect(subagentSessionFilePath(sessionsDir, sessionId, child)).toBe(
+      join(sessionsDir, "ses_test", "sub-agents", "ses_sub_child", "events.jsonl"),
+    );
+    expect(subagentSessionLogFilePath(sessionsDir, sessionId, child)).toBe(
+      join(sessionsDir, "ses_test", "sub-agents", "ses_sub_child", "session.log"),
+    );
+    expect(subagentSessionArtifactsDirPath(sessionsDir, sessionId, child)).toBe(
+      join(sessionsDir, "ses_test", "sub-agents", "ses_sub_child", "tool-results"),
+    );
   });
 
   it("maintains a session-level observation summary beside the session JSONL", async () => {
