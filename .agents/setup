@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Scorel orb setup: Node >=22.19.0, pnpm@11.1.2, workspace deps.
+# Idempotent; safe on warm snapshots. Aim <2 minutes warm.
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+log() { printf '+ %s\n' "$*"; }
+time_step() {
+  local label="$1"
+  shift
+  local start end
+  start="$(date +%s)"
+  log "$label"
+  "$@"
+  end="$(date +%s)"
+  printf '  (%ss)\n' "$((end - start))"
+}
+
+NODE_VERSION="22.19.0"
+PNPM_VERSION="11.1.2"
+# Official Node linux tarball under the user prefix (no root needed).
+NODE_PREFIX="${HOME}/.local/node-v${NODE_VERSION}"
+NODE_BIN="${NODE_PREFIX}/bin"
+PROFILE_MARKER="# scorel orb node toolchain"
+
+need_apt=()
+for pkg in ca-certificates curl xz-utils; do
+  if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+    need_apt+=("$pkg")
+  fi
+done
+if ((${#need_apt[@]})); then
+  time_step "apt-get update" sudo apt-get update -qq
+  time_step "apt-get install ${need_apt[*]}" \
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${need_apt[@]}"
+else
+  log "system packages already present"
+fi
+
+install_node() {
+  if [[ -x "${NODE_BIN}/node" ]]; then
+    local have
+    have="$("${NODE_BIN}/node" -v 2>/dev/null || true)"
+    if [[ "$have" == "v${NODE_VERSION}" ]]; then
+      log "Node v${NODE_VERSION} already installed at ${NODE_PREFIX}"
+      return 0
+    fi
+  fi
+
+  local arch tarball url tmp
+  case "$(uname -m)" in
+    x86_64 | amd64) arch="x64" ;;
+    aarch64 | arm64) arch="arm64" ;;
+    *)
+      echo "unsupported architecture: $(uname -m)" >&2
+      exit 1
+      ;;
+  esac
+
+  tarball="node-v${NODE_VERSION}-linux-${arch}.tar.xz"
+  url="https://nodejs.org/dist/v${NODE_VERSION}/${tarball}"
+  tmp="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+
+  time_step "download Node v${NODE_VERSION}" curl -fsSL "$url" -o "${tmp}/${tarball}"
+  mkdir -p "${HOME}/.local"
+  rm -rf "${NODE_PREFIX}"
+  time_step "extract Node v${NODE_VERSION}" tar -xJf "${tmp}/${tarball}" -C "${HOME}/.local"
+  mv "${HOME}/.local/node-v${NODE_VERSION}-linux-${arch}" "${NODE_PREFIX}"
+}
+
+install_node
+
+export PATH="${NODE_BIN}:${PATH}"
+hash -r 2>/dev/null || true
+
+# Persist toolchain for non-interactive login shells (Amp + supervised services).
+if [[ ! -f "${HOME}/.bash_profile" ]] || ! grep -Fqx "$PROFILE_MARKER" "${HOME}/.bash_profile" 2>/dev/null; then
+  log "append Node PATH to ~/.bash_profile"
+  cat >> "${HOME}/.bash_profile" <<EOF
+
+${PROFILE_MARKER}
+export PATH="${NODE_BIN}:\$PATH"
+EOF
+fi
+
+if [[ ! -x "${NODE_BIN}/node" ]]; then
+  echo "Node install failed: missing ${NODE_BIN}/node" >&2
+  exit 1
+fi
+
+log "node $("${NODE_BIN}/node" -v) at ${NODE_BIN}/node"
+log "npm $("${NODE_BIN}/npm" -v)"
+
+time_step "corepack enable" "${NODE_BIN}/corepack" enable
+time_step "corepack prepare pnpm@${PNPM_VERSION}" \
+  "${NODE_BIN}/corepack" prepare "pnpm@${PNPM_VERSION}" --activate
+
+export PATH="${NODE_BIN}:${PATH}"
+hash -r 2>/dev/null || true
+
+log "pnpm $(pnpm -v) ($(command -v pnpm))"
+
+time_step "pnpm install --frozen-lockfile" pnpm install --frozen-lockfile
+
+# Optional eval template only; never clobber a private eval/.env.
+if [[ -f eval/.env.example && ! -f eval/.env ]]; then
+  log "note: eval/.env.example present (not copied; eval needs real secrets)"
+fi
+
+# Orb-specific agent guidance (does not replace repo AGENTS.md).
+amp_config_dir="${HOME}/.config/amp"
+mkdir -p "$amp_config_dir"
+cat > "${amp_config_dir}/AGENTS.md" <<'EOF'
+# Scorel — orb notes
+
+- Toolchain: Node 22.19.0 and pnpm 11.1.2 are installed by `.agents/setup` under `~/.local/node-v22.19.0` and prepended on PATH via `~/.bash_profile`. Prefer `pnpm` / `node` from that prefix over the base-image Node 20.
+- Install: `pnpm install --frozen-lockfile` (already run in setup).
+- Checks: `pnpm typecheck` and `pnpm test`.
+- CLI from source: `pnpm scorel` or `pnpm dev` (Host up).
+- Local WebUI: `pnpm scorel webui --port 3000` (use `amp orb service start` / portals for user-facing URLs; never share raw localhost).
+- GUI (Electron): `pnpm gui` — optional; macOS packaging is not expected in Linux orbs.
+- Eval/Harbor harness lives under `eval/` and needs a private `eval/.env` (from `eval/.env.example`); do not commit secrets.
+- ripgrep (`rg`) is available and used by coding tools.
+- Long-lived servers: use `amp orb service start <name> --command '...' --portal` or `.amp/services.yaml`; do not background with nohup/&/tmux for portals.
+EOF
+
+log "setup complete"

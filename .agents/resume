@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Fast wake-up checks only. Do not install dependencies here.
+# Amp waits at most ~10s for this script.
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+NODE_VERSION="22.19.0"
+NODE_BIN="${HOME}/.local/node-v${NODE_VERSION}/bin"
+
+if [[ -d "$NODE_BIN" ]]; then
+  export PATH="${NODE_BIN}:${PATH}"
+fi
+
+# Re-assert PATH hook if a snapshot/user profile lost it.
+PROFILE_MARKER="# scorel orb node toolchain"
+if [[ -d "$NODE_BIN" ]]; then
+  if [[ ! -f "${HOME}/.bash_profile" ]] || ! grep -Fqx "$PROFILE_MARKER" "${HOME}/.bash_profile" 2>/dev/null; then
+    cat >> "${HOME}/.bash_profile" <<EOF
+
+${PROFILE_MARKER}
+export PATH="${NODE_BIN}:\$PATH"
+EOF
+  fi
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "resume: node not on PATH (run .agents/setup)" >&2
+  exit 1
+fi
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "resume: pnpm not on PATH (run .agents/setup)" >&2
+  exit 1
+fi
+
+# Cheap presence check; do not reinstall.
+if [[ ! -d node_modules ]]; then
+  echo "resume: node_modules missing (run .agents/setup)" >&2
+  exit 1
+fi
+
+mkdir -p .amp
+date -u +%Y-%m-%dT%H:%M:%SZ > .amp/resume-last-ran.txt
+
+echo "resume ok: node $(node -v), pnpm $(pnpm -v)"
