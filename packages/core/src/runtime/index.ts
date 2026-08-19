@@ -7,6 +7,15 @@ import type {
 } from "@scorel/protocol";
 
 import type { AgentTool, ToolResult } from "../tools/index.js";
+import {
+  DEFAULT_PROVIDER_RETRY_CONFIG,
+  abortableSleep,
+  computeRetryDelay,
+  isAbortError,
+  isRetryableAssistantMessage,
+  isRetryableError,
+  type ProviderRetryConfig,
+} from "../provider/retry.js";
 
 export type RuntimeTurnOptions = {
   refreshContext?: (context: ScorelMessage[]) => ScorelMessage[] | Promise<ScorelMessage[]>;
@@ -55,11 +64,19 @@ type ProviderTurnResult = {
 
 export class ScorelRuntime {
   readonly #provider: RuntimeProvider;
+  readonly #retryConfig: ProviderRetryConfig;
   readonly #tools = new Map<string, AgentTool>();
   #controller: AbortController | undefined;
 
-  constructor({ provider }: { provider: RuntimeProvider }) {
+  constructor({
+    provider,
+    retryConfig = DEFAULT_PROVIDER_RETRY_CONFIG,
+  }: {
+    provider: RuntimeProvider;
+    retryConfig?: ProviderRetryConfig;
+  }) {
     this.#provider = provider;
+    this.#retryConfig = retryConfig;
   }
 
   get running(): boolean {
@@ -158,7 +175,14 @@ export class ScorelRuntime {
 
     yield { type: "message_start", role: "assistant" };
 
-    providerAttempts: for (let attempt = 0; ; attempt += 1) {
+    retryLoop: for (let attempt = 0; attempt <= this.#retryConfig.maxAttempts; attempt += 1) {
+      if (signal.aborted) {
+        const cancelledMessage = partialAssistantMessage({ thinking, text }, "cancelled");
+        if (cancelledMessage) {
+          yield { type: "message_end", message: cancelledMessage };
+        }
+        return { stopReason: "cancelled" };
+      }
       try {
         const stream = this.#provider.streamTurn({
           context,
@@ -176,15 +200,19 @@ export class ScorelRuntime {
           const next = await stream.next();
           if (next.done) {
             const message = normalizeAssistantMessage(next.value, { thinking, text }, signal.aborted ? "cancelled" : "end_turn");
+            // Retry error assistant messages only when no visible text has been emitted
+            // and the error is classified as retryable.
             if (
-              attempt === 0
-              && thinking.length > 0
+              message?.stopReason === "error"
               && text.length === 0
               && !signal.aborted
-              && isPrematureStreamMessage(message)
+              && attempt < this.#retryConfig.maxAttempts
+              && isRetryableAssistantMessage(message)
             ) {
               thinking = "";
-              continue providerAttempts;
+              const errorMessage = typeof message.meta?.errorMessage === "string" ? message.meta.errorMessage : "Unknown error";
+              yield* this.#retryBackoff(attempt, errorMessage, signal);
+              continue retryLoop;
             }
             if (message) {
               yield { type: "message_end", message };
@@ -208,10 +236,23 @@ export class ScorelRuntime {
         return { stopReason: "cancelled" };
       } catch (cause) {
         const error = cause instanceof Error ? cause : new Error(String(cause));
-        if (attempt === 0 && thinking.length > 0 && text.length === 0 && !signal.aborted && isPrematureStreamEnd(error)) {
-          thinking = "";
-          continue;
+
+        // Abort is always terminal — never retry.
+        if (isAbortError(error) || signal.aborted) {
+          const partial = partialAssistantMessage({ thinking, text }, "cancelled");
+          if (partial) {
+            yield { type: "message_end", message: partial };
+          }
+          return { stopReason: "cancelled" };
         }
+
+        // Retry only when no visible text has been emitted and the error is retryable.
+        if (text.length === 0 && attempt < this.#retryConfig.maxAttempts && isRetryableError(error)) {
+          thinking = "";
+          yield* this.#retryBackoff(attempt, error.message, signal);
+          continue retryLoop;
+        }
+
         const partial = partialAssistantMessage({ thinking, text }, "error");
         if (partial) {
           yield { type: "message_end", message: partial };
@@ -220,6 +261,33 @@ export class ScorelRuntime {
         yield { type: "turn_end", stopReason: "error" };
         return { finished: true };
       }
+    }
+
+    // All retry attempts exhausted: surface the final error.
+    const partial = partialAssistantMessage({ thinking, text }, "error");
+    if (partial) {
+      yield { type: "message_end", message: partial };
+    }
+    yield { type: "error", error: new Error(`Provider retry exhausted after ${this.#retryConfig.maxAttempts} attempts`) };
+    yield { type: "turn_end", stopReason: "error" };
+    return { finished: true };
+  }
+
+  /**
+   * Sleeps for the computed backoff delay, yielding nothing.
+   * If the signal fires during the sleep, the sleep aborts and the caller
+   * proceeds to the next iteration (which will see `signal.aborted` and exit).
+   */
+  async *#retryBackoff(
+    attempt: number,
+    errorMessage: string,
+    signal: AbortSignal,
+  ): AsyncGenerator<RawRuntimeEvent, void, undefined> {
+    const delay = computeRetryDelay(attempt + 1, new Error(errorMessage), this.#retryConfig);
+    try {
+      await abortableSleep(delay, signal);
+    } catch {
+      // Abort during backoff — the next loop iteration will handle cancellation.
     }
   }
 
@@ -272,15 +340,6 @@ export class ScorelRuntime {
     };
   }
 }
-
-const isPrematureStreamEnd = (error: Error): boolean =>
-  error.message.includes("Stream ended without finish_reason");
-
-const isPrematureStreamMessage = (message: (ScorelMessage & { role: "assistant" }) | undefined): boolean =>
-  message?.stopReason === "error"
-  && message.meta?.api === "openai-completions"
-  && typeof message.meta.errorMessage === "string"
-  && message.meta.errorMessage.includes("Stream ended without finish_reason");
 
 const toolResultForContext = (result: ToolResult): ToolResult => ({
   content: result.content,
