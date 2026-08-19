@@ -4,7 +4,16 @@ import { describe, expect, it } from "vitest";
 import type { ScorelMessage } from "@scorel/protocol";
 
 import { ScorelRuntime, type RuntimeProvider, type RuntimeProviderTurn, type RuntimeTurnOptions } from "./index.js";
+import type { ProviderRetryConfig } from "../provider/retry.js";
 import { defineTool } from "../tools/index.js";
+
+/** Retry config with negligible delays for fast test execution. */
+const fastRetryConfig: ProviderRetryConfig = {
+  maxAttempts: 5,
+  baseDelayMs: 1,
+  maxDelayMs: 5,
+  jitterFactor: 0,
+};
 
 const userMessage = (text: string): ScorelMessage => ({
   role: "user",
@@ -124,7 +133,7 @@ describe("ScorelRuntime", () => {
         return assistantMessage("done");
       },
     };
-    const runtime = new ScorelRuntime({ provider });
+    const runtime = new ScorelRuntime({ provider, retryConfig: fastRetryConfig });
 
     const events = await collect(runtime);
 
@@ -154,7 +163,7 @@ describe("ScorelRuntime", () => {
       },
     };
 
-    const events = await collect(new ScorelRuntime({ provider }));
+    const events = await collect(new ScorelRuntime({ provider, retryConfig: fastRetryConfig }));
 
     expect(attempts).toBe(2);
     expect(events.at(-2)).toEqual({ type: "message_end", message: assistantMessage("recovered") });
@@ -171,10 +180,209 @@ describe("ScorelRuntime", () => {
       },
     };
 
-    const events = await collect(new ScorelRuntime({ provider }));
+    const events = await collect(new ScorelRuntime({ provider, retryConfig: fastRetryConfig }));
 
     expect(attempts).toBe(1);
     expect(events).toContainEqual({ type: "turn_end", stopReason: "error" });
+  });
+
+  it("retries a 429 error before visible text and succeeds on retry", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("429 Too Many Requests");
+        }
+        yield { type: "text_delta", delta: "hello" };
+        return assistantMessage("hello");
+      },
+    };
+    const runtime = new ScorelRuntime({ provider, retryConfig: fastRetryConfig });
+
+    const events = await collect(runtime);
+
+    expect(attempts).toBe(2);
+    expect(events.at(-2)).toEqual({ type: "message_end", message: assistantMessage("hello") });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "error" }));
+  });
+
+  it("retries a transient network error before visible text", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        if (attempts <= 2) {
+          throw new Error("fetch failed: ECONNRESET");
+        }
+        yield { type: "text_delta", delta: "recovered" };
+        return assistantMessage("recovered");
+      },
+    };
+    const runtime = new ScorelRuntime({ provider, retryConfig: fastRetryConfig });
+
+    const events = await collect(runtime);
+
+    expect(attempts).toBe(3);
+    expect(events.at(-2)).toEqual({ type: "message_end", message: assistantMessage("recovered") });
+  });
+
+  it("does not retry a non-retryable error (401 Unauthorized)", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        const error = new Error("401 Unauthorized");
+        (error as { status?: number }).status = 401;
+        throw error;
+      },
+    };
+    const runtime = new ScorelRuntime({ provider, retryConfig: fastRetryConfig });
+
+    const events = await collect(runtime);
+
+    expect(attempts).toBe(1);
+    expect(events).toContainEqual({ type: "turn_end", stopReason: "error" });
+    expect(events).toContainEqual(expect.objectContaining({ type: "error" }));
+  });
+
+  it("does not retry a content_filter error assistant message", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        return {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          meta: { errorMessage: "content_filter" },
+        } satisfies ScorelMessage;
+      },
+    };
+    const runtime = new ScorelRuntime({ provider, retryConfig: fastRetryConfig });
+
+    const events = await collect(runtime);
+
+    expect(attempts).toBe(1);
+    expect(events).toContainEqual({ type: "turn_end", stopReason: "error" });
+  });
+
+  it("exhausts max retry attempts and surfaces a final error", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        throw new Error("503 Service unavailable");
+      },
+    };
+    const runtime = new ScorelRuntime({ provider, retryConfig: fastRetryConfig });
+
+    const events = await collect(runtime);
+
+    // 1 initial + 5 retries = 6 total attempts
+    expect(attempts).toBe(6);
+    expect(events).toContainEqual({ type: "turn_end", stopReason: "error" });
+  });
+
+  it("does not retry after visible text even for retryable errors", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        yield { type: "text_delta", delta: "partial response" };
+        throw new Error("503 Service unavailable");
+      },
+    };
+    const runtime = new ScorelRuntime({ provider, retryConfig: fastRetryConfig });
+
+    const events = await collect(runtime);
+
+    expect(attempts).toBe(1);
+    expect(events).toContainEqual({ type: "turn_end", stopReason: "error" });
+    // Partial text should be preserved
+    expect(events).toContainEqual({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "partial response" }],
+        stopReason: "error",
+        meta: { partial: true },
+      },
+    });
+  });
+
+  it("aborts during backoff sleep without retrying further", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        throw new Error("503 Service unavailable");
+      },
+    };
+    const runtime = new ScorelRuntime({
+      provider,
+      retryConfig: {
+        maxAttempts: 10,
+        baseDelayMs: 10_000,
+        maxDelayMs: 10_000,
+        jitterFactor: 0,
+      },
+    });
+
+    // Abort after 50ms (during the first backoff sleep).
+    setTimeout(() => runtime.cancel(), 50);
+
+    const events = [];
+    for await (const event of runtime.executeTurn([userMessage("hi")], undefined, {})) {
+      events.push(event);
+    }
+
+    expect(attempts).toBe(1);
+    expect(events).toContainEqual({ type: "turn_end", stopReason: "cancelled" });
+  });
+
+  it("does not retry abort errors", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        const error = new Error("Request was aborted");
+        error.name = "AbortError";
+        throw error;
+      },
+    };
+    const runtime = new ScorelRuntime({ provider, retryConfig: fastRetryConfig });
+
+    const events = await collect(runtime);
+
+    expect(attempts).toBe(1);
+    // Abort errors produce cancelled stop reason, not error
+    expect(events).toContainEqual({ type: "turn_end", stopReason: "cancelled" });
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "error" }));
+  });
+
+  it("retries an error assistant message with a retryable error before visible text", async () => {
+    let attempts = 0;
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        attempts += 1;
+        if (attempts === 1) {
+          return {
+            role: "assistant",
+            content: [],
+            stopReason: "error",
+            meta: { errorMessage: "overloaded" },
+          } satisfies ScorelMessage;
+        }
+        return assistantMessage("recovered");
+      },
+    };
+    const runtime = new ScorelRuntime({ provider, retryConfig: fastRetryConfig });
+
+    const events = await collect(runtime);
+
+    expect(attempts).toBe(2);
+    expect(events.at(-2)).toEqual({ type: "message_end", message: assistantMessage("recovered") });
   });
 
   it("cancels streaming without emitting an empty persistent message", async () => {
