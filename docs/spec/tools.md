@@ -109,50 +109,93 @@ M2 落地七个用户可见工具，语义参考 Claude Code 的基础 coding �
 
 ---
 
-## 5. MCP 集成（M2 后）
+## 5. MCP 集成（S0122 已实现）
 
 pi-ai 本身不内置 MCP，Scorel 自己接——TypeScript 生态的 MCP SDK 已经成熟，接入成本不高。
 
-MCP 不属于 M2。M2 先把内置 coding 工具和 session/daemon/client/CLI 主链路跑通；MCP 在后续 ecosystem 阶段接入。
+MCP 支持在 S0122 实现。配置、连接、工具发现/调用、错误隔离、断开和持久化全链路已打通。
 
-### 5.1 MCP 工具转换
+### 5.1 Transport 支持
+
+Scorel 支持三种 MCP transport：
+
+- **stdio**：通过 `StdioClientTransport` 启动子进程，适合本地 MCP server（如 `npx -y @modelcontextprotocol/server-everything`）。Host shutdown 时终止子进程。
+- **http**（推荐）：通过 `StreamableHTTPClientTransport` 连接 Streamable HTTP endpoint。这是 MCP 规范当前推荐的 transport。
+- **sse**（legacy）：通过 `SSEClientTransport` 连接旧式 HTTP+SSE endpoint，保持向后兼容。
+
+### 5.2 MCP 工具转换
 
 每个 MCP 服务器暴露的 tool 被包装成一条 `AgentTool`：
 
 ```typescript
-function mcpToAgentTool(client: McpClient, tool: McpTool): AgentTool {
+function mcpToAgentTool(connection: McpConnection, tool: McpToolDescriptor): AgentTool {
   return {
-    name: `${client.name}_${tool.name}`,
-    label: tool.name,
-    description: tool.description,
-    parameters: convertJsonSchemaToTypeBox(tool.inputSchema),
-    execute: async (_, args) => {
-      const result = await client.callTool(tool.name, args);
-      return {
-        content: result.content,
-        details: { server: client.name, tool: tool.name },
-      };
+    name: `${connection.id}_${tool.toolName}`,
+    description: tool.description ?? `MCP tool ${tool.name} from server ${connection.id}`,
+    parameters: Type.Unsafe(tool.inputSchema ?? { type: "object", properties: {} }),
+    execute: async (_toolCallId, args) => {
+      return connection.callTool(tool.toolName, args);
     },
   };
 }
 ```
 
-MCP 生态里很多 server 用 Zod / 原生 JSON Schema，Scorel 工具签名统一在 TypeBox 风格 schema。JSON Schema 到 TypeBox 的转换由 adapter 层负责。
+MCP 生态里很多 server 用 Zod / 原生 JSON Schema，Scorel 工具签名统一在 TypeBox 风格 schema。JSON Schema 到 TypeBox 的转换由 adapter 层负责（`Type.Unsafe`）。
 
-### 5.2 后续：启动时加载
+### 5.3 配置
 
-```typescript
-interface McpServerConfig {
-  name: string;
-  transport: 'sse' | 'stdio';
-  url?: string;            // sse
-  command?: string;        // stdio
-}
+MCP server 配置存储在 `~/.scorel/config.toml` 的 `[mcp.servers.<id>]` section 中，与其他 Scorel 配置共用同一配置源：
+
+```toml
+[mcp.servers.myserver]
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-everything"]
+
+[mcp.servers.myserver.env]
+NODE_ENV = "production"
+
+[mcp.servers.myhttp]
+transport = "http"
+url = "https://example.com/mcp"
+
+[mcp.servers.myhttp.envHeaders]
+Authorization = "MCP_AUTH_TOKEN"
 ```
 
-所有配置的 MCP 服务器在 session 启动时连接并加载工具描述，全部作为 `all` 预设的一部分。是否进入 `coding` 预设，需要等内置 M2 工具稳定后再决定。
+**凭据安全**：`envHeaders` 存储的是环境变量名而非实际值。连接时从 `process.env` 读取实际值注入 HTTP headers。配置文件中不存储 token / API key。
 
-### 5.3 更后续：按需分级加载
+所有配置的 MCP 服务器在 Host 启动时连接并加载工具描述，注册到每个 session lane 的 runtime tool loop 中。配置变更时通过 `refreshMcpServers()` 重连。
+
+### 5.4 生命周期与错误隔离
+
+- **启动**：Host `start()` 调用 `McpManager.startServers()`，逐个连接配置的 MCP server。
+- **错误隔离**：单个 MCP server 连接失败不会阻止其他 server 连接或 Host 启动。失败的 server 在状态中记录 error，但不抛异常。
+- **工具注册**：连接成功后，发现的工具通过 `mcpToAgentTool()` 转换为 `AgentTool` 并注册到 runtime。
+- **断开**：Host `shutdown()` 调用 `McpManager.disconnectAll()`，终止 stdio 子进程并关闭 HTTP/SSE 连接。
+- **配置刷新**：CLI / GUI 通过 wire request 修改配置后，`refreshMcpServers()` 重新加载配置、停止已移除的 server、启动新 server，并重新注册工具。
+
+### 5.5 CLI 管理
+
+```bash
+scorel mcp list                              # 列出已配置的 MCP server 及状态
+scorel mcp add <id> --transport stdio \
+  --command npx --args "-y,@modelcontextprotocol/server-everything"
+scorel mcp add <id> --transport http --url https://example.com/mcp
+scorel mcp remove <id>                       # 移除 MCP server
+scorel mcp call <server> <tool> [json-args]  # 直接调用 MCP 工具
+scorel mcp cloud list                        # 浏览 Cloud MCP registry
+scorel mcp cloud add <catalog-id> [server-id]  # 从 registry 添加 server
+```
+
+### 5.6 GUI 设置
+
+GUI Settings 中有 MCP 管理界面（"MCP" tab），支持：
+- 查看已配置 server 列表及连接状态、工具列表和错误信息
+- 添加 / 移除 MCP server（stdio / http / sse）
+- 浏览 Cloud MCP registry 并一键添加
+
+### 5.7 后续：按需分级加载
 
 初期不做的：按 keyword 触发的 **Tier 2** 动态加载（`transformContext` 拦截用户消息，命中关键词才 attach 对应工具）。
 

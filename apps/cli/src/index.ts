@@ -63,6 +63,7 @@ import { runCliRelay } from "./relay-server-cli.js";
 import { runCliUp } from "./up-cli.js";
 import { runCliWebUi } from "./webui-cli.js";
 import { readInstalledScorelVersion, runCliUpdate } from "./update-cli.js";
+import { runCliMcp, writeMcpUsage } from "./mcp-cli.js";
 
 export const cliAppName = "@scorel/app-cli" as const;
 export const cliClientDependency = clientPackageName;
@@ -269,6 +270,17 @@ export const runCli = async (
   }
   if (command === "project") {
     return runProject(rest, {
+      stateDir: stateDirFromSessionsDir(runOptions.sessionsDir),
+      output: io.output,
+      error: io.error,
+    });
+  }
+  if (command === "mcp") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      writeMcpUsage(io.output);
+      return 0;
+    }
+    return runCliMcp(rest, {
       stateDir: stateDirFromSessionsDir(runOptions.sessionsDir),
       output: io.output,
       error: io.error,
@@ -1337,6 +1349,7 @@ const resolveRunConfig = (options: RunOptions): ScorelConfig | undefined => {
       tokenSavingRtk: false,
     },
     extensions: {},
+    mcpServers: {},
   };
 };
 

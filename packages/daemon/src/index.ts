@@ -73,7 +73,14 @@ import {
   type SubagentSnapshot,
   type SubagentStatus,
   type SubagentThreadEvent,
+  fetchCloudMcpCatalog,
+  cloudEntryToServerConfig,
+  type McpServerConfig,
+  renderMcpServerConfig,
+  removeMcpServerConfig,
+  type McpServerConfigEntry,
 } from "@scorel/core";
+import { McpManager } from "./mcp-manager.js";
 import {
   asClientId,
   asDeviceId,
@@ -121,6 +128,9 @@ import {
   type MemorySettings,
   type ObservabilitySettings,
   type RuntimeSettings,
+  type McpServerStatusSummary,
+  type CallMcpToolResult,
+  type ListCloudMcpResult,
 } from "@scorel/protocol";
 
 export const daemonPackageName = "@scorel/daemon" as const;
@@ -592,6 +602,8 @@ type SessionLane = {
   subagents?: SubagentRunner;
   /** True for nested subagent lanes; they must not register Task tools. */
   isSubagent?: boolean;
+  /** Names of MCP tools currently registered in this lane's runtime. */
+  registeredMcpToolNames?: string[];
 };
 
 type HostSubagentTask = {
@@ -707,6 +719,7 @@ export class ScorelHost {
   readonly #sessionMemoryUpdates = new Map<SessionId, Promise<void>>();
   readonly #imExtensions = new Map<string, LoadedImExtension>();
   readonly #imBindings = new Map<string, ImSessionBinding>();
+  readonly #mcpManager: McpManager;
   readonly #registry: ProjectRegistry;
   #runtimeStatsQueue: Promise<void> = Promise.resolve();
   #hadClientConnection = false;
@@ -737,6 +750,10 @@ export class ScorelHost {
       createId: this.#createId,
       now: this.#now,
     });
+    this.#mcpManager = new McpManager({
+      scorelHomeDir: this.#scorelHomeDir,
+      appendDiagnostic: (event, fields) => this.#appendHostDiagnostic(event, fields),
+    });
   }
 
   async start(): Promise<void> {
@@ -745,6 +762,7 @@ export class ScorelHost {
     await mkdir(this.#scorelHomeDir, { recursive: true });
     await this.#loadImBindings();
     await this.#startEnabledImExtensions();
+    await this.#startMcpServers();
   }
 
   async shutdown(): Promise<void> {
@@ -762,6 +780,7 @@ export class ScorelHost {
     }
     await Promise.all([...this.#sessions.values()].map((lane) => lane.runtime.detachActiveToolWork()));
     await this.#stopImExtensions();
+    await this.#mcpManager.disconnectAll();
     this.#connections.clear();
     this.#hadClientConnection = false;
     this.#started = false;
@@ -997,6 +1016,30 @@ export class ScorelHost {
           projectId: message.projectId,
           removed: await this.removeProject(message.projectId),
         });
+        break;
+      }
+      case "list_mcp_servers": {
+        this.#respond(connection, message, { servers: this.#mcpManager.toStatusSummaries() });
+        break;
+      }
+      case "upsert_mcp_server": {
+        this.#respond(connection, message, { servers: await this.#handleUpsertMcpServer(message) });
+        break;
+      }
+      case "remove_mcp_server": {
+        this.#respond(connection, message, await this.#handleRemoveMcpServer(message));
+        break;
+      }
+      case "call_mcp_tool": {
+        this.#respond(connection, message, await this.#handleCallMcpTool(message));
+        break;
+      }
+      case "list_cloud_mcp": {
+        this.#respond(connection, message, await this.#handleListCloudMcp(message));
+        break;
+      }
+      case "add_cloud_mcp": {
+        this.#respond(connection, message, await this.#handleAddCloudMcp(message));
         break;
       }
       case "cancel":
@@ -2796,6 +2839,8 @@ export class ScorelHost {
         lane.runtime.registerTool(tool);
       }
     }
+    // Register MCP server tools
+    this.#registerMcpTools(lane);
   }
 
   #createSubagentRunner(parentLane: SessionLane): SubagentRunner {
@@ -3396,6 +3441,52 @@ export class ScorelHost {
     this.#imExtensions.clear();
   }
 
+  async #startMcpServers(): Promise<void> {
+    const config = await this.#loadUserConfigProfile().catch((cause) => {
+      if (isMissingConfigError(cause)) {
+        return undefined;
+      }
+      throw cause;
+    });
+    if (!config?.mcpServers || Object.keys(config.mcpServers).length === 0) {
+      return;
+    }
+    const configs: Record<string, McpServerConfig> = {};
+    for (const [id, entry] of Object.entries(config.mcpServers)) {
+      configs[id] = mcpServerEntryToConfig(entry);
+    }
+    await this.#mcpManager.startServers(configs);
+  }
+
+  async refreshMcpServers(): Promise<void> {
+    await this.#startMcpServers();
+    // Re-register tools in all active lanes
+    for (const lane of this.#sessions.values()) {
+      this.#registerMcpTools(lane);
+    }
+  }
+
+  #registerMcpTools(lane: SessionLane): void {
+    // Remove existing MCP tools first
+    const mcpToolNames = new Set<string>();
+    for (const tool of this.#mcpManager.getTools()) {
+      mcpToolNames.add(tool.name);
+    }
+    // Unregister tools that are no longer present
+    for (const toolName of lane.registeredMcpToolNames ?? []) {
+      if (!mcpToolNames.has(toolName)) {
+        lane.runtime.unregisterTool(toolName);
+      }
+    }
+    // Register current MCP tools
+    const registered: string[] = [];
+    for (const tool of this.#mcpManager.getTools()) {
+      lane.runtime.registerTool(tool);
+      registered.push(tool.name);
+    }
+    lane.registeredMcpToolNames = registered;
+  }
+
   async #discoverExtensionManifests(): Promise<Map<string, ExtensionManifest>> {
     const roots = [
       this.#builtinExtensionsDir,
@@ -3918,6 +4009,150 @@ export class ScorelHost {
     });
     await this.refreshImExtensions();
     return this.#extensionSettings(request.extensionId);
+  }
+
+  async #handleUpsertMcpServer(request: ClientRequest<"upsert_mcp_server">): Promise<McpServerStatusSummary[]> {
+    const target = this.#configWriteTarget();
+    let existingConfigText: string | undefined;
+    try {
+      existingConfigText = await readFile(target.configPath, "utf8");
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+    await mkdir(target.configDir, { recursive: true });
+    await writeFile(
+      target.configPath,
+      renderMcpServerConfig({
+        serverId: request.serverId,
+        transport: request.transport,
+        ...(request.command !== undefined ? { command: request.command } : {}),
+        ...(request.args !== undefined ? { args: request.args } : {}),
+        ...(request.env !== undefined ? { env: request.env } : {}),
+        ...(request.cwd !== undefined ? { cwd: request.cwd } : {}),
+        ...(request.url !== undefined ? { url: request.url } : {}),
+        ...(request.headers !== undefined ? { headers: request.headers } : {}),
+        ...(request.envHeaders !== undefined ? { envHeaders: request.envHeaders } : {}),
+        existingConfigText,
+      }),
+      "utf8",
+    );
+    await this.#appendHostDiagnostic("mcp_server_upserted", {
+      serverId: request.serverId,
+      transport: request.transport,
+    });
+    await this.refreshMcpServers();
+    return this.#mcpManager.toStatusSummaries();
+  }
+
+  async #handleRemoveMcpServer(request: ClientRequest<"remove_mcp_server">): Promise<{ servers: McpServerStatusSummary[]; removed: boolean }> {
+    const target = this.#configWriteTarget();
+    let existingConfigText: string | undefined;
+    try {
+      existingConfigText = await readFile(target.configPath, "utf8");
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+    await mkdir(target.configDir, { recursive: true });
+    await writeFile(
+      target.configPath,
+      removeMcpServerConfig({
+        serverId: request.serverId,
+        existingConfigText,
+      }),
+      "utf8",
+    );
+    await this.#appendHostDiagnostic("mcp_server_removed", {
+      serverId: request.serverId,
+    });
+    await this.refreshMcpServers();
+    return { servers: this.#mcpManager.toStatusSummaries(), removed: true };
+  }
+
+  async #handleCallMcpTool(request: ClientRequest<"call_mcp_tool">): Promise<CallMcpToolResult> {
+    const connection = this.#mcpManager.getConnection(request.serverId);
+    if (!connection) {
+      return {
+        serverId: request.serverId,
+        toolName: request.toolName,
+        content: [{ type: "text", text: `MCP server "${request.serverId}" is not configured or not connected` }],
+        error: "server_not_found",
+      };
+    }
+    const result = await connection.callTool(request.toolName, request.args);
+    return {
+      serverId: request.serverId,
+      toolName: request.toolName,
+      content: result.content.map((block) => ({
+        type: "text" as const,
+        text: block.type === "text" ? block.text : JSON.stringify(block),
+      })),
+      ...(result.details && typeof result.details === "object" && "error" in result.details
+        ? { error: String((result.details as { error: unknown }).error) }
+        : {}),
+    };
+  }
+
+  async #handleListCloudMcp(request: ClientRequest<"list_cloud_mcp">): Promise<ListCloudMcpResult> {
+    const registryUrl = request.registryUrl ?? DEFAULT_CLOUD_MCP_REGISTRY;
+    const catalog = await fetchCloudMcpCatalog(registryUrl);
+    return {
+      servers: catalog.servers.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        ...(entry.description ? { description: entry.description } : {}),
+        transport: entry.transport,
+        ...(entry.command ? { command: entry.command } : {}),
+        ...(entry.args ? { args: entry.args } : {}),
+        ...(entry.url ? { url: entry.url } : {}),
+        ...(entry.envHeaders ? { envHeaders: entry.envHeaders } : {}),
+        ...(entry.tags ? { tags: entry.tags } : {}),
+      })),
+    };
+  }
+
+  async #handleAddCloudMcp(request: ClientRequest<"add_cloud_mcp">): Promise<{ servers: McpServerStatusSummary[]; added: boolean }> {
+    const registryUrl = request.registryUrl ?? DEFAULT_CLOUD_MCP_REGISTRY;
+    const catalog = await fetchCloudMcpCatalog(registryUrl);
+    const entry = catalog.servers.find((server) => server.id === request.catalogId);
+    if (!entry) {
+      throw new Error(`Cloud MCP server "${request.catalogId}" not found in registry`);
+    }
+    const serverId = request.serverId ?? entry.id;
+    const config = cloudEntryToServerConfig(entry);
+    const target = this.#configWriteTarget();
+    let existingConfigText: string | undefined;
+    try {
+      existingConfigText = await readFile(target.configPath, "utf8");
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+    await mkdir(target.configDir, { recursive: true });
+    await writeFile(
+      target.configPath,
+      renderMcpServerConfig({
+        serverId,
+        transport: config.transport,
+        ...(config.command ? { command: config.command } : {}),
+        ...(config.args ? { args: config.args } : {}),
+        ...(config.url ? { url: config.url } : {}),
+        ...(config.envHeaders ? { envHeaders: config.envHeaders } : {}),
+        existingConfigText,
+      }),
+      "utf8",
+    );
+    await this.#appendHostDiagnostic("mcp_cloud_server_added", {
+      catalogId: request.catalogId,
+      serverId,
+      transport: config.transport,
+    });
+    await this.refreshMcpServers();
+    return { servers: this.#mcpManager.toStatusSummaries(), added: true };
   }
 
   async #fetchProviderModels(projectId: ProjectId | undefined, providerId: string): Promise<ProviderCatalogModelSummary[]> {
@@ -4601,6 +4836,19 @@ const stripImCommandPrefix = (text: string): string =>
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+const mcpServerEntryToConfig = (entry: McpServerConfigEntry): McpServerConfig => ({
+  transport: entry.transport,
+  ...(entry.command ? { command: entry.command } : {}),
+  ...(entry.args ? { args: entry.args } : {}),
+  ...(entry.env ? { env: entry.env } : {}),
+  ...(entry.cwd ? { cwd: entry.cwd } : {}),
+  ...(entry.url ? { url: entry.url } : {}),
+  ...(entry.headers ? { headers: entry.headers } : {}),
+  ...(entry.envHeaders ? { envHeaders: entry.envHeaders } : {}),
+});
+
+const DEFAULT_CLOUD_MCP_REGISTRY = "https://registry.modelcontextprotocol.io/servers";
 
 const parseMemoryUpdate = (raw: string): { projectMemory?: string; rootMemory?: string } | undefined => {
   const text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();

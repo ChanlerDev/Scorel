@@ -21,6 +21,13 @@ import type {
   UpsertObservabilitySettingsInput,
   UpsertRuntimeSettingsInput,
   UpsertExtensionSettingsInput,
+  McpServerStatusSummary,
+  UpsertMcpServerSettingsInput,
+  RemoveMcpServerSettingsInput,
+  CallMcpToolInput,
+  CallMcpToolResult,
+  CloudMcpServerSummary,
+  AddCloudMcpInput,
 } from "@scorel/protocol";
 
 export type GuiHostStatus = {
@@ -106,6 +113,20 @@ export type GuiExtensionSettingsView = ExtensionSettings;
 
 export type GuiUpsertExtensionSettingsInput = UpsertExtensionSettingsInput;
 
+export type GuiMcpServerStatusView = McpServerStatusSummary;
+
+export type GuiUpsertMcpServerInput = UpsertMcpServerSettingsInput;
+
+export type GuiRemoveMcpServerInput = RemoveMcpServerSettingsInput;
+
+export type GuiCallMcpToolInput = CallMcpToolInput;
+
+export type GuiCallMcpToolResult = CallMcpToolResult;
+
+export type GuiCloudMcpServerView = CloudMcpServerSummary;
+
+export type GuiAddCloudMcpInput = AddCloudMcpInput;
+
 export type GuiProviderCatalogModelView = ProviderCatalogModelSummary;
 
 export type GuiRelayPairSessionView = {
@@ -156,6 +177,12 @@ export type GuiApi = {
   upsertObservabilitySettings(device: GuiDeviceRef, input: GuiUpsertObservabilitySettingsInput): Promise<GuiObservabilitySettingsView>;
   getExtensionSettings(extensionId: string): Promise<GuiExtensionSettingsView>;
   upsertExtensionSettings(input: GuiUpsertExtensionSettingsInput): Promise<GuiExtensionSettingsView>;
+  listMcpServers(): Promise<GuiMcpServerStatusView[]>;
+  upsertMcpServer(input: GuiUpsertMcpServerInput): Promise<GuiMcpServerStatusView[]>;
+  removeMcpServer(input: GuiRemoveMcpServerInput): Promise<{ servers: GuiMcpServerStatusView[]; removed: boolean }>;
+  callMcpTool(input: GuiCallMcpToolInput): Promise<GuiCallMcpToolResult>;
+  listCloudMcp(registryUrl?: string): Promise<{ servers: GuiCloudMcpServerView[] }>;
+  addCloudMcp(input: GuiAddCloudMcpInput): Promise<{ servers: GuiMcpServerStatusView[]; added: boolean }>;
   createSession(project: GuiProjectRef, modelSelection?: GuiModelSelection): Promise<SessionId>;
   openSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
   attachSession(project: GuiProjectRef, sessionId: string): Promise<PersistentEvent[]>;
@@ -191,6 +218,12 @@ export const guiIpcChannels = {
   upsertObservabilitySettings: "scorel:upsertObservabilitySettings",
   getExtensionSettings: "scorel:getExtensionSettings",
   upsertExtensionSettings: "scorel:upsertExtensionSettings",
+  listMcpServers: "scorel:listMcpServers",
+  upsertMcpServer: "scorel:upsertMcpServer",
+  removeMcpServer: "scorel:removeMcpServer",
+  callMcpTool: "scorel:callMcpTool",
+  listCloudMcp: "scorel:listCloudMcp",
+  addCloudMcp: "scorel:addCloudMcp",
   createSession: "scorel:createSession",
   openSession: "scorel:openSession",
   attachSession: "scorel:attachSession",

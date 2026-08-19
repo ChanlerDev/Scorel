@@ -22,6 +22,10 @@ import {
   type GuiRemoteProjectView,
   type GuiUpsertRuntimeSettingsInput,
   type GuiSnapshot,
+  type GuiUpsertMcpServerInput,
+  type GuiRemoveMcpServerInput,
+  type GuiCallMcpToolInput,
+  type GuiAddCloudMcpInput,
 } from "./shared/ipc.js";
 
 const here = __dirname;
@@ -273,6 +277,24 @@ const registerIpc = (): void => {
   );
   ipcMain.handle(guiIpcChannels.upsertExtensionSettings, async (_event, input: GuiUpsertExtensionSettingsInput) =>
     requireConnectedLocalHost().upsertLocalExtensionSettings(input),
+  );
+  ipcMain.handle(guiIpcChannels.listMcpServers, async () =>
+    requireConnectedLocalHost().listLocalMcpServers(),
+  );
+  ipcMain.handle(guiIpcChannels.upsertMcpServer, async (_event, input: GuiUpsertMcpServerInput) =>
+    requireConnectedLocalHost().upsertLocalMcpServer(input),
+  );
+  ipcMain.handle(guiIpcChannels.removeMcpServer, async (_event, input: GuiRemoveMcpServerInput) =>
+    requireConnectedLocalHost().removeLocalMcpServer(input),
+  );
+  ipcMain.handle(guiIpcChannels.callMcpTool, async (_event, input: GuiCallMcpToolInput) =>
+    requireConnectedLocalHost().callLocalMcpTool(input),
+  );
+  ipcMain.handle(guiIpcChannels.listCloudMcp, async (_event, registryUrl?: string) =>
+    requireConnectedLocalHost().listLocalCloudMcp(registryUrl),
+  );
+  ipcMain.handle(guiIpcChannels.addCloudMcp, async (_event, input: GuiAddCloudMcpInput) =>
+    requireConnectedLocalHost().addLocalCloudMcp(input),
   );
   ipcMain.handle(guiIpcChannels.createSession, async (_event, project: GuiProjectRef, modelSelection?: GuiModelSelection) => {
     const ref = normalizeProjectRef(project);
