@@ -232,7 +232,62 @@ interface RuntimeBridge {
 
 ---
 
-## 11. 初期范围与延后项
+## 11. Provider Retry 策略
+
+`#runProviderTurn` 内置 provider-neutral 重试循环，覆盖 429/503/5xx、临时网络错误、stream 中断等瞬态故障。重试策略参考 Codex：最多 10 次，前几次等待较短，随后指数退避 + jitter。
+
+### 重试条件
+
+| 条件 | 行为 |
+|---|---|
+| 无 visible text + retryable error | 重试（指数退避 + jitter） |
+| 有 visible text + 任何 error | 不重试（避免不安全重放） |
+| AbortError / signal.aborted | 不重试，返回 cancelled |
+| 非 retryable error（401/403/400/422、quota/billing、content_filter） | 不重试，立即失败 |
+| 重试次数耗尽 | 立即失败 |
+
+### Retryable 分类
+
+- HTTP 408/409/429/500/502/503/504/524
+- `x-should-retry: true` header
+- 网络错误：`fetch failed`、`ECONNRESET`、`ECONNREFUSED`、`ETIMEDOUT`、`socket hang up` 等
+- Stream 中断：`Stream ended without finish_reason`、`stream ended before message_stop` 等
+- Provider 超载：`overloaded`、`rate limit`、`too many requests` 等
+
+### 非 Retryable 分类
+
+- AbortError / 用户取消
+- HTTP 400/401/403/404/422/451
+- `x-should-retry: false` header
+- Quota/billing：`insufficient_quota`、`quota exceeded`、`billing` 等
+- Content filter / safety
+
+### Backoff 策略
+
+```
+baseDelayMs: 500     (首次重试 ~375–500ms)
+maxDelayMs:  30_000  (上限 30s)
+jitterFactor: 0.25   (delay * (1 – random * 0.25))
+```
+
+延迟序列（jitter 前）：0.5s, 1s, 2s, 4s, 8s, 16s, 30s, 30s, 30s, 30s。
+
+`Retry-After` / `retry-after-ms` header 优先于指数退避计算，但同样受 `maxDelayMs` 上限约束。
+
+### 安全保证
+
+- 重试只在 **无 visible text** 时发生（thinking-only 或完全空）。
+- 工具执行在 `streamTurn` 返回后由 runtime 驱动，重试不会在工具执行后重复。
+- `AbortSignal` 在 backoff sleep 期间有效，取消立即生效。
+- Thinking deltas 在重试时重置（不影响用户可见输出）。
+
+### 配置
+
+`ScorelRuntime` 构造器接受可选 `retryConfig: ProviderRetryConfig`，默认值为上述策略。测试可注入短延迟配置。
+
+---
+
+## 12. 初期范围与延后项
 
 **初期落地**
 - ScorelRuntime 接口 + executeTurn
