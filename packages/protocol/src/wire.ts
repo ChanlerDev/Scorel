@@ -18,10 +18,12 @@ import type {
   ModelSelectionInput,
   ObservabilitySettings,
   RuntimeSettings,
+  TaskBudgetSettings,
   UpsertExtensionSettingsInput,
   UpsertMemorySettingsInput,
   UpsertObservabilitySettingsInput,
   UpsertRuntimeSettingsInput,
+  UpsertTaskBudgetSettingsInput,
   PersistentEvent,
   QueueItem,
   QueueName,
@@ -120,6 +122,14 @@ export type ClientRequestMap = {
   upsert_runtime_settings: {
     request: UpsertRuntimeSettingsInput;
     response: { runtime: RuntimeSettings };
+  };
+  get_task_budget_settings: {
+    request: { projectId?: ProjectId };
+    response: { taskBudget: TaskBudgetSettings };
+  };
+  upsert_task_budget_settings: {
+    request: UpsertTaskBudgetSettingsInput;
+    response: { taskBudget: TaskBudgetSettings };
   };
   get_observability_settings: {
     request: { projectId?: ProjectId };

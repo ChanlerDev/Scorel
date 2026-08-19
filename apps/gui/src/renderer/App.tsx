@@ -27,6 +27,7 @@ import type {
   GuiRelayDeviceView,
   GuiRemoteProjectView,
   GuiRuntimeSettingsView,
+  GuiTaskBudgetSettingsView,
   GuiSnapshot,
   GuiModelSelection,
   GuiReasoningEffort,
@@ -60,6 +61,14 @@ const defaultRuntimeSettings = (): GuiRuntimeSettingsView => ({
   rtkAvailable: false,
   estimatedOutputTokens: 0,
   estimatedSavedTokens: 0,
+});
+
+const defaultTaskBudgetSettings = (): GuiTaskBudgetSettingsView => ({
+  maxTokens: 0,
+  maxCostUsd: 0,
+  maxWallClockMinutes: 0,
+  repeatedCommandThreshold: 3,
+  staleProgressMinutes: 10,
 });
 
 const defaultObservabilitySettings = (): GuiObservabilitySettingsView => ({
@@ -201,6 +210,7 @@ export function App() {
   const [memorySettings, setMemorySettings] = useState<GuiMemorySettingsView>(defaultMemorySettings());
   const [memoryStatus, setMemoryStatus] = useState<GuiMemoryStatusView>(defaultMemoryStatus());
   const [runtimeSettings, setRuntimeSettings] = useState<GuiRuntimeSettingsView>(defaultRuntimeSettings());
+  const [taskBudgetSettings, setTaskBudgetSettings] = useState<GuiTaskBudgetSettingsView>(defaultTaskBudgetSettings());
   const [observabilitySettings, setObservabilitySettings] = useState<GuiObservabilitySettingsView>(defaultObservabilitySettings());
   const [imSettings, setImSettings] = useState<Record<string, GuiExtensionSettingsView>>({
     telegram: defaultExtensionSettings("telegram"),
@@ -498,6 +508,16 @@ export function App() {
         setRuntimeSettings(defaultRuntimeSettings());
         setError(cause instanceof Error ? cause.message : String(cause));
       });
+    void window.scorel.getTaskBudgetSettings(activeConfigDevice)
+      .then((taskBudget) => {
+        if (!isCurrent()) return;
+        setTaskBudgetSettings(taskBudget);
+      })
+      .catch((cause) => {
+        if (!isCurrent()) return;
+        setTaskBudgetSettings(defaultTaskBudgetSettings());
+        setError(cause instanceof Error ? cause.message : String(cause));
+      });
     void window.scorel.getObservabilitySettings(activeConfigDevice)
       .then((observability) => {
         if (!isCurrent()) return;
@@ -692,6 +712,7 @@ export function App() {
         memory={memorySettings}
         memoryStatus={memoryStatus}
         runtime={runtimeSettings}
+        taskBudget={taskBudgetSettings}
         observability={observabilitySettings}
         imExtensions={imSettings}
         onModelProfileChange={(profile) => {
@@ -706,6 +727,7 @@ export function App() {
         }}
         onMemoryChange={setMemorySettings}
         onRuntimeChange={setRuntimeSettings}
+        onTaskBudgetChange={setTaskBudgetSettings}
         onObservabilityChange={setObservabilitySettings}
         onExtensionChange={(extension) => setImSettings((current) => ({ ...current, [extension.extensionId]: extension }))}
         onBack={() => setView("workspace")}

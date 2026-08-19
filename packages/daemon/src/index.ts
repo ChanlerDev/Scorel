@@ -40,6 +40,7 @@ import {
   renderMemoryConfig,
   renderObservabilityConfig,
   renderRuntimeConfig,
+  renderTaskBudgetConfig,
   renderExtensionConfig,
   renderMemoryHarness,
   renderSkillDelta,
@@ -60,6 +61,11 @@ import {
   syncObservationAssetTargets,
   writeMemoryDreamState,
   writeSessionMemory,
+  buildSupervisionReminder,
+  checkSupervision,
+  deriveTaskSupervisionFromEvents,
+  type TaskBudgetConfig,
+  type TaskSupervisionState,
   type ExtensionManifest,
   type BackgroundBashCompletion,
   type BackgroundBashDeliveryHooks,
@@ -67,6 +73,7 @@ import {
   type ScorelConfigProfile,
   type JsonlSession,
   type RawRuntimeEvent,
+  type RunReportingModel,
   type SubagentCompletion,
   type SubagentDeliveryHooks,
   type SubagentRunner,
@@ -131,6 +138,8 @@ import {
   type McpServerStatusSummary,
   type CallMcpToolResult,
   type ListCloudMcpResult,
+  type TaskBudgetSettings,
+  type UpsertTaskBudgetSettingsInput,
 } from "@scorel/protocol";
 
 export const daemonPackageName = "@scorel/daemon" as const;
@@ -604,6 +613,10 @@ type SessionLane = {
   isSubagent?: boolean;
   /** Names of MCP tools currently registered in this lane's runtime. */
   registeredMcpToolNames?: string[];
+  /** Task supervision state, derived from session events and incrementally updated. */
+  supervision?: TaskSupervisionState;
+  /** Set of violation types already alerted in the current user turn (dedup). */
+  supervisionAlerted: Set<string>;
 };
 
 type HostSubagentTask = {
@@ -987,6 +1000,14 @@ export class ScorelHost {
         this.#respond(connection, message, { runtime: await this.#handleUpsertRuntimeSettings(message) });
         break;
       }
+      case "get_task_budget_settings": {
+        this.#respond(connection, message, { taskBudget: await this.#taskBudgetSettings(message.projectId) });
+        break;
+      }
+      case "upsert_task_budget_settings": {
+        this.#respond(connection, message, { taskBudget: await this.#handleUpsertTaskBudgetSettings(message) });
+        break;
+      }
       case "get_observability_settings": {
         this.#respond(connection, message, { observability: await this.#observabilitySettings(message.projectId) });
         break;
@@ -1229,6 +1250,8 @@ export class ScorelHost {
           : {}),
       },
     }) as Extract<PersistentEvent, { type: "user_message" }>;
+    // Reset per-turn supervision dedup set when a new user message starts
+    lane.supervisionAlerted.clear();
     const runAfterUserMessageHooks = this.#scheduleAfterUserMessageHooks(lane, clientId, userEvent);
     void runAfterUserMessageHooks().catch((cause) => {
       const error = cause instanceof Error ? cause : new Error(String(cause));
@@ -1886,6 +1909,106 @@ export class ScorelHost {
           message: rawEvent.error.message,
         });
         break;
+    }
+
+    // Task supervision: check after each persisted event
+    if (rawEvent.type === "message_end" || rawEvent.type === "tool_execution_end") {
+      await this.#checkTaskSupervision(lane, clientId);
+    }
+  }
+
+  async #checkTaskSupervision(lane: SessionLane, clientId: ClientId): Promise<void> {
+    const config = await this.#safeTaskBudgetConfig(lane);
+    // Skip if all limits are 0 (disabled) and thresholds are 0
+    if (config.maxTokens === 0 && config.maxCostUsd === 0 && config.maxWallClockMinutes === 0
+      && config.repeatedCommandThreshold === 0 && config.staleProgressMinutes === 0) {
+      return;
+    }
+
+    // Re-derive from the full event tree to stay consistent with persisted state.
+    // This is replay-safe and avoids missing events from prior turns.
+    const events: PersistentEvent[] = [];
+    for (const event of lane.session.tree) {
+      events.push(event);
+    }
+    lane.supervision = deriveTaskSupervisionFromEvents(events, this.#runReportingModelForLane(lane));
+
+    const result = checkSupervision(lane.supervision, config, this.#now());
+    if (result.violations.length === 0) {
+      return;
+    }
+
+    // Dedup: only alert for violation types not yet alerted this turn
+    const newViolations = result.violations.filter(
+      (violation) => !lane.supervisionAlerted.has(violation.type),
+    );
+    if (newViolations.length === 0) {
+      return;
+    }
+
+    // Mark all current violation types as alerted
+    for (const violation of result.violations) {
+      lane.supervisionAlerted.add(violation.type);
+    }
+
+    const reminder = buildSupervisionReminder(newViolations, lane.supervision);
+    const parentId = lane.session.activeLeafId;
+    const sessionId = lane.session.header.sessionId;
+    await this.#appendPersistent(lane, {
+      type: "harness_item",
+      id: asEventId(this.#createId()),
+      parentId: parentId ?? null,
+      sessionId,
+      clientId,
+      ts: this.#now(),
+      item: {
+        kind: "runtime_notice",
+        origin: "system",
+        visibility: "hidden",
+        content: reminder,
+        data: {
+          type: "task_supervision_alert",
+          violations: newViolations.map((v) => v.type),
+        },
+      },
+    });
+    await this.#appendDiagnostic(sessionId, "task_supervision_alert", {
+      clientId,
+      violations: newViolations.map((v) => v.type),
+    });
+  }
+
+  #runReportingModelForLane(lane: SessionLane): RunReportingModel | undefined {
+    const selected = lane.selectedModel;
+    if (!selected) {
+      return undefined;
+    }
+    return {
+      modelId: selected.modelId,
+      providerModelId: selected.id,
+      provider: selected.provider,
+      ...(selected.reasoningEffort ? { reasoningEffort: selected.reasoningEffort } : {}),
+    };
+  }
+
+  async #safeTaskBudgetConfig(lane: SessionLane): Promise<TaskBudgetConfig> {
+    try {
+      const config = await this.#configForProject(lane.project.projectId);
+      return config?.taskBudget ?? {
+        maxTokens: 0,
+        maxCostUsd: 0,
+        maxWallClockMinutes: 0,
+        repeatedCommandThreshold: 3,
+        staleProgressMinutes: 10,
+      };
+    } catch {
+      return {
+        maxTokens: 0,
+        maxCostUsd: 0,
+        maxWallClockMinutes: 0,
+        repeatedCommandThreshold: 3,
+        staleProgressMinutes: 10,
+      };
     }
   }
 
@@ -2749,6 +2872,7 @@ export class ScorelHost {
       queue: Promise.resolve(),
       appendQueue: Promise.resolve(),
       followUpWaiters: new Map(),
+      supervisionAlerted: new Set<string>(),
     };
     this.#registerLaneTools(lane);
     this.#sessions.set(sessionId, lane);
@@ -2811,6 +2935,7 @@ export class ScorelHost {
       queue: Promise.resolve(),
       appendQueue: Promise.resolve(),
       followUpWaiters: new Map(),
+      supervisionAlerted: new Set<string>(),
     };
     this.#registerLaneTools(lane);
     return lane;
@@ -2961,6 +3086,7 @@ export class ScorelHost {
           appendQueue: Promise.resolve(),
           followUpWaiters: new Map(),
           isSubagent: true,
+          supervisionAlerted: new Set<string>(),
         };
         // Child lanes intentionally skip Task tools (depth 1).
         childLane.runtime.registerTool(
@@ -3904,6 +4030,53 @@ export class ScorelHost {
       installStatus: installResult.status,
       ...(installResult.message ? { installMessage: installResult.message } : {}),
     });
+  }
+
+  async #taskBudgetSettings(projectId?: ProjectId): Promise<TaskBudgetSettings> {
+    const config = await (projectId ? this.#configProfileForProject(projectId) : this.#loadUserConfigProfile()).catch((cause) => {
+      if (isMissingConfigError(cause)) {
+        return undefined;
+      }
+      throw cause;
+    });
+    return config?.taskBudget ?? {
+      maxTokens: 0,
+      maxCostUsd: 0,
+      maxWallClockMinutes: 0,
+      repeatedCommandThreshold: 3,
+      staleProgressMinutes: 10,
+    };
+  }
+
+  async #handleUpsertTaskBudgetSettings(request: ClientRequest<"upsert_task_budget_settings">): Promise<TaskBudgetSettings> {
+    const target = this.#configWriteTarget();
+    let existingConfigText: string | undefined;
+    try {
+      existingConfigText = await readFile(target.configPath, "utf8");
+    } catch (cause) {
+      if (!isNodeErrorCode(cause, "ENOENT")) {
+        throw cause;
+      }
+    }
+    await mkdir(target.configDir, { recursive: true });
+    await writeFile(
+      target.configPath,
+      renderTaskBudgetConfig({
+        ...(request.maxTokens !== undefined ? { maxTokens: request.maxTokens } : {}),
+        ...(request.maxCostUsd !== undefined ? { maxCostUsd: request.maxCostUsd } : {}),
+        ...(request.maxWallClockMinutes !== undefined ? { maxWallClockMinutes: request.maxWallClockMinutes } : {}),
+        ...(request.repeatedCommandThreshold !== undefined ? { repeatedCommandThreshold: request.repeatedCommandThreshold } : {}),
+        ...(request.staleProgressMinutes !== undefined ? { staleProgressMinutes: request.staleProgressMinutes } : {}),
+        existingConfigText,
+      }),
+      "utf8",
+    );
+    await this.#appendHostDiagnostic("task_budget_settings_upserted", {
+      ...(request.projectId ? { ignoredProjectId: request.projectId } : {}),
+      scope: "device",
+      workDir: target.workDir,
+    });
+    return this.#taskBudgetSettings(undefined);
   }
 
   async #observabilitySettings(projectId?: ProjectId): Promise<ObservabilitySettings> {

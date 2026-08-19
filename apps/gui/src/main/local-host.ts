@@ -28,6 +28,7 @@ import {
   type MemorySettings,
   type ObservabilitySettings,
   type RuntimeSettings,
+  type TaskBudgetSettings,
   type ExtensionSettings,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
@@ -36,6 +37,7 @@ import {
   type UpsertMemorySettingsInput,
   type UpsertObservabilitySettingsInput,
   type UpsertRuntimeSettingsInput,
+  type UpsertTaskBudgetSettingsInput,
   type UpsertExtensionSettingsInput,
   type PersistentEvent,
   type ProjectId,
@@ -82,6 +84,8 @@ export type GuiLocalHostService = {
   upsertLocalMemorySettings(input: UpsertMemorySettingsInput): Promise<MemorySettings>;
   getLocalRuntimeSettings(): Promise<RuntimeSettings>;
   upsertLocalRuntimeSettings(input: UpsertRuntimeSettingsInput): Promise<RuntimeSettings>;
+  getLocalTaskBudgetSettings(): Promise<TaskBudgetSettings>;
+  upsertLocalTaskBudgetSettings(input: UpsertTaskBudgetSettingsInput): Promise<TaskBudgetSettings>;
   getLocalObservabilitySettings(): Promise<ObservabilitySettings>;
   upsertLocalObservabilitySettings(input: UpsertObservabilitySettingsInput): Promise<ObservabilitySettings>;
   getLocalExtensionSettings(extensionId: string): Promise<ExtensionSettings>;
@@ -228,6 +232,12 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     },
     upsertLocalRuntimeSettings(input) {
       return client.upsertRuntimeSettings(input);
+    },
+    getLocalTaskBudgetSettings() {
+      return client.getTaskBudgetSettings();
+    },
+    upsertLocalTaskBudgetSettings(input) {
+      return client.upsertTaskBudgetSettings(input);
     },
     getLocalObservabilitySettings() {
       return client.getObservabilitySettings();

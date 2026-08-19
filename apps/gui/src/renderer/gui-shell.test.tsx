@@ -118,6 +118,14 @@ const runtimeSettings = {
   estimatedSavedTokens: 4800,
 };
 
+const taskBudgetSettings = {
+  maxTokens: 0,
+  maxCostUsd: 0,
+  maxWallClockMinutes: 0,
+  repeatedCommandThreshold: 3,
+  staleProgressMinutes: 10,
+};
+
 const observabilitySettings = {
   local: true,
   sync: { enabled: false, mode: "manual" as const, targets: ["langfuse" as const] },
@@ -536,11 +544,13 @@ describe("GUI shell rendering contract", () => {
         memory={memorySettings}
         memoryStatus={memoryStatus}
         runtime={runtimeSettings}
+        taskBudget={taskBudgetSettings}
         observability={observabilitySettings}
         imExtensions={imExtensions}
         onModelProfileChange={noop}
         onMemoryChange={noop}
         onRuntimeChange={noop}
+        onTaskBudgetChange={noop}
         onObservabilityChange={noop}
         onExtensionChange={noop}
         busy={false}
@@ -555,6 +565,7 @@ describe("GUI shell rendering contract", () => {
     expect(html).toContain("Provider");
     expect(html).toContain("记忆");
     expect(html).toContain("Token 节省");
+    expect(html).toContain("任务预算");
     expect(html).toContain("可观测性");
     expect(html).toContain("Main Model");
     expect(html).toContain("工作模型");
@@ -591,11 +602,13 @@ describe("GUI shell rendering contract", () => {
         memory={memorySettings}
         memoryStatus={memoryStatus}
         runtime={runtimeSettings}
+        taskBudget={taskBudgetSettings}
         observability={observabilitySettings}
         imExtensions={imExtensions}
         onModelProfileChange={noop}
         onMemoryChange={noop}
         onRuntimeChange={noop}
+        onTaskBudgetChange={noop}
         onObservabilityChange={noop}
         onExtensionChange={noop}
         busy={false}
@@ -630,11 +643,13 @@ describe("GUI shell rendering contract", () => {
         memory={memorySettings}
         memoryStatus={memoryStatus}
         runtime={runtimeSettings}
+        taskBudget={taskBudgetSettings}
         observability={observabilitySettings}
         imExtensions={imExtensions}
         onModelProfileChange={noop}
         onMemoryChange={noop}
         onRuntimeChange={noop}
+        onTaskBudgetChange={noop}
         onObservabilityChange={noop}
         onExtensionChange={noop}
         busy={false}

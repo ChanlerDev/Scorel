@@ -254,6 +254,13 @@ function installScorelApi(overrides: {
         estimatedOutputTokens: 0,
         estimatedSavedTokens: 0,
       })),
+      getTaskBudgetSettings: vi.fn(async () => ({
+        maxTokens: 0,
+        maxCostUsd: 0,
+        maxWallClockMinutes: 0,
+        repeatedCommandThreshold: 3,
+        staleProgressMinutes: 10,
+      })),
       getObservabilitySettings: vi.fn(async () => ({
         local: true,
         sync: { enabled: false, mode: "manual", targets: [] },

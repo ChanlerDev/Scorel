@@ -183,6 +183,18 @@ export type UpsertObservabilitySettingsInput = {
   otel?: Partial<ObservabilitySettings["otel"]>;
 };
 
+export type TaskBudgetSettings = {
+  maxTokens: number;
+  maxCostUsd: number;
+  maxWallClockMinutes: number;
+  repeatedCommandThreshold: number;
+  staleProgressMinutes: number;
+};
+
+export type UpsertTaskBudgetSettingsInput = Partial<TaskBudgetSettings> & {
+  projectId?: ProjectId;
+};
+
 export type ExtensionSettings = {
   extensionId: string;
   enabled: boolean;

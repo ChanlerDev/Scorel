@@ -12,6 +12,7 @@ import {
   renderMemoryConfig,
   renderModelProfileConfig,
   renderRuntimeConfig,
+  renderTaskBudgetConfig,
   scorelSessionsDir,
   scorelUserConfigPath,
   scorelUserRoot,
@@ -207,6 +208,97 @@ tokenSavingRtk = true
 
     expect(rendered).toContain("[runtime]");
     expect(rendered).toContain("tokenSavingRtk = false");
+  });
+
+  it("loads and renders task budget settings", async () => {
+    const cwd = await mkProject(`
+[providers.openai]
+type = "builtin"
+provider = "openai"
+apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.openai_gpt_54_mini]
+provider = "openai"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.main]
+model = "openai_gpt_54_mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
+
+[taskBudget]
+maxTokens = 50000
+maxCostUsd = 2.5
+maxWallClockMinutes = 30
+repeatedCommandThreshold = 5
+staleProgressMinutes = 15
+`);
+
+    await expect(loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "secret" } })).resolves.toMatchObject({
+      taskBudget: {
+        maxTokens: 50000,
+        maxCostUsd: 2.5,
+        maxWallClockMinutes: 30,
+        repeatedCommandThreshold: 5,
+        staleProgressMinutes: 15,
+      },
+    });
+
+    const rendered = renderTaskBudgetConfig({
+      existingConfigText: await readDeviceConfig(),
+      maxTokens: 100000,
+    });
+
+    expect(rendered).toContain("[taskBudget]");
+    expect(rendered).toContain("maxTokens = 100000");
+    expect(rendered).toContain("maxCostUsd = 2.5");
+    expect(rendered).toContain("repeatedCommandThreshold = 5");
+  });
+
+  it("applies default task budget when section is absent", async () => {
+    const cwd = await mkProject(`
+[providers.openai]
+type = "builtin"
+provider = "openai"
+apiKeyEnv = "SCOREL_API_KEY"
+
+[provider_models.openai_gpt_54_mini]
+provider = "openai"
+id = "gpt-5.4-mini"
+displayName = "GPT 5.4 Mini"
+
+[available_models.main]
+model = "openai_gpt_54_mini"
+
+[model_profile.roles]
+primary = "main"
+standard = "main"
+auxiliary = "main"
+`);
+
+    const config = await loadScorelConfig({ cwd, env: { SCOREL_API_KEY: "secret" } });
+    expect(config.taskBudget).toEqual({
+      maxTokens: 0,
+      maxCostUsd: 0,
+      maxWallClockMinutes: 0,
+      repeatedCommandThreshold: 3,
+      staleProgressMinutes: 10,
+    });
+  });
+
+  it("rejects unknown keys in [taskBudget] section", () => {
+    const taskBudgetKeys = SCOREL_CONFIG_SCHEMA.sections.taskBudget.keys;
+    expect(taskBudgetKeys).toEqual([
+      "maxTokens",
+      "maxCostUsd",
+      "maxWallClockMinutes",
+      "repeatedCommandThreshold",
+      "staleProgressMinutes",
+    ]);
   });
 
   it("loads extension enablement and config without resolving secrets", async () => {

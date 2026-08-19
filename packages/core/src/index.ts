@@ -18,5 +18,6 @@ export * from "./reporting/index.js";
 export * from "./runtime/index.js";
 export * from "./session/index.js";
 export * from "./skills/index.js";
+export * from "./task-supervision/index.js";
 export * from "./tools/index.js";
 export * from "./mcp/index.js";

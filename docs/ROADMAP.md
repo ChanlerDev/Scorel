@@ -144,6 +144,7 @@ Design Baseline → CLI Alpha → Safe Coding CLI → Remote Control → WebUI �
 | Background.1 | [`S0115`](spec/ship/S0115-async-bash-sessions.md) | Bash 支持 `wait_time` 转后台、`task_id` 轮询/写 stdin、`BashStop` 停止，并复用原 Bash result/artifact 逻辑。 | Done |
 | Background.2 | [`S0116`](spec/ship/S0116-background-bash-system-reminders.md) | 后台 Bash 完成后通过现有 `system_reminder` 注入结果，空闲时自动启动续跑，并避免按 `task_id` 重复读取已注入结果。 | Done |
 | Background.3 | [`S0120`](spec/ship/S0120-subagent-task-tools.md) | 通用 Task/sub-agent：120s 默认 wait、只回最后 assistant、parent/sub-agents 目录布局。 | Done |
+| Background.4 | [`S0123`](spec/ship/S0123-long-running-task-supervision.md) | 通用长任务监督：token/cost/wall-clock 预算可见可控，重复命令/连续错误/无进展时注入 advisory runtime_notice，不隐式终止。 | Done |
 | GUI.1 | [`S0117`](spec/ship/S0117-gui-context-usage-indicator.md) | GUI composer 发送按钮旁显示 provider-reported context 使用圆圈，按非缓存 input + output 计算，包含 hover 详情和 auto compact 阈值标记。 | In Progress |
 
 **Candidate scope**:

@@ -477,6 +477,13 @@ const builtinProfile: ScorelConfig = {
   runtime: {
     tokenSavingRtk: false,
   },
+  taskBudget: {
+    maxTokens: 0,
+    maxCostUsd: 0,
+    maxWallClockMinutes: 0,
+    repeatedCommandThreshold: 3,
+    staleProgressMinutes: 10,
+  },
   extensions: {},
   mcpServers: {},
 };
@@ -523,6 +530,13 @@ const customProfile: ScorelConfig = {
   },
   runtime: {
     tokenSavingRtk: false,
+  },
+  taskBudget: {
+    maxTokens: 0,
+    maxCostUsd: 0,
+    maxWallClockMinutes: 0,
+    repeatedCommandThreshold: 3,
+    staleProgressMinutes: 10,
   },
   extensions: {},
   mcpServers: {},
