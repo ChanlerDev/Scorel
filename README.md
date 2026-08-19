@@ -119,6 +119,32 @@ pnpm scorel pair <pair-code> --relay wss://scorel-relay.chanler.dev
 pnpm scorel webui --port 3000
 ```
 
+## ACP (Agent Client Protocol)
+
+Scorel 可以作为 ACP agent 运行，让任何实现 ACP 的编辑器（Zed、JetBrains、Neovim、Emacs 等）以子进程方式启动 Scorel 并通过 stdin/stdout 上的 JSON-RPC 驱动它。ACP 会话走的是和 `scorel chat` / `scorel run` 完全相同的执行路径：真实 ScorelHost、Session JSONL 持久化、工具循环和 replay，编辑器只是另一个 Entry。
+
+```bash
+scorel acp
+# 可选：指定工作目录、state 目录
+scorel acp --cwd /path/to/project --state-dir ~/.scorel
+```
+
+在 Zed 里把 Scorel 注册为外部 agent：
+
+```json
+// ~/.config/zed/settings.json
+{
+  "assistant": {
+    "edit_predictions": { "disabled": true },
+    "agents": [
+      { "name": "scorel", "command": "scorel", "args": ["acp"] }
+    ]
+  }
+}
+```
+
+支持的 ACP 方法：`initialize`、`session/new`、`session/load`（replay 历史）、`session/prompt`（流式 `session/update` 通知）、`session/cancel`、`session/close`。Scorel 事件映射：`text_delta` → `agent_message_chunk`，`thinking_delta` → `agent_thought_chunk`，工具调用 → `tool_call` / `tool_call_update`。
+
 Telegram IM 入口可以在 GUI 的 Settings -> IM 里启用，也可以手写用户级配置：
 
 ```toml

@@ -57,6 +57,7 @@ import {
 } from "@scorel/protocol";
 
 import { runCliDaemon } from "./daemon-cli.js";
+import { runCliAcp } from "./acp-cli.js";
 import { runCliPair } from "./relay-cli.js";
 import { runCliRelay } from "./relay-server-cli.js";
 import { runCliUp } from "./up-cli.js";
@@ -236,6 +237,18 @@ export const runCli = async (
       output: io.output,
       error: io.error,
     });
+  }
+  if (command === "acp") {
+    if (rest.includes("--help") || rest.includes("-h")) {
+      writeUsage(io.output);
+      return 0;
+    }
+    try {
+      return runCliAcp(parseAcpOptions(rest));
+    } catch (cause) {
+      io.error.write(`scorel acp error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+      return 1;
+    }
   }
   if (command === "update" || command === "upgrade") {
     return runCliUpdate(rest, { output: io.output, error: io.error });
@@ -1452,6 +1465,32 @@ const loadOrCreateSession = async (
   }
 };
 
+const parseAcpOptions = (argv: string[]): { cwd: string; stateDir?: string; sessionsDir?: string } => {
+  let cwd = process.cwd();
+  let stateDir: string | undefined;
+  let sessionsDir: string | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--cwd") {
+      cwd = requireValue(argv, index, "--cwd");
+      index += 1;
+      continue;
+    }
+    if (arg === "--state-dir") {
+      stateDir = requireValue(argv, index, "--state-dir");
+      index += 1;
+      continue;
+    }
+    if (arg === "--sessions-dir") {
+      sessionsDir = requireValue(argv, index, "--sessions-dir");
+      index += 1;
+      continue;
+    }
+    throw new Error(`Unknown acp option: ${arg}`);
+  }
+  return { cwd, stateDir, sessionsDir };
+};
+
 const parseChatOptions = (argv: string[]): ChatOptions => {
   let sessionId = asSessionId("ses_default");
   let cwd = process.cwd();
@@ -1764,6 +1803,7 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
       "       scorel relay serve [--host <h>] [--port <p>] [--data-dir <dir>]",
       "       scorel webui [--port <p>] [--host <h>]",
       "       scorel up [--daemon-port <p>] [--webui-port <p>] [--cwd <d>]",
+      "       scorel acp [--cwd <dir>]",
       "       scorel update",
       "       scorel upgrade",
       "       scorel version",
