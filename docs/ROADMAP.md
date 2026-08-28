@@ -830,8 +830,10 @@ HTTP adapter 必须映射已有 Host use cases，不复制领域逻辑。
 | [`S0117`](spec/ship/S0117-gui-context-usage-indicator.md) | Provider-reported GUI context usage indicator using non-cache input plus output | In Progress |
 | [`S0118`](spec/ship/S0118-reasoning-effort-eval-path.md) | Reasoning effort across CLI, GUI, runtime, reports, and Harbor eval | Done |
 | [`S0120`](spec/ship/S0120-subagent-task-tools.md) | Subagent Task / TaskStop tools and per-session layout | Done |
-| [`S0121`](spec/ship/S0121-provider-retry-reliability.md) | Provider retry reliability: bounded exponential backoff with jitter, Retry-After, retryable/non-retryable classification, safe retry semantics | In Progress |
-| [`S0122`](spec/ship/S0122-mcp-server-support.md) | MCP server support: stdio, Streamable HTTP, legacy SSE, runtime tools, CLI, and GUI management | In Progress |
+| [`S0121`](spec/ship/S0121-provider-retry-reliability.md) | Provider retry reliability: bounded exponential backoff with jitter, Retry-After, retryable/non-retryable classification, safe retry semantics | Done |
+| [`S0122`](spec/ship/S0122-mcp-server-support.md) | MCP server support: stdio, Streamable HTTP, legacy SSE, runtime tools, CLI, and GUI management | Done |
+| [`S0123`](spec/ship/S0123-long-running-task-supervision.md) | Generic long-running task supervision and budget advisories | Done |
+| [`S0124`](spec/ship/S0124-terminal-bench-gpt56-result.md) | Publish the Scorel v0.0.13 GPT-5.6 Luna Terminal-Bench 2.1 result | Done |
 
 ---
 
