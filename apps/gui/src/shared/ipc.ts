@@ -7,6 +7,7 @@ import type {
   MemorySettings,
   ObservabilitySettings,
   RuntimeSettings,
+  TaskBudgetSettings,
   ExtensionSettings,
   ProviderCatalogModelSummary,
   ProviderConnectionSummary,
@@ -20,6 +21,7 @@ import type {
   UpsertMemorySettingsInput,
   UpsertObservabilitySettingsInput,
   UpsertRuntimeSettingsInput,
+  UpsertTaskBudgetSettingsInput,
   UpsertExtensionSettingsInput,
   McpServerStatusSummary,
   UpsertMcpServerSettingsInput,
@@ -105,6 +107,10 @@ export type GuiRuntimeSettingsView = RuntimeSettings;
 
 export type GuiUpsertRuntimeSettingsInput = Omit<UpsertRuntimeSettingsInput, "projectId">;
 
+export type GuiTaskBudgetSettingsView = TaskBudgetSettings;
+
+export type GuiUpsertTaskBudgetSettingsInput = Omit<UpsertTaskBudgetSettingsInput, "projectId">;
+
 export type GuiObservabilitySettingsView = ObservabilitySettings;
 
 export type GuiUpsertObservabilitySettingsInput = Omit<UpsertObservabilitySettingsInput, "projectId">;
@@ -173,6 +179,8 @@ export type GuiApi = {
   upsertMemorySettings(device: GuiDeviceRef, input: GuiUpsertMemorySettingsInput): Promise<GuiMemorySettingsView>;
   getRuntimeSettings(device: GuiDeviceRef): Promise<GuiRuntimeSettingsView>;
   upsertRuntimeSettings(device: GuiDeviceRef, input: GuiUpsertRuntimeSettingsInput): Promise<GuiRuntimeSettingsView>;
+  getTaskBudgetSettings(device: GuiDeviceRef): Promise<GuiTaskBudgetSettingsView>;
+  upsertTaskBudgetSettings(device: GuiDeviceRef, input: GuiUpsertTaskBudgetSettingsInput): Promise<GuiTaskBudgetSettingsView>;
   getObservabilitySettings(device: GuiDeviceRef): Promise<GuiObservabilitySettingsView>;
   upsertObservabilitySettings(device: GuiDeviceRef, input: GuiUpsertObservabilitySettingsInput): Promise<GuiObservabilitySettingsView>;
   getExtensionSettings(extensionId: string): Promise<GuiExtensionSettingsView>;
@@ -214,6 +222,8 @@ export const guiIpcChannels = {
   upsertMemorySettings: "scorel:upsertMemorySettings",
   getRuntimeSettings: "scorel:getRuntimeSettings",
   upsertRuntimeSettings: "scorel:upsertRuntimeSettings",
+  getTaskBudgetSettings: "scorel:getTaskBudgetSettings",
+  upsertTaskBudgetSettings: "scorel:upsertTaskBudgetSettings",
   getObservabilitySettings: "scorel:getObservabilitySettings",
   upsertObservabilitySettings: "scorel:upsertObservabilitySettings",
   getExtensionSettings: "scorel:getExtensionSettings",

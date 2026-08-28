@@ -24,6 +24,7 @@ import {
   type MemoryStatus,
   type ObservabilitySettings,
   type RuntimeSettings,
+  type TaskBudgetSettings,
   type ProviderCatalogModelSummary,
   type ProviderConnectionSummary,
   type ProviderModelSummary,
@@ -33,6 +34,7 @@ import {
   type UpsertMemorySettingsInput,
   type UpsertObservabilitySettingsInput,
   type UpsertRuntimeSettingsInput,
+  type UpsertTaskBudgetSettingsInput,
   type PersistentEvent,
   type ProjectId,
   type QueueItem,
@@ -350,6 +352,16 @@ export class DaemonClient {
   async upsertRuntimeSettings(input: UpsertRuntimeSettingsInput): Promise<RuntimeSettings> {
     this.#assertDaemonConnected();
     return (await this.#request("upsert_runtime_settings", input)).runtime;
+  }
+
+  async getTaskBudgetSettings(input: { projectId?: ProjectId } = {}): Promise<TaskBudgetSettings> {
+    this.#assertDaemonConnected();
+    return (await this.#request("get_task_budget_settings", input)).taskBudget;
+  }
+
+  async upsertTaskBudgetSettings(input: UpsertTaskBudgetSettingsInput): Promise<TaskBudgetSettings> {
+    this.#assertDaemonConnected();
+    return (await this.#request("upsert_task_budget_settings", input)).taskBudget;
   }
 
   async getObservabilitySettings(input: { projectId?: ProjectId } = {}): Promise<ObservabilitySettings> {

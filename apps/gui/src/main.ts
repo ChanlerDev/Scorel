@@ -21,6 +21,7 @@ import {
   type GuiProjectRef,
   type GuiRemoteProjectView,
   type GuiUpsertRuntimeSettingsInput,
+  type GuiUpsertTaskBudgetSettingsInput,
   type GuiSnapshot,
   type GuiUpsertMcpServerInput,
   type GuiRemoveMcpServerInput,
@@ -258,6 +259,19 @@ const registerIpc = (): void => {
     return ref.source === "local"
       ? requireConnectedLocalHost().upsertLocalRuntimeSettings(payload)
       : relayService.upsertRemoteRuntimeSettings(requireDeviceId(ref), payload);
+  });
+  ipcMain.handle(guiIpcChannels.getTaskBudgetSettings, async (_event, device: GuiDeviceRef) => {
+    const ref = normalizeDeviceRef(device);
+    return ref.source === "local"
+      ? requireConnectedLocalHost().getLocalTaskBudgetSettings()
+      : relayService.getRemoteTaskBudgetSettings(requireDeviceId(ref));
+  });
+  ipcMain.handle(guiIpcChannels.upsertTaskBudgetSettings, async (_event, device: GuiDeviceRef, input: GuiUpsertTaskBudgetSettingsInput) => {
+    const ref = normalizeDeviceRef(device);
+    const payload = { ...input };
+    return ref.source === "local"
+      ? requireConnectedLocalHost().upsertLocalTaskBudgetSettings(payload)
+      : relayService.upsertRemoteTaskBudgetSettings(requireDeviceId(ref), payload);
   });
   ipcMain.handle(guiIpcChannels.getObservabilitySettings, async (_event, device: GuiDeviceRef) => {
     const ref = normalizeDeviceRef(device);

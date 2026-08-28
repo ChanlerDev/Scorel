@@ -20,6 +20,7 @@ const minimalConfig = (baseUrl: string): ScorelConfig => ({
   modelProfile: { roles: { primary: "main", standard: "main", auxiliary: "main" } },
   memory: { enabled: false, daily: false, sessionMemory: false, autoDream: false, promoteRoot: false, dreamIdleMinutes: 60, autoCompactThreshold: 0.8 },
   runtime: { tokenSavingRtk: false },
+  taskBudget: { maxTokens: 0, maxCostUsd: 0, maxWallClockMinutes: 0, repeatedCommandThreshold: 3, staleProgressMinutes: 10 },
   extensions: {},
   mcpServers: {},
 });

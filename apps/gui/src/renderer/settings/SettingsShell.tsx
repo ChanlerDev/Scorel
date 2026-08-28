@@ -9,7 +9,8 @@ import {
   Terminal,
   Puzzle,
 } from "../icons/index.js";
-import type { GuiDeviceRef, GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiObservabilitySettingsView, GuiRelayDeviceView, GuiRuntimeSettingsView } from "../../shared/ipc.js";
+import type { GuiDeviceRef, GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiObservabilitySettingsView, GuiRelayDeviceView, GuiRuntimeSettingsView, GuiTaskBudgetSettingsView } from "../../shared/ipc.js";
+import { BudgetSection } from "./sections/BudgetSection.js";
 import { ConfigSection } from "./sections/ConfigSection.js";
 import { ImSection } from "./sections/ImSection.js";
 import { McpSection } from "./sections/McpSection.js";
@@ -28,11 +29,13 @@ export type SettingsShellProps = {
   memory: GuiMemorySettingsView;
   memoryStatus: GuiMemoryStatusView;
   runtime: GuiRuntimeSettingsView;
+  taskBudget: GuiTaskBudgetSettingsView;
   observability: GuiObservabilitySettingsView;
   imExtensions: Record<string, GuiExtensionSettingsView>;
   onModelProfileChange(profile: GuiModelProfileView): void;
   onMemoryChange(memory: GuiMemorySettingsView): void;
   onRuntimeChange(runtime: GuiRuntimeSettingsView): void;
+  onTaskBudgetChange(taskBudget: GuiTaskBudgetSettingsView): void;
   onObservabilityChange(observability: GuiObservabilitySettingsView): void;
   onExtensionChange(extension: GuiExtensionSettingsView): void;
   busy: boolean;
@@ -51,6 +54,7 @@ const NAV_GROUPS: SettingsNavGroup[] = [
       { id: "provider", label: "Provider", icon: <Box size={14} /> },
       { id: "memory", label: "记忆", icon: <FileText size={14} /> },
       { id: "runtime", label: "Token 节省", icon: <Terminal size={14} /> },
+      { id: "budget", label: "任务预算", icon: <Activity size={14} /> },
       { id: "observability", label: "可观测性", icon: <Activity size={14} /> },
       { id: "im", label: "IM", icon: <Smartphone size={14} /> },
       { id: "mcp", label: "MCP", icon: <Puzzle size={14} /> },
@@ -122,6 +126,18 @@ export function SettingsShell(props: SettingsShellProps) {
           setBusy={props.setBusy}
           setError={props.setError}
           onObservabilityChange={props.onObservabilityChange}
+        />
+      );
+      break;
+    case "budget":
+      content = (
+        <BudgetSection
+          device={props.device}
+          taskBudget={props.taskBudget}
+          busy={props.busy}
+          setBusy={props.setBusy}
+          setError={props.setError}
+          onTaskBudgetChange={props.onTaskBudgetChange}
         />
       );
       break;

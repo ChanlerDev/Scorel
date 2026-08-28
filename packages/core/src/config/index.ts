@@ -29,6 +29,9 @@ export const SCOREL_CONFIG_SCHEMA = {
     runtime: {
       keys: ["tokenSavingRtk"],
     },
+    taskBudget: {
+      keys: ["maxTokens", "maxCostUsd", "maxWallClockMinutes", "repeatedCommandThreshold", "staleProgressMinutes"],
+    },
     observability: {
       keys: ["local"],
     },
@@ -118,6 +121,7 @@ export type ScorelConfig = {
   };
   memory: MemoryConfig;
   runtime: RuntimeConfig;
+  taskBudget: TaskBudgetConfig;
   observability?: ObservabilityConfig;
   extensions: Record<string, ExtensionConfig>;
   mcpServers: Record<string, McpServerConfigEntry>;
@@ -135,6 +139,14 @@ export type MemoryConfig = {
 
 export type RuntimeConfig = {
   tokenSavingRtk: boolean;
+};
+
+export type TaskBudgetConfig = {
+  maxTokens: number;
+  maxCostUsd: number;
+  maxWallClockMinutes: number;
+  repeatedCommandThreshold: number;
+  staleProgressMinutes: number;
 };
 
 export type ObservabilityTarget = "langfuse" | "otel";
@@ -218,6 +230,7 @@ export type ScorelConfigProfile = {
   };
   memory: MemoryConfig;
   runtime: RuntimeConfig;
+  taskBudget: TaskBudgetConfig;
   observability?: ObservabilityConfig;
   extensions: Record<string, ExtensionConfig>;
   mcpServers: Record<string, McpServerConfigEntry>;
@@ -294,6 +307,10 @@ export type UpsertRuntimeConfigInput = Partial<RuntimeConfig> & {
   existingConfigText?: string;
 };
 
+export type UpsertTaskBudgetConfigInput = Partial<TaskBudgetConfig> & {
+  existingConfigText?: string;
+};
+
 export type UpsertObservabilityConfigInput = {
   local?: boolean;
   sync?: Partial<ObservabilityConfig["sync"]>;
@@ -353,6 +370,7 @@ type RawConfig = {
   };
   memory?: Partial<MemoryConfig>;
   runtime?: Partial<RuntimeConfig>;
+  taskBudget?: Partial<TaskBudgetConfig>;
   observability?: {
     local?: boolean;
   };
@@ -397,6 +415,7 @@ type ConfigSection =
   | { kind: "modelProfileRoles" }
   | { kind: "memory" }
   | { kind: "runtime" }
+  | { kind: "taskBudget" }
   | { kind: "observability" }
   | { kind: "observabilitySync" }
   | { kind: "observabilityLangfuse" }
@@ -423,6 +442,7 @@ export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promis
     modelProfile: { roles },
     memory: loadMemory(raw),
     runtime: loadRuntime(raw),
+    taskBudget: loadTaskBudget(raw),
     observability: loadObservability(raw),
     extensions: loadExtensions(raw),
     mcpServers: loadMcpServers(raw),
@@ -444,6 +464,7 @@ export const loadScorelConfigProfile = async (options: LoadScorelConfigOptions &
     modelProfile: { roles },
     memory: loadMemory(raw),
     runtime: loadRuntime(raw),
+    taskBudget: loadTaskBudget(raw),
     observability: loadObservability(raw),
     extensions: loadExtensions(raw),
     mcpServers: loadMcpServers(raw),
@@ -753,6 +774,19 @@ export const renderRuntimeConfig = (input: UpsertRuntimeConfigInput): string => 
   return renderRawConfig(raw);
 };
 
+export const renderTaskBudgetConfig = (input: UpsertTaskBudgetConfigInput): string => {
+  const raw = parseEditableConfig(input.existingConfigText);
+  raw.taskBudget = {
+    ...loadTaskBudget(raw),
+    ...(input.maxTokens !== undefined ? { maxTokens: requireNonNegativeNumber(input.maxTokens, "taskBudget.maxTokens") } : {}),
+    ...(input.maxCostUsd !== undefined ? { maxCostUsd: requireNonNegativeNumber(input.maxCostUsd, "taskBudget.maxCostUsd") } : {}),
+    ...(input.maxWallClockMinutes !== undefined ? { maxWallClockMinutes: requireNonNegativeNumber(input.maxWallClockMinutes, "taskBudget.maxWallClockMinutes") } : {}),
+    ...(input.repeatedCommandThreshold !== undefined ? { repeatedCommandThreshold: requireNonNegativeNumber(input.repeatedCommandThreshold, "taskBudget.repeatedCommandThreshold") } : {}),
+    ...(input.staleProgressMinutes !== undefined ? { staleProgressMinutes: requireNonNegativeNumber(input.staleProgressMinutes, "taskBudget.staleProgressMinutes") } : {}),
+  };
+  return renderRawConfig(raw);
+};
+
 export const renderObservabilityConfig = (input: UpsertObservabilityConfigInput): string => {
   const raw = parseEditableConfig(input.existingConfigText);
   const current = loadObservability(raw);
@@ -882,6 +916,14 @@ const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
   tokenSavingRtk: false,
 };
 
+const DEFAULT_TASK_BUDGET_CONFIG: TaskBudgetConfig = {
+  maxTokens: 0,
+  maxCostUsd: 0,
+  maxWallClockMinutes: 0,
+  repeatedCommandThreshold: 3,
+  staleProgressMinutes: 10,
+};
+
 const DEFAULT_OBSERVABILITY_CONFIG: ObservabilityConfig = {
   local: true,
   sync: {
@@ -910,6 +952,14 @@ const loadMemory = (raw: RawConfig): MemoryConfig => ({
 
 const loadRuntime = (raw: RawConfig): RuntimeConfig => ({
   tokenSavingRtk: raw.runtime?.tokenSavingRtk ?? DEFAULT_RUNTIME_CONFIG.tokenSavingRtk,
+});
+
+const loadTaskBudget = (raw: RawConfig): TaskBudgetConfig => ({
+  maxTokens: requireNonNegativeNumber(raw.taskBudget?.maxTokens ?? DEFAULT_TASK_BUDGET_CONFIG.maxTokens, "taskBudget.maxTokens"),
+  maxCostUsd: requireNonNegativeNumber(raw.taskBudget?.maxCostUsd ?? DEFAULT_TASK_BUDGET_CONFIG.maxCostUsd, "taskBudget.maxCostUsd"),
+  maxWallClockMinutes: requireNonNegativeNumber(raw.taskBudget?.maxWallClockMinutes ?? DEFAULT_TASK_BUDGET_CONFIG.maxWallClockMinutes, "taskBudget.maxWallClockMinutes"),
+  repeatedCommandThreshold: requireNonNegativeNumber(raw.taskBudget?.repeatedCommandThreshold ?? DEFAULT_TASK_BUDGET_CONFIG.repeatedCommandThreshold, "taskBudget.repeatedCommandThreshold"),
+  staleProgressMinutes: requireNonNegativeNumber(raw.taskBudget?.staleProgressMinutes ?? DEFAULT_TASK_BUDGET_CONFIG.staleProgressMinutes, "taskBudget.staleProgressMinutes"),
 });
 
 const loadObservability = (raw: RawConfig): ObservabilityConfig => ({
@@ -1332,6 +1382,16 @@ const renderRawConfig = (raw: RawConfig): string => {
     lines.push(`tokenSavingRtk = ${runtime.tokenSavingRtk}`);
     lines.push("");
   }
+  if (raw.taskBudget) {
+    const taskBudget = loadTaskBudget(raw);
+    lines.push("[taskBudget]");
+    lines.push(`maxTokens = ${taskBudget.maxTokens}`);
+    lines.push(`maxCostUsd = ${taskBudget.maxCostUsd}`);
+    lines.push(`maxWallClockMinutes = ${taskBudget.maxWallClockMinutes}`);
+    lines.push(`repeatedCommandThreshold = ${taskBudget.repeatedCommandThreshold}`);
+    lines.push(`staleProgressMinutes = ${taskBudget.staleProgressMinutes}`);
+    lines.push("");
+  }
   if (raw.observability) {
     const observability = loadObservability(raw);
     lines.push("[observability]");
@@ -1613,6 +1673,9 @@ const parseConfigSection = (section: string): ConfigSection => {
   if (section === "runtime") {
     return { kind: "runtime" };
   }
+  if (section === "taskBudget") {
+    return { kind: "taskBudget" };
+  }
   if (section === "observability") {
     return { kind: "observability" };
   }
@@ -1666,6 +1729,8 @@ const ensureSection = (config: RawConfig, section: ConfigSection): void => {
     config.memory ??= {};
   } else if (section.kind === "runtime") {
     config.runtime ??= {};
+  } else if (section.kind === "taskBudget") {
+    config.taskBudget ??= {};
   } else if (section.kind === "observability") {
     config.observability ??= {};
   } else if (section.kind === "observabilitySync") {
@@ -1716,6 +1781,9 @@ const setConfigValue = (config: RawConfig, section: ConfigSection, key: string, 
   } else if (section.kind === "runtime") {
     config.runtime ??= {};
     setValue(config.runtime, key, value);
+  } else if (section.kind === "taskBudget") {
+    config.taskBudget ??= {};
+    setValue(config.taskBudget, key, value);
   } else if (section.kind === "observability") {
     config.observability ??= {};
     setValue(config.observability, key, value);

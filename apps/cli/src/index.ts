@@ -13,6 +13,8 @@ import {
   buildLangfuseSyncPayload,
   buildObservationAsset,
   buildOtelDeltaPayload,
+  checkSupervision,
+  deriveTaskSupervisionFromEvents,
   loadSession,
   readObservabilitySyncState,
   resolveModelSelection,
@@ -26,6 +28,7 @@ import {
   writeObservabilitySyncState,
   type RunCostEstimate,
   type RunReportingModel,
+  type TaskBudgetConfig,
 } from "@scorel/core";
 import {
   ScorelHost,
@@ -153,6 +156,12 @@ type RunSummary = {
   model?: RunReportingModel;
   reasoningEffort?: ReasoningEffort;
   cost: RunCostEstimate;
+  taskBudget?: {
+    config: TaskBudgetConfig;
+    violations: string[];
+    tokensUsed: number;
+    elapsedMinutes: number;
+  };
   reports: Record<string, string>;
 };
 
@@ -298,6 +307,13 @@ export const runCli = async (
       io.error.write(`scorel logs error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
       return 1;
     }
+  }
+  if (command === "budget") {
+    return runBudget(rest, {
+      stateDir: stateDirFromSessionsDir(runOptions.sessionsDir),
+      output: io.output,
+      error: io.error,
+    });
   }
   writeUsage(io.error);
   return command === "--help" || command === "-h" ? 0 : 1;
@@ -1016,6 +1032,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
       startedAt,
       projectId,
       reportingModel,
+      ...(reportingConfig?.taskBudget ? { taskBudgetConfig: reportingConfig.taskBudget } : {}),
       status: runtimeError ? "error" : "completed",
       exitReason: runtimeError ? "error" : "completed",
       userEventId: String(result.userEventId),
@@ -1035,6 +1052,7 @@ const runHeadless = async (options: RunOptions, io: CliIo): Promise<number> => {
       startedAt,
       projectId,
       reportingModel,
+      ...(reportingConfig?.taskBudget ? { taskBudgetConfig: reportingConfig.taskBudget } : {}),
       status: isTimeout ? "timeout" : "error",
       exitReason: isTimeout ? "timeout" : "error",
       error: cause instanceof Error ? cause : new Error(String(cause)),
@@ -1124,6 +1142,7 @@ const makeRunSummary = (input: {
   startedAt: number;
   projectId?: ProjectId;
   reportingModel?: RunReportingModel;
+  taskBudgetConfig?: TaskBudgetConfig;
   status: RunSummary["status"];
   exitReason: RunSummary["exitReason"];
   userEventId?: string;
@@ -1134,6 +1153,27 @@ const makeRunSummary = (input: {
   const events = input.events ?? [];
   const observation = buildRunObservation({ events, selectedModel: input.reportingModel });
   const reports = runReportPaths(input.options);
+  const taskBudgetConfig = input.taskBudgetConfig;
+  const taskBudget = taskBudgetConfig
+    ? (() => {
+        const persistentEvents = events.filter((e): e is PersistentEvent => "id" in e);
+        const supervisionState = deriveTaskSupervisionFromEvents(persistentEvents, input.reportingModel);
+        const result = checkSupervision(supervisionState, taskBudgetConfig, Date.now());
+        const tokensUsed = supervisionState.usage.inputTokens
+          + supervisionState.usage.outputTokens
+          + supervisionState.usage.cacheReadTokens
+          + supervisionState.usage.cacheWriteTokens;
+        const elapsedMinutes = supervisionState.startedAt !== undefined
+          ? (Date.now() - supervisionState.startedAt) / 60_000
+          : 0;
+        return {
+          config: taskBudgetConfig,
+          violations: result.violations.map((v) => v.type),
+          tokensUsed,
+          elapsedMinutes,
+        };
+      })()
+    : undefined;
   return {
     status: input.status,
     sessionId: String(input.options.sessionId),
@@ -1155,6 +1195,7 @@ const makeRunSummary = (input: {
       ? { reasoningEffort: input.options.modelSelection.reasoningEffort }
       : {}),
     cost: observation.cost,
+    ...(taskBudget ? { taskBudget } : {}),
     reports,
   };
 };
@@ -1347,6 +1388,13 @@ const resolveRunConfig = (options: RunOptions): ScorelConfig | undefined => {
     },
     runtime: {
       tokenSavingRtk: false,
+    },
+    taskBudget: {
+      maxTokens: 0,
+      maxCostUsd: 0,
+      maxWallClockMinutes: 0,
+      repeatedCommandThreshold: 3,
+      staleProgressMinutes: 10,
     },
     extensions: {},
     mcpServers: {},
@@ -1825,6 +1873,9 @@ const writeUsage = (output: NodeJS.WritableStream): void => {
       "       scorel project list",
       "       scorel project add <dir>",
       "       scorel project remove <project-id>",
+      "       scorel budget [show]",
+      "       scorel budget set --maxTokens <n> --maxCostUsd <n> --maxWallClockMinutes <n>",
+      "                         --repeatedCommandThreshold <n> --staleProgressMinutes <n>",
     ].join("\n") + "\n",
   );
 };
@@ -1878,6 +1929,112 @@ const writeObserveUsage = (output: NodeJS.WritableStream): void => {
 
 const writeProjectUsage = (output: NodeJS.WritableStream): void => {
   output.write("Usage: scorel project list | add <dir> | remove <project-id>\n");
+};
+
+type BudgetCommandOptions = {
+  stateDir: string;
+  output: NodeJS.WritableStream;
+  error: NodeJS.WritableStream;
+};
+
+const runBudget = async (argv: string[], io: BudgetCommandOptions): Promise<number> => {
+  const args = argv.filter((a) => !a.startsWith("--"));
+  const flags = Object.fromEntries(
+    argv
+      .filter((a) => a.startsWith("--"))
+      .map((a) => {
+        const eq = a.indexOf("=");
+        if (eq > 0) {
+          return [a.slice(2, eq), a.slice(eq + 1)];
+        }
+        const next = argv[argv.indexOf(a) + 1];
+        if (next && !next.startsWith("--")) {
+          return [a.slice(2), next];
+        }
+        return [a.slice(2), "true"];
+      }),
+  );
+  const subcommand = args[0] ?? "show";
+  if (!["show", "set"].includes(subcommand)) {
+    writeBudgetUsage(io.error);
+    return 1;
+  }
+  if (subcommand === "set" && Object.keys(flags).length === 0) {
+    writeBudgetUsage(io.error);
+    return 1;
+  }
+  const state = await readLocalDaemonState({ stateDir: io.stateDir });
+  if (!state || state.stoppedAt !== null) {
+    io.error.write("scorel budget error: local daemon is not running\n");
+    return 1;
+  }
+  const client = new DaemonClient(new WsTransport({ url: state.wsUrl, token: state.token }), {
+    clientId: asClientId("client_cli_budget"),
+  });
+  try {
+    await client.connect();
+    if (subcommand === "show") {
+      const budget = await client.getTaskBudgetSettings();
+      io.output.write(formatBudgetSettings(budget));
+      return 0;
+    }
+    // set
+    const upsert: Record<string, number> = {};
+    for (const [key, value] of Object.entries(flags)) {
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < 0) {
+        io.error.write(`scorel budget error: --${key} must be a non-negative number\n`);
+        return 1;
+      }
+      upsert[key] = num;
+    }
+    const budget = await client.upsertTaskBudgetSettings(upsert);
+    io.output.write(formatBudgetSettings(budget));
+    return 0;
+  } catch (cause) {
+    io.error.write(`scorel budget error: ${cause instanceof Error ? cause.message : String(cause)}\n`);
+    return 1;
+  } finally {
+    client.disconnect();
+  }
+};
+
+const formatBudgetSettings = (budget: {
+  maxTokens: number;
+  maxCostUsd: number;
+  maxWallClockMinutes: number;
+  repeatedCommandThreshold: number;
+  staleProgressMinutes: number;
+}): string => {
+  const lines = [
+    "Task Budget Settings:",
+    `  maxTokens              = ${budget.maxTokens}${budget.maxTokens === 0 ? " (disabled)" : ""}`,
+    `  maxCostUsd             = ${budget.maxCostUsd}${budget.maxCostUsd === 0 ? " (disabled)" : ""}`,
+    `  maxWallClockMinutes    = ${budget.maxWallClockMinutes}${budget.maxWallClockMinutes === 0 ? " (disabled)" : ""}`,
+    `  repeatedCommandThreshold = ${budget.repeatedCommandThreshold}`,
+    `  staleProgressMinutes   = ${budget.staleProgressMinutes}`,
+  ];
+  return `${lines.join("\n")}\n`;
+};
+
+const writeBudgetUsage = (output: NodeJS.WritableStream): void => {
+  output.write(
+    [
+      "Usage: scorel budget [show]",
+      "       scorel budget set --maxTokens <n> --maxCostUsd <n> --maxWallClockMinutes <n>",
+      "                         --repeatedCommandThreshold <n> --staleProgressMinutes <n>",
+      "",
+      "  show   Display current task budget settings (default).",
+      "  set    Update one or more budget fields. 0 disables a budget limit.",
+      "",
+      "Fields:",
+      "  --maxTokens               Maximum total tokens before advisory alert (0 = disabled).",
+      "  --maxCostUsd              Maximum estimated cost in USD before advisory alert (0 = disabled).",
+      "  --maxWallClockMinutes     Maximum wall-clock minutes before advisory alert (0 = disabled).",
+      "  --repeatedCommandThreshold  Consecutive identical Bash commands before advisory alert.",
+      "  --staleProgressMinutes    Minutes without progress before advisory alert.",
+    ].join("\n") + "\n",
+  );
 };
 
 const writeEventError = (output: NodeJS.WritableStream, event: ErrorEvent): void => {

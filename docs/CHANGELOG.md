@@ -7,6 +7,8 @@
 - Added provider-neutral retry with bounded exponential backoff, jitter, Retry-After support, and retryable/non-retryable error classification to the runtime provider turn loop.
 - Retry only occurs when no visible text has been emitted, preventing unsafe replay after partial output or tool execution.
 - Added MCP server management and runtime integration for stdio, Streamable HTTP, and legacy SSE transports, including CLI and GUI controls.
+- Added generic long-running task supervision with configurable token, cost, and wall-clock advisory budgets, plus repeated-command, consecutive-error, and stale-progress detection.
+- Added `scorel budget` controls and task-budget state to headless run summaries; supervision reminders preserve session replay and never implicitly terminate work.
 
 ## 0.0.13 - 2026-08-18
 
