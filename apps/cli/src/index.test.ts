@@ -2261,6 +2261,7 @@ const testConfig = (baseURL: string): ScorelConfig => ({
     tokenSavingRtk: false,
   },
   extensions: {},
+  mcpServers: {},
 });
 
 const langfuseConfigToml = (providerBaseUrl: string, langfuseHost: string): string => `

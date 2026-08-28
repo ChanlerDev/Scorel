@@ -47,6 +47,9 @@ export const SCOREL_CONFIG_SCHEMA = {
     extensionConfig: {
       keys: [],
     },
+    mcpServer: {
+      keys: ["transport", "command", "args", "env", "cwd", "url", "headers", "envHeaders"],
+    },
   },
 } as const;
 
@@ -117,6 +120,7 @@ export type ScorelConfig = {
   runtime: RuntimeConfig;
   observability?: ObservabilityConfig;
   extensions: Record<string, ExtensionConfig>;
+  mcpServers: Record<string, McpServerConfigEntry>;
 };
 
 export type MemoryConfig = {
@@ -161,6 +165,35 @@ export type ExtensionConfig = {
   config: Record<string, string | number | boolean>;
 };
 
+export type McpServerConfigEntry = {
+  transport: "stdio" | "http" | "sse";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  envHeaders?: Record<string, string>;
+};
+
+export type UpsertMcpServerInput = {
+  serverId: string;
+  transport: "stdio" | "http" | "sse";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  envHeaders?: Record<string, string>;
+  existingConfigText?: string;
+};
+
+export type RemoveMcpServerInput = {
+  serverId: string;
+  existingConfigText?: string;
+};
+
 export type ProviderConnectionSummary = {
   providerId: string;
   type: "builtin" | "custom";
@@ -187,6 +220,7 @@ export type ScorelConfigProfile = {
   runtime: RuntimeConfig;
   observability?: ObservabilityConfig;
   extensions: Record<string, ExtensionConfig>;
+  mcpServers: Record<string, McpServerConfigEntry>;
   warnings?: string[];
 };
 
@@ -268,13 +302,13 @@ export type UpsertObservabilityConfigInput = {
   existingConfigText?: string;
 };
 
-export type ConfigValue = string | number | boolean;
+export type ConfigValue = string | number | boolean | string[];
 
 export type UpsertExtensionConfigInput = {
   extensionId: string;
   enabled?: boolean;
   kind?: "im";
-  config?: Record<string, ConfigValue | undefined>;
+  config?: Record<string, string | number | boolean | undefined>;
   existingConfigText?: string;
 };
 
@@ -341,7 +375,17 @@ type RawConfig = {
   extensions: Record<string, {
     enabled?: boolean;
     kind?: string;
-    config?: Record<string, ConfigValue>;
+    config?: Record<string, string | number | boolean>;
+  }>;
+  mcpServers: Record<string, {
+    transport?: string;
+    command?: string;
+    args?: string[];
+    env?: Record<string, string>;
+    cwd?: string;
+    url?: string;
+    headers?: Record<string, string>;
+    envHeaders?: Record<string, string>;
   }>;
 };
 
@@ -359,6 +403,10 @@ type ConfigSection =
   | { kind: "observabilityOtel" }
   | { kind: "extension"; id: string }
   | { kind: "extensionConfig"; id: string }
+  | { kind: "mcpServer"; id: string }
+  | { kind: "mcpServerEnv"; id: string }
+  | { kind: "mcpServerHeaders"; id: string }
+  | { kind: "mcpServerEnvHeaders"; id: string }
   | { kind: "ignored" };
 export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promise<ScorelConfig> => {
   const env = options.env ?? process.env;
@@ -377,6 +425,7 @@ export const loadScorelConfig = async (options: LoadScorelConfigOptions): Promis
     runtime: loadRuntime(raw),
     observability: loadObservability(raw),
     extensions: loadExtensions(raw),
+    mcpServers: loadMcpServers(raw),
   };
 };
 
@@ -397,6 +446,7 @@ export const loadScorelConfigProfile = async (options: LoadScorelConfigOptions &
     runtime: loadRuntime(raw),
     observability: loadObservability(raw),
     extensions: loadExtensions(raw),
+    mcpServers: loadMcpServers(raw),
   };
 };
 
@@ -410,6 +460,25 @@ export const listProviderConnections = (config: ScorelConfig | ScorelConfigProfi
     ...("apiKeyEnv" in provider && provider.apiKeyEnv ? { apiKeyEnv: provider.apiKeyEnv } : {}),
     credentialSource: "credentialSource" in provider ? provider.credentialSource : "apiKey" in provider ? "direct" : "env",
     credentialStatus: "credentialStatus" in provider ? provider.credentialStatus : "available",
+  }));
+
+export type McpServerSummary = {
+  serverId: string;
+  transport: "stdio" | "http" | "sse";
+  command?: string;
+  args?: string[];
+  url?: string;
+  cwd?: string;
+};
+
+export const listMcpServers = (config: ScorelConfig | ScorelConfigProfile): McpServerSummary[] =>
+  Object.entries(config.mcpServers).map(([serverId, server]) => ({
+    serverId,
+    transport: server.transport,
+    ...(server.command ? { command: server.command } : {}),
+    ...(server.args ? { args: server.args } : {}),
+    ...(server.url ? { url: server.url } : {}),
+    ...(server.cwd ? { cwd: server.cwd } : {}),
   }));
 
 export const listAvailableModels = (config: ScorelConfig | ScorelConfigProfile): AvailableModelSummary[] =>
@@ -762,6 +831,43 @@ export const renderExtensionConfig = (input: UpsertExtensionConfigInput): string
   return renderRawConfig(raw);
 };
 
+export const renderMcpServerConfig = (input: UpsertMcpServerInput): string => {
+  const raw = parseEditableConfig(input.existingConfigText);
+  const serverId = requireIdentifier(input.serverId, "serverId");
+  const transport = requireMcpTransport(input.transport, "transport");
+  const entry: RawConfig["mcpServers"][string] = { transport };
+  if (input.command !== undefined) {
+    entry.command = input.command || undefined;
+  }
+  if (input.args !== undefined) {
+    entry.args = input.args.length > 0 ? input.args : undefined;
+  }
+  if (input.env !== undefined) {
+    entry.env = Object.keys(input.env).length > 0 ? input.env : undefined;
+  }
+  if (input.cwd !== undefined) {
+    entry.cwd = input.cwd || undefined;
+  }
+  if (input.url !== undefined) {
+    entry.url = input.url ? stripTrailingSlashes(input.url) : undefined;
+  }
+  if (input.headers !== undefined) {
+    entry.headers = Object.keys(input.headers).length > 0 ? input.headers : undefined;
+  }
+  if (input.envHeaders !== undefined) {
+    entry.envHeaders = Object.keys(input.envHeaders).length > 0 ? input.envHeaders : undefined;
+  }
+  raw.mcpServers[serverId] = entry;
+  return renderRawConfig(raw);
+};
+
+export const removeMcpServerConfig = (input: RemoveMcpServerInput): string => {
+  const raw = parseEditableConfig(input.existingConfigText);
+  const serverId = requireIdentifier(input.serverId, "serverId");
+  delete raw.mcpServers[serverId];
+  return renderRawConfig(raw);
+};
+
 const DEFAULT_MEMORY_CONFIG: MemoryConfig = {
   enabled: true,
   daily: true,
@@ -839,6 +945,76 @@ const loadExtensions = (raw: RawConfig): Record<string, ExtensionConfig> => {
     };
   }
   return extensions;
+};
+
+const loadMcpServers = (raw: RawConfig): Record<string, McpServerConfigEntry> => {
+  const servers: Record<string, McpServerConfigEntry> = {};
+  for (const [serverId, server] of Object.entries(raw.mcpServers)) {
+    const transport = requireMcpTransport(server.transport, `mcp.servers.${serverId}.transport`);
+    const entry: McpServerConfigEntry = { transport };
+    if (server.command) {
+      entry.command = requireString(server.command, `mcp.servers.${serverId}.command`);
+    }
+    if (server.args) {
+      entry.args = parseStringArray(server.args, `mcp.servers.${serverId}.args`);
+    }
+    if (server.env) {
+      entry.env = parseStringMap(server.env, `mcp.servers.${serverId}.env`);
+    }
+    if (server.cwd) {
+      entry.cwd = requireString(server.cwd, `mcp.servers.${serverId}.cwd`);
+    }
+    if (server.url) {
+      entry.url = stripTrailingSlashes(requireString(server.url, `mcp.servers.${serverId}.url`));
+    }
+    if (server.headers) {
+      entry.headers = parseStringMap(server.headers, `mcp.servers.${serverId}.headers`);
+    }
+    if (server.envHeaders) {
+      entry.envHeaders = parseStringMap(server.envHeaders, `mcp.servers.${serverId}.envHeaders`);
+    }
+    if (transport === "stdio" && !entry.command) {
+      throw new Error(`mcp.servers.${serverId}.command is required for stdio transport`);
+    }
+    if ((transport === "http" || transport === "sse") && !entry.url) {
+      throw new Error(`mcp.servers.${serverId}.url is required for ${transport} transport`);
+    }
+    servers[serverId] = entry;
+  }
+  return servers;
+};
+
+const requireMcpTransport = (value: string | undefined, name: string): "stdio" | "http" | "sse" => {
+  if (value === "stdio" || value === "http" || value === "sse") {
+    return value;
+  }
+  throw new Error(`${name} must be stdio, http, or sse`);
+};
+
+const parseStringArray = (value: unknown, name: string): string[] => {
+  if (!Array.isArray(value)) {
+    throw new Error(`${name} must be an array`);
+  }
+  return value.map((item, index) => {
+    if (typeof item !== "string") {
+      throw new Error(`${name}[${index}] must be a string`);
+    }
+    return item;
+  });
+};
+
+const parseStringMap = (value: unknown, name: string): Record<string, string> => {
+  if (!isRecord(value)) {
+    throw new Error(`${name} must be a table`);
+  }
+  const result: Record<string, string> = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (typeof val !== "string") {
+      throw new Error(`${name}.${key} must be a string`);
+    }
+    result[key] = val;
+  }
+  return result;
 };
 
 const loadProviders = (raw: RawConfig, env: Record<string, string | undefined>): Record<string, ScorelProviderConfig> => {
@@ -1210,6 +1386,49 @@ const renderRawConfig = (raw: RawConfig): string => {
       lines.push("");
     }
   }
+  for (const [serverId, server] of Object.entries(raw.mcpServers).sort(([left], [right]) => left.localeCompare(right))) {
+    const loaded = loadMcpServers({ mcpServers: { [serverId]: server } } as RawConfig);
+    const entry = loaded[serverId];
+    if (!entry) {
+      continue;
+    }
+    lines.push(`[mcp.servers.${serverId}]`);
+    lines.push(`transport = ${tomlString(entry.transport)}`);
+    if (entry.command) {
+      lines.push(`command = ${tomlString(entry.command)}`);
+    }
+    if (entry.args && entry.args.length > 0) {
+      lines.push(`args = [${entry.args.map((a) => tomlString(a)).join(", ")}]`);
+    }
+    if (entry.cwd) {
+      lines.push(`cwd = ${tomlString(entry.cwd)}`);
+    }
+    if (entry.url) {
+      lines.push(`url = ${tomlString(entry.url)}`);
+    }
+    lines.push("");
+    if (entry.env && Object.keys(entry.env).length > 0) {
+      lines.push(`[mcp.servers.${serverId}.env]`);
+      for (const [key, value] of Object.entries(entry.env).sort(([left], [right]) => left.localeCompare(right))) {
+        lines.push(`${key} = ${tomlString(value)}`);
+      }
+      lines.push("");
+    }
+    if (entry.headers && Object.keys(entry.headers).length > 0) {
+      lines.push(`[mcp.servers.${serverId}.headers]`);
+      for (const [key, value] of Object.entries(entry.headers).sort(([left], [right]) => left.localeCompare(right))) {
+        lines.push(`${key} = ${tomlString(value)}`);
+      }
+      lines.push("");
+    }
+    if (entry.envHeaders && Object.keys(entry.envHeaders).length > 0) {
+      lines.push(`[mcp.servers.${serverId}.envHeaders]`);
+      for (const [key, value] of Object.entries(entry.envHeaders).sort(([left], [right]) => left.localeCompare(right))) {
+        lines.push(`${key} = ${tomlString(value)}`);
+      }
+      lines.push("");
+    }
+  }
   return lines.join("\n");
 };
 
@@ -1218,6 +1437,7 @@ const emptyRawConfig = (): RawConfig => ({
   providerModels: {},
   availableModels: {},
   extensions: {},
+  mcpServers: {},
 });
 
 const stripComment = (line: string): string => {
@@ -1413,6 +1633,22 @@ const parseConfigSection = (section: string): ConfigSection => {
   if (extensionMatch?.[1]) {
     return { kind: "extension", id: extensionMatch[1] };
   }
+  const mcpServerMatch = /^mcp\.servers\.([A-Za-z0-9_-]+)$/.exec(section);
+  if (mcpServerMatch?.[1]) {
+    return { kind: "mcpServer", id: mcpServerMatch[1] };
+  }
+  const mcpServerEnvMatch = /^mcp\.servers\.([A-Za-z0-9_-]+)\.env$/.exec(section);
+  if (mcpServerEnvMatch?.[1]) {
+    return { kind: "mcpServerEnv", id: mcpServerEnvMatch[1] };
+  }
+  const mcpServerHeadersMatch = /^mcp\.servers\.([A-Za-z0-9_-]+)\.headers$/.exec(section);
+  if (mcpServerHeadersMatch?.[1]) {
+    return { kind: "mcpServerHeaders", id: mcpServerHeadersMatch[1] };
+  }
+  const mcpServerEnvHeadersMatch = /^mcp\.servers\.([A-Za-z0-9_-]+)\.envHeaders$/.exec(section);
+  if (mcpServerEnvHeadersMatch?.[1]) {
+    return { kind: "mcpServerEnvHeaders", id: mcpServerEnvHeadersMatch[1] };
+  }
   return { kind: "ignored" };
 };
 
@@ -1443,6 +1679,17 @@ const ensureSection = (config: RawConfig, section: ConfigSection): void => {
   } else if (section.kind === "extensionConfig") {
     config.extensions[section.id] ??= {};
     config.extensions[section.id].config ??= {};
+  } else if (section.kind === "mcpServer") {
+    config.mcpServers[section.id] ??= {};
+  } else if (section.kind === "mcpServerEnv") {
+    config.mcpServers[section.id] ??= {};
+    config.mcpServers[section.id].env ??= {};
+  } else if (section.kind === "mcpServerHeaders") {
+    config.mcpServers[section.id] ??= {};
+    config.mcpServers[section.id].headers ??= {};
+  } else if (section.kind === "mcpServerEnvHeaders") {
+    config.mcpServers[section.id] ??= {};
+    config.mcpServers[section.id].envHeaders ??= {};
   }
 };
 
@@ -1489,6 +1736,25 @@ const setConfigValue = (config: RawConfig, section: ConfigSection, key: string, 
     const extensionConfig = config.extensions[section.id].config ?? {};
     config.extensions[section.id].config = extensionConfig;
     setValue(extensionConfig, key, value);
+  } else if (section.kind === "mcpServer") {
+    config.mcpServers[section.id] ??= {};
+    if (key === "args") {
+      config.mcpServers[section.id].args = parseTomlArrayValue(value);
+    } else {
+      setValue(config.mcpServers[section.id], key, value);
+    }
+  } else if (section.kind === "mcpServerEnv") {
+    config.mcpServers[section.id] ??= {};
+    config.mcpServers[section.id].env ??= {};
+    config.mcpServers[section.id].env![key] = String(value);
+  } else if (section.kind === "mcpServerHeaders") {
+    config.mcpServers[section.id] ??= {};
+    config.mcpServers[section.id].headers ??= {};
+    config.mcpServers[section.id].headers![key] = String(value);
+  } else if (section.kind === "mcpServerEnvHeaders") {
+    config.mcpServers[section.id] ??= {};
+    config.mcpServers[section.id].envHeaders ??= {};
+    config.mcpServers[section.id].envHeaders![key] = String(value);
   }
 };
 
@@ -1497,12 +1763,15 @@ const isKnownConfigKey = (section: ConfigSection, key: string): boolean => {
   if (schemaSection === "ignored") {
     return false;
   }
-  if (schemaSection === "extensionConfig") {
+  if (schemaSection === "extensionConfig" || schemaSection === "mcpServerEnv" || schemaSection === "mcpServerHeaders" || schemaSection === "mcpServerEnvHeaders") {
     return /^[A-Za-z0-9_-]+$/.test(key);
   }
   const allowed = SCOREL_CONFIG_SCHEMA.sections[schemaSection].keys;
   return (allowed as readonly string[]).includes(key);
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const setValue = (target: object, key: string, value: ConfigValue): void => {
   (target as Record<string, ConfigValue | undefined>)[key] = value;
@@ -1519,11 +1788,57 @@ const parseTomlValue = (value: string): ConfigValue => {
   if (value === "false") {
     return false;
   }
+  if (value.startsWith("[") && value.endsWith("]")) {
+    return parseTomlArray(value);
+  }
   const number = Number(value);
   if (Number.isFinite(number)) {
     return number;
   }
   throw new Error(`Unsupported config value: ${value}`);
+};
+
+const parseTomlArray = (value: string): string[] => {
+  const inner = value.slice(1, -1).trim();
+  if (inner.length === 0) {
+    return [];
+  }
+  const items: string[] = [];
+  let current = "";
+  let inString = false;
+  for (let i = 0; i < inner.length; i += 1) {
+    const char = inner[i]!;
+    if (char === '"' && inner[i - 1] !== "\\") {
+      inString = !inString;
+    } else if (char === "," && !inString) {
+      items.push(parseTomlStringItem(current.trim()));
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  if (current.trim().length > 0) {
+    items.push(parseTomlStringItem(current.trim()));
+  }
+  return items;
+};
+
+const parseTomlStringItem = (value: string): string => {
+  const match = /^"([^"]*)"$/.exec(value);
+  if (match) {
+    return match[1] ?? "";
+  }
+  return value;
+};
+
+const parseTomlArrayValue = (value: ConfigValue): string[] => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.startsWith("[") && value.endsWith("]")) {
+    return parseTomlArray(value);
+  }
+  throw new Error(`Expected array value, got ${typeof value}`);
 };
 
 const stripTrailingSlashes = (value: string): string => value.replace(/\/+$/, "");
@@ -1538,8 +1853,15 @@ const requireIdentifier = (value: string | undefined, name: string): string => {
 
 const tomlString = (value: string): string => `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
 
-const renderTomlValue = (value: ConfigValue): string =>
-  typeof value === "string" ? tomlString(value) : String(value);
+const renderTomlValue = (value: ConfigValue): string => {
+  if (typeof value === "string") {
+    return tomlString(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => tomlString(v)).join(", ")}]`;
+  }
+  return String(value);
+};
 
 const isNodeErrorCode = (cause: unknown, code: string): boolean =>
   typeof cause === "object" && cause !== null && "code" in cause && cause.code === code;

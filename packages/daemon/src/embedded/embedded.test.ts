@@ -84,6 +84,7 @@ const modelProfile: ScorelConfig = {
     tokenSavingRtk: false,
   },
   extensions: {},
+  mcpServers: {},
 };
 
 const fixture = async () => {

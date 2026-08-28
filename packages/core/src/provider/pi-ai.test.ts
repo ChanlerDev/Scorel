@@ -478,6 +478,7 @@ const builtinProfile: ScorelConfig = {
     tokenSavingRtk: false,
   },
   extensions: {},
+  mcpServers: {},
 };
 
 const customProfile: ScorelConfig = {
@@ -524,6 +525,7 @@ const customProfile: ScorelConfig = {
     tokenSavingRtk: false,
   },
   extensions: {},
+  mcpServers: {},
 };
 
 const user = (text: string): ScorelMessage => ({

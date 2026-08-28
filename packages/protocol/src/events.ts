@@ -198,6 +198,69 @@ export type UpsertExtensionSettingsInput = {
   config?: Record<string, string | number | boolean | undefined>;
 };
 
+export type McpServerStatusSummary = {
+  serverId: string;
+  transport: "stdio" | "http" | "sse";
+  connected: boolean;
+  toolCount: number;
+  tools: Array<{ name: string; description?: string }>;
+  error?: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+};
+
+export type UpsertMcpServerSettingsInput = {
+  serverId: string;
+  transport: "stdio" | "http" | "sse";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  envHeaders?: Record<string, string>;
+};
+
+export type RemoveMcpServerSettingsInput = {
+  serverId: string;
+};
+
+export type CallMcpToolInput = {
+  serverId: string;
+  toolName: string;
+  args?: Record<string, unknown>;
+};
+
+export type CallMcpToolResult = {
+  serverId: string;
+  toolName: string;
+  content: Array<{ type: "text"; text: string }>;
+  error?: string;
+};
+
+export type CloudMcpServerSummary = {
+  id: string;
+  name: string;
+  description?: string;
+  transport: "stdio" | "http" | "sse";
+  command?: string;
+  args?: string[];
+  url?: string;
+  envHeaders?: Record<string, string>;
+  tags?: string[];
+};
+
+export type ListCloudMcpResult = {
+  servers: CloudMcpServerSummary[];
+};
+
+export type AddCloudMcpInput = {
+  catalogId: string;
+  serverId?: string;
+  registryUrl?: string;
+};
+
 export type SelectedModelSummary = {
   modelId: string;
   role?: ModelRole;

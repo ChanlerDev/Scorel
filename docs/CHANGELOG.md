@@ -6,6 +6,7 @@
 
 - Added provider-neutral retry with bounded exponential backoff, jitter, Retry-After support, and retryable/non-retryable error classification to the runtime provider turn loop.
 - Retry only occurs when no visible text has been emitted, preventing unsafe replay after partial output or tool execution.
+- Added MCP server management and runtime integration for stdio, Streamable HTTP, and legacy SSE transports, including CLI and GUI controls.
 
 ## 0.0.13 - 2026-08-18
 

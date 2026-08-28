@@ -7,10 +7,12 @@ import {
   Server,
   Smartphone,
   Terminal,
+  Puzzle,
 } from "../icons/index.js";
 import type { GuiDeviceRef, GuiExtensionSettingsView, GuiMemorySettingsView, GuiMemoryStatusView, GuiModelProfileView, GuiObservabilitySettingsView, GuiRelayDeviceView, GuiRuntimeSettingsView } from "../../shared/ipc.js";
 import { ConfigSection } from "./sections/ConfigSection.js";
 import { ImSection } from "./sections/ImSection.js";
+import { McpSection } from "./sections/McpSection.js";
 import { MemorySection } from "./sections/MemorySection.js";
 import { ModelSection } from "./sections/ModelSection.js";
 import { ObservabilitySection } from "./sections/ObservabilitySection.js";
@@ -51,6 +53,7 @@ const NAV_GROUPS: SettingsNavGroup[] = [
       { id: "runtime", label: "Token 节省", icon: <Terminal size={14} /> },
       { id: "observability", label: "可观测性", icon: <Activity size={14} /> },
       { id: "im", label: "IM", icon: <Smartphone size={14} /> },
+      { id: "mcp", label: "MCP", icon: <Puzzle size={14} /> },
       { id: "connections", label: "连接", icon: <Server size={14} /> },
     ],
   },
@@ -130,6 +133,16 @@ export function SettingsShell(props: SettingsShellProps) {
           setBusy={props.setBusy}
           setError={props.setError}
           onExtensionChange={props.onExtensionChange}
+        />
+      );
+      break;
+    case "mcp":
+      content = (
+        <McpSection
+          busy={props.busy}
+          setBusy={props.setBusy}
+          setError={props.setError}
+          refresh={props.refresh}
         />
       );
       break;

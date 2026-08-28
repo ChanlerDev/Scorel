@@ -42,6 +42,13 @@ import {
   type ScorelEvent,
   type SessionId,
   type SessionSummary,
+  type McpServerStatusSummary,
+  type UpsertMcpServerSettingsInput,
+  type RemoveMcpServerSettingsInput,
+  type CallMcpToolInput,
+  type CallMcpToolResult,
+  type CloudMcpServerSummary,
+  type AddCloudMcpInput,
 } from "@scorel/protocol";
 
 type RuntimeFactory = ScorelHostOptions["createRuntime"];
@@ -79,6 +86,12 @@ export type GuiLocalHostService = {
   upsertLocalObservabilitySettings(input: UpsertObservabilitySettingsInput): Promise<ObservabilitySettings>;
   getLocalExtensionSettings(extensionId: string): Promise<ExtensionSettings>;
   upsertLocalExtensionSettings(input: UpsertExtensionSettingsInput): Promise<ExtensionSettings>;
+  listLocalMcpServers(): Promise<McpServerStatusSummary[]>;
+  upsertLocalMcpServer(input: UpsertMcpServerSettingsInput): Promise<McpServerStatusSummary[]>;
+  removeLocalMcpServer(input: RemoveMcpServerSettingsInput): Promise<{ servers: McpServerStatusSummary[]; removed: boolean }>;
+  callLocalMcpTool(input: CallMcpToolInput): Promise<CallMcpToolResult>;
+  listLocalCloudMcp(registryUrl?: string): Promise<{ servers: CloudMcpServerSummary[] }>;
+  addLocalCloudMcp(input: AddCloudMcpInput): Promise<{ servers: McpServerStatusSummary[]; added: boolean }>;
   createLocalSession(projectId: string, modelSelection?: ModelSelectionInput): Promise<SessionId>;
   openLocalSession(sessionId: string): Promise<PersistentEvent[]>;
   attachLocalSession(sessionId: string, handler: GuiLocalSubscriber): Promise<{
@@ -227,6 +240,24 @@ export const createGuiLocalHostService = (options: GuiLocalHostServiceOptions): 
     },
     upsertLocalExtensionSettings(input) {
       return client.upsertExtensionSettings(input);
+    },
+    listLocalMcpServers() {
+      return client.listMcpServers();
+    },
+    upsertLocalMcpServer(input) {
+      return client.upsertMcpServer(input);
+    },
+    removeLocalMcpServer(input) {
+      return client.removeMcpServer(input);
+    },
+    callLocalMcpTool(input) {
+      return client.callMcpTool(input);
+    },
+    listLocalCloudMcp(registryUrl) {
+      return client.listCloudMcp(registryUrl);
+    },
+    addLocalCloudMcp(input) {
+      return client.addCloudMcp(input);
     },
     createLocalSession(projectId, modelSelection) {
       return client.createSession({ meta: { projectId: asProjectId(projectId) as ProjectId, modelSelection } });

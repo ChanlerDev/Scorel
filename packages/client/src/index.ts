@@ -44,6 +44,14 @@ import {
   type SessionId,
   type SessionSummary,
   type Unsubscribe,
+  type McpServerStatusSummary,
+  type UpsertMcpServerSettingsInput,
+  type RemoveMcpServerSettingsInput,
+  type CallMcpToolInput,
+  type CallMcpToolResult,
+  type ListCloudMcpResult,
+  type AddCloudMcpInput,
+  type CloudMcpServerSummary,
 } from "@scorel/protocol";
 
 export const clientPackageName = "@scorel/client" as const;
@@ -377,6 +385,36 @@ export class DaemonClient {
   async removeProject(projectId: ProjectId): Promise<boolean> {
     this.#assertDaemonConnected();
     return (await this.#request("remove_project", { projectId })).removed;
+  }
+
+  async listMcpServers(): Promise<McpServerStatusSummary[]> {
+    this.#assertDaemonConnected();
+    return (await this.#request("list_mcp_servers", {})).servers;
+  }
+
+  async upsertMcpServer(input: UpsertMcpServerSettingsInput): Promise<McpServerStatusSummary[]> {
+    this.#assertDaemonConnected();
+    return (await this.#request("upsert_mcp_server", input)).servers;
+  }
+
+  async removeMcpServer(input: RemoveMcpServerSettingsInput): Promise<{ servers: McpServerStatusSummary[]; removed: boolean }> {
+    this.#assertDaemonConnected();
+    return this.#request("remove_mcp_server", input);
+  }
+
+  async callMcpTool(input: CallMcpToolInput): Promise<CallMcpToolResult> {
+    this.#assertDaemonConnected();
+    return this.#request("call_mcp_tool", input);
+  }
+
+  async listCloudMcp(registryUrl?: string): Promise<{ servers: CloudMcpServerSummary[] }> {
+    this.#assertDaemonConnected();
+    return this.#request("list_cloud_mcp", registryUrl ? { registryUrl } : {});
+  }
+
+  async addCloudMcp(input: AddCloudMcpInput): Promise<{ servers: McpServerStatusSummary[]; added: boolean }> {
+    this.#assertDaemonConnected();
+    return this.#request("add_cloud_mcp", input);
   }
 
   #assertDaemonConnected(): void {

@@ -28,6 +28,13 @@ import type {
   ScorelEvent,
   SessionMeta,
   SessionSummary,
+  McpServerStatusSummary,
+  UpsertMcpServerSettingsInput,
+  RemoveMcpServerSettingsInput,
+  CallMcpToolInput,
+  CallMcpToolResult,
+  ListCloudMcpResult,
+  AddCloudMcpInput,
 } from "./events.js";
 import type { ContentBlock } from "./messages.js";
 
@@ -129,6 +136,30 @@ export type ClientRequestMap = {
   upsert_extension_settings: {
     request: UpsertExtensionSettingsInput;
     response: { extension: ExtensionSettings };
+  };
+  list_mcp_servers: {
+    request: Record<never, never>;
+    response: { servers: McpServerStatusSummary[] };
+  };
+  upsert_mcp_server: {
+    request: UpsertMcpServerSettingsInput;
+    response: { servers: McpServerStatusSummary[] };
+  };
+  remove_mcp_server: {
+    request: RemoveMcpServerSettingsInput;
+    response: { servers: McpServerStatusSummary[]; removed: boolean };
+  };
+  call_mcp_tool: {
+    request: CallMcpToolInput;
+    response: CallMcpToolResult;
+  };
+  list_cloud_mcp: {
+    request: { registryUrl?: string };
+    response: ListCloudMcpResult;
+  };
+  add_cloud_mcp: {
+    request: AddCloudMcpInput;
+    response: { servers: McpServerStatusSummary[]; added: boolean };
   };
   list_directories: {
     request: { path?: string };
