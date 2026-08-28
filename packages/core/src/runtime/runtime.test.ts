@@ -207,6 +207,30 @@ describe("ScorelRuntime", () => {
     expect(events).not.toContainEqual(expect.objectContaining({ type: "error" }));
   });
 
+  it("honors Retry-After from a retryable provider error", async () => {
+    const callTimes: number[] = [];
+    const provider: RuntimeProvider = {
+      streamTurn: async function* () {
+        callTimes.push(Date.now());
+        if (callTimes.length === 1) {
+          const error = new Error("429 Too Many Requests");
+          (error as { headers?: Headers }).headers = new Headers({ "retry-after-ms": "100" });
+          throw error;
+        }
+        return assistantMessage("recovered");
+      },
+    };
+    const runtime = new ScorelRuntime({
+      provider,
+      retryConfig: { ...fastRetryConfig, baseDelayMs: 0, maxDelayMs: 100, jitterFactor: 0 },
+    });
+
+    await collect(runtime);
+
+    expect(callTimes).toHaveLength(2);
+    expect(callTimes[1]! - callTimes[0]!).toBeGreaterThanOrEqual(70);
+  });
+
   it("retries a transient network error before visible text", async () => {
     let attempts = 0;
     const provider: RuntimeProvider = {

@@ -211,7 +211,7 @@ export class ScorelRuntime {
             ) {
               thinking = "";
               const errorMessage = typeof message.meta?.errorMessage === "string" ? message.meta.errorMessage : "Unknown error";
-              yield* this.#retryBackoff(attempt, errorMessage, signal);
+              yield* this.#retryBackoff(attempt, new Error(errorMessage), signal);
               continue retryLoop;
             }
             if (message) {
@@ -249,7 +249,7 @@ export class ScorelRuntime {
         // Retry only when no visible text has been emitted and the error is retryable.
         if (text.length === 0 && attempt < this.#retryConfig.maxAttempts && isRetryableError(error)) {
           thinking = "";
-          yield* this.#retryBackoff(attempt, error.message, signal);
+          yield* this.#retryBackoff(attempt, error, signal);
           continue retryLoop;
         }
 
@@ -280,10 +280,10 @@ export class ScorelRuntime {
    */
   async *#retryBackoff(
     attempt: number,
-    errorMessage: string,
+    error: unknown,
     signal: AbortSignal,
   ): AsyncGenerator<RawRuntimeEvent, void, undefined> {
-    const delay = computeRetryDelay(attempt + 1, new Error(errorMessage), this.#retryConfig);
+    const delay = computeRetryDelay(attempt + 1, error, this.#retryConfig);
     try {
       await abortableSleep(delay, signal);
     } catch {

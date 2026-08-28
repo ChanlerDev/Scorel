@@ -120,19 +120,29 @@ const getErrorStatus = (error: unknown): number | undefined => {
  * Extract a Headers-like object from an error, if present.
  * Provider SDK errors carry `.headers` as a `Headers` instance or plain record.
  */
-const getErrorHeaders = (error: unknown): Headers | Record<string, string> | undefined => {
+type HeaderGetter = {
+  get(name: string): string | null;
+};
+
+const isHeaderGetter = (value: unknown): value is HeaderGetter =>
+  typeof value === "object"
+  && value !== null
+  && "get" in value
+  && typeof (value as { get?: unknown }).get === "function";
+
+const getErrorHeaders = (error: unknown): HeaderGetter | Record<string, string> | undefined => {
   if (typeof error !== "object" || error === null) return undefined;
   const headers = (error as { headers?: unknown }).headers;
-  if (headers instanceof Headers) return headers;
+  if (isHeaderGetter(headers)) return headers;
   if (typeof headers === "object" && headers !== null) {
     return headers as Record<string, string>;
   }
   return undefined;
 };
 
-const getHeaderValue = (headers: Headers | Record<string, string> | undefined, name: string): string | undefined => {
+const getHeaderValue = (headers: HeaderGetter | Record<string, string> | undefined, name: string): string | undefined => {
   if (!headers) return undefined;
-  if (headers instanceof Headers) {
+  if (isHeaderGetter(headers)) {
     return headers.get(name) ?? undefined;
   }
   // Case-insensitive lookup for plain record
